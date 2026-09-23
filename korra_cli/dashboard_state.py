@@ -21,12 +21,14 @@ Three rules shape every section:
 
 from __future__ import annotations
 
+import errno
 import heapq
 import json
 import logging
 import os
 import re
 import sqlite3
+import stat
 import sys
 import threading
 import time
@@ -687,65 +689,197 @@ def _artifact_candidate(name: str) -> bool:
     return not lowered.endswith(_TEMP_SUFFIXES)
 
 
-class _Walk:
-    """Newest files under a few roots, within one shared entry budget."""
+class _Workspace:
+    """Read-only view of the workspace that can never step outside it.
 
-    def __init__(self, budget: int, keep: int, recent_since: float):
+    The same containment rule as the Files screen (``_resolve_managed_path``):
+    the workspace root is resolved once — it may itself be a link, as the
+    Files root may — and nothing below it may be a symbolic link. Here the
+    rule is enforced at open time, not by a check before it: every component
+    is opened relative to its already-open parent with ``O_NOFOLLOW``, so a
+    results folder, ``shared``, an intermediate directory or a file replaced
+    by a link is refused, including a link swapped in after the walk saw a
+    real directory (R8, 0.21.13 review).
+
+    Hosts without ``dir_fd`` support (native Windows) fall back to a lexical
+    check of every component plus a resolved-path check, the Files policy.
+    """
+
+    _DIR_FLAGS = (os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+                  | getattr(os, "O_CLOEXEC", 0))
+    _FILE_FLAGS = (os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+                   | getattr(os, "O_CLOEXEC", 0))
+    _FD_SAFE = (
+        os.open in os.supports_dir_fd
+        and os.scandir in os.supports_fd
+        and hasattr(os, "O_NOFOLLOW")
+        and hasattr(os, "O_DIRECTORY")
+    )
+
+    def __init__(self, root: Path):
+        self.base = root.resolve(strict=True)
+        if not self.base.is_dir():
+            raise NotADirectoryError(str(self.base))
+        self._root_fd: Optional[int] = None
+        if self._FD_SAFE:
+            self._root_fd = os.open(self.base, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0))
+
+    def close(self) -> None:
+        if self._root_fd is not None:
+            os.close(self._root_fd)
+            self._root_fd = None
+
+    def __enter__(self) -> "_Workspace":
+        return self
+
+    def __exit__(self, *_exc: Any) -> None:
+        self.close()
+
+    @staticmethod
+    def _check_parts(parts: tuple[str, ...]) -> None:
+        for name in parts:
+            if not name or name in {".", ".."} or "/" in name or "\\" in name or "\x00" in name:
+                raise OSError(errno.EINVAL, "invalid path component", name)
+
+    def path(self, parts: tuple[str, ...]) -> str:
+        return str(self.base.joinpath(*parts))
+
+    def _lexical(self, parts: tuple[str, ...]) -> Path:
+        """Fallback: no component is a link and the real path stays inside."""
+        current = self.base
+        for name in parts:
+            current = current / name
+            if stat.S_ISLNK(os.lstat(current).st_mode):
+                raise OSError(errno.ELOOP, "symbolic link inside the workspace", str(current))
+        real = Path(os.path.realpath(current))
+        if real != self.base and self.base not in real.parents:
+            raise OSError(errno.EXDEV, "path leaves the workspace", str(current))
+        return current
+
+    def open_dir(self, parts: tuple[str, ...]) -> Any:
+        """A directory handle for ``scandir``: an fd, or a checked path."""
+        self._check_parts(parts)
+        if self._root_fd is None:
+            return str(self._lexical(parts))
+        fd = os.dup(self._root_fd)
+        try:
+            for name in parts:
+                child = os.open(name, self._DIR_FLAGS, dir_fd=fd)
+                os.close(fd)
+                fd = child
+        except BaseException:
+            os.close(fd)
+            raise
+        return fd
+
+    def read_head(self, parts: tuple[str, ...], size: int = 4096) -> Optional[bytes]:
+        """First bytes of a regular file inside the workspace, else ``None``."""
+        if not parts:
+            return None
+        try:
+            if self._root_fd is None:
+                path = self._lexical(parts)
+                with open(path, "rb") as handle:
+                    if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                        return None
+                    return handle.read(size)
+            parent = self.open_dir(parts[:-1])
+            try:
+                fd = os.open(parts[-1], self._FILE_FLAGS, dir_fd=parent)
+            finally:
+                os.close(parent)
+            try:
+                if not stat.S_ISREG(os.fstat(fd).st_mode):
+                    return None
+                return os.read(fd, size)
+            finally:
+                os.close(fd)
+        except OSError:
+            return None
+
+
+def _scandir(handle: Any) -> Any:
+    return os.scandir(handle)
+
+
+def _close_handle(handle: Any) -> None:
+    if isinstance(handle, int):
+        os.close(handle)
+
+
+class _Walk:
+    """Newest files under a few workspace roots, within one shared entry budget."""
+
+    def __init__(self, workspace: _Workspace, budget: int, keep: int, recent_since: float):
+        self.workspace = workspace
         self.budget = budget
         self.keep = keep
         self.recent_since = recent_since
         self.truncated = False
         self.recent = 0
-        self._heap: list[tuple[float, str, dict[str, Any]]] = []
+        self._heap: list[tuple[float, tuple[str, ...], dict[str, Any]]] = []
 
-    def walk(self, root: Path, *, depth: int, meta: dict[str, Any], skip_top: frozenset = frozenset()) -> None:
-        stack = [(root, 0)]
+    def walk(
+        self,
+        parts: tuple[str, ...],
+        *,
+        depth: int,
+        meta: dict[str, Any],
+        skip_top: frozenset = frozenset(),
+    ) -> None:
+        stack = [(parts, 0)]
         while stack:
             current, level = stack.pop()
             try:
-                entries = os.scandir(current)
+                handle = self.workspace.open_dir(current)
+            except OSError:
+                # A missing folder is normal; a linked one is refused here.
+                continue
+            try:
+                with _scandir(handle) as entries:
+                    for entry in entries:
+                        if self.budget <= 0:
+                            self.truncated = True
+                            return
+                        self.budget -= 1
+                        name = entry.name
+                        try:
+                            if entry.is_symlink():
+                                continue
+                            if entry.is_dir(follow_symlinks=False):
+                                if level + 1 < depth and name not in _SKIP_DIRS and not name.startswith(".") \
+                                        and not (level == 0 and name in skip_top):
+                                    stack.append((current + (name,), level + 1))
+                                continue
+                            if not entry.is_file(follow_symlinks=False) or not _artifact_candidate(name):
+                                continue
+                            info = entry.stat(follow_symlinks=False)
+                        except OSError:
+                            continue
+                        if info.st_mtime >= self.recent_since:
+                            self.recent += 1
+                        item = (info.st_mtime, current + (name,), {**meta, "size": info.st_size})
+                        if len(self._heap) < self.keep:
+                            heapq.heappush(self._heap, item)
+                        elif item[0] > self._heap[0][0]:
+                            heapq.heapreplace(self._heap, item)
             except OSError:
                 continue
-            with entries:
-                for entry in entries:
-                    if self.budget <= 0:
-                        self.truncated = True
-                        return
-                    self.budget -= 1
-                    name = entry.name
-                    try:
-                        if entry.is_symlink():
-                            continue
-                        if entry.is_dir(follow_symlinks=False):
-                            if level + 1 < depth and name not in _SKIP_DIRS and not name.startswith(".") \
-                                    and not (level == 0 and name in skip_top):
-                                stack.append((Path(entry.path), level + 1))
-                            continue
-                        if not entry.is_file(follow_symlinks=False) or not _artifact_candidate(name):
-                            continue
-                        stat = entry.stat(follow_symlinks=False)
-                    except OSError:
-                        continue
-                    if stat.st_mtime >= self.recent_since:
-                        self.recent += 1
-                    item = (stat.st_mtime, entry.path, {**meta, "size": stat.st_size})
-                    if len(self._heap) < self.keep:
-                        heapq.heappush(self._heap, item)
-                    elif item[0] > self._heap[0][0]:
-                        heapq.heapreplace(self._heap, item)
+            finally:
+                _close_handle(handle)
 
-    def newest(self) -> list[tuple[float, str, dict[str, Any]]]:
+    def newest(self) -> list[tuple[float, tuple[str, ...], dict[str, Any]]]:
         return sorted(self._heap, key=lambda item: item[0], reverse=True)
 
 
-def _registry(root: Path) -> Optional[dict[str, Any]]:
-    """The K21-146 folder registry, read without creating anything."""
-    path = root / ".index" / "file-organization-v1.json"
-    if path.is_symlink() or not path.is_file():
+def _registry(workspace: _Workspace) -> Optional[dict[str, Any]]:
+    """The K21-146 folder registry, read without creating or following anything."""
+    raw = workspace.read_head((".index", "file-organization-v1.json"), size=1024 * 1024)
+    if raw is None:
         return None
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        data = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
         return None
     if not isinstance(data, dict) or data.get("version") != 1:
         return None
@@ -754,12 +888,9 @@ def _registry(root: Path) -> Optional[dict[str, Any]]:
     return {"profiles": profiles, "archived": archived}
 
 
-def _excerpt(path: Path) -> tuple[Optional[str], list[str]]:
-    """Heading and first lines of a small text file (≤ 4 KiB read)."""
-    try:
-        with open(path, "rb") as handle:
-            head = handle.read(4096)
-    except OSError:
+def _excerpt(head: Optional[bytes]) -> tuple[Optional[str], list[str]]:
+    """Heading and first lines of a small text file's first bytes."""
+    if not head:
         return None, []
     text = head.decode("utf-8", errors="replace")
     title: Optional[str] = None
@@ -785,69 +916,86 @@ def _excerpt(path: Path) -> tuple[Optional[str], list[str]]:
 def artifacts_section(
     agents: list[Agent], *, root: Path, now: float, limit: int = _ARTIFACT_LIMIT
 ) -> dict[str, Any]:
-    if not root.is_dir():
-        return {"status": "empty", "items": [], "recent_count": 0, "organized": False,
+    def _empty(status: str) -> dict[str, Any]:
+        return {"status": status, "items": [], "recent_count": 0, "organized": False,
                 "root": str(root), "truncated": False}
+
     try:
-        os.scandir(root).close()
+        workspace = _Workspace(root)
+    except (FileNotFoundError, NotADirectoryError):
+        return _empty("empty")
     except OSError:
-        return {"status": "error", "items": [], "recent_count": 0, "organized": False,
-                "root": str(root), "truncated": False}
+        return _empty("error")
 
-    registry = _registry(root)
-    walk = _Walk(_SCAN_BUDGET, limit, now - _RECENT_WINDOW_SECONDS)
-    if registry is not None:
-        owners: dict[str, tuple[str, str]] = {}
-        for name, key in registry["profiles"].items():
-            if isinstance(key, str):
-                owners[key] = (_wire(str(name)), _label_for(agents, str(name)) or str(name))
-        for key, name in registry["archived"].items():
-            if isinstance(key, str) and key not in owners:
-                owners[key] = (_wire(str(name)), f"{name} (архив)")
-        agents_dir = root / "agents"
+    with workspace:
         try:
-            keys = sorted(entry.name for entry in os.scandir(agents_dir)
-                          if entry.is_dir(follow_symlinks=False) and _REGISTRY_KEY.fullmatch(entry.name))
+            _close_handle(workspace.open_dir(()))
         except OSError:
-            keys = []
-        for key in keys:
-            profile, label = owners.get(key, ("", None))
-            walk.walk(agents_dir / key / "results", depth=4,
-                      meta={"section": "agent", "profile": profile, "agent": label})
-        walk.walk(root / "shared", depth=3, meta={"section": "shared", "profile": None, "agent": None})
-    walk.walk(root, depth=2, meta={"section": "workspace", "profile": None, "agent": None},
-              skip_top=_RESERVED_ROOT_DIRS if registry is not None else frozenset({"client"}))
+            return _empty("error")
+        registry = _registry(workspace)
+        walk = _Walk(workspace, _SCAN_BUDGET, limit, now - _RECENT_WINDOW_SECONDS)
+        if registry is not None:
+            owners: dict[str, tuple[str, str]] = {}
+            for name, key in registry["profiles"].items():
+                if isinstance(key, str):
+                    owners[key] = (_wire(str(name)), _label_for(agents, str(name)) or str(name))
+            for key, name in registry["archived"].items():
+                if isinstance(key, str) and key not in owners:
+                    owners[key] = (_wire(str(name)), f"{name} (архив)")
+            keys: list[str] = []
+            try:
+                handle = workspace.open_dir(("agents",))
+            except OSError:
+                handle = None
+            if handle is not None:
+                try:
+                    with _scandir(handle) as entries:
+                        keys = sorted(
+                            entry.name for entry in entries
+                            if _REGISTRY_KEY.fullmatch(entry.name) and entry.is_dir(follow_symlinks=False)
+                        )
+                except OSError:
+                    keys = []
+                finally:
+                    _close_handle(handle)
+            for key in keys:
+                profile, label = owners.get(key, ("", None))
+                walk.walk(("agents", key, "results"), depth=4,
+                          meta={"section": "agent", "profile": profile, "agent": label})
+            walk.walk(("shared",), depth=3, meta={"section": "shared", "profile": None, "agent": None})
+        walk.walk((), depth=2, meta={"section": "workspace", "profile": None, "agent": None},
+                  skip_top=_RESERVED_ROOT_DIRS if registry is not None else frozenset({"client"}))
 
-    items: list[dict[str, Any]] = []
-    for index, (mtime, raw_path, meta) in enumerate(walk.newest()):
-        path = Path(raw_path)
-        ext = path.suffix.lower().lstrip(".")
-        kind = _KIND_BY_EXT.get(ext, "file")
-        item = {
-            "path": str(path),
-            "name": path.name,
-            "folder": str(path.parent),
-            "ext": ext,
-            "kind": kind,
-            "size": meta["size"],
-            "modified_at": mtime,
-            "section": meta["section"],
-            "profile": meta["profile"],
-            "agent": meta["agent"],
+        items: list[dict[str, Any]] = []
+        for index, (mtime, parts, meta) in enumerate(walk.newest()):
+            name = parts[-1]
+            ext = Path(name).suffix.lower().lstrip(".")
+            kind = _KIND_BY_EXT.get(ext, "file")
+            item = {
+                "path": workspace.path(parts),
+                "name": name,
+                "folder": workspace.path(parts[:-1]),
+                "ext": ext,
+                "kind": kind,
+                "size": meta["size"],
+                "modified_at": mtime,
+                "section": meta["section"],
+                "profile": meta["profile"],
+                "agent": meta["agent"],
+            }
+            if kind == "text" and index < _EXCERPT_LIMIT and meta["size"] > 0:
+                title, lines = _excerpt(workspace.read_head(parts))
+                item["title"] = title
+                item["excerpt"] = lines
+            items.append(item)
+        return {
+            "status": "ok" if items else "empty",
+            "items": items,
+            "recent_count": walk.recent,
+            "organized": registry is not None,
+            "root": str(workspace.base),
+            "truncated": walk.truncated,
         }
-        if kind == "text" and index < _EXCERPT_LIMIT and meta["size"] > 0:
-            title, lines = _excerpt(path)
-            item["title"] = title
-            item["excerpt"] = lines
-        items.append(item)
-    return {
-        "status": "ok" if items else "empty",
-        "items": items,
-        "recent_count": walk.recent,
-        "organized": registry is not None,
-        "root": str(root),
-        "truncated": walk.truncated,
-    }
 
 
 # ---------------------------------------------------------------------------

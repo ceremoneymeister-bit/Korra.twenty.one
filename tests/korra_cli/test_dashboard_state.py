@@ -272,6 +272,140 @@ def test_artifacts_follow_the_file_organization_and_skip_uploads_and_secrets(tmp
     assert all(Path(item["path"]).is_file() for item in value["items"])
 
 
+# R8 (0.21.13 review): a link anywhere below the workspace root must never
+# lead the dashboard outside it — neither for listing nor for excerpts. Each
+# case runs with the dir_fd/O_NOFOLLOW walk and with the lexical fallback.
+
+SECRET = "Synthetic secret outside workspace"
+
+
+@pytest.fixture(params=["dir_fd", "lexical"])
+def containment(request, monkeypatch):
+    if request.param == "lexical":
+        monkeypatch.setattr(ds._Workspace, "_FD_SAFE", False)
+    elif not ds._Workspace._FD_SAFE:
+        pytest.skip("dir_fd walk is not available on this host")
+    return request.param
+
+
+def _outside(tmp_path: Path) -> Path:
+    outside = tmp_path / "outside-workspace"
+    (outside / "results").mkdir(parents=True)
+    for folder in (outside, outside / "results"):
+        _touch(folder / "private-note.md", f"# Private\n{SECRET}\n", at=NOW - 1)
+    return outside
+
+
+def _leaks(value: dict) -> bool:
+    return any(
+        SECRET in " ".join(item.get("excerpt") or []) or "outside-workspace" in item["path"]
+        or item["name"] == "private-note.md"
+        for item in value["items"]
+    )
+
+
+def _organized(tmp_path: Path) -> tuple[Path, Path]:
+    from korra_cli.file_organization import ensure_agent_results
+
+    root = tmp_path / "workspace"
+    results = ensure_agent_results(root, "writer")
+    _touch(root / "Легитимный.md", "# Свой файл\nвнутри\n", at=NOW - 30)
+    return root, results
+
+
+def test_results_root_link_does_not_leave_the_workspace(tmp_path, containment):
+    root, results = _organized(tmp_path)
+    outside = _outside(tmp_path)
+    results.rmdir()
+    results.symlink_to(outside, target_is_directory=True)
+
+    value = ds.artifacts_section([], root=root, now=NOW)
+
+    assert not _leaks(value)
+    assert [item["name"] for item in value["items"]] == ["Легитимный.md"]
+
+
+def test_shared_link_does_not_leave_the_workspace(tmp_path, containment):
+    root, _results = _organized(tmp_path)
+    outside = _outside(tmp_path)
+    (root / "shared").rmdir()
+    (root / "shared").symlink_to(outside, target_is_directory=True)
+    assert not _leaks(ds.artifacts_section([], root=root, now=NOW))
+
+
+@pytest.mark.parametrize("level", ["agents", "key"])
+def test_intermediate_link_does_not_leave_the_workspace(tmp_path, containment, level):
+    root, results = _organized(tmp_path)
+    outside = _outside(tmp_path)
+    key_dir = results.parent
+    if level == "key":
+        results.rmdir()
+        key_dir.rmdir()
+        key_dir.symlink_to(outside, target_is_directory=True)
+    else:
+        agents = root / "agents"
+        moved = tmp_path / "moved-agents"
+        agents.rename(moved)
+        # The link target mirrors the real layout, so the walk would find
+        # agents/<key>/results/private-note.md if it followed the link.
+        (outside / key_dir.name / "results").mkdir(parents=True)
+        _touch(outside / key_dir.name / "results" / "private-note.md", f"# Private\n{SECRET}\n", at=NOW - 1)
+        agents.symlink_to(outside, target_is_directory=True)
+    assert not _leaks(ds.artifacts_section([], root=root, now=NOW))
+
+
+def test_file_and_folder_links_inside_results_are_skipped(tmp_path, containment):
+    root, results = _organized(tmp_path)
+    outside = _outside(tmp_path)
+    (results / "note.md").symlink_to(outside / "private-note.md")
+    (results / "linked").symlink_to(outside, target_is_directory=True)
+    assert not _leaks(ds.artifacts_section([], root=root, now=NOW))
+
+
+def test_excerpt_refuses_a_link_swapped_in_after_the_walk(tmp_path, containment):
+    """The read re-opens the path without following links (open-time check)."""
+    root, results = _organized(tmp_path)
+    outside = _outside(tmp_path)
+    _touch(results / "report.md", "# Отчёт\nсвоё\n", at=NOW - 5)
+    with ds._Workspace(root) as workspace:
+        parts = ("agents", results.parent.name, "results", "report.md")
+        assert workspace.read_head(parts).startswith("# Отчёт".encode())
+        (results / "report.md").unlink()
+        (results / "report.md").symlink_to(outside / "private-note.md")
+        assert workspace.read_head(parts) is None
+        # A parent folder swapped for a link is refused the same way.
+        (results / "report.md").unlink()
+        results.rmdir()
+        results.symlink_to(outside / "results", target_is_directory=True)
+        assert workspace.read_head(("agents", results.parent.name, "results", "private-note.md")) is None
+
+
+def test_linked_registry_is_not_trusted(tmp_path, containment):
+    root, _results = _organized(tmp_path)
+    fake = tmp_path / "fake-index"
+    fake.mkdir()
+    (fake / "file-organization-v1.json").write_text(
+        json.dumps({"version": 1, "profiles": {"leak": "0123456789abcdef"}, "archived": {}}), encoding="utf-8")
+    index = root / ".index"
+    for child in index.iterdir():
+        child.unlink()
+    index.rmdir()
+    index.symlink_to(fake, target_is_directory=True)
+    value = ds.artifacts_section([], root=root, now=NOW)
+    assert value["organized"] is False
+
+
+def test_workspace_root_may_itself_be_a_link(tmp_path, containment):
+    """Like the Files root, the workspace root is resolved once and allowed."""
+    real = tmp_path / "volume" / "workspace"
+    _touch(real / "План.docx", at=NOW - 10)
+    link = tmp_path / "workspace"
+    link.symlink_to(real, target_is_directory=True)
+    value = ds.artifacts_section([], root=link, now=NOW)
+    assert [item["name"] for item in value["items"]] == ["План.docx"]
+    assert value["items"][0]["path"] == str(real.resolve() / "План.docx")
+
+
 def test_artifacts_walk_is_bounded(tmp_path, monkeypatch):
     root = tmp_path / "workspace"
     for index in range(50):
