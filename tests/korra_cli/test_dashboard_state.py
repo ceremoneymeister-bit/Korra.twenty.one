@@ -480,7 +480,7 @@ def test_unused_board_is_not_created_by_the_dashboard(tmp_path, monkeypatch):
     board.get_attention = lambda limit=50: pytest.fail("an unused board must not be opened")
     monkeypatch.setitem(sys.modules, "hermes_dashboard_plugin_kanban", board)
     monkeypatch.setenv("KORRA_KANBAN_HOME", str(tmp_path))
-    assert ds._kanban_items([]) == ([], [])
+    assert ds._kanban_items([]) == ([], [], 0)
     assert not (tmp_path / "kanban.db").exists()
 
 
@@ -574,6 +574,35 @@ def test_attention_reports_unreadable_sources_instead_of_all_clear(tmp_path, mon
     sources = {error["source"] for error in value["errors"]}
     assert {"kanban", "delivery"} <= sources
     assert value["items"] == []
+
+
+def test_attention_count_uses_board_totals_not_the_fetched_page(tmp_path, monkeypatch):
+    """P2: more than one page of kanban items — the total is the plugin's."""
+    main = _agent(tmp_path, "default", "Корра")
+    board = types.ModuleType("hermes_dashboard_plugin_kanban")
+    page = [
+        {"board": "default", "task_id": f"t{index}", "title": f"Задача {index}", "kind": "question",
+         "assignee": "default", "question": "?", "created_at": NOW - index}
+        for index in range(50)
+    ]
+    board.get_attention = lambda limit=50: {"items": page[:limit], "counts": {"question": 73},
+                                            "count": 73, "errors": []}
+    monkeypatch.setitem(sys.modules, "hermes_dashboard_plugin_kanban", board)
+    _board_in_use(tmp_path, monkeypatch)
+    monkeypatch.setattr(ds, "_update_items", lambda now: [])
+
+    value = ds.attention_section([main], now=NOW, tz=MSK, quota={"available": False})
+
+    assert value["count"] == 73
+    assert value["truncated"] is True
+    assert len(value["items"]) == ds._ATTENTION_LIMIT
+
+
+def test_attention_short_list_is_not_marked_truncated(tmp_path, monkeypatch):
+    main = _agent(tmp_path, "default", "Корра")
+    monkeypatch.setattr(ds, "_update_items", lambda now: [])
+    value = ds.attention_section([main], now=NOW, tz=MSK, quota={"available": False})
+    assert value["count"] == len(value["items"]) and value["truncated"] is False
 
 
 def test_attention_raises_the_quota_when_it_is_almost_spent(tmp_path, monkeypatch):

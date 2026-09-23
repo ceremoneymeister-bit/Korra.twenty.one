@@ -1119,6 +1119,8 @@ def quota_section(
 # ---------------------------------------------------------------------------
 
 _SEVERITY_RANK = {"action": 0, "problem": 1, "info": 2}
+#: Rows the strip receives; ``count`` always carries the full total.
+_ATTENTION_LIMIT = 20
 
 _KANBAN_KINDS = {
     "question": ("action", "Исполнитель ждёт ответа", "Ответить"),
@@ -1146,12 +1148,23 @@ SOURCE_LABELS = {
 }
 
 
-def _kanban_items(agents: list[Agent]) -> Optional[tuple[list[dict[str, Any]], list[str]]]:
+#: How many kanban rows to fetch for the strip; the total comes from the
+#: plugin's own counters, not from the length of this page.
+_KANBAN_PAGE = 50
+
+
+def _kanban_items(
+    agents: list[Agent],
+) -> Optional[tuple[list[dict[str, Any]], list[str], int]]:
     """Owner attention from every live board, via the kanban plugin itself.
 
     The plugin's ``/attention`` handler is the one source the board header,
     the navigation badge and this card share. A disabled or unmounted plugin
     is not a failure — the board simply is not part of this installation.
+
+    Returns ``(rows, unreadable boards, total)``. ``total`` is the plugin's
+    own ``count`` (everything that waits for the owner, pauses excluded) —
+    the rows are only the first page of it.
     """
     module = sys.modules.get("hermes_dashboard_plugin_kanban")
     handler = getattr(module, "get_attention", None) if module is not None else None
@@ -1171,8 +1184,8 @@ def _kanban_items(agents: list[Agent]) -> Optional[tuple[list[dict[str, Any]], l
     if not kanban_db.kanban_db_path(kanban_db.DEFAULT_BOARD).exists() and not any(
         Path(kanban_db.boards_root()).glob("*/kanban.db")
     ):
-        return [], []
-    payload = handler(limit=50)
+        return [], [], 0
+    payload = handler(limit=_KANBAN_PAGE)
     items = []
     for raw in payload.get("items", []):
         kind = raw.get("kind")
@@ -1200,7 +1213,9 @@ def _kanban_items(agents: list[Agent]) -> Optional[tuple[list[dict[str, Any]], l
             "at": raw.get("created_at"),
         })
     errors = [str(error.get("board") or "") for error in payload.get("errors", []) if isinstance(error, dict)]
-    return items, errors
+    reported = payload.get("count")
+    total = reported if isinstance(reported, int) and not isinstance(reported, bool) else len(items)
+    return items, errors, max(total, len(items))
 
 
 def _delivery_items(agents: list[Agent], *, now: float) -> list[dict[str, Any]]:
@@ -1402,6 +1417,9 @@ def attention_section(
     items: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
     checked: list[str] = []
+    # Kanban rows that exist but did not fit the fetched page: they count
+    # towards the total even though they are not listed.
+    unlisted = [0]
 
     def _collect(source: str, produce: Callable[[], Any]) -> None:
         try:
@@ -1419,7 +1437,8 @@ def attention_section(
         result = _kanban_items(agents)
         if result is None:
             return None
-        found, broken = result
+        found, broken, total = result
+        unlisted[0] = max(0, total - len(found))
         for board in broken:
             errors.append({"source": "kanban", "label": f"доску «{board}»" if board else SOURCE_LABELS["kanban"]})
         return found
@@ -1450,10 +1469,15 @@ def attention_section(
             })
 
     items.sort(key=lambda item: (_SEVERITY_RANK.get(item["severity"], 9), -(item.get("at") or 0)))
+    shown = items[:_ATTENTION_LIMIT]
+    total = len(items) + unlisted[0]
     return {
         "status": "ok" if checked or not errors else "error",
-        "items": items[:20],
-        "count": len(items),
+        "items": shown,
+        # The true number of things waiting, not the length of this page.
+        "count": total,
+        # The list is a first page: more exists than was sent.
+        "truncated": total > len(shown),
         "errors": errors,
         "checked": checked,
     }
