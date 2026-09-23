@@ -39,6 +39,11 @@ function datePart(date: string, part: "day" | "month"): string {
     .format(new Date(`${date}T12:00:00Z`));
 }
 
+function eventCountLabel(count: number): string {
+  const form = new Intl.PluralRules("ru-RU").select(count);
+  return `${count} ${form === "one" ? "событие" : form === "few" ? "события" : "событий"}`;
+}
+
 function ICloudCalendarBody({ size = "m" }: DashboardWidgetBodyProps) {
   const [feed, setFeed] = useState<ICloudCalendarFeed | null>(null);
   const [phase, setPhase] = useState<"loading" | "ready" | "error">("loading");
@@ -132,6 +137,17 @@ function ICloudCalendarBody({ size = "m" }: DashboardWidgetBodyProps) {
   const capacity = listHeight === null ? 3 : Math.max(0, Math.min(6, Math.floor(listHeight / FOLLOWUP_HEIGHT)));
   const shown = size === "l" ? followups.slice(0, capacity) : [];
   const hidden = followups.length - shown.length;
+  const weekDays = size === "l" ? Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(`${today}T12:00:00Z`);
+    date.setUTCDate(date.getUTCDate() + index);
+    const key = date.toISOString().slice(0, 10);
+    return {
+      key,
+      day: date.getUTCDate(),
+      label: new Intl.DateTimeFormat("ru-RU", { weekday: "short", timeZone: "UTC" }).format(date),
+      count: events.filter((event) => eventDay(event, zone) === key).length,
+    };
+  }) : [];
 
   return <WidgetStack className="kdw-icloud">
     <a href={ICLOUD_CALENDAR_URL} target="_blank" rel="noopener noreferrer"
@@ -163,6 +179,17 @@ function ICloudCalendarBody({ size = "m" }: DashboardWidgetBodyProps) {
         </a>
       </li>)}
     </ul> : null}
+    {size === "l" ? <div className="kdw-icloud-week" aria-label="Ближайшие семь дней">
+      <span className="kdw-icloud-week-heading">Ближайшие 7 дней · {eventCountLabel(events.length)}</span>
+      <div className="kdw-icloud-week-days">
+        {weekDays.map((day) => <span key={day.key} className="kdw-icloud-week-day"
+          aria-label={`${day.label}, ${day.day}: ${eventCountLabel(day.count)}`} title={`${day.label}, ${day.day}: ${eventCountLabel(day.count)}`}>
+          <small>{day.label}</small>
+          <i data-active={day.count > 0 || undefined} style={{ height: `${4 + Math.min(day.count, 4) * 6}px` }} aria-hidden />
+          <strong>{day.day}</strong>
+        </span>)}
+      </div>
+    </div> : null}
     <Freshness feed={feed} stale={isStale} busy={busy} onRetry={refresh} hidden={hidden} />
   </WidgetStack>;
 }

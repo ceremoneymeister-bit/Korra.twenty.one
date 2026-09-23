@@ -82,6 +82,8 @@ it("выделяет ближайшую встречу и показывает �
   expect(host.querySelector(".kdw-icloud-featured")?.textContent).toContain("Первая встреча");
   expect(host.querySelector(".kdw-icloud-followups")?.textContent).toContain("Вторая встреча");
   expect(host.textContent).toContain("Завтра");
+  expect(host.querySelector(".kdw-icloud-week-heading")?.textContent).toContain("2 события");
+  expect(host.querySelectorAll(".kdw-icloud-week-day")).toHaveLength(7);
 });
 
 it("показывает старую ленту сразу, пока сервер обновляет iCloud", async () => {
