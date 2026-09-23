@@ -905,7 +905,13 @@ def quota_section(
     from agent.rate_limit_tracker import load_codex_quota
 
     data = load_codex_quota(root=root)
-    configured = _codex_configured(agents)
+    # Whether a subscription is connected changes rarely; the percent itself
+    # is re-read every time, the per-profile config/auth scan once a minute.
+    configured = _cached(
+        ("codex-configured",) + tuple(str(agent.home) for agent in agents),
+        60.0,
+        lambda: _codex_configured(agents),
+    )
     if data is None:
         if not configured:
             return {"available": False, "status": "absent"}
