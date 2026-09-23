@@ -75,16 +75,21 @@ READINESS_TIMEOUT_CODES = {"native_readiness_timeout", "profile_gateway_timeout"
 # DATA copies an installation keeps in updates/ (K21-136). Every update leaves
 # a full `before` copy and nothing ever removed one: 13 of them (30 GiB) sat on
 # a 2.4 GiB installation. Only the newest copy is ever usable — `--rollback`
-# of an older job is refused once the container runs another image — so one
-# finished operation is kept besides the current version's rollback copy,
-# which is never retired. An incident review raises the number with
-# UPDATE_HISTORY or a root-owned `update-history` file beside the updater.
+# of an older job is refused once the container runs another image — so
+# UPDATE_HISTORY counts real version installs only, from the one that put the
+# running image in place backwards. A dry run, an already-current check or a
+# failed preflight is no install and never moves that boundary. Without a
+# proven install nothing is retired. A rollback's exports (`after`,
+# `data.after-*`) hold the owner's writes the rollback did not restore; they
+# stay until an operator reconciles them and leaves `exports-reviewed` in the
+# job directory. An incident review raises the number with UPDATE_HISTORY or
+# a root-owned `update-history` file beside the updater.
 UPDATE_HISTORY_DEFAULT = 1
 UPDATE_HISTORY_MAX = 100
 UPDATE_HISTORY_FILE = "update-history"
+EXPORTS_REVIEWED = "exports-reviewed"
 RETIRED_LEDGER = "retired.json"
 RETIRED_LEDGER_JOBS = 100
-RETIRABLE_STATUSES = {"succeeded", "rolled_back"}
 PROTECTIVE_REF = re.compile(r"korra-local-(?:candidate|rollback):[0-9a-f]{24}")
 
 # Runs with the image's own imports and no mounted data/network. The complete
@@ -1224,19 +1229,46 @@ class Updater:
                     found.append(path)
         return sorted(found)
 
+    @staticmethod
+    def installed_version(receipt):
+        """A real version install: a completed update, not a check or a rollback."""
+        return (receipt.get("action") == "update" and receipt.get("status") == "succeeded"
+                and receipt.get("phase") == "complete" and not receipt.get("dry_run"))
+
+    def exports_reviewed(self, directory, receipt):
+        """May a rolled-back operation's exports go?
+
+        Its `after` export and `data.after-*` tree are the only copies of what
+        the owner wrote on the failed release: the rollback restored the older
+        DATA and carried forward only credentials. They may go when the export
+        differs from the restored copy in nothing, or when an operator has
+        reconciled them and left a root-owned `exports-reviewed` beside the
+        receipt. A receipt without the count is never assumed empty.
+        """
+        marker = directory / EXPORTS_REVIEWED
+        if not marker.is_symlink() and marker.is_file() and marker.stat().st_uid == directory.stat().st_uid:
+            return True
+        changes = receipt.get("post_update_changes")
+        return type(changes) is int and changes == 0
+
     def retain_history(self, current_image=None):
-        """Keep the newest finished operations' DATA copies; retire the older ones.
+        """Keep the newest version installs' DATA copies; retire the older ones.
 
         The boundary is the gc's: only this deployment's own receipts, only
         operations that finished successfully (`succeeded`, `rolled_back`),
         never the copy the current version's rollback needs — the newest
-        completed update that installed the running image. Everything after
-        that update is the present (a rolled-back attempt and the owner's
-        writes it exported, a dry run) and stays until a later update
-        completes. Counting from the rollback copy backwards, `keep` finished
-        operations stay. Failed, interrupted and running operations are listed
-        for review and never touched. A retired rollback takes its displaced
-        `data.after-*` trees with it; protective tags move to the ledger first.
+        completed update that installed the running image (the proven
+        install). Without one — the first update rolled back, the install was
+        rolled back later, the image was switched by hand — nothing is retired:
+        any copy may be the only one of something. Everything after the proven
+        install is the present and stays until a later install completes.
+        Counting backwards from it, `keep` real version installs stay; a dry
+        run, an already-current check or a preflight never counts and never
+        moves the boundary. A rollback's exports stay until they are proven
+        empty or reviewed (:meth:`exports_reviewed`). Failed, interrupted and
+        running operations are listed for review and never touched. A retired
+        rollback takes its displaced `data.after-*` trees with it; protective
+        tags move to the ledger first.
         """
         keep, source = self.history_setting()
         result = {"keep": keep, "source": source, "current_rollback": None, "kept": [], "retired": [],
@@ -1264,27 +1296,30 @@ class Updater:
                 continue
             jobs.append((str(receipt.get("started_at") or ""), directory.name, directory, receipt))
         jobs.sort(key=lambda item: item[:2], reverse=True)  # newest first
-        completed = [job for job in jobs if job[3].get("status") == "succeeded"
-                     and job[3].get("phase") == "complete"]
-        rollback_job = next((job for job in completed if job[3].get("target_image_id") == current_image),
-                            completed[0] if completed else None)
-        if rollback_job:
-            result["current_rollback"] = rollback_job[1]
-            position = jobs.index(rollback_job)
-            present = {job[1] for job in jobs[:position + 1]}
-            older = [job for job in jobs[position + 1:] if job[3].get("status") in RETIRABLE_STATUSES]
-            kept = present | {job[1] for job in older[:keep - 1]}
-        else:
-            finished = [job for job in jobs if job[3].get("status") in RETIRABLE_STATUSES]
-            kept = {job[1] for job in finished[:keep]}
+        installs = [job for job in jobs if self.installed_version(job[3])]
+        proven = next((job for job in installs if job[3].get("target_image_id") == current_image), None)
+        position = jobs.index(proven) if proven else len(jobs)
+        # Installs before the proven one, newest first; only these count.
+        older_installs = [job for job in installs if jobs.index(job) > position]
+        kept_installs = {job[1] for job in older_installs[:keep - 1]}
+        result["current_rollback"] = proven[1] if proven else None
+        result["reasons"] = {}
         candidates = []
-        for _started, name, directory, receipt in jobs:
-            if receipt.get("status") not in RETIRABLE_STATUSES:
+        for index, (_started, name, directory, receipt) in enumerate(jobs):
+            status = receipt.get("status")
+            if status not in ("succeeded", "rolled_back"):
                 result["review"].append(name)
-            elif name in kept:
+                result["reasons"][name] = "not_finished_successfully"
+            elif status == "rolled_back" and not self.exports_reviewed(directory, receipt):
+                result["review"].append(name)
+                result["reasons"][name] = "unreviewed_rollback_exports"
+            elif proven is None or index <= position or name in kept_installs:
                 result["kept"].append(name)
             else:
                 candidates.append((name, directory, receipt))
+        if proven is None:
+            self.log("history: no completed update installed the running image; nothing retired")
+            return dict(result, status="skipped", reason="no_proven_install")
         if candidates:
             try:
                 ledger = self.retired_ledger()
@@ -1476,7 +1511,7 @@ class Updater:
             outcome = {"status": "failed", "reason": str(exc)[:200]}
         self.receipt["history_retention"] = {key: outcome.get(key) for key in (
             "status", "reason", "keep", "source", "current_rollback", "kept", "retired", "review",
-            "failed", "freed_bytes") if key in outcome}
+            "reasons", "failed", "freed_bytes") if key in outcome}
         with contextlib.suppress(Exception):
             atomic_json(self.job / "status.json", self.receipt)
         return outcome

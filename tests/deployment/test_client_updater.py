@@ -2698,23 +2698,29 @@ def test_foreign_unfinished_and_failed_jobs_are_never_touched(updater, history_e
     assert neighbour_copy.is_dir()
 
 
-def test_a_rolled_back_attempt_waits_for_the_next_completed_update(updater, history_env):
+def test_rollback_exports_outlive_the_next_install_until_reviewed(updater, history_env):
+    """Выгрузка отката — единственная копия записей владельца на неудачном выпуске."""
     updater.fail_smoke = True
     with pytest.raises(u.UpdateError, match="Injected model"):
         updater.update("registry.example/korra:latest")
+    failed_job = updater.job
     displaced = updater.data.with_name(updater.data.name + ".after-fixture-job")
-    assert displaced.is_dir() and (updater.job / "after").is_dir()
-
-    # Сразу после отката выгрузка записей владельца остаётся на месте.
-    assert updater.gc()["history"]["retired"] == []
-    assert displaced.is_dir()
+    assert (displaced / "new-message.txt").is_file() and (failed_job / "after/new-message.txt").is_file()
 
     updater.fail_smoke = False
     updater.update(_second_update(updater, image=NEW))
 
+    # Новое завершённое обновление не даёт права снять неразобранную выгрузку.
     retention = updater.receipt["history_retention"]
-    assert [item["job_id"] for item in retention["retired"]] == ["fixture-job"]
-    assert retention["retired"][0]["paths"] == 2
+    assert retention["retired"] == [] and retention["review"] == ["fixture-job"]
+    assert retention["reasons"]["fixture-job"] == "unreviewed_rollback_exports"
+    assert (displaced / "new-message.txt").is_file() and (failed_job / "after/new-message.txt").is_file()
+
+    # Оператор сверил записи и оставил отметку — теперь выгрузка уходит вместе с data.after-*.
+    (failed_job / u.EXPORTS_REVIEWED).write_text("reconciled 2026-09-23\n")
+    history = updater.gc()["history"]
+    assert [item["job_id"] for item in history["retired"]] == ["fixture-job"]
+    assert history["retired"][0]["paths"] == 2
     assert not displaced.exists() and _jobs(updater) == ["second-job"]
     assert updater.data.is_dir() and (updater.data / "config.yaml").is_file()
 
@@ -2790,3 +2796,185 @@ def test_launcher_panel_wait_follows_the_same_budget(updater, monkeypatch, opera
     u.Updater.start_image(updater, NEW)
 
     assert captured[0]["WAIT_SECONDS"] == (operator or str(120 + 20 * 4 + 5 * 4))
+
+
+# ── R1 (ревью Astra 23.09): история считает только настоящие установки ──────
+
+FOURTH = "sha256:" + "4" * 64
+
+
+def _failing_update(updater, job_id, image):
+    """Обновление, которое падает на приёмке после записи владельца и откатывается."""
+    reference = _second_update(updater, job_id=job_id, image=image)
+    original = updater.smoke
+
+    def smoke(target):
+        if target == image and updater.receipt["phase"] == "smoke":
+            (updater.data / ("owner-note-" + job_id + ".txt")).write_text("written on the failed release")
+            raise u.UpdateError("Injected failure " + job_id)
+        return original(target)
+    updater.smoke = smoke
+    try:
+        with pytest.raises(u.UpdateError, match="Injected failure"):
+            updater.update(reference)
+    finally:
+        updater.smoke = original
+    assert updater.receipt["status"] == "rolled_back"
+    return updater.job, updater.data.with_name(updater.data.name + ".after-" + job_id)
+
+
+def _dry_run(updater, job_id):
+    updater.initialize(job_id, "registry.example/korra:latest", dry_run=True)
+    updater.update("registry.example/korra:latest", dry_run=True)
+    assert updater.receipt["phase"] == "dry_run" and updater.receipt["status"] == "succeeded"
+
+
+def test_gc_after_a_dry_run_keeps_a_failed_updates_only_export(updater, history_env):
+    """Дословный сценарий R1: первая попытка откатилась, затем dry-run и `--gc`."""
+    updater.fail_smoke = True
+    with pytest.raises(u.UpdateError, match="Injected model"):
+        updater.update("registry.example/korra:latest")
+    exported = updater.job / "after" / "new-message.txt"
+    displaced = updater.data.with_name(updater.data.name + ".after-fixture-job")
+    assert exported.is_file() and (displaced / "new-message.txt").is_file()
+    assert not (updater.data / "new-message.txt").exists()
+
+    _dry_run(updater, "new-preflight")
+    history = updater.gc()["history"]
+
+    assert history["status"] == "skipped" and history["reason"] == "no_proven_install"
+    assert history["retired"] == [] and history["current_rollback"] is None
+    assert history["review"] == ["fixture-job"]
+    assert exported.is_file() and (displaced / "new-message.txt").is_file()
+    assert _jobs(updater) == ["fixture-job", "new-preflight"]
+
+
+def test_an_already_current_check_after_a_rollback_retires_nothing(updater, history_env):
+    updater.fail_smoke = True
+    with pytest.raises(u.UpdateError, match="Injected model"):
+        updater.update("registry.example/korra:latest")
+    displaced = updater.data.with_name(updater.data.name + ".after-fixture-job")
+
+    updater.fail_smoke = False
+    updater.update(_second_update(updater, job_id="same-image", image=OLD))
+    assert updater.receipt["phase"] == "already_current"
+    history = updater.gc()["history"]
+
+    assert history["reason"] == "no_proven_install" and history["retired"] == []
+    assert displaced.is_dir() and _jobs(updater) == ["fixture-job", "same-image"]
+
+
+def test_an_install_rolled_back_later_leaves_no_proven_install(updater, history_env):
+    updater.update("registry.example/korra:latest")
+    (updater.data / "later-note.txt").write_text("written on the new release")
+    updater.rollback()
+    assert updater.receipt["status"] == "rolled_back" and updater.image == OLD
+    displaced = updater.data.with_name(updater.data.name + ".after-fixture-job")
+    _dry_run(updater, "after-rollback-check")
+
+    history = updater.gc()["history"]
+
+    assert history["reason"] == "no_proven_install" and history["retired"] == []
+    assert (displaced / "later-note.txt").is_file()
+    assert (updater.jobs / "fixture-job" / "before").is_dir()
+
+
+def test_two_rollbacks_in_a_row_keep_both_exports_across_the_next_install(updater, history_env):
+    updater.update("registry.example/korra:latest")                    # OLD → NEW, доказанная установка
+    first_job, first_copy = _failing_update(updater, "fail-1", THIRD)
+    (updater.data / "revoked.token").write_text("restored for the fixture")
+    second_job, second_copy = _failing_update(updater, "fail-2", THIRD)
+
+    history = updater.gc()["history"]
+    assert history["current_rollback"] == "fixture-job" and history["retired"] == []
+    assert history["review"] == ["fail-2", "fail-1"]
+
+    updater.update(_second_update(updater, job_id="install-2", image=FOURTH))
+    retention = updater.receipt["history_retention"]
+    assert [item["job_id"] for item in retention["retired"]] == ["fixture-job"]
+    assert retention["review"] == ["fail-2", "fail-1"]
+    for job, copy, name in ((first_job, first_copy, "fail-1"), (second_job, second_copy, "fail-2")):
+        assert (copy / ("owner-note-" + name + ".txt")).is_file()
+        assert (job / "after" / ("owner-note-" + name + ".txt")).is_file()
+
+
+def test_dry_runs_and_current_checks_never_take_a_history_place(updater, monkeypatch):
+    monkeypatch.setenv("UPDATE_HISTORY", "2")
+    updater.update("registry.example/korra:latest")                    # установка 1
+    _dry_run(updater, "dry-1")
+    updater.update(_second_update(updater, job_id="same-1", image=NEW))  # already_current
+    assert updater.receipt["phase"] == "already_current"
+    _dry_run(updater, "dry-2")
+    updater.update(_second_update(updater, job_id="install-2", image=THIRD))
+
+    retention = updater.receipt["history_retention"]
+    assert set(retention["kept"]) == {"install-2", "fixture-job"}
+    assert {item["job_id"] for item in retention["retired"]} == {"dry-1", "same-1", "dry-2"}
+    assert (updater.jobs / "fixture-job" / "before").is_dir()
+
+
+def test_a_neighbour_installation_on_the_host_is_never_touched(updater, history_env, monkeypatch, tmp_path):
+    data_b = tmp_path / "data-b"
+    data_b.mkdir()
+    (data_b / "config.yaml").write_text("model: neighbour\n")
+    (data_b / "auth.json").write_text('{"refresh_token": "b"}')
+    (data_b / "revoked.token").write_text("b")
+    with sqlite3.connect(data_b / "state.db") as database:
+        database.execute("CREATE TABLE messages(text)")
+    home_b = tmp_path / "deploy-b"
+    home_b.mkdir()
+    (home_b / "IMAGE").write_text(OLD)
+    monkeypatch.setenv("DATA", str(data_b))
+    monkeypatch.setenv("NAME", "neighbour-fixture")
+    neighbour = FakeDockerUpdater(home_b)
+    neighbour.initialize("fixture-job", "registry.example/korra:latest")  # тот же job id
+    neighbour.receipt["baseline_capability"] = neighbour.capability()
+    neighbour.fail_smoke = True
+    with pytest.raises(u.UpdateError, match="Injected model"):
+        neighbour.update("registry.example/korra:latest")
+    neighbour_copy = data_b.with_name("data-b.after-fixture-job")
+    decoy = updater.data.with_name(updater.data.name + ".after-fixture-job.retry-notahex")
+    decoy.mkdir()
+
+    updater.update("registry.example/korra:latest")
+    updater.update(_second_update(updater))
+
+    assert [item["job_id"] for item in updater.receipt["history_retention"]["retired"]] == ["fixture-job"]
+    assert neighbour_copy.is_dir() and (home_b / "updates" / "fixture-job" / "before").is_dir()
+    assert decoy.is_dir(), "только точные имена своих вытесненных копий"
+
+
+def test_a_locked_target_retires_nothing_until_the_lock_is_free(updater, monkeypatch, capsys):
+    monkeypatch.setenv("UPDATE_HISTORY", "2")
+    updater.update("registry.example/korra:latest")
+    updater.update(_second_update(updater))
+    assert _jobs(updater) == ["fixture-job", "second-job"]
+    monkeypatch.setenv("UPDATE_HISTORY", "1")
+    monkeypatch.setattr(u.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(u, "HERE", updater.home)
+    monkeypatch.setattr(u, "Updater", lambda: updater)
+    monkeypatch.setattr(u, "trusted_control", lambda path: None)
+
+    held = u.target_lock_path(updater.data).open("a")
+    u.fcntl.flock(held, u.fcntl.LOCK_EX | u.fcntl.LOCK_NB)
+    try:
+        with pytest.raises(u.UpdateError, match="target lock"):
+            u.main(["--gc"])
+        assert _jobs(updater) == ["fixture-job", "second-job"]
+    finally:
+        held.close()
+
+    assert u.main(["--gc"]) == 0
+    report = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert [item["job_id"] for item in report["history"]["retired"]] == ["fixture-job"]
+    assert _jobs(updater) == ["second-job"]
+
+
+def test_a_symlinked_review_mark_does_not_release_exports(updater, history_env, tmp_path):
+    updater.fail_smoke = True
+    with pytest.raises(u.UpdateError, match="Injected model"):
+        updater.update("registry.example/korra:latest")
+    elsewhere = tmp_path / "planted"
+    elsewhere.write_text("x")
+    (updater.job / u.EXPORTS_REVIEWED).symlink_to(elsewhere)
+    assert updater.exports_reviewed(updater.job, updater.receipt) is False
