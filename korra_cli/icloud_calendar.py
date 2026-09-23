@@ -70,7 +70,11 @@ def _safe_url(href: str, base: str) -> str:
     url = urljoin(base, href)
     parsed = urlsplit(url)
     host = (parsed.hostname or "").lower()
-    if parsed.scheme != "https" or parsed.username or parsed.password or parsed.port or not re.fullmatch(r"(?:p\d+-)?caldav\.icloud\.com", host):
+    try:
+        port = parsed.port
+    except ValueError:
+        port = -1
+    if parsed.scheme != "https" or parsed.username or parsed.password or port not in (None, 443) or not re.fullmatch(r"(?:p\d+-)?caldav\.icloud\.com", host):
         raise ICloudCalendarError("unsafe_response", "iCloud вернул недопустимый адрес.")
     return url
 

@@ -21,7 +21,7 @@ LISTING = '''<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:calda
 EVENTS = '''<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:response><d:propstat><d:prop><c:calendar-data>BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:meeting-1\r\nSUMMARY:Встреча с \r\n клиентом\r\nDTSTART:20260923T090000Z\r\nDTEND:20260923T100000Z\r\nEND:VEVENT\r\nEND:VCALENDAR</c:calendar-data></d:prop></d:propstat></d:response></d:multistatus>'''.encode()
 
 
-def fake_client(monkeypatch, *, fail_status=0, malicious=False):
+def fake_client(monkeypatch, *, fail_status=0, malicious=False, home_href=None):
     requests = []
 
     def respond(request):
@@ -34,7 +34,7 @@ def fake_client(monkeypatch, *, fail_status=0, malicious=False):
         if request.url.path == "/":
             return httpx.Response(207, content=PRINCIPAL.replace(b"/123/principal/", b"https://evil.example/" if malicious else b"/123/principal/"))
         if request.url.path.endswith("/principal/"):
-            return httpx.Response(207, content=HOME)
+            return httpx.Response(207, content=HOME.replace(b"/123/calendars/", home_href) if home_href else HOME)
         return httpx.Response(207, content=LISTING)
 
     transport = httpx.MockTransport(respond)
@@ -81,6 +81,26 @@ def test_discovery_rejects_external_href_and_does_not_save(tmp_path, monkeypatch
     assert error.value.code == "unsafe_response"
     assert len(requests) == 1
     assert not (tmp_path / "icloud-calendar" / "credentials.json").exists()
+
+
+def test_discovery_accepts_icloud_home_with_explicit_https_port(tmp_path, monkeypatch):
+    requests = fake_client(monkeypatch, home_href=b"https://p184-caldav.icloud.com:443/123/calendars/")
+    connected = ic.connect("person@icloud.com", "app-secret", root=tmp_path)
+    assert connected["calendars"] == 1
+    assert requests[-1].url.host == "p184-caldav.icloud.com"
+    assert ic._safe_url("https://p184-caldav.icloud.com:443/123/calendars/", ic.BASE_URL).startswith(
+        "https://p184-caldav.icloud.com:443/"
+    )
+
+
+@pytest.mark.parametrize("href", [
+    "https://p184-caldav.icloud.com:444/123/calendars/",
+    "https://p184-caldav.icloud.com:invalid/123/calendars/",
+])
+def test_discovery_rejects_non_https_ports(href):
+    with pytest.raises(ic.ICloudCalendarError) as error:
+        ic._safe_url(href, ic.BASE_URL)
+    assert error.value.code == "unsafe_response"
 
 
 def test_calendar_parser_handles_all_day_and_folded_lines():
