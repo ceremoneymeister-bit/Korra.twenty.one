@@ -8,9 +8,11 @@ import { useTheme } from "@/themes";
 /**
  * A direct light/dark control for the bottom of the sidebar.
  *
- * The expanded sidebar has two equally sized icon-only targets. The narrow
- * rail has room for one accessible 44 px toggle, so it shows the current
- * mode and switches to the other one when pressed.
+ * The expanded sidebar shows a compact 32 px pill with two icon-only
+ * segments instead of a full-width block; the narrow rail shows one toggle
+ * with the current mode. With a mouse the targets stay small so the control
+ * does not crowd the sidebar; on touch screens (`pointer-coarse`) they grow
+ * back to finger size.
  */
 export function ThemeSwitcher({ collapsed = false }: ThemeSwitcherProps) {
   const { themeName, setTheme, saveState, saveError, retryTheme } = useTheme();
@@ -22,13 +24,13 @@ export function ThemeSwitcher({ collapsed = false }: ThemeSwitcherProps) {
   };
 
   return (
-    <div className={cn("w-full", collapsed && "w-auto")}>
+    <div className="w-auto">
       {collapsed ? (
         <button
           aria-busy={isSaving || undefined}
           aria-label={isDark ? "Включить светлую тему" : "Включить тёмную тему"}
           className={cn(
-            "grid size-[44px] place-items-center rounded-[var(--neo-radius-control)]",
+            "grid size-[36px] place-items-center rounded-full pointer-coarse:size-[44px]",
             "text-[var(--neo-text-secondary)] transition-[box-shadow,color,opacity]",
             "hover:text-[var(--neo-text-primary)] hover:shadow-[var(--neo-inset-compact)]",
             "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--neo-accent-line)]",
@@ -37,13 +39,13 @@ export function ThemeSwitcher({ collapsed = false }: ThemeSwitcherProps) {
           onClick={() => chooseTheme(isDark ? "light" : "dark")}
           type="button"
         >
-          {isDark ? <Moon aria-hidden className="size-[18px]" /> : <Sun aria-hidden className="size-[18px]" />}
+          {isDark ? <Moon aria-hidden className="size-[16px]" /> : <Sun aria-hidden className="size-[16px]" />}
         </button>
       ) : (
         <div
           aria-busy={isSaving || undefined}
           aria-label="Цветовая тема"
-          className="grid min-h-[52px] w-full grid-cols-2 gap-1 rounded-[var(--neo-radius-control)] bg-[var(--neo-surface)] p-[4px] shadow-[var(--neo-inset-compact)]"
+          className="grid h-[32px] w-[84px] grid-cols-2 gap-[2px] rounded-full bg-[var(--neo-surface)] p-[3px] shadow-[var(--neo-inset-compact)] pointer-coarse:h-[40px] pointer-coarse:w-[100px]"
           role="group"
         >
           <ThemeChoice
@@ -51,14 +53,14 @@ export function ThemeSwitcher({ collapsed = false }: ThemeSwitcherProps) {
             label="Светлая тема"
             onClick={() => chooseTheme("light")}
           >
-            <Sun aria-hidden className="size-[18px]" />
+            <Sun aria-hidden className="size-[15px]" />
           </ThemeChoice>
           <ThemeChoice
             active={isDark}
             label="Тёмная тема"
             onClick={() => chooseTheme("dark")}
           >
-            <Moon aria-hidden className="size-[18px]" />
+            <Moon aria-hidden className="size-[15px]" />
           </ThemeChoice>
         </div>
       )}
@@ -94,7 +96,7 @@ function ThemeChoice({ active, children, label, onClick }: ThemeChoiceProps) {
       aria-label={label}
       aria-pressed={active}
       className={cn(
-        "grid min-h-[44px] min-w-[44px] place-items-center rounded-[calc(var(--neo-radius-control)-0.25rem)]",
+        "grid h-full place-items-center rounded-full",
         "transition-[box-shadow,color,background-color]",
         "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--neo-accent-line)]",
         active

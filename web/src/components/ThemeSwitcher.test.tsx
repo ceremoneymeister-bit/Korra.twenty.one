@@ -42,6 +42,9 @@ it("renders two centered icon-only choices in the expanded sidebar", async () =>
   const dark = host.querySelector<HTMLButtonElement>('[aria-label="Тёмная тема"]');
 
   expect(group?.className).toContain("grid-cols-2");
+  // Compact pill: 32 px with a mouse, finger-sized on touch screens.
+  expect(group?.className).toContain("h-[32px]");
+  expect(group?.className).toContain("pointer-coarse:h-[40px]");
   expect(light?.className).toContain("place-items-center");
   expect(dark?.className).toContain("place-items-center");
   expect(light?.textContent).toBe("");
@@ -53,12 +56,13 @@ it("renders two centered icon-only choices in the expanded sidebar", async () =>
   expect(state.setTheme).toHaveBeenCalledWith("dark");
 });
 
-it("uses one 44 px direct toggle in the collapsed sidebar", async () => {
+it("uses one compact direct toggle in the collapsed sidebar, finger-sized on touch", async () => {
   await act(async () => root.render(<ThemeSwitcher collapsed />));
 
   const toggle = host.querySelector<HTMLButtonElement>('[aria-label="Включить тёмную тему"]');
   expect(host.querySelectorAll("button")).toHaveLength(1);
-  expect(toggle?.className).toContain("size-[44px]");
+  expect(toggle?.className).toContain("size-[36px]");
+  expect(toggle?.className).toContain("pointer-coarse:size-[44px]");
 
   await act(async () => toggle?.click());
   expect(state.setTheme).toHaveBeenCalledWith("dark");
