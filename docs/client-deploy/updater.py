@@ -3,7 +3,8 @@
 
 The deployment directory is a root-owned control plane, separate from DATA.
 The native gateway owns admission/draining. Docker owns image identity. Each
-operation retains full before/after state; rollback never overwrites newer auth.
+operation retains full before/after state until a later completed update
+retires it (UPDATE_HISTORY); rollback never overwrites newer auth.
 """
 from __future__ import annotations
 
@@ -50,6 +51,41 @@ VOLATILE = {"gateway.sock", "gateway.sock.path", "gateway.pid", "cron.pid",
 # fields to decide which profile gateways to bring up. They are preserved
 # across a restore; nothing else from that file is.
 GATEWAY_INTENT = ("desired_state", "gateway_state")
+
+# Readiness budget of one boot, sized to what that boot has to bring up
+# (K21-137). A multiplex root gateway connects every platform of every member
+# profile one after another before it reports `running`: on 22.09.2026
+# Dolomanova's six Telegram platforms took ~11 s each and the root answered at
+# 123 s, three seconds past the old fixed 120 s, and zaripov-boris (12
+# profiles) rolled back a healthy release and then failed the rollback on the
+# same limit. The base keeps the old contract for a small contour; every
+# further sequential connection adds about twice the measured cost, every
+# multiplex member a little for its own start, a large DATA a precaution.
+# The cap is the budget an operator had to pass by hand to zaripov-boris.
+READINESS_BASE_SECONDS = 120
+READINESS_PER_CONNECTION_SECONDS = 20
+READINESS_PER_MEMBER_SECONDS = 5
+READINESS_PER_DATA_GIB_SECONDS = 10
+READINESS_FREE_DATA_GIB = 2
+PROFILE_BASE_SECONDS = 240
+PROFILE_PER_PROFILE_SECONDS = 30
+READINESS_CAP_SECONDS = 900
+READINESS_TIMEOUT_CODES = {"native_readiness_timeout", "profile_gateway_timeout"}
+
+# DATA copies an installation keeps in updates/ (K21-136). Every update leaves
+# a full `before` copy and nothing ever removed one: 13 of them (30 GiB) sat on
+# a 2.4 GiB installation. Only the newest copy is ever usable — `--rollback`
+# of an older job is refused once the container runs another image — so one
+# finished operation is kept besides the current version's rollback copy,
+# which is never retired. An incident review raises the number with
+# UPDATE_HISTORY or a root-owned `update-history` file beside the updater.
+UPDATE_HISTORY_DEFAULT = 1
+UPDATE_HISTORY_MAX = 100
+UPDATE_HISTORY_FILE = "update-history"
+RETIRED_LEDGER = "retired.json"
+RETIRED_LEDGER_JOBS = 100
+RETIRABLE_STATUSES = {"succeeded", "rolled_back"}
+PROTECTIVE_REF = re.compile(r"korra-local-(?:candidate|rollback):[0-9a-f]{24}")
 
 # Runs with the image's own imports and no mounted data/network. The complete
 # file map supplements the native (historically MD5) provenance marker.
@@ -251,6 +287,7 @@ print(json.dumps({
     'multiplex': multiplex,
     'multiplex_profile_allowlist': allowlist,
     'expected_profiles': sorted(expected),
+    'root_channels': root_config['channels'],
     'profiles': profiles,
 }))
 '''
@@ -619,6 +656,27 @@ def tree_manifest(root):
                     digest = hashlib.file_digest(stream, "sha256").hexdigest()
                 result[rel] = {"sha256": digest, "size": entry.stat().st_size}
     return result
+
+
+def tree_bytes(root):
+    """Allocated bytes of a tree, each inode once, never following a symlink."""
+    seen, total = set(), 0
+
+    def add(path):
+        nonlocal total
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            return
+        if (info.st_dev, info.st_ino) not in seen:
+            seen.add((info.st_dev, info.st_ino))
+            total += info.st_blocks * 512
+
+    add(Path(root))
+    for directory, dirs, files in os.walk(root, followlinks=False):
+        for name in dirs + files:
+            add(Path(directory) / name)
+    return total
 
 
 def sqlite_files(root):
@@ -1012,6 +1070,8 @@ class Updater:
                     continue
                 if not stat.S_ISLNK(info.st_mode):
                     size += info.st_size
+        # The same sum sizes the readiness budget of a large contour.
+        self.receipt["data_bytes"] = size
         # Before + after + restoration staging, plus dependency/image headroom.
         required = 3 * size + image_bytes + 2 * 1024**3
         for location in {self.home, self.data.parent, Path("/var/lib/docker")}:
@@ -1080,7 +1140,12 @@ class Updater:
         return reference
 
     def own_image_refs(self):
-        """Protective tags this deployment created, from its own receipts."""
+        """Protective tags this deployment created, from its own receipts.
+
+        A retired job's receipt is gone, so its tags are proven by the ledger
+        that retirement wrote first; otherwise they would read as a
+        neighbour's and outlive every later gc.
+        """
         refs = set()
         for path in sorted(self.jobs.glob("*/status.json")):
             try:
@@ -1094,7 +1159,169 @@ class Updater:
                 value = receipt.get(key)
                 if isinstance(value, str) and value.startswith("korra-local-"):
                     refs.add(value)
+        try:
+            ledger = self.retired_ledger()["refs"]
+        except UpdateError as exc:
+            # Without the proof a retired job's tags read as a neighbour's:
+            # skipped, never removed. Housekeeping is poorer, not wrong.
+            self.log(f"gc: {exc}")
+            ledger = []
+        refs.update(entry["ref"] for entry in ledger
+                    if entry["name"] == self.name and entry["data"] == str(self.data))
         return refs
+
+    def retired_ledger(self):
+        """`updates/retired.json`: protective tags and a short trail of retired jobs.
+
+        Root-owned beside the receipts. An unreadable ledger stops housekeeping
+        rather than forgetting which tags are this deployment's own.
+        """
+        path = self.jobs / RETIRED_LEDGER
+        if not path.exists() and not path.is_symlink():
+            return {"schema": 1, "refs": [], "jobs": []}
+        try:
+            if path.is_symlink() or not path.is_file():
+                raise ValueError("not a regular file")
+            value = json.loads(path.read_text())
+            refs = [entry for entry in value["refs"]
+                    if isinstance(entry, dict) and set(entry) == {"ref", "name", "data"}
+                    and isinstance(entry["ref"], str) and PROTECTIVE_REF.fullmatch(entry["ref"])
+                    and isinstance(entry["name"], str) and isinstance(entry["data"], str)]
+            jobs = [entry for entry in value["jobs"] if isinstance(entry, dict)]
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            raise UpdateError(f"Retired-jobs ledger is unreadable: {exc}") from None
+        return {"schema": 1, "refs": refs, "jobs": jobs}
+
+    def write_retired_ledger(self, ledger):
+        ledger = dict(ledger, jobs=ledger["jobs"][-RETIRED_LEDGER_JOBS:])
+        atomic_json(self.jobs / RETIRED_LEDGER, ledger)
+
+    def history_setting(self):
+        """How many finished operations keep their DATA copies, and who said so."""
+        raw, source = os.environ.get("UPDATE_HISTORY", "").strip(), "environment"
+        if not raw:
+            path = self.home / UPDATE_HISTORY_FILE
+            if not path.exists() and not path.is_symlink():
+                return UPDATE_HISTORY_DEFAULT, "default"
+            trusted_control(path)
+            if not path.is_file():
+                raise UpdateError(f"{UPDATE_HISTORY_FILE} must be a regular file")
+            raw, source = path.read_text().strip(), "control_file"
+        if not raw.isdigit() or not 1 <= int(raw) <= UPDATE_HISTORY_MAX:
+            raise UpdateError(f"UPDATE_HISTORY must be a whole number from 1 to {UPDATE_HISTORY_MAX}")
+        return int(raw), source
+
+    def displaced_copies(self, job_id):
+        """DATA trees a rollback of this job left beside DATA, by their exact names."""
+        pattern = re.compile(re.escape(self.data.name) + r"\.(?:after-" + re.escape(job_id)
+                             + r"(?:\.retry-[0-9a-f]{8})?|restore-" + re.escape(job_id)
+                             + r"\.attempt-[0-9a-f]{8})")
+        found = []
+        for prefix in (".after-", ".restore-"):
+            for path in self.data.parent.glob(self.data.name + prefix + job_id + "*"):
+                if (pattern.fullmatch(path.name) and path != self.data and not path.is_symlink()
+                        and path.is_dir() and path.parent == self.data.parent):
+                    found.append(path)
+        return sorted(found)
+
+    def retain_history(self, current_image=None):
+        """Keep the newest finished operations' DATA copies; retire the older ones.
+
+        The boundary is the gc's: only this deployment's own receipts, only
+        operations that finished successfully (`succeeded`, `rolled_back`),
+        never the copy the current version's rollback needs — the newest
+        completed update that installed the running image. Everything after
+        that update is the present (a rolled-back attempt and the owner's
+        writes it exported, a dry run) and stays until a later update
+        completes. Counting from the rollback copy backwards, `keep` finished
+        operations stay. Failed, interrupted and running operations are listed
+        for review and never touched. A retired rollback takes its displaced
+        `data.after-*` trees with it; protective tags move to the ledger first.
+        """
+        keep, source = self.history_setting()
+        result = {"keep": keep, "source": source, "current_rollback": None, "kept": [], "retired": [],
+                  "review": [], "skipped": [], "failed": [], "freed_bytes": 0}
+        if not getattr(shutil.rmtree, "avoids_symlink_attacks", False):
+            return dict(result, status="skipped", reason="rmtree_not_symlink_safe")
+        if current_image is None:
+            try:
+                current_image = json.loads(self.docker(
+                    "image", "inspect", (self.home / "IMAGE").read_text().strip()))[0]["Id"]
+            except (OSError, UpdateError, ValueError, KeyError, IndexError):
+                return dict(result, status="skipped", reason="current_image_unresolved")
+        jobs = []
+        for directory in sorted(self.jobs.iterdir()):
+            if directory.is_symlink() or not directory.is_dir():
+                continue
+            try:
+                receipt = json.loads((directory / "status.json").read_text())
+            except (OSError, ValueError):
+                result["skipped"].append(directory.name)
+                continue
+            if (not isinstance(receipt, dict) or receipt.get("job_id") != directory.name
+                    or receipt.get("name") != self.name or receipt.get("data") != str(self.data)):
+                result["skipped"].append(directory.name)
+                continue
+            jobs.append((str(receipt.get("started_at") or ""), directory.name, directory, receipt))
+        jobs.sort(key=lambda item: item[:2], reverse=True)  # newest first
+        completed = [job for job in jobs if job[3].get("status") == "succeeded"
+                     and job[3].get("phase") == "complete"]
+        rollback_job = next((job for job in completed if job[3].get("target_image_id") == current_image),
+                            completed[0] if completed else None)
+        if rollback_job:
+            result["current_rollback"] = rollback_job[1]
+            position = jobs.index(rollback_job)
+            present = {job[1] for job in jobs[:position + 1]}
+            older = [job for job in jobs[position + 1:] if job[3].get("status") in RETIRABLE_STATUSES]
+            kept = present | {job[1] for job in older[:keep - 1]}
+        else:
+            finished = [job for job in jobs if job[3].get("status") in RETIRABLE_STATUSES]
+            kept = {job[1] for job in finished[:keep]}
+        candidates = []
+        for _started, name, directory, receipt in jobs:
+            if receipt.get("status") not in RETIRABLE_STATUSES:
+                result["review"].append(name)
+            elif name in kept:
+                result["kept"].append(name)
+            else:
+                candidates.append((name, directory, receipt))
+        if candidates:
+            try:
+                ledger = self.retired_ledger()
+            except UpdateError as exc:
+                self.log(f"history: nothing retired: {exc}")
+                return dict(result, failed=[name for name, _, _ in candidates], status="failed",
+                            reason="ledger_unreadable")
+        for name, directory, receipt in candidates:
+            try:
+                paths = [*self.displaced_copies(name), directory]
+                freed = sum(tree_bytes(path) for path in paths)
+                # The ledger holds the tags before the receipt that proved them
+                # disappears; the receipt, which proves the displaced trees are
+                # this job's, is removed last.
+                for key in ("candidate_image_ref", "rollback_image_ref"):
+                    entry = {"ref": receipt.get(key), "name": self.name, "data": str(self.data)}
+                    if (isinstance(entry["ref"], str) and PROTECTIVE_REF.fullmatch(entry["ref"])
+                            and entry not in ledger["refs"]):
+                        ledger["refs"].append(entry)
+                self.write_retired_ledger(ledger)
+                for path in paths:
+                    shutil.rmtree(path)
+                ledger["jobs"].append({"job_id": name, "status": receipt.get("status"),
+                                       "started_at": receipt.get("started_at"), "retired_at": utc(),
+                                       "freed_bytes": freed, "paths": [str(path) for path in paths]})
+                self.write_retired_ledger(ledger)
+                result["retired"].append({"job_id": name, "status": receipt.get("status"),
+                                          "freed_bytes": freed, "paths": len(paths)})
+                result["freed_bytes"] += freed
+            except (OSError, UpdateError) as exc:
+                result["failed"].append(name)
+                self.log(f"history: {name} not retired: {exc}")
+        self.log("history: keep {keep} ({source}), kept {kept}, retired {retired}, review {review}, "
+                 "failed {failed}, freed {freed} bytes".format(
+                     keep=keep, source=source, kept=len(result["kept"]), retired=len(result["retired"]),
+                     review=len(result["review"]), failed=len(result["failed"]), freed=result["freed_bytes"]))
+        return dict(result, status="failed" if result["failed"] else "ok", reason=None)
 
     def gc(self):
         """Drop the protective tags that no longer pin this deployment's images.
@@ -1105,7 +1332,16 @@ class Updater:
         with 16 GB free. Exactly two images stay — the running one (IMAGE) and
         the one `--rollback` needs (IMAGE.prev). Tags of another installation on
         the same host are reported, never removed: it has its own IMAGE pair.
+
+        The DATA copies in updates/ are bounded first (:meth:`retain_history`),
+        so the tags of the operations it retires are removed in the same run.
+        A refusal there is reported, never a reason to skip the tags.
         """
+        try:
+            history = self.retain_history()
+        except (OSError, UpdateError) as exc:
+            self.log(f"history: not bounded: {exc}")
+            history = {"status": "failed", "reason": str(exc)[:200]}
         keep = set()
         for name in ("IMAGE", "IMAGE.prev"):
             path = self.home / name
@@ -1135,6 +1371,18 @@ class Updater:
                     # image; housekeeping does not stop at the first refusal.
                     result["failed"].append(reference)
                     self.log(f"gc: {reference} not removed: {exc}")
+        # A ledger tag that is gone (removed now, or by hand earlier) no longer
+        # needs its ownership proof. Anything still listed stays in the ledger.
+        listed_refs = {line.strip().partition("|")[0] for line in listed.splitlines()}
+        try:
+            ledger = self.retired_ledger()
+            remaining = [entry for entry in ledger["refs"]
+                         if entry["ref"] in listed_refs and entry["ref"] not in result["removed"]]
+            if remaining != ledger["refs"]:
+                self.write_retired_ledger(dict(ledger, refs=remaining))
+        except (OSError, UpdateError) as exc:
+            self.log(f"gc: retired-jobs ledger not updated: {exc}")
+        result["history"] = history
         self.log("gc: kept {}, removed {}, skipped {}, failed {}".format(
             *(len(result[key]) for key in ("kept", "removed", "skipped", "failed"))))
         return result
@@ -1212,6 +1460,27 @@ class Updater:
         except Exception as exc:  # noqa: BLE001 — уборка не отменяет результат
             self.log(f"Drain marker cleanup skipped: {exc}")
 
+    def bound_history(self, current_image):
+        """After a completed update: bound updates/* on the installation itself.
+
+        Housekeeping, not part of the transaction — the update is already
+        accepted and nothing here may unmake it, so every failure, including an
+        unexpected one, lands in the receipt as `history_retention` and the
+        job stays `succeeded`. The cabinet's native path never runs `--gc`;
+        this is what keeps its copies bounded.
+        """
+        try:
+            outcome = self.retain_history(current_image)
+        except Exception as exc:  # noqa: BLE001 — уборка не отменяет результат
+            self.log(f"history: not bounded: {exc}")
+            outcome = {"status": "failed", "reason": str(exc)[:200]}
+        self.receipt["history_retention"] = {key: outcome.get(key) for key in (
+            "status", "reason", "keep", "source", "current_rollback", "kept", "retired", "review",
+            "failed", "freed_bytes") if key in outcome}
+        with contextlib.suppress(Exception):
+            atomic_json(self.job / "status.json", self.receipt)
+        return outcome
+
     def prune_skills(self, old, target):
         removed = []
         homes = [self.data]
@@ -1272,6 +1541,10 @@ class Updater:
     def start_image(self, image):
         rollback = self.receipt["phase"] == "rollback_recreate"
         env = self.launcher_env(rollback=rollback)
+        if not os.environ.get("WAIT_SECONDS", "").strip():
+            # up.sh waits for the panel with its own 120 s default; a contour
+            # sized for longer must not fail in the launcher first.
+            env["WAIT_SECONDS"] = str(self.readiness_budget(rollback=rollback)["core_seconds"])
         google_contract = self.receipt.get("google_oauth_mount")
         if isinstance(google_contract, dict) and google_contract.get("present") is True:
             self.validate_google_oauth_source(env["ENGINE_GID"])
@@ -1379,20 +1652,113 @@ class Updater:
         except (UpdateError, OSError, ValueError, subprocess.SubprocessError):
             raise UpdateError("Provider capability cannot be verified") from None
 
+    @staticmethod
+    def readiness_overrides():
+        """Operator budgets from WAIT_SECONDS/PROFILE_WAIT_SECONDS, or None each.
+
+        Checked in preflight too, so a mistyped value refuses before drain
+        instead of rolling back a healthy release at the smoke step.
+        """
+        result = {}
+        for key, variable, low in (("core", "WAIT_SECONDS", 1), ("profile", "PROFILE_WAIT_SECONDS", 0)):
+            raw = os.environ.get(variable, "").strip()
+            if not raw:
+                result[key] = None
+            elif not raw.isdigit():
+                raise UpdateError(f"{variable} must be a whole number of seconds")
+            else:
+                result[key] = max(low, int(raw))
+        return result
+
+    def readiness_topology(self, rollback=False):
+        """What one boot brings up before it answers, from this phase's expectations.
+
+        Channel names come from the stopped-DATA expectations probe. A probe
+        or receipt without them counts one connection for every profile the
+        root gateway itself serves, and an unknown mode is taken as multiplex:
+        the budget errs long, never short.
+        """
+        topology = self.receipt.get("gateway_expectations_" + ("rollback" if rollback else "forward"))
+        topology = topology if isinstance(topology, dict) else {}
+        expected = sorted(set(self.receipt.get("expected_profiles")
+                              or self.receipt.get("served_profiles") or ["default"]) - {"default"})
+        multiplex = topology.get("multiplex") if type(topology.get("multiplex")) is bool else None
+
+        def count(value):
+            return (len(value) if isinstance(value, list) and all(isinstance(item, str) for item in value)
+                    else None)
+
+        rows = {row.get("profile"): row for row in topology.get("profiles") or [] if isinstance(row, dict)}
+        root = count(topology.get("root_channels"))
+        connections = None
+        if root is not None and multiplex is False:
+            connections = root
+        elif root is not None and multiplex:
+            members = [count(rows.get(name, {}).get("channels")) for name in expected]
+            if None not in members:
+                connections = root + sum(members)
+        channels_known = connections is not None
+        if connections is None:
+            connections = 1 + (0 if multiplex is False else len(expected))
+        return {"multiplex": multiplex, "connections": connections, "channels_known": channels_known,
+                "members": 0 if multiplex is False else len(expected), "profiles": len(expected)}
+
+    def readiness_budget(self, rollback=False):
+        """Core and profile budgets of this boot, recorded before the wait starts.
+
+        A rollback that follows a readiness timeout gets twice the forward
+        budget: the same topology was just shown to need longer than predicted,
+        and a rollback that misses the same limit leaves a working contour
+        reported as `rollback_failed`. An operator value always wins and is
+        named as such.
+        """
+        topology = self.readiness_topology(rollback)
+        data_bytes = self.receipt.get("data_bytes")
+        data_gib = data_bytes / 1024**3 if type(data_bytes) is int and data_bytes > 0 else 0.0
+        core = (READINESS_BASE_SECONDS
+                + READINESS_PER_CONNECTION_SECONDS * max(0, topology["connections"] - 1)
+                + READINESS_PER_MEMBER_SECONDS * topology["members"]
+                + READINESS_PER_DATA_GIB_SECONDS * max(0, int(data_gib - READINESS_FREE_DATA_GIB + 0.999)))
+        profile = max(PROFILE_BASE_SECONDS, PROFILE_PER_PROFILE_SECONDS * topology["profiles"])
+        core, profile = min(READINESS_CAP_SECONDS, core), min(READINESS_CAP_SECONDS, profile)
+        reason = "topology"
+        forward = self.receipt.get("readiness_budget")
+        if rollback and self.receipt.get("error_code") in READINESS_TIMEOUT_CODES and isinstance(forward, dict):
+            core = min(READINESS_CAP_SECONDS, max(core, 2 * int(forward.get("core_seconds") or 0)))
+            profile = min(READINESS_CAP_SECONDS, max(profile, 2 * int(forward.get("profile_seconds") or 0)))
+            reason = "forward_readiness_timeout"
+        overrides = self.readiness_overrides()
+        record = {
+            "core_seconds": core if overrides["core"] is None else overrides["core"],
+            "profile_seconds": profile if overrides["profile"] is None else overrides["profile"],
+            "source": {"core": "auto" if overrides["core"] is None else "operator",
+                       "profile": "auto" if overrides["profile"] is None else "operator"},
+            "auto": {"core_seconds": core, "profile_seconds": profile, "reason": reason},
+            "inputs": {**topology, "data_gib": round(data_gib, 2)},
+        }
+        self.receipt["rollback_readiness_budget" if rollback else "readiness_budget"] = record
+        return record
+
     def smoke(self, expected):
         """Readiness of the panel, the root gateway, every expected profile and the model.
 
         Two budgets, because the two failures are not the same. The panel and the
-        root gateway must answer within WAIT_SECONDS — that is the old contract.
-        A profile gateway has its own PROFILE_WAIT_SECONDS after that: profiles
-        come up one by one and a contour with nine of them needs longer than a
-        contour with one, and a slow profile must not roll back a healthy
-        release. A profile that never comes up is named in the receipt.
+        root gateway must answer within the core budget; a profile gateway has
+        its own budget after that: profiles come up one by one and a contour
+        with nine of them needs longer than a contour with one, and a slow
+        profile must not roll back a healthy release. A profile that never
+        comes up is named in the receipt. Both budgets follow the topology of
+        this boot (:meth:`readiness_budget`) unless WAIT_SECONDS /
+        PROFILE_WAIT_SECONDS set them; the receipt names the budget used and
+        how long the boot actually took.
         """
-        wait_seconds = max(1, int(os.environ.get("WAIT_SECONDS", "120")))
-        profile_seconds = max(0, int(os.environ.get("PROFILE_WAIT_SECONDS", "240")))
         baseline = self.receipt.get("old_resources", {})
         rollback = self.receipt["phase"] == "rollback_recreate"
+        readiness = self.readiness_budget(rollback=rollback)
+        wait_seconds, profile_seconds = readiness["core_seconds"], readiness["profile_seconds"]
+        observed = {"core_ready_seconds": None, "all_ready_seconds": None}
+        self.receipt["rollback_readiness_observed" if rollback else "readiness_observed"] = observed
+        started = time.monotonic()
         expected_profiles = set(self.receipt.get("expected_profiles")
                                 or self.receipt.get("served_profiles") or ["default"])
         if not profile_seconds:
@@ -1471,8 +1837,13 @@ class Updater:
                     states and status.get("gateway_running") is True
                     and status.get("gateway_state") == "running"
                     and "default" in present and "default" in served)
+                # How long this boot really took: the next budget is calibrated
+                # from receipts, not from memory of a rollout.
+                if core_ready and observed["core_ready_seconds"] is None:
+                    observed["core_ready_seconds"] = round(time.monotonic() - started, 1)
                 missing = sorted(expected_profiles - {"default"} - (present & served))
                 if core_ready and not missing:
+                    observed["all_ready_seconds"] = round(time.monotonic() - started, 1)
                     break
             except (UpdateError, OSError, ValueError, KeyError, TypeError, IndexError, subprocess.TimeoutExpired):
                 pass
@@ -1481,7 +1852,8 @@ class Updater:
             time.sleep(min(1, max(0, deadline - time.monotonic())))
         if not core_ready:
             self.receipt["error_code"] = "native_readiness_timeout"
-            raise UpdateError(f"Native gateway readiness timed out after {wait_seconds}s; see private operation.log")
+            raise UpdateError(f"Native gateway readiness timed out after {wait_seconds}s "
+                              f"({readiness['source']['core']} budget); see private operation.log")
         if missing:
             self.receipt["error_code"] = "profile_gateway_timeout"
             self.receipt["missing_profiles"] = missing
@@ -1811,6 +2183,7 @@ print(json.dumps(changed))
             self.receipt["google_oauth_mount"] = self.google_oauth_mount_contract(initial)
             self.receipt["telegram_mount"] = self.telegram_mount_contract(initial)
             self.launch_runtime_env()  # invalid ownership/admin overrides fail before pull/drain
+            self.readiness_overrides()  # so does a mistyped readiness budget
             if self.receipt.get("expected_current") not in (None, old):
                 self.receipt["error_code"] = "expected_current_mismatch"
                 raise UpdateError("Expected current image differs from the running container; refresh installation state")
@@ -1889,6 +2262,7 @@ print(json.dumps(changed))
             self.release_drain()
             (self.home / "IMAGE.prev").write_text(old + "\n")
             self.phase("complete", status="succeeded")
+            self.bound_history(target)
         except Exception as exc:
             self.receipt["error"] = str(exc)
             if backed_up:
@@ -1911,6 +2285,7 @@ print(json.dumps(changed))
         validate_capability(self.receipt.get("baseline_capability"))
         self.launch_runtime_env(rollback=True)
         self.launch_resource_env(rollback=True)  # validate before stopping an older job's healthy container
+        self.readiness_overrides()
         # A launcher whose timezone default drifted since the update would
         # restore the old image with the wrong clock. Ask before quiescing:
         # a refused rollback that changed nothing is recoverable, a finished
@@ -2076,6 +2451,9 @@ def main(argv=None):
         print(json.dumps({"protocol": 1, "update": True, "detach": True, "status": True,
                           "rollback_detach": True, "expected_current": True, "artifact_verification": True,
                           "gc": True, "runtime_timezone": True,
+                          # K21-137/K21-136: the kit sizes its own readiness
+                          # budget and bounds its own updates/* history.
+                          "readiness_budget": True, "update_history": True,
                           "files": ["update.sh", "updater.py", "up.sh", "backup.sh", "dependencies.lock.json"]}))
         return 0
     if os.geteuid() != 0:

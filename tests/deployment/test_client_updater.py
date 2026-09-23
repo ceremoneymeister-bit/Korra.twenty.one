@@ -2363,3 +2363,430 @@ def test_new_ram_budget_does_not_inherit_incompatible_old_swap(updater, monkeypa
     monkeypatch.delenv("CONTAINER_MEMORY_SWAP", raising=False)
     assert updater.launch_resource_env()["CONTAINER_MEMORY_SWAP"] == "0"
     assert updater.launch_resource_env(rollback=True)["CONTAINER_MEMORY_SWAP"] == str(2 * 1024**3)
+
+
+# ── K21-137: бюджет готовности соразмерен контуру ────────────────────────────
+
+THIRD = "sha256:" + "3" * 64
+
+
+def _multiplex_topology(members, *, root=("telegram",), channels=("telegram",), silent=()):
+    """Мультиплексный контур: корень подключает платформы всех участников подряд."""
+    return {
+        "source": "synthetic_stopped_data", "multiplex": True, "multiplex_profile_allowlist": None,
+        "expected_profiles": ["default", *members, *silent], "root_channels": list(root),
+        "profiles": [{"profile": name, "channels": list(channels), "expected": True,
+                      "reason": "multiplex_member"} for name in members]
+                    + [{"profile": name, "channels": [], "expected": True,
+                        "reason": "multiplex_member"} for name in silent],
+    }
+
+
+def _no_operator_budget(monkeypatch):
+    for name in ("WAIT_SECONDS", "PROFILE_WAIT_SECONDS"):
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_small_contour_keeps_the_old_readiness_contract(updater, monkeypatch):
+    _no_operator_budget(monkeypatch)
+    updater.receipt.update(expected_profiles=["default"], gateway_expectations_forward={
+        "multiplex": False, "root_channels": ["telegram"], "profiles": [], "expected_profiles": ["default"]})
+
+    budget = updater.readiness_budget()
+
+    assert (budget["core_seconds"], budget["profile_seconds"]) == (120, 240)
+    assert budget["source"] == {"core": "auto", "profile": "auto"}
+    assert budget["inputs"]["connections"] == 1 and budget["inputs"]["channels_known"] is True
+    assert updater.receipt["readiness_budget"] == budget
+
+
+def test_multiplex_budget_counts_every_sequential_connection_and_is_capped(updater, monkeypatch):
+    _no_operator_budget(monkeypatch)
+    # Доломанова 22.09: шесть Telegram-платформ по ~11 с, корень — на 123-й секунде.
+    members = ["m%d" % index for index in range(5)]
+    topology = _multiplex_topology(members, silent=["dash", "calc"])
+    updater.receipt.update(expected_profiles=topology["expected_profiles"],
+                           gateway_expectations_forward=topology)
+
+    budget = updater.readiness_budget()
+
+    assert budget["inputs"]["connections"] == 6 and budget["inputs"]["members"] == 7
+    assert budget["core_seconds"] == 120 + 20 * 5 + 5 * 7
+    assert budget["core_seconds"] >= 2 * 123 - 20, "запас над измеренным стартом"
+
+    huge = _multiplex_topology(["p%d" % index for index in range(60)])
+    updater.receipt.update(expected_profiles=huge["expected_profiles"], gateway_expectations_forward=huge)
+    assert updater.readiness_budget()["core_seconds"] == u.READINESS_CAP_SECONDS
+    assert updater.readiness_budget()["profile_seconds"] == u.READINESS_CAP_SECONDS
+
+
+def test_budget_without_channel_names_errs_long(updater, monkeypatch):
+    _no_operator_budget(monkeypatch)
+    # Старый probe или квитанция без имён каналов: по соединению на профиль.
+    updater.receipt.update(expected_profiles=["default", "a", "b", "c"])
+    updater.receipt.pop("gateway_expectations_forward", None)
+
+    budget = updater.readiness_budget()
+
+    assert budget["inputs"] == {"multiplex": None, "connections": 4, "channels_known": False,
+                                "members": 3, "profiles": 3, "data_gib": 0.0}
+    assert budget["core_seconds"] == 120 + 20 * 3 + 5 * 3
+
+
+def test_large_data_adds_a_bounded_precaution(updater, monkeypatch):
+    _no_operator_budget(monkeypatch)
+    updater.receipt.update(expected_profiles=["default"], data_bytes=12 * 1024**3)
+    assert updater.readiness_budget()["core_seconds"] == 120 + 10 * 10
+    updater.receipt["data_bytes"] = 1024**3
+    assert updater.readiness_budget()["core_seconds"] == 120
+
+
+def test_free_space_records_the_data_size_the_budget_reads(updater, monkeypatch):
+    (updater.data / "blob.bin").write_bytes(b"x" * 4096)
+    monkeypatch.setattr(u.shutil, "disk_usage", lambda path: types.SimpleNamespace(free=1 << 60))
+    u.Updater.free_space(updater)
+    assert updater.receipt["data_bytes"] >= 4096
+
+
+def test_operator_budget_wins_and_is_named(updater, monkeypatch):
+    monkeypatch.setenv("WAIT_SECONDS", "900")
+    monkeypatch.setenv("PROFILE_WAIT_SECONDS", "0")
+    updater.receipt.update(expected_profiles=["default", "secretary"])
+
+    budget = updater.readiness_budget()
+
+    assert (budget["core_seconds"], budget["profile_seconds"]) == (900, 0)
+    assert budget["source"] == {"core": "operator", "profile": "operator"}
+    assert budget["auto"]["core_seconds"] == 120 + 20 + 5
+
+
+@pytest.mark.parametrize("variable", ["WAIT_SECONDS", "PROFILE_WAIT_SECONDS"])
+def test_mistyped_operator_budget_refuses_before_pull_or_drain(updater, monkeypatch, variable):
+    monkeypatch.setenv(variable, "15m")
+    with pytest.raises(u.UpdateError, match=variable):
+        updater.update("registry.example/korra:latest")
+    assert not any(call[0] in ("pull", "stop") for call in updater.calls)
+    assert ("native", "drain") not in updater.calls
+    assert updater.image == OLD and updater.running
+
+
+def test_rollback_after_a_readiness_timeout_gets_twice_the_forward_budget(updater, monkeypatch):
+    _no_operator_budget(monkeypatch)
+    topology = _multiplex_topology(["a", "b", "c"])
+    updater.receipt.update(expected_profiles=topology["expected_profiles"],
+                           gateway_expectations_forward=topology, gateway_expectations_rollback=topology)
+    forward = updater.readiness_budget()
+    updater.receipt["error_code"] = "native_readiness_timeout"
+
+    rollback = updater.readiness_budget(rollback=True)
+
+    assert rollback["core_seconds"] == 2 * forward["core_seconds"]
+    assert rollback["auto"]["reason"] == "forward_readiness_timeout"
+    assert updater.receipt["rollback_readiness_budget"] == rollback
+    assert updater.receipt["readiness_budget"] == forward, "бюджет прямого хода не переписан"
+
+    # Откат по другой причине — тот же соразмерный бюджет, без удвоения.
+    updater.receipt["error_code"] = "model_smoke_failed"
+    assert updater.readiness_budget(rollback=True)["core_seconds"] == forward["core_seconds"]
+
+
+def _slow_multiplex_boot(updater, clock, members, ready_at):
+    """Корень мультиплекса отвечает `running` только на `ready_at` секунде.
+
+    Drain и отмена до перезапуска идут прежним фиктивным путём: медленным
+    бывает только старт нового контейнера.
+    """
+    def native(action="status", timeout=None):
+        if action != "status" or updater.receipt.get("phase") not in ("smoke", "rollback_recreate"):
+            return FakeDockerUpdater.native_states(updater, action, timeout)
+        if clock[0] < ready_at:
+            return [{"home": "/opt/data", "state": {"gateway_state": "starting"}}]
+        return [{"home": "/opt/data", "state": {"gateway_state": "running",
+                                                "served_profiles": ["default", *members]}}]
+    return native
+
+
+def _slow_contour(real_smoke_context, monkeypatch, ready_at=123):
+    updater, clock, models, settings = real_smoke_context
+    _no_operator_budget(monkeypatch)
+    members = ["m%d" % index for index in range(5)]
+    topology = _multiplex_topology(members, silent=["dash", "calc"])
+    profiles = [{"name": name} for name in ["default", *topology["expected_profiles"][1:]]]
+    monkeypatch.setattr(u.urllib.request, "urlopen", _panel(settings, profiles))
+    monkeypatch.setattr(updater, "native_states",
+                        _slow_multiplex_boot(updater, clock, topology["expected_profiles"][1:], ready_at))
+    updater.gateway_expectations = lambda image: json.loads(json.dumps(topology))
+    return updater, clock, models, topology
+
+
+def _panel(settings, profiles):
+    def urlopen(request, **kwargs):
+        url = request if isinstance(request, str) else request.full_url
+        if url.endswith("/"):
+            return io.BytesIO(b'window.__KORRA_SESSION_TOKEN__="test-token"')
+        if url.endswith("/api/status"):
+            return io.BytesIO(json.dumps(settings["status"]).encode())
+        return io.BytesIO(json.dumps({"profiles": profiles}).encode())
+    return urlopen
+
+
+def test_update_survives_a_root_gateway_that_answers_after_120_seconds(real_smoke_context, monkeypatch):
+    """K21-137: один успешный attempt, ни отката, ни ручных переменных."""
+    updater, clock, models, topology = _slow_contour(real_smoke_context, monkeypatch)
+    updater.smoke = lambda image: u.Updater.smoke(updater, image)
+
+    updater.update("registry.example/korra:latest")
+
+    assert updater.receipt["status"] == "succeeded" and updater.image == NEW
+    assert [call for call in updater.calls if call[0] == "start_image"] == [("start_image", NEW)]
+    assert "rollback_readiness_budget" not in updater.receipt
+    budget = updater.receipt["readiness_budget"]
+    assert budget["source"]["core"] == "auto" and budget["core_seconds"] > 123
+    assert budget["inputs"]["connections"] == 6
+    assert updater.receipt["readiness_observed"]["core_ready_seconds"] == 123
+    assert updater.receipt["readiness_observed"]["all_ready_seconds"] == 123
+    assert updater.receipt["model_smoke"] == {"status": "ok"} and len(models) == 1
+    assert "error_code" not in updater.receipt
+
+
+def test_the_old_fixed_budget_would_have_rolled_the_same_boot_back(real_smoke_context, monkeypatch):
+    updater, clock, models, _ = _slow_contour(real_smoke_context, monkeypatch)
+    updater.receipt.update(expected_profiles=["default"])
+    monkeypatch.setenv("WAIT_SECONDS", "120")
+
+    with pytest.raises(u.UpdateError, match=r"timed out after 120s \(operator budget\)"):
+        u.Updater.smoke(updater, OLD)
+
+    assert updater.receipt["error_code"] == "native_readiness_timeout" and models == []
+
+
+def test_auto_budget_keeps_the_hard_gates(real_smoke_context, monkeypatch):
+    updater, clock, models, settings = real_smoke_context
+    _no_operator_budget(monkeypatch)
+    topology = _multiplex_topology(["a", "b"])
+    updater.receipt.update(phase="smoke", expected_profiles=topology["expected_profiles"],
+                           gateway_expectations_forward=topology)
+    monkeypatch.setattr(updater, "native_states", lambda **kwargs: [
+        {"home": "/opt/data", "state": {"gateway_state": "starting"}}])
+
+    # Шлюз, который так и не ответил, по-прежнему отвергнут — в пределах бюджета.
+    with pytest.raises(u.UpdateError, match=r"timed out after 170s \(auto budget\)"):
+        u.Updater.smoke(updater, OLD)
+    assert clock[0] == 170 and models == []
+    assert updater.receipt["readiness_observed"] == {"core_ready_seconds": None, "all_ready_seconds": None}
+
+    # Деградировавшее здоровье не пропускается сколько ни жди.
+    clock[0] = 0
+    settings["status"]["components"]["storage"]["status"] = "degraded"
+    monkeypatch.setattr(updater, "native_states", lambda **kwargs: [
+        {"home": "/opt/data", "state": {"gateway_state": "running", "served_profiles": ["default", "a", "b"]}}])
+    with pytest.raises(u.UpdateError, match="timed out"):
+        u.Updater.smoke(updater, OLD)
+    assert models == []
+
+
+def test_gateway_expectations_name_the_root_channels(tmp_path):
+    root = tmp_path / "data"
+    root.mkdir()
+    (root / "config.yaml").write_text("gateway:\n  multiplex_profiles: true\ntelegram:\n  enabled: true\n")
+    (root / ".env").write_text("TELEGRAM_BOT_TOKEN=synthetic-token\n")
+    _gateway_profile(root, "sales", telegram=True)
+
+    result = _run_gateway_expectations(root)
+
+    assert result["root_channels"] == ["telegram"]
+    assert {row["profile"]: row["channels"] for row in result["profiles"]} == {"sales": ["telegram"]}
+
+
+def test_capabilities_announce_self_sized_budget_and_bounded_history(monkeypatch, capsys):
+    monkeypatch.setattr(u.os, "geteuid", lambda: 1000)
+    assert u.main(["--capabilities"]) == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["readiness_budget"] is True and output["update_history"] is True
+
+
+# ── K21-136: установка сама ограничивает историю копий DATA ──────────────────
+
+def _second_update(updater, job_id="second-job", image=THIRD):
+    reference = "registry.example/korra:" + job_id
+    updater.tags[reference] = image
+    # Фиктивный `image inspect` знает только OLD/NEW; сырой id тоже должен
+    # резолвиться в себя, как у настоящего Docker.
+    updater.tags.setdefault(image, image)
+    updater.initialize(job_id, reference)
+    updater.receipt["baseline_capability"] = updater.capability()
+    return reference
+
+
+def _jobs(updater):
+    return sorted(path.name for path in updater.jobs.iterdir() if path.is_dir())
+
+
+@pytest.fixture
+def history_env(monkeypatch):
+    monkeypatch.delenv("UPDATE_HISTORY", raising=False)
+
+
+def test_two_updates_leave_exactly_the_current_rollback_copy(updater, history_env):
+    updater.update("registry.example/korra:latest")
+    first = updater.receipt
+    assert first["history_retention"]["status"] == "ok"
+    assert first["history_retention"]["retired"] == [] and _jobs(updater) == ["fixture-job"]
+
+    updater.update(_second_update(updater))
+
+    assert updater.receipt["status"] == "succeeded" and updater.image == THIRD
+    retention = updater.receipt["history_retention"]
+    assert retention["current_rollback"] == "second-job"
+    assert [item["job_id"] for item in retention["retired"]] == ["fixture-job"]
+    assert retention["freed_bytes"] > 0
+    assert _jobs(updater) == ["second-job"]
+    assert (updater.home / "IMAGE.prev").read_text().strip() == NEW
+    # Копия текущего отката цела, и откат на предыдущий образ проходит.
+    updater.rollback()
+    assert updater.receipt["status"] == "rolled_back" and updater.image == NEW
+
+
+def test_retired_jobs_tags_stay_this_installations_own(updater, history_env):
+    updater.update("registry.example/korra:latest")
+    old_refs = {updater.receipt["candidate_image_ref"], updater.receipt["rollback_image_ref"]}
+    updater.update(_second_update(updater))
+    ledger = json.loads((updater.jobs / u.RETIRED_LEDGER).read_text())
+    assert {entry["ref"] for entry in ledger["refs"]} == old_refs
+    assert [entry["job_id"] for entry in ledger["jobs"]] == ["fixture-job"]
+
+    result = updater.gc()
+
+    # Тег отката к OLD мёртв и снят; тег кандидата NEW держит IMAGE.prev.
+    retired_rollback = next(ref for ref in old_refs if ref.startswith("korra-local-rollback"))
+    assert result["removed"] == [retired_rollback]
+    assert result["skipped"] == []
+    ledger = json.loads((updater.jobs / u.RETIRED_LEDGER).read_text())
+    assert {entry["ref"] for entry in ledger["refs"]} == old_refs - {retired_rollback}
+
+
+def test_a_single_job_is_never_retired(updater, history_env):
+    updater.update("registry.example/korra:latest")
+    result = updater.gc()
+    assert result["history"]["retired"] == [] and result["history"]["kept"] == ["fixture-job"]
+    assert _jobs(updater) == ["fixture-job"]
+
+
+def test_foreign_unfinished_and_failed_jobs_are_never_touched(updater, history_env, tmp_path):
+    updater.update("registry.example/korra:latest")
+    for job_id, fields in (("neighbour-job", {"data": str(tmp_path / "other-data"), "status": "succeeded"}),
+                           ("running-job", {"status": "running"}),
+                           ("failed-job", {"status": "rollback_failed"}),
+                           ("broken-job", None)):
+        directory = updater.jobs / job_id
+        directory.mkdir()
+        if fields is None:
+            (directory / "status.json").write_text("{not json")
+            continue
+        u.atomic_json(directory / "status.json", {
+            "job_id": job_id, "name": updater.name, "data": str(updater.data), "action": "update",
+            "phase": "complete", "started_at": "2000-01-01T00:00:00+00:00", **fields})
+    neighbour_copy = tmp_path / "other-data.after-neighbour-job"
+    neighbour_copy.mkdir()
+
+    result = updater.gc()["history"]
+
+    assert sorted(result["review"]) == ["failed-job", "running-job"]
+    assert sorted(result["skipped"]) == ["broken-job", "neighbour-job"]
+    assert result["retired"] == []
+    assert _jobs(updater) == ["broken-job", "failed-job", "fixture-job", "neighbour-job", "running-job"]
+    assert neighbour_copy.is_dir()
+
+
+def test_a_rolled_back_attempt_waits_for_the_next_completed_update(updater, history_env):
+    updater.fail_smoke = True
+    with pytest.raises(u.UpdateError, match="Injected model"):
+        updater.update("registry.example/korra:latest")
+    displaced = updater.data.with_name(updater.data.name + ".after-fixture-job")
+    assert displaced.is_dir() and (updater.job / "after").is_dir()
+
+    # Сразу после отката выгрузка записей владельца остаётся на месте.
+    assert updater.gc()["history"]["retired"] == []
+    assert displaced.is_dir()
+
+    updater.fail_smoke = False
+    updater.update(_second_update(updater, image=NEW))
+
+    retention = updater.receipt["history_retention"]
+    assert [item["job_id"] for item in retention["retired"]] == ["fixture-job"]
+    assert retention["retired"][0]["paths"] == 2
+    assert not displaced.exists() and _jobs(updater) == ["second-job"]
+    assert updater.data.is_dir() and (updater.data / "config.yaml").is_file()
+
+
+def test_history_can_be_raised_for_an_incident(updater, monkeypatch):
+    monkeypatch.setenv("UPDATE_HISTORY", "2")
+    updater.update("registry.example/korra:latest")
+    updater.update(_second_update(updater))
+    updater.update(_second_update(updater, job_id="third-job", image=OLD))
+
+    assert updater.receipt["history_retention"]["keep"] == 2
+    assert updater.receipt["history_retention"]["source"] == "environment"
+    assert _jobs(updater) == ["second-job", "third-job"]
+
+
+def test_history_control_file_holds_across_channels(updater, monkeypatch):
+    monkeypatch.delenv("UPDATE_HISTORY", raising=False)
+    monkeypatch.setattr(u, "trusted_control", lambda path: None)
+    (updater.home / u.UPDATE_HISTORY_FILE).write_text("3\n")
+    assert updater.history_setting() == (3, "control_file")
+    (updater.home / u.UPDATE_HISTORY_FILE).write_text("0\n")
+    with pytest.raises(u.UpdateError, match="UPDATE_HISTORY"):
+        updater.history_setting()
+
+
+def test_a_housekeeping_failure_never_unmakes_the_update(updater, monkeypatch, history_env):
+    def broken(*args, **kwargs):
+        raise RuntimeError("disk vanished")
+    monkeypatch.setattr(updater, "retain_history", broken)
+
+    updater.update("registry.example/korra:latest")
+
+    assert updater.receipt["status"] == "succeeded" and updater.image == NEW
+    assert updater.receipt["history_retention"] == {"status": "failed", "reason": "disk vanished"}
+    assert json.loads((updater.job / "status.json").read_text())["history_retention"]["status"] == "failed"
+    assert [call for call in updater.calls if call[0] == "start_image"] == [("start_image", NEW)], \
+        "отката не было"
+
+
+def test_invalid_history_setting_retires_nothing(updater, monkeypatch):
+    monkeypatch.delenv("UPDATE_HISTORY", raising=False)
+    updater.update("registry.example/korra:latest")
+    monkeypatch.setenv("UPDATE_HISTORY", "all")
+    updater.update(_second_update(updater))
+    assert updater.receipt["status"] == "succeeded"
+    assert updater.receipt["history_retention"]["status"] == "failed"
+    assert _jobs(updater) == ["fixture-job", "second-job"]
+
+
+def test_unreadable_ledger_retires_nothing_and_keeps_receipt_tags(updater, history_env):
+    updater.update("registry.example/korra:latest")
+    (updater.jobs / u.RETIRED_LEDGER).write_text("{broken")
+    updater.update(_second_update(updater))
+
+    assert updater.receipt["history_retention"]["reason"] == "ledger_unreadable"
+    assert _jobs(updater) == ["fixture-job", "second-job"]
+    assert updater.receipt["rollback_image_ref"] in updater.own_image_refs()
+
+
+@pytest.mark.parametrize("operator", [None, "900"])
+def test_launcher_panel_wait_follows_the_same_budget(updater, monkeypatch, operator):
+    _no_operator_budget(monkeypatch)
+    if operator:
+        monkeypatch.setenv("WAIT_SECONDS", operator)
+    topology = _multiplex_topology(["a", "b", "c", "d"])
+    updater.receipt.update(phase="recreate", expected_profiles=topology["expected_profiles"],
+                           gateway_expectations_forward=topology,
+                           old_resources={"nano_cpus": 0, "memory_bytes": 0})
+    captured = []
+    monkeypatch.setattr(u.subprocess, "run", lambda *a, **kw:
+                        captured.append(kw["env"]) or types.SimpleNamespace(returncode=0, stdout=""))
+
+    u.Updater.start_image(updater, NEW)
+
+    assert captured[0]["WAIT_SECONDS"] == (operator or str(120 + 20 * 4 + 5 * 4))
