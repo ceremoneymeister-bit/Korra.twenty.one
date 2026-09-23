@@ -79,6 +79,7 @@ _HERMES_CORE_TOOLS = [
     # to owner turns where the installation OAuth app is configured; each call
     # re-checks the principal and resolves the profile's effective grant.
     "google_calendar",
+    "icloud_calendar",
     # Kanban multi-agent coordination — only in schema when the agent is
     # spawned as a kanban worker (HERMES_KANBAN_TASK env set) or the current
     # profile explicitly enables the kanban toolset. Gated via check_fn in
@@ -165,6 +166,12 @@ TOOLSETS = {
     "google_calendar": {
         "description": "Read and add events in the Google Calendar the owner connected in Korra",
         "tools": ["google_calendar"],
+        "includes": [],
+    },
+
+    "icloud_calendar": {
+        "description": "Read events in the owner's connected iCloud Calendar",
+        "tools": ["icloud_calendar"],
         "includes": [],
     },
 
@@ -495,6 +502,7 @@ TOOLSETS = {
             "ha_list_entities", "ha_get_state", "ha_list_services", "ha_call_service",
             # The owner's Google Calendar (gated on the installation OAuth app)
             "google_calendar",
+            "icloud_calendar",
 
         ],
         "includes": []

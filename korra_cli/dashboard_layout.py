@@ -41,6 +41,7 @@ WIDGET_IDS: tuple[str, ...] = (
     "calendar",
     # Shown only where a Codex subscription is connected (0.21.13).
     "codex-quota",
+    "icloud-calendar",
 )
 
 #: Cards that live outside the tile grid: no size, no reordering.

@@ -4,6 +4,7 @@ import type { DashboardWidget } from "./widget-types";
 import { AGENTS_WIDGET } from "./widgets/AgentsWidget";
 import { ATTENTION_WIDGET } from "./widgets/AttentionWidget";
 import { CALENDAR_WIDGET } from "./widgets/CalendarWidget";
+import { ICLOUD_CALENDAR_WIDGET } from "./widgets/ICloudCalendarWidget";
 import { CODEX_QUOTA_WIDGET } from "./widgets/CodexQuotaWidget";
 import { METRICS_WIDGET } from "./widgets/MetricsWidget";
 import { RECENT_RESULTS_WIDGET } from "./widgets/RecentResultsWidget";
@@ -30,6 +31,7 @@ export const DASHBOARD_WIDGETS: readonly DashboardWidget[] = [
   // так же, как в серверном каталоге (`korra_cli/dashboard_layout.py`).
   CALENDAR_WIDGET,
   CODEX_QUOTA_WIDGET,
+  ICLOUD_CALENDAR_WIDGET,
 ];
 
 /** Порядок каталога в том виде, в каком его читают функции состава. */

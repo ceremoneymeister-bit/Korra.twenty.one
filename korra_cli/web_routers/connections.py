@@ -17,8 +17,10 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 from korra_cli import dashboard_calendar
+from korra_cli import icloud_calendar
 from korra_cli import google_workspace as google
 from korra_cli.web_deps import late
 
@@ -106,3 +108,35 @@ async def dashboard_calendar_feed(refresh: bool = False):
         jobs_loader=lambda: _list_cron_jobs_sync("all"),
         refresh=refresh,
     )
+
+
+class ICloudConnectBody(BaseModel):
+    username: str
+    app_password: str
+
+
+def _icloud_call(callback, *args):
+    try:
+        return callback(*args)
+    except icloud_calendar.ICloudCalendarError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": str(exc)}) from exc
+
+
+@router.get("/api/connections/icloud-calendar")
+async def icloud_calendar_status():
+    return await asyncio.to_thread(_icloud_call, icloud_calendar.status)
+
+
+@router.post("/api/connections/icloud-calendar")
+async def icloud_calendar_connect(body: ICloudConnectBody):
+    return await asyncio.to_thread(_icloud_call, icloud_calendar.connect, body.username, body.app_password)
+
+
+@router.delete("/api/connections/icloud-calendar")
+async def icloud_calendar_disconnect():
+    return await asyncio.to_thread(_icloud_call, icloud_calendar.disconnect)
+
+
+@router.get("/api/dashboard/icloud-calendar")
+async def icloud_dashboard_feed():
+    return await asyncio.to_thread(_icloud_call, icloud_calendar.dashboard_feed)

@@ -1,4 +1,4 @@
-import { Link } from "react-router";
+import { Link, useLocation } from "react-router";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { KorraLoader } from "@/components/KorraLoader";
 import {
@@ -28,6 +28,7 @@ import { useConfirmDelete } from "@nous-research/ui/hooks/use-confirm-delete";
 import { useToast } from "@nous-research/ui/hooks/use-toast";
 import { OAuthProvidersCard } from "@/components/OAuthProvidersCard";
 import { ConnectedServicesSection } from "@/components/ConnectedServicesSection";
+import { ICloudCalendarCard } from "@/components/ICloudCalendarCard";
 import { Button } from "@nous-research/ui/ui/components/button";
 import { ListItem } from "@nous-research/ui/ui/components/list-item";
 import {
@@ -653,8 +654,16 @@ function CustomKeysCard({
 /* ------------------------------------------------------------------ */
 
 export default function EnvPage() {
+  const { hash } = useLocation();
   const clientMode = isProductUiMode();
   const [vars, setVars] = useState<Record<string, EnvVarInfo> | null>(null);
+  useEffect(() => {
+    if (hash !== "#section-icloud-calendar" || !vars) return;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById("section-icloud-calendar")?.scrollIntoView({ block: "start" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [hash, vars]);
   const [loadError, setLoadError] = useState(false);
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [revealed, setRevealed] = useState<Record<string, string>>({});
@@ -686,6 +695,7 @@ export default function EnvPage() {
   const sections = useMemo(() => {
     const items: { id: string; label: string }[] = [
       { id: "section-services", label: "Подключённые сервисы" },
+      { id: "section-icloud-calendar", label: "iCloud" },
       { id: "section-oauth", label: "Аккаунты" },
       { id: "section-providers", label: "Сервисы ответов" },
     ];
@@ -1014,6 +1024,8 @@ export default function EnvPage() {
         onError={(msg) => showToast(msg, "error")}
         onSuccess={(msg) => showToast(msg, "success")}
       />
+
+      <ICloudCalendarCard />
 
       <div id="section-oauth">
         <OAuthProvidersCard

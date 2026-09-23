@@ -1096,6 +1096,18 @@ export const api = {
     fetchJSON<DashboardCalendarFeed>(
       refresh ? "/api/dashboard/calendar?refresh=1" : "/api/dashboard/calendar",
     ),
+  getICloudCalendarStatus: () =>
+    fetchJSON<ICloudCalendarStatus>("/api/connections/icloud-calendar"),
+  connectICloudCalendar: (username: string, appPassword: string) =>
+    fetchJSON<ICloudCalendarStatus>("/api/connections/icloud-calendar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, app_password: appPassword }),
+    }),
+  disconnectICloudCalendar: () =>
+    fetchJSON<ICloudCalendarStatus>("/api/connections/icloud-calendar", { method: "DELETE" }),
+  getICloudCalendarFeed: () =>
+    fetchJSON<ICloudCalendarFeed>("/api/dashboard/icloud-calendar"),
 
   // Cron jobs
   getCronJobs: (profile = "all") =>
@@ -2796,6 +2808,29 @@ export interface DashboardCalendarFeed {
   };
   schedule: { state: "ok" | "error" };
   items: DashboardCalendarItem[];
+}
+
+export interface ICloudCalendarStatus {
+  state: "connected" | "not_connected";
+  account: string | null;
+  calendars?: number;
+}
+
+export interface ICloudCalendarEvent {
+  id: string;
+  title: string;
+  start: string;
+  end: string | null;
+  all_day: boolean;
+  calendar: string;
+  location: string;
+}
+
+export interface ICloudCalendarFeed extends ICloudCalendarStatus {
+  timezone?: string;
+  now?: string;
+  fetched_at: string | null;
+  events: ICloudCalendarEvent[];
 }
 
 export interface TelegramOnboardingStartResponse {

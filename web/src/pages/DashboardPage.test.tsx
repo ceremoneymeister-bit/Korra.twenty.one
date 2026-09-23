@@ -21,6 +21,7 @@ const api = vi.hoisted(() => ({
   setDashboardLayout: vi.fn(),
   getProfiles: vi.fn(),
   getDashboardCalendar: vi.fn(),
+  getICloudCalendarFeed: vi.fn(),
 }));
 vi.mock(import("@/lib/api"), async (importOriginal) => ({
   ...(await importOriginal()),
@@ -34,8 +35,9 @@ const CATALOG_TITLES = [
   "Ближайшие задачи",
   "Артефакты",
   "Календарь",
+  "iCloud Calendar",
 ];
-const CATALOG_IDS = ["attention", "agents", "metrics", "upcoming-tasks", "recent-results", "calendar"];
+const CATALOG_IDS = ["attention", "agents", "metrics", "upcoming-tasks", "recent-results", "calendar", "icloud-calendar"];
 const TILE_IDS = CATALOG_IDS.filter((id) => id !== "attention");
 
 let root: Root;
@@ -46,7 +48,7 @@ function pref(over: Partial<DashboardLayoutPreference> = {}): DashboardLayoutPre
     version: 1,
     revision: 1,
     initialized: true,
-    order: [...CATALOG_IDS],
+    order: [...CATALOG_IDS.filter((id) => id !== "icloud-calendar"), "codex-quota", "icloud-calendar"],
     hidden: [],
     sizes: Object.fromEntries(TILE_IDS.map((id) => [id, "m"])),
     ...over,
@@ -142,6 +144,7 @@ beforeEach(async () => {
   api.getProfiles.mockRejectedValue(new Error("offline"));
   // Календарь проверяется своим тестом; здесь он только должен не мешать доске.
   api.getDashboardCalendar.mockRejectedValue(new Error("offline"));
+  api.getICloudCalendarFeed.mockResolvedValue({ state: "not_connected", account: null, fetched_at: null, events: [] });
   vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
   $dashboardState.set(null);
   $dashboardStatus.set("idle");
@@ -250,6 +253,7 @@ describe("Раскладка дашборда хранится на сервер
       { id: "upcoming-tasks", size: "s" },
       // Карточки, которой не было в сохранённой раскладке, не теряем: в конец.
       { id: "calendar", size: "m" },
+      { id: "icloud-calendar", size: "m" },
     ]);
     expect(cardTitles()).not.toContain("Мои показатели");
   });
@@ -308,6 +312,7 @@ describe("Раскладка дашборда хранится на сервер
       "recent-results",
       "calendar",
       "codex-quota",
+      "icloud-calendar",
     ]);
     expect(tiles().map((tile) => tile.id)).toEqual([
       "metrics",
@@ -315,6 +320,7 @@ describe("Раскладка дашборда хранится на сервер
       "upcoming-tasks",
       "recent-results",
       "calendar",
+      "icloud-calendar",
     ]);
     // Первую плитку левее не двигают, закреплённая полоса стрелок не имеет.
     expect((byLabel("Переместить карточку «Мои показатели» левее") as HTMLButtonElement).disabled)
