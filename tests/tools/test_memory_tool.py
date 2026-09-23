@@ -402,6 +402,116 @@ class TestMemoryBatch:
         assert "legit fact" not in store.memory_entries
 
 
+class TestWholeEntryMatchBeatsSubstring:
+    """A short entry contained in a longer one stays addressable.
+
+    ``remove('test')`` against ``['test', 'run the tests before merge']`` used
+    to report "Multiple entries matched" — the short entry could never be
+    targeted, and a batch touching it aborted whole. A whole-entry match now
+    wins; substring matching is unchanged when no entry equals ``old_text``,
+    and ``exact=True`` (the profile editor's stale-card check) never falls
+    back to a substring. (Hermes upstream c2bc93588f.)
+    """
+
+    SHORT = "test"
+    LONG = "run the tests before merge"
+
+    def _seed(self, store):
+        store.add("memory", self.SHORT)
+        store.add("memory", self.LONG)
+
+    def test_remove_targets_the_whole_entry(self, store, tmp_path):
+        self._seed(store)
+        result = store.remove("memory", self.SHORT)
+        assert result["success"] is True, result
+        assert store.memory_entries == [self.LONG]
+        # Written through to disk, not just the in-memory list.
+        assert MemoryStore._read_file(tmp_path / "MEMORY.md") == [self.LONG]
+
+    def test_replace_targets_the_whole_entry(self, store):
+        self._seed(store)
+        result = store.replace("memory", f"  {self.SHORT}  ", "pytest -q")
+        assert result["success"] is True, result
+        assert store.memory_entries == ["pytest -q", self.LONG]
+
+    def test_dispatcher_single_op_and_batch(self, store):
+        self._seed(store)
+        single = json.loads(memory_tool(action="remove", old_text=self.SHORT, store=store))
+        assert single["success"] is True, single
+        assert store.memory_entries == [self.LONG]
+
+        store.add("memory", self.SHORT)
+        batch = json.loads(memory_tool(
+            target="memory",
+            operations=[
+                {"action": "replace", "old_text": self.SHORT, "content": "pytest -q"},
+                {"action": "add", "content": "ruff before commit"},
+            ],
+            store=store,
+        ))
+        assert batch["success"] is True, batch
+        assert store.memory_entries == [self.LONG, "pytest -q", "ruff before commit"]
+
+    def test_batch_stays_all_or_nothing(self, store, tmp_path):
+        self._seed(store)
+        result = store.apply_batch("memory", [
+            {"action": "remove", "old_text": self.SHORT},
+            {"action": "remove", "old_text": "no such entry"},
+        ])
+        assert result["success"] is False
+        assert "No operations were applied" in result["error"]
+        assert store.memory_entries == [self.SHORT, self.LONG]
+        assert MemoryStore._read_file(tmp_path / "MEMORY.md") == [self.SHORT, self.LONG]
+
+    def test_batch_sees_earlier_ops_in_the_same_batch(self, store):
+        """Matching runs on the working copy: an entry added earlier in the
+        batch is addressable by a later op, whole-entry first."""
+        store.add("memory", self.LONG)
+        result = store.apply_batch("memory", [
+            {"action": "add", "content": self.SHORT},
+            {"action": "replace", "old_text": self.SHORT, "content": "pytest -q"},
+        ])
+        assert result["success"] is True, result
+        assert store.memory_entries == [self.LONG, "pytest -q"]
+
+    def test_substring_matching_is_unchanged(self, store):
+        self._seed(store)
+        # A unique substring still addresses its entry.
+        assert store.replace("memory", "before merge", "run the tests before push")["success"] is True
+        assert store.memory_entries == [self.SHORT, "run the tests before push"]
+        # A substring shared by distinct entries (and equal to none) stays ambiguous.
+        store.add("memory", "server A runs nginx")
+        store.add("memory", "server B runs nginx")
+        result = store.remove("memory", "nginx")
+        assert result["success"] is False
+        assert "Multiple" in result["error"]
+        assert len(store.memory_entries) == 4
+
+    def test_exact_mode_never_falls_back_to_a_substring(self, store):
+        self._seed(store)
+        stale = store.replace("memory", "run the tests", "changed", exact=True)
+        assert stale["success"] is False
+        assert "No entry matched" in stale["error"]
+        assert store.remove("memory", "run the", exact=True)["success"] is False
+        assert store.memory_entries == [self.SHORT, self.LONG]
+
+        assert store.remove("memory", self.SHORT, exact=True)["success"] is True
+        assert store.memory_entries == [self.LONG]
+
+    def test_match_uses_the_state_reloaded_under_the_lock(self, store, tmp_path, monkeypatch):
+        """Another session's write lands between our load and our edit: the
+        whole-entry match must be decided on the fresh on-disk entries."""
+        store.add("memory", self.LONG)
+        other = MemoryStore(memory_char_limit=500, user_char_limit=300)
+        other.load_from_disk()
+        other.add("memory", self.SHORT)
+        assert store.memory_entries == [self.LONG]  # stale in-memory view
+
+        result = store.remove("memory", self.SHORT)
+        assert result["success"] is True, result
+        assert MemoryStore._read_file(tmp_path / "MEMORY.md") == [self.LONG]
+
+
 class TestBackgroundReviewDeleteGate:
     """Unattended review may append memory, never replace or remove it."""
 

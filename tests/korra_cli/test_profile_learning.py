@@ -128,6 +128,26 @@ def test_stale_memory_card_cannot_change_a_different_matching_entry(client, acti
     assert client.get("/api/profiles/learning-one/memory").json()["memory"] == (["Новые условия"] if action == "replace" else [])
 
 
+def test_agent_removes_a_short_fact_contained_in_a_longer_one_in_its_own_profile(client):
+    """The model's memory tool addresses a short entry by its whole text even
+    when a longer sibling contains it, and writes only the selected profile."""
+    from korra_cli.web_server import _profile_scope
+    from tools.memory_tool import load_on_disk_store, memory_tool
+
+    short, long = "Доставка", "Доставка бесплатна от 3000 рублей."
+    for profile in ("learning-one", "learning-two"):
+        for fact in (short, long):
+            assert change(client, "add", fact, profile=profile).status_code == 200
+
+    with _profile_scope("learning-one"):
+        result = json.loads(memory_tool(
+            action="remove", old_text=short, store=load_on_disk_store(),
+        ))
+    assert result["success"] is True, result
+    assert client.get("/api/profiles/learning-one/memory").json()["memory"] == [long]
+    assert client.get("/api/profiles/learning-two/memory").json()["memory"] == [short, long]
+
+
 def test_unreadable_memory_is_an_error_and_is_not_overwritten(client):
     path = home() / "memories" / "MEMORY.md"
     path.write_bytes(b"\xff\xfe damaged")

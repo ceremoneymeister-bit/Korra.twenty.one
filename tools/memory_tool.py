@@ -470,6 +470,22 @@ class MemoryStore:
 
         return self._success_response(target, "Entry added.")
 
+    @staticmethod
+    def _match_indices(entries: List[str], old_text: str, *, exact: bool = False) -> List[int]:
+        """Indices of the entries ``old_text`` addresses.
+
+        A whole-entry match wins: substring matches are considered only when
+        no entry equals ``old_text``, so a short entry stays addressable when
+        its text is contained in a longer sibling (``remove('test')`` next to
+        ``'run the tests before merge'`` used to be reported as ambiguous).
+        ``exact=True`` — the profile editor's stale-card check — never falls
+        back to a substring.
+        """
+        whole = [i for i, entry in enumerate(entries) if entry == old_text]
+        if whole or exact:
+            return whole
+        return [i for i, entry in enumerate(entries) if old_text in entry]
+
     def replace(self, target: str, old_text: str, new_content: str, *, exact: bool = False) -> Dict[str, Any]:
         """Replace a matching entry; GUI edits use exact text to detect stale cards."""
         old_text = old_text.strip()
@@ -492,7 +508,7 @@ class MemoryStore:
                 return _drift_error(self._path_for(target), bak)
 
             entries = self._entries_for(target)
-            matches = [(i, e) for i, e in enumerate(entries) if (old_text == e if exact else old_text in e)]
+            matches = [(i, entries[i]) for i in self._match_indices(entries, old_text, exact=exact)]
 
             if not matches:
                 return self._consolidation_failure({
@@ -555,7 +571,7 @@ class MemoryStore:
                 return _drift_error(self._path_for(target), bak)
 
             entries = self._entries_for(target)
-            matches = [(i, e) for i, e in enumerate(entries) if (old_text == e if exact else old_text in e)]
+            matches = [(i, entries[i]) for i in self._match_indices(entries, old_text, exact=exact)]
 
             if not matches:
                 return self._consolidation_failure({
@@ -642,7 +658,7 @@ class MemoryStore:
                             target,
                             f"{pos}: content is required (use action='remove' to delete).",
                         )
-                    matches = [j for j, e in enumerate(working) if old_text in e]
+                    matches = self._match_indices(working, old_text)
                     if not matches:
                         return self._batch_error(target, f"{pos}: no entry matched '{old_text}'.")
                     if len({working[j] for j in matches}) > 1:
@@ -655,7 +671,7 @@ class MemoryStore:
                 elif act == "remove":
                     if not old_text:
                         return self._batch_error(target, f"{pos}: old_text is required.")
-                    matches = [j for j, e in enumerate(working) if old_text in e]
+                    matches = self._match_indices(working, old_text)
                     if not matches:
                         return self._batch_error(target, f"{pos}: no entry matched '{old_text}'.")
                     if len({working[j] for j in matches}) > 1:
