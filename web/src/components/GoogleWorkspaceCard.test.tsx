@@ -248,3 +248,17 @@ it("keeps start and complete mutually exclusive while consent is open", async ()
   expect(buttons).toContain("Завершить");
   expect(host.querySelector<HTMLFieldSetElement>("fieldset")?.disabled).toBe(true);
 });
+
+it("does not offer to revoke a grant that is open to all agents", async () => {
+  apiMocks.getGoogleWorkspaceStatus.mockResolvedValue({
+    app: { configured: true, credential_type: "installed" },
+    connection: { state: "connected", services: ["calendar"], shared_with_all: true },
+    pending: { active: false },
+    available_services: ["calendar"],
+    completion_mode: "manual_localhost_url",
+  });
+  await renderCard();
+  expect(host.textContent).toContain("открыто всем агентам");
+  const revoke = Array.from(host.querySelectorAll("button")).find((node) => node.textContent?.includes("Отключить Google"));
+  expect(revoke?.disabled).toBe(true);
+});

@@ -102,6 +102,7 @@ function GoogleWorkspaceCardBody({ onError, onSuccess, onChanged, profileKey, na
   const legacyCompatible = Boolean(needsReauth && status?.connection.legacy_compatible);
   const sharedFrom = sharedToAll ? undefined : status?.connection.shared_from;
   const sharedWith = status?.connection.shared_with ?? [];
+  const sharedWithAll = Boolean(status?.connection.shared_with_all);
   const canStart = Boolean(status?.app.configured && selected.length && !busy && !needsReauth && !sharedFrom);
   const stateLabel = useMemo(() => {
     if (!status) return "Проверяем";
@@ -243,6 +244,12 @@ function GoogleWorkspaceCardBody({ onError, onSuccess, onChanged, profileKey, na
           </div>
         ) : null}
 
+        {sharedWithAll ? (
+          <div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-sm">
+            Это подключение открыто всем агентам. Чтобы отключить Google целиком, сначала выключите «Доступно всем агентам» в разделе «Подключённые сервисы».
+          </div>
+        ) : null}
+
         {sharedWith.length ? (
           <div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-sm">
             Это подключение также используют: <strong>{sharedWith.map(label).join(", ")}</strong>. Чтобы отключить Google целиком, сначала отключите общий доступ у этих агентов.
@@ -332,7 +339,7 @@ function GoogleWorkspaceCardBody({ onError, onSuccess, onChanged, profileKey, na
                 </Button>
               ))}
             </div>
-            <Button size="sm" outlined disabled={Boolean(busy) || (!sharedFrom && sharedWith.length > 0)} onClick={() => void revoke()} className="w-fit">
+            <Button size="sm" outlined disabled={Boolean(busy) || (!sharedFrom && (sharedWith.length > 0 || sharedWithAll))} onClick={() => void revoke()} className="w-fit">
               {sharedFrom ? "Отключить общий доступ" : needsReauth ? "Отключить для переподключения" : "Отключить Google"}
             </Button>
           </div>

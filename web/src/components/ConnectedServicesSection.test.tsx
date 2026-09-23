@@ -269,6 +269,14 @@ describe("Раздел «Подключённые сервисы» в «Ключ
     expect(api.getGoogleWorkspaceStatus).toHaveBeenCalledWith("default");
   });
 
+  it("с рабочим календарём переход из карточки не предлагает переподключаться", async () => {
+    await mount("/env?connect=calendar&profile=default#section-services");
+    expect(document.body.textContent).not.toContain("Чтобы добавить календарь");
+    // …и не раскрывает подключение второго аккаунта.
+    expect(document.body.textContent).not.toContain("Агент, которому принадлежит подключение");
+    expect(document.querySelector("[data-google-source='default']")).not.toBeNull();
+  });
+
   it("без приложения на сервере честно отправляет в поддержку", async () => {
     api.getConnections.mockResolvedValue(connections([row("default")], false));
     await mount();

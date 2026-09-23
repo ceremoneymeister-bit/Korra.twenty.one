@@ -168,10 +168,25 @@ function GoogleSection({ focusCalendar, google, onChanged, onError, onSuccess, r
   const requestedRow = requestedProfile ? byName.get(requestedProfile) : undefined;
   // Пришли из «Календаря» к агенту со своим подключением: значит, его и
   // нужно переподключить — показываем именно его карточку.
-  const reconnectTarget = focusCalendar && requestedRow?.access === "own" ? requestedRow.profile : null;
+  // Только если календаря в этом подключении действительно нет или доступ
+  // истёк: с рабочим календарём переход из карточки просто открывает раздел.
+  const calendarWorks = Boolean(
+    requestedRow?.services.includes("calendar") &&
+      (requestedRow.state === "connected" || requestedRow.legacy_compatible),
+  );
+  const reconnectTarget =
+    focusCalendar && requestedRow?.access === "own" && !calendarWorks ? requestedRow.profile : null;
   const candidates = connectCandidates(rows);
+  // Из карточки «Календарь» раскрываем подключение, только если календаря
+  // ещё нет ни в одном подключении.
+  const calendarConnected = sources.some(
+    (row) => row.services.includes("calendar") && sourceIsUsable(row),
+  );
   const [connectOpen, setConnectOpen] = useState(
-    () => focusCalendar || sources.length === 0 || candidates.some((row) => row.pending),
+    () =>
+      (focusCalendar && !calendarConnected) ||
+      sources.length === 0 ||
+      candidates.some((row) => row.pending),
   );
   const [target, setTarget] = useState<string | null>(() => defaultConnectTarget(rows, requestedProfile));
   const effectiveTarget =
@@ -226,7 +241,7 @@ function GoogleSection({ focusCalendar, google, onChanged, onError, onSuccess, r
           <section className="grid gap-2" aria-label="Переподключение Google">
             <p className="text-sm">
               Чтобы добавить календарь, отключите Google у агента «{nameOf(reconnectTarget)}» и подключите снова,
-              отметив «Календарь». Если этим подключением пользуются другие агенты, сначала закройте им доступ ниже.
+              отметив «Календарь». Если подключение открыто другим агентам, сначала закройте им доступ ниже.
             </p>
             <GoogleWorkspaceProfileCard
               profile={reconnectTarget}
