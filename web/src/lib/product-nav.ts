@@ -83,6 +83,7 @@ const MAIN_PLUGIN_ANCHOR = "/cron";
  */
 export const CLIENT_SETTINGS_PATHS = [
   "/env",
+  "/connections",
   "/models",
   "/updates",
   "/logs",
@@ -91,6 +92,8 @@ export const CLIENT_SETTINGS_PATHS = [
 
 export const CLIENT_SETTINGS_LABELS: Record<string, string> = {
   "/env": "Ключи и доступы",
+  // Не «Подключения»: так в «Служебном» уже называется допуск людей к ботам.
+  "/connections": "Сервисы",
   "/models": "Модель",
   "/updates": "Обновления",
   "/logs": "Журналы",

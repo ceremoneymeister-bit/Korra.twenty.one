@@ -1072,6 +1072,23 @@ export const api = {
         body: "{}",
       },
     ),
+  /** Одно подключение Google для нескольких агентов: `profile` — источник. */
+  setGoogleWorkspaceSharing: (profiles: string[], sourceProfile: string) =>
+    fetchJSON<{ source_profile: string; profiles: string[] }>(
+      appendProfileParam("/api/google-workspace/sharing", sourceProfile),
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profiles }),
+      },
+    ),
+  /** Сводка подключений установки: кто держит доступ и каким агентам он открыт. */
+  getConnections: () => fetchJSON<ConnectionsResponse>("/api/connections"),
+  /** Встречи, задачи с датой и запуски агентов на неделю для «Календаря». */
+  getDashboardCalendar: (refresh = false) =>
+    fetchJSON<DashboardCalendarFeed>(
+      refresh ? "/api/dashboard/calendar?refresh=1" : "/api/dashboard/calendar",
+    ),
 
   // Cron jobs
   getCronJobs: (profile = "all") =>
@@ -2685,6 +2702,85 @@ export interface GoogleWorkspaceStart {
 export interface GoogleWorkspaceRevoke {
   status: "revoked" | "detached";
   remote_revoked: boolean;
+}
+
+/** Строка сводки подключений: один агент и его доступ к Google. */
+export interface ConnectionsGoogleProfile {
+  profile: string;
+  /** Имя агента для людей; пусто — показываем идентификатор. */
+  label: string;
+  /** own — своё подключение, shared — чужое по разрешению владельца, none — нет. */
+  access: "own" | "shared" | "none";
+  state: "connected" | "not_connected" | "reauthorization_required";
+  services: string[];
+  /** Начато подключение и ждёт адреса возврата от Google. */
+  pending: boolean;
+  shared_from?: string;
+  shared_with?: string[];
+  reason?: string;
+  legacy_compatible?: boolean;
+  tools: {
+    /** Инструмент «Календарь» есть у агента (задаёт приложение сервера). */
+    calendar: boolean;
+    /** Навык Google Workspace установлен: почта, диск, таблицы, документы. */
+    workspace_skill: boolean;
+  };
+}
+
+export interface ConnectionsResponse {
+  google: {
+    app: { configured: boolean; reason?: string };
+    profiles: ConnectionsGoogleProfile[];
+    available_services: string[];
+  };
+}
+
+/** Что владельцу сделать, чтобы карточка «Календарь» заработала. */
+export type CalendarNextAction = "connect" | "reconnect" | "retry" | "support" | null;
+
+export interface DashboardCalendarItem {
+  /** event — встреча из Google, task — задача с датой, agent_run — запуск агента. */
+  kind: "event" | "task" | "agent_run";
+  id: string;
+  title: string;
+  /** ISO со смещением; у встреч на весь день — дата YYYY-MM-DD. */
+  start: string;
+  end?: string;
+  all_day?: boolean;
+  location?: string;
+  url?: string;
+  join_url?: string;
+  job_id?: string;
+  profile?: string;
+  schedule?: string;
+  /** Частый запуск свёрнут в одну строку: `occurrences` раз за неделю. */
+  repeats?: boolean;
+  occurrences?: number;
+}
+
+export interface DashboardCalendarFeed {
+  /** IANA-зона владельца: в ней считаются «сегодня» и время строк. */
+  timezone: string;
+  now: string;
+  window: { start: string; end: string; days: number };
+  google: {
+    state:
+      | "connected"
+      | "not_connected"
+      | "calendar_not_selected"
+      | "reauthorization_required"
+      | "app_unavailable"
+      | "error";
+    source_profile: string | null;
+    action: CalendarNextAction;
+    account: string;
+    fetched_at: string | null;
+    /** Google не ответил, показаны встречи последнего удачного чтения. */
+    stale: boolean;
+    error: { code: string; message: string; action: CalendarNextAction } | null;
+  };
+  schedule: { state: "ok" | "error" };
+  items: DashboardCalendarItem[];
 }
 
 export interface TelegramOnboardingStartResponse {

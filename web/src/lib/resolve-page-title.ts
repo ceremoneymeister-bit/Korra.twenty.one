@@ -28,6 +28,7 @@ const BUILTIN_LITERAL: Record<string, string> = {
   "/channels": "Каналы",
   "/webhooks": "Вебхуки",
   "/pairing": "Подключения",
+  "/connections": "Сервисы",
   "/system": "Система",
   "/profiles/new": "Создать агента",
   "/help": "Помощь",

@@ -30,6 +30,8 @@ const DEFAULT_SERVICES = ["drive", "sheets", "calendar"];
 interface Props {
   onError: (message: string) => void;
   onSuccess: (message: string) => void;
+  /** Подключение изменилось (начато, завершено, отменено или отозвано). */
+  onChanged?: () => void;
 }
 
 
@@ -40,7 +42,17 @@ export function GoogleWorkspaceCard(props: Props) {
   return <GoogleWorkspaceCardBody key={profileKey} {...props} profileKey={profileKey} names={names} />;
 }
 
-function GoogleWorkspaceCardBody({ onError, onSuccess, profileKey, names }: Props & {
+/**
+ * Та же карточка для явно выбранного агента — экран «Сервисы» подключает
+ * Google не тому агенту, что выбран в шапке, а тому, кого назвал владелец.
+ */
+export function GoogleWorkspaceProfileCard({ profile, ...props }: Props & { profile: string }) {
+  const { profiles } = useProfileScope();
+  const names = Object.fromEntries((profiles ?? []).map(item => [item.name, item.display_name?.trim() || item.name]));
+  return <GoogleWorkspaceCardBody key={profile} {...props} profileKey={profile} names={names} />;
+}
+
+function GoogleWorkspaceCardBody({ onError, onSuccess, onChanged, profileKey, names }: Props & {
   profileKey: string; names: Record<string, string>;
 }) {
   const alive = useRef(true);
@@ -106,6 +118,7 @@ function GoogleWorkspaceCardBody({ onError, onSuccess, profileKey, names }: Prop
       setAuthUrl(result.authorization_url);
       window.open(result.authorization_url, "_blank", "noopener,noreferrer");
       await load();
+      onChanged?.();
     } catch (error) {
       if (!alive.current) return;
       onError(ownerFacingError(error, "Не удалось начать подключение Google."));
@@ -123,6 +136,7 @@ function GoogleWorkspaceCardBody({ onError, onSuccess, profileKey, names }: Prop
       setAuthUrl("");
       onSuccess("Google Workspace подключён к выбранному агенту.");
       await load();
+      onChanged?.();
     } catch (error) {
       if (!alive.current) return;
       onError(ownerFacingError(error, "Не удалось завершить подключение Google."));
@@ -139,6 +153,7 @@ function GoogleWorkspaceCardBody({ onError, onSuccess, profileKey, names }: Prop
       setAuthUrl("");
       setCallbackUrl("");
       await load();
+      onChanged?.();
     } catch (error) {
       if (!alive.current) return;
       onError(ownerFacingError(error, "Не удалось отменить подключение Google."));
@@ -165,6 +180,7 @@ function GoogleWorkspaceCardBody({ onError, onSuccess, profileKey, names }: Prop
         );
       }
       await load();
+      onChanged?.();
     } catch (error) {
       if (!alive.current) return;
       onError(ownerFacingError(error, "Не удалось отключить Google."));
@@ -233,7 +249,9 @@ function GoogleWorkspaceCardBody({ onError, onSuccess, profileKey, names }: Prop
         ) : null}
 
         {!connected && !needsReauth && !sharedFrom ? (
-          <fieldset className="grid gap-2" disabled={!status?.app.configured || Boolean(busy)}>
+          // Пока открыт поток согласия, выбор сервисов заморожен: он уже ушёл в
+          // Google, и новый выбор без отмены молча заменил бы начатый поток.
+          <fieldset className="grid gap-2" disabled={!status?.app.configured || Boolean(busy) || Boolean(status?.pending.active)}>
             <legend className="mb-1 text-sm font-medium">Какие сервисы разрешить этому агенту</legend>
             <div className="flex flex-wrap gap-x-5 gap-y-2">
               {available.map(service => (
@@ -252,10 +270,16 @@ function GoogleWorkspaceCardBody({ onError, onSuccess, profileKey, names }: Prop
 
         {!connected && !needsReauth && !sharedFrom && status?.app.configured ? (
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" disabled={!canStart} onClick={() => void start()}>
-              {busy === "start" ? "Открываем…" : "Подключить Google"}
-            </Button>
-            {status.pending.active ? <Button size="sm" outlined disabled={Boolean(busy)} onClick={() => void cancel()}>Отменить</Button> : null}
+            {/* Начать и завершить — взаимоисключающие шаги: при открытом потоке
+                второй «Подключить Google» заменил бы state, и вставленный адрес
+                перестал бы подходить (урок инцидента со Скрынник). */}
+            {status.pending.active ? (
+              <Button size="sm" outlined disabled={Boolean(busy)} onClick={() => void cancel()}>Отменить подключение</Button>
+            ) : (
+              <Button size="sm" disabled={!canStart} onClick={() => void start()}>
+                {busy === "start" ? "Открываем…" : "Подключить Google"}
+              </Button>
+            )}
           </div>
         ) : null}
 

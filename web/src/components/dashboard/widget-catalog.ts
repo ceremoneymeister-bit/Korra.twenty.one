@@ -2,6 +2,7 @@ import type { WidgetCatalogShape } from "@/lib/dashboard-layout";
 import type { DashboardWidget } from "./widget-types";
 import { AGENTS_WIDGET } from "./widgets/AgentsWidget";
 import { ATTENTION_WIDGET } from "./widgets/AttentionWidget";
+import { CALENDAR_WIDGET } from "./widgets/CalendarWidget";
 import { METRICS_WIDGET } from "./widgets/MetricsWidget";
 import { RECENT_RESULTS_WIDGET } from "./widgets/RecentResultsWidget";
 import { UPCOMING_TASKS_WIDGET } from "./widgets/UpcomingTasksWidget";
@@ -23,6 +24,9 @@ export const DASHBOARD_WIDGETS: readonly DashboardWidget[] = [
   METRICS_WIDGET,
   UPCOMING_TASKS_WIDGET,
   RECENT_RESULTS_WIDGET,
+  // 0.21.13: встречи Google, задачи с датой и запуски агентов. Последним —
+  // так же, как в серверном каталоге (`korra_cli/dashboard_layout.py`).
+  CALENDAR_WIDGET,
 ];
 
 /** Порядок каталога в том виде, в каком его читают функции состава. */

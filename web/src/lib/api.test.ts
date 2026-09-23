@@ -294,6 +294,29 @@ describe("api Google Workspace helpers", () => {
     ]);
     expect(revokeResult).toEqual({ status: "revoked", remote_revoked: false });
   });
+
+  it("shares from the named source and reads installation-wide views unscoped", async () => {
+    vi.stubGlobal("window", {});
+    const fetchMock = jsonFetchMock({});
+    vi.stubGlobal("fetch", fetchMock);
+    setManagementProfile("writer");
+
+    await api.setGoogleWorkspaceSharing(["designer", "mentor"], "default");
+    await api.getConnections();
+    await api.getDashboardCalendar();
+    await api.getDashboardCalendar(true);
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      // Источник — тот агент, которого назвал экран, а не выбранный в шапке.
+      "/api/google-workspace/sharing?profile=default",
+      "/api/connections",
+      "/api/dashboard/calendar",
+      "/api/dashboard/calendar?refresh=1",
+    ]);
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init?.method).toBe("PUT");
+    expect(JSON.parse(String(init?.body))).toEqual({ profiles: ["designer", "mentor"] });
+  });
 });
 
 describe("transcribeAudio", () => {

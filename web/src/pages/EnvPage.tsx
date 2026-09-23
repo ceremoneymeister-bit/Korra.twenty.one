@@ -1011,6 +1011,13 @@ export default function EnvPage() {
           onError={(msg) => showToast(msg, "error")}
           onSuccess={(msg) => showToast(msg, "success")}
         />
+        <p className="mt-2 text-xs text-text-tertiary">
+          Каким агентам доступно подключение Google и общий доступ одним переключателем —{" "}
+          <Link to="/connections" className="text-primary hover:underline">
+            в разделе «Сервисы»
+          </Link>
+          .
+        </p>
         <div className="h-3" />
         <OAuthProvidersCard
           onError={(msg) => showToast(msg, "error")}

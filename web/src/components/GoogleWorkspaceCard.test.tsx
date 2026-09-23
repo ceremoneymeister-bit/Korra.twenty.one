@@ -238,3 +238,13 @@ it("keeps an in-flight detach bound to its original agent", async () => {
   expect(onError).not.toHaveBeenCalled();
   expect(host.textContent).toContain("Источник подключения:");
 });
+
+it("keeps start and complete mutually exclusive while consent is open", async () => {
+  await renderCard();
+  const buttons = Array.from(host.querySelectorAll("button")).map((node) => node.textContent?.trim());
+  // Второй «Подключить Google» заменил бы открытый поток, и вставленный адрес перестал бы подходить.
+  expect(buttons).not.toContain("Подключить Google");
+  expect(buttons).toContain("Отменить подключение");
+  expect(buttons).toContain("Завершить");
+  expect(host.querySelector<HTMLFieldSetElement>("fieldset")?.disabled).toBe(true);
+});

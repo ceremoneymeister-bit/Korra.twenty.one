@@ -34,6 +34,7 @@ const ADMIN_NAV: NavEntry[] = [
   { path: "/profiles", labelKey: "profiles", label: "Profiles" },
   { path: "/config", labelKey: "config", label: "Config" },
   { path: "/env", labelKey: "keys", label: "Keys" },
+  { path: "/connections", label: "Services" },
   { path: "/system", label: "System" },
   { path: "/docs", labelKey: "documentation", label: "Documentation" },
 ];
@@ -84,6 +85,7 @@ describe("secondary navigation", () => {
   it("формирует настройки отдельно от служебных экранов", () => {
     expect(selectProductSettingsNav(ADMIN_NAV).map((item) => item.path)).toEqual([
       "/env",
+      "/connections",
       "/models",
       "/updates",
       "/logs",
@@ -93,6 +95,10 @@ describe("secondary navigation", () => {
     expect(
       selectProductSettingsNav(ADMIN_NAV).find((item) => item.path === "/updates")?.label,
     ).toBe("Обновления");
+    // «Подключения» уже заняты допуском людей к ботам в «Служебном».
+    expect(
+      selectProductSettingsNav(ADMIN_NAV).find((item) => item.path === "/connections")?.label,
+    ).toBe("Сервисы");
     expect(selectServiceNav(ADMIN_NAV).map((item) => item.path)).toEqual([
       "/sessions",
       "/skills",

@@ -13,6 +13,7 @@ const api = vi.hoisted(() => ({
   getDashboardLayout: vi.fn(),
   setDashboardLayout: vi.fn(),
   getProfiles: vi.fn(),
+  getDashboardCalendar: vi.fn(),
 }));
 vi.mock(import("@/lib/api"), async (importOriginal) => ({
   ...(await importOriginal()),
@@ -25,8 +26,9 @@ const CATALOG_TITLES = [
   "Мои показатели",
   "Ближайшие задачи",
   "Артефакты",
+  "Календарь",
 ];
-const CATALOG_IDS = ["attention", "agents", "metrics", "upcoming-tasks", "recent-results"];
+const CATALOG_IDS = ["attention", "agents", "metrics", "upcoming-tasks", "recent-results", "calendar"];
 const TILE_IDS = CATALOG_IDS.filter((id) => id !== "attention");
 
 let root: Root;
@@ -113,6 +115,8 @@ beforeEach(async () => {
   // Дашборд должен собираться и без реальных агентов: эту границу проверяет
   // отдельный тест самой карточки.
   api.getProfiles.mockRejectedValue(new Error("offline"));
+  // Календарь проверяется своим тестом; здесь он только должен не мешать доске.
+  api.getDashboardCalendar.mockRejectedValue(new Error("offline"));
   vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
   await mount();
 });
@@ -135,7 +139,7 @@ describe("Личный дашборд", () => {
     expect(button("Настроить")).toBeTruthy();
   });
 
-  it("показывает пять карточек-кандидатов в порядке каталога", () => {
+  it("показывает карточки-кандидаты в порядке каталога", () => {
     expect(cardTitles()).toEqual(CATALOG_TITLES);
   });
 
@@ -214,6 +218,8 @@ describe("Раскладка дашборда хранится на сервер
       { id: "recent-results", size: "s" },
       { id: "agents", size: "l" },
       { id: "upcoming-tasks", size: "s" },
+      // Карточки, которой не было в сохранённой раскладке, не теряем: в конец.
+      { id: "calendar", size: "m" },
     ]);
     expect(cardTitles()).not.toContain("Мои показатели");
   });
@@ -268,12 +274,14 @@ describe("Раскладка дашборда хранится на сервер
       "agents",
       "upcoming-tasks",
       "recent-results",
+      "calendar",
     ]);
     expect(tiles().map((tile) => tile.id)).toEqual([
       "metrics",
       "agents",
       "upcoming-tasks",
       "recent-results",
+      "calendar",
     ]);
     // Первую плитку левее не двигают, закреплённая полоса стрелок не имеет.
     expect((byLabel("Переместить карточку «Мои показатели» левее") as HTMLButtonElement).disabled)
