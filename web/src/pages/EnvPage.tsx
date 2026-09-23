@@ -653,6 +653,21 @@ function CustomKeysCard({
 /*  Main page                                                          */
 /* ------------------------------------------------------------------ */
 
+function scrollToSection(id: string, behavior: ScrollBehavior = "auto") {
+  const target = document.getElementById(id);
+  if (!target) return;
+  const scroller = target.closest("main");
+  if (!scroller) {
+    target.scrollIntoView({ behavior, block: "start" });
+    return;
+  }
+  // The app shell scrolls inside <main>. scrollIntoView aligns with the
+  // viewport and can leave the card title behind the fixed mobile header.
+  const top = target.getBoundingClientRect().top - scroller.getBoundingClientRect().top
+    + scroller.scrollTop - 16;
+  scroller.scrollTo({ top, behavior });
+}
+
 export default function EnvPage() {
   const { hash } = useLocation();
   const clientMode = isProductUiMode();
@@ -660,7 +675,7 @@ export default function EnvPage() {
   useEffect(() => {
     if (hash !== "#section-icloud-calendar" || !vars) return;
     const frame = window.requestAnimationFrame(() => {
-      document.getElementById("section-icloud-calendar")?.scrollIntoView({ block: "start" });
+      scrollToSection("section-icloud-calendar");
     });
     return () => window.cancelAnimationFrame(frame);
   }, [hash, vars]);
@@ -724,7 +739,7 @@ export default function EnvPage() {
 
   useLayoutEffect(() => {
     const scrollTo = (id: string) => {
-      document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      scrollToSection(id, "smooth");
     };
     setAfterTitle(
       <div className="flex min-w-0 flex-nowrap items-center gap-2">
