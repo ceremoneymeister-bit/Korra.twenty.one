@@ -660,6 +660,16 @@ def make_codex_app_server_event_bridge(agent) -> Callable[[dict], None]:
         if method == "item/agentMessage/delta":
             _fire_text_delta(params)
             return
+        if method == "account/rateLimits/updated":
+            # Same subscription usage the Responses stream reports, in the
+            # app-server's camelCase spelling.
+            try:
+                from agent.rate_limit_tracker import observe_codex_quota
+
+                observe_codex_quota(body=params)
+            except Exception:
+                logger.debug("Codex quota notification not recorded", exc_info=True)
+            return
         if method in {"item/reasoning/delta", "item/reasoning/summaryDelta"}:
             _fire_reasoning_delta(params)
             return
@@ -1017,6 +1027,49 @@ def _item_field(item: Any, name: str, default: Any = None) -> Any:
     if value is None and isinstance(item, dict):
         value = item.get(name, default)
     return value if value is not None else default
+
+
+def _observe_codex_quota_headers(raw_stream: Any) -> None:
+    """Remember the subscription usage the backend sent with the response.
+
+    The Codex backend reports it as ``x-codex-primary-*`` headers; the owner
+    sees the value on the dashboard. Fail-open: quota bookkeeping must never
+    disturb the turn itself.
+    """
+    try:
+        response = getattr(raw_stream, "response", None)
+        headers = getattr(response, "headers", None)
+        if headers:
+            from agent.rate_limit_tracker import observe_codex_quota
+
+            observe_codex_quota(headers=headers)
+    except Exception:
+        logger.debug("Codex quota headers not recorded", exc_info=True)
+
+
+def _observe_codex_quota_event(event: Any) -> None:
+    """Record a ``rate_limits`` object carried inside the stream body.
+
+    Only rate-limit events and terminal frames are inspected, so text deltas
+    pay one string check each.
+    """
+    try:
+        event_type = _event_field(event, "type")
+        if not isinstance(event_type, str):
+            return
+        if "rate_limit" in event_type:
+            carrier = event
+        elif event_type in _TERMINAL_EVENT_TYPES:
+            carrier = _event_field(event, "response")
+            if carrier is None:
+                return
+        else:
+            return
+        from agent.rate_limit_tracker import observe_codex_quota
+
+        observe_codex_quota(body=carrier)
+    except Exception:
+        logger.debug("Codex quota event not recorded", exc_info=True)
 
 
 def _raise_stream_error(event: Any) -> None:
@@ -1622,6 +1675,7 @@ def run_codex_stream(agent, api_kwargs: dict, client: Any = None, on_first_delta
         # TTFB watchdog and activity touch — runs once per SSE event.
         agent._codex_stream_last_event_ts = time.time()
         agent._touch_activity("receiving stream response")
+        _observe_codex_quota_event(event)
 
     for attempt in range(max_stream_retries + 1):
         if agent._interrupt_requested:
@@ -1643,6 +1697,7 @@ def run_codex_stream(agent, api_kwargs: dict, client: Any = None, on_first_delta
             # Claim the delta sink for THIS physical attempt. A newer attempt
             # supersedes this token and fences late deltas out of the turn.
             writer_token["value"] = claim_stream_writer(agent)
+            _observe_codex_quota_headers(_raw_stream)
 
         def _accept_codex_chunk(_chunk: Any) -> bool:
             token = writer_token["value"]
