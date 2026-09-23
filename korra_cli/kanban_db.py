@@ -3205,6 +3205,20 @@ def _canonical_assignee(assignee: Optional[str]) -> Optional[str]:
     return normalize_profile_name(assignee)
 
 
+def _normalize_choice(
+    value: Optional[str], name: str, allowed: set, *, none: set = frozenset(),
+) -> Optional[str]:
+    """Normalise an optional enum column; values in ``none`` mean NULL."""
+    if value is None:
+        return None
+    cleaned = str(value).strip().lower()
+    if not cleaned or cleaned in none:
+        return None
+    if cleaned not in allowed:
+        raise ValueError(f"{name} must be one of {sorted(allowed | set(none))}")
+    return cleaned
+
+
 def create_task(
     conn: sqlite3.Connection,
     *,
@@ -3233,8 +3247,18 @@ def create_task(
     board: Optional[str] = None,
     project_id: Optional[str] = None,
     project_source_task_id: Optional[str] = None,
+    acceptance: Optional[str] = None,
+    actor_kind: Optional[str] = None,
+    plan_id: Optional[str] = None,
+    plan_title: Optional[str] = None,
 ) -> str:
     """Create a new task and optionally link it under parent tasks.
+
+    Owner journey fields: ``acceptance="owner"`` holds a worker's result for
+    the owner's acceptance; ``actor_kind="human"`` makes a step the owner
+    does themselves (no assignee, never dispatched); ``plan_id`` /
+    ``plan_title`` group the steps of one plan (inherited from the first
+    parent that has a plan when omitted).
 
     Returns the new task id.  Status is ``ready`` when there are no
     parents (or all parents already ``done``), otherwise ``todo``.
@@ -3458,6 +3482,22 @@ def create_task(
         if row:
             return row["id"]
 
+    acceptance = _normalize_choice(acceptance, "acceptance", {"owner"}, none={"auto", "agent"})
+    actor_kind = _normalize_choice(actor_kind, "actor_kind", {"human"}, none={"agent"})
+    if actor_kind == "human":
+        # The owner does this step; no profile may claim it.
+        assignee = None
+    plan_id = (plan_id or "").strip() or None
+    plan_title = (plan_title or "").strip() or None
+    if plan_id is None and parents:
+        inherited = conn.execute(
+            "SELECT plan_id, plan_title FROM tasks WHERE plan_id IS NOT NULL AND id IN ("
+            + ",".join("?" * len(list(parents))) + ") LIMIT 1",
+            list(parents),
+        ).fetchone()
+        if inherited:
+            plan_id, plan_title = inherited["plan_id"], plan_title or inherited["plan_title"]
+
     now = int(time.time())
 
     # Resolve workspace_path from board-level default_workdir when the
@@ -3547,8 +3587,9 @@ def create_task(
                         max_runtime_seconds,
                         skills, max_retries, model_override, provider_override,
                         reasoning_effort,
-                        goal_mode, goal_max_turns, session_id
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        goal_mode, goal_max_turns, session_id,
+                        acceptance, actor_kind, plan_id, plan_title
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         task_id,
@@ -3574,6 +3615,10 @@ def create_task(
                         1 if goal_mode else 0,
                         int(goal_max_turns) if goal_max_turns is not None else None,
                         session_id,
+                        acceptance,
+                        actor_kind,
+                        plan_id,
+                        plan_title,
                     ),
                 )
                 for pid in parents:
@@ -4662,15 +4707,19 @@ def recompute_ready(
 # for the owner's decision on it.
 _UNSATISFIED_PARENT_SQL = (
     "(p.status != 'done' AND NOT (p.status = 'archived' "
-    "AND (p.completed_at IS NOT NULL OR p.result IS NOT NULL)))"
+    "AND p.completed_at IS NOT NULL))"
 )
 
 
 def parent_satisfies(status: Optional[str], completed_at: Any = None, result: Any = None) -> bool:
-    """Python twin of :data:`_UNSATISFIED_PARENT_SQL` (negated)."""
+    """Python twin of :data:`_UNSATISFIED_PARENT_SQL` (negated).
+
+    ``result`` is accepted for call-site symmetry only: a result submitted
+    for the owner's acceptance is not a finished step until accepted.
+    """
     if status == "done":
         return True
-    return status == "archived" and (completed_at is not None or result is not None)
+    return status == "archived" and completed_at is not None
 
 
 def _parents_satisfied(conn: sqlite3.Connection, task_id: str) -> bool:
@@ -4755,6 +4804,7 @@ def claim_task(
              WHERE id = ?
                AND status = 'ready'
                AND claim_lock IS NULL
+               AND COALESCE(actor_kind, '') != 'human'
             """,
             (lock, expires, now, task_id),
         )
@@ -4855,6 +4905,7 @@ def claim_review_task(
              WHERE id = ?
                AND status = 'review'
                AND claim_lock IS NULL
+               AND COALESCE(acceptance, '') != 'owner'
             """,
             (lock, expires, now, task_id),
         )
@@ -5429,8 +5480,16 @@ def complete_task(
     created_cards: Optional[Iterable[str]] = None,
     expected_run_id: Optional[int] = None,
     fire_lifecycle_hook: bool = True,
+    as_worker: bool = False,
 ) -> bool:
     """Transition ``running|ready|blocked|review -> done`` and record ``result``.
+
+    ``as_worker=True`` marks an agent's completion (worker or orchestrator
+    tool, CLI inside an agent). For a task with ``acceptance='owner'`` the
+    result is then *submitted*, not accepted: the task lands in ``review``
+    with its result, run and declared files saved, children stay waiting,
+    the workspace is kept for a possible rework, and a ``submitted`` event
+    replaces ``completed``. :func:`accept_result` finishes it.
 
     Accepts a task that is merely ``ready`` too, so a manual CLI
     completion (``hermes kanban complete <id>``) works without requiring
@@ -5505,15 +5564,21 @@ def complete_task(
         if not _parents_satisfied(conn, task_id):
             return False
         prior = conn.execute(
-            "SELECT status FROM tasks WHERE id = ?",
+            "SELECT status, acceptance FROM tasks WHERE id = ?",
             (task_id,),
         ).fetchone()
         prior_status = prior["status"] if prior else None
+        hold = bool(
+            as_worker and prior is not None and prior["acceptance"] == "owner"
+            and prior_status != "review"
+        )
+        target_status = "review" if hold else "done"
+        completed_value = None if hold else now
         if expected_run_id is None:
             cur = conn.execute(
                 """
                 UPDATE tasks
-                   SET status       = 'done',
+                   SET status       = ?,
                        result       = ?,
                        completed_at = ?,
                        claim_lock   = NULL,
@@ -5525,13 +5590,13 @@ def complete_task(
                  WHERE id = ?
                    AND status IN ('running', 'ready', 'blocked', 'review')
                 """,
-                (result, now, task_id),
+                (target_status, result, completed_value, task_id),
             )
         else:
             cur = conn.execute(
                 """
                 UPDATE tasks
-                   SET status       = 'done',
+                   SET status       = ?,
                        result       = ?,
                        completed_at = ?,
                        claim_lock   = NULL,
@@ -5544,7 +5609,7 @@ def complete_task(
                    AND status IN ('running', 'ready', 'blocked', 'review')
                    AND current_run_id = ?
                 """,
-                (result, now, task_id, int(expected_run_id)),
+                (target_status, result, completed_value, task_id, int(expected_run_id)),
             )
         if cur.rowcount != 1:
             return False
@@ -5562,7 +5627,8 @@ def complete_task(
                 )
         run_id = _end_run(
             conn, task_id,
-            outcome="completed", status="done",
+            outcome="submitted" if hold else "completed",
+            status="review" if hold else "done",
             summary=summary if summary is not None else result,
             metadata=metadata,
         )
@@ -5583,7 +5649,7 @@ def complete_task(
                 }
             run_id = _synthesize_ended_run(
                 conn, task_id,
-                outcome="completed",
+                outcome="submitted" if hold else "completed",
                 summary=synth_summary,
                 metadata=synth_metadata,
             )
@@ -5617,7 +5683,7 @@ def complete_task(
                 if cleaned_artifacts:
                     completed_payload["artifacts"] = cleaned_artifacts
         _append_event(
-            conn, task_id, "completed",
+            conn, task_id, "submitted" if hold else "completed",
             completed_payload,
             run_id=run_id,
         )
@@ -5647,6 +5713,10 @@ def complete_task(
     # just tracks "is there a current pathology the breaker should
     # care about", and a success resets that question.
     _clear_failure_counter(conn, task_id)
+    if hold:
+        # Waiting for the owner: children keep waiting, the workspace stays
+        # for a possible rework, and "completed" fires only on acceptance.
+        return True
     # Recompute ready status for dependents (separate txn so children see done).
     recompute_ready(conn)
     # Clean up the scratch workspace and any stale tmux session for the worker.
@@ -7131,6 +7201,160 @@ def respond_to_block(
             },
         )
     return {"ok": True, "status": new_status, "duplicate": False, "reason": None}
+
+
+def submitted_version(conn: sqlite3.Connection, task_id: str) -> Optional[int]:
+    """Identity of the result currently waiting for the owner's acceptance.
+
+    The id of the latest ``submitted`` event; the owner accepts or returns
+    exactly the version they saw.
+    """
+    row = conn.execute(
+        "SELECT id FROM task_events WHERE task_id = ? AND kind = 'submitted' "
+        "ORDER BY id DESC LIMIT 1",
+        (task_id,),
+    ).fetchone()
+    return int(row["id"]) if row else None
+
+
+def _replayed_owner_action(conn, task_id: str, kinds: tuple, request_id: Optional[str]):
+    if not request_id:
+        return None
+    marks = ",".join("?" for _ in kinds)
+    for row in conn.execute(
+        f"SELECT payload FROM task_events WHERE task_id = ? AND kind IN ({marks}) "
+        "ORDER BY id DESC",
+        (task_id, *kinds),
+    ):
+        try:
+            payload = json.loads(row["payload"] or "{}")
+        except (TypeError, ValueError):
+            continue
+        if isinstance(payload, dict) and payload.get("request_id") == request_id:
+            return payload
+    return None
+
+
+def _owner_review_gate(conn, task_id: str, version: Optional[int]) -> tuple[Optional[str], Optional[int]]:
+    row = conn.execute(
+        "SELECT status, acceptance FROM tasks WHERE id = ?", (task_id,),
+    ).fetchone()
+    if row is None:
+        return "not_found", None
+    if row["status"] != "review" or row["acceptance"] != "owner":
+        return "not_waiting", None
+    current = submitted_version(conn, task_id)
+    if version is not None and current != int(version):
+        return "stale", current
+    return None, current
+
+
+def accept_result(
+    conn: sqlite3.Connection,
+    task_id: str,
+    *,
+    author: str,
+    version: Optional[int] = None,
+    request_id: Optional[str] = None,
+) -> dict[str, Any]:
+    """The owner accepts the submitted result: ``review`` → ``done``.
+
+    Only a result held for the owner (``acceptance='owner'``) is accepted
+    here, and only the ``version`` the owner saw. Emits the ``completed``
+    event (carrying ``accepted_by``) so notifications, children and hooks
+    see a finished step exactly once, then releases dependants and cleans
+    the workspace like a normal completion.
+    """
+    now = int(time.time())
+    with write_txn(conn):
+        replay = _replayed_owner_action(conn, task_id, ("completed",), request_id)
+        if replay is not None:
+            return {"ok": True, "duplicate": True, "reason": None, "status": "done"}
+        reason, current = _owner_review_gate(conn, task_id, version)
+        if reason:
+            return {"ok": False, "duplicate": False, "reason": reason, "status": None}
+        if not _parents_satisfied(conn, task_id):
+            return {"ok": False, "duplicate": False, "reason": "parents", "status": "review"}
+        cur = conn.execute(
+            "UPDATE tasks SET status = 'done', completed_at = ?, claim_lock = NULL, "
+            "claim_expires = NULL, worker_pid = NULL, block_kind = NULL, "
+            "block_recurrences = 0, block_reason = NULL "
+            "WHERE id = ? AND status = 'review'",
+            (now, task_id),
+        )
+        if cur.rowcount != 1:
+            return {"ok": False, "duplicate": False, "reason": "not_waiting", "status": None}
+        submitted = conn.execute(
+            "SELECT payload, run_id FROM task_events WHERE id = ?", (current,),
+        ).fetchone() if current else None
+        try:
+            payload = json.loads(submitted["payload"] or "{}") if submitted else {}
+        except (TypeError, ValueError):
+            payload = {}
+        payload = payload if isinstance(payload, dict) else {}
+        payload.update({
+            "accepted_by": author,
+            "version": current,
+            "request_id": request_id,
+        })
+        run_id = submitted["run_id"] if submitted else None
+        _append_event(conn, task_id, "completed", payload, run_id=run_id)
+    recompute_ready(conn)
+    _cleanup_workspace(conn, task_id)
+    done = get_task(conn, task_id)
+    _fire_kanban_lifecycle_hook(
+        "kanban_task_completed",
+        task_id,
+        board=get_current_board(),
+        assignee=done.assignee if done else None,
+        run_id=run_id,
+        summary=payload.get("summary"),
+    )
+    return {"ok": True, "duplicate": False, "reason": None, "status": "done"}
+
+
+def return_for_rework(
+    conn: sqlite3.Connection,
+    task_id: str,
+    *,
+    comment: str,
+    author: str,
+    version: Optional[int] = None,
+    request_id: Optional[str] = None,
+) -> dict[str, Any]:
+    """The owner returns the submitted result with a remark.
+
+    Saves the remark as a comment the worker reads on its next run and sends
+    the task back to its assignee (``ready``, or ``todo`` if a parent was
+    reopened). The previous result stays in the run history.
+    """
+    text = (comment or "").strip()
+    if not text:
+        raise ValueError("comment is required to return a result")
+    with write_txn(conn):
+        replay = _replayed_owner_action(conn, task_id, ("owner_changes_requested",), request_id)
+        if replay is not None:
+            return {"ok": True, "duplicate": True, "reason": None, "status": replay.get("status")}
+        reason, current = _owner_review_gate(conn, task_id, version)
+        if reason:
+            return {"ok": False, "duplicate": False, "reason": reason, "status": None}
+        add_comment(conn, task_id, author, text)
+        landing = _landing_status_after_parents(conn, task_id)
+        cur = conn.execute(
+            "UPDATE tasks SET status = ?, current_run_id = NULL, "
+            "consecutive_failures = 0, last_failure_error = NULL "
+            "WHERE id = ? AND status = 'review'",
+            (landing, task_id),
+        )
+        if cur.rowcount != 1:
+            return {"ok": False, "duplicate": False, "reason": "not_waiting", "status": None}
+        _append_event(conn, task_id, "owner_changes_requested", {
+            "request_id": request_id,
+            "version": current,
+            "status": landing,
+            "author": author,
+        })
+    return {"ok": True, "duplicate": False, "reason": None, "status": landing}
 
 
 def pause_task(
@@ -9788,6 +10012,7 @@ def has_spawnable_ready(conn: sqlite3.Connection) -> bool:
     rows = conn.execute(
         "SELECT DISTINCT assignee FROM tasks "
         "WHERE status = 'ready' AND assignee IS NOT NULL "
+        "    AND COALESCE(actor_kind, '') != 'human' "
         "    AND claim_lock IS NULL"
     ).fetchall()
     if not rows:
@@ -9814,7 +10039,7 @@ def has_spawnable_review(conn: sqlite3.Connection) -> bool:
     rows = conn.execute(
         "SELECT DISTINCT assignee FROM tasks "
         "WHERE status = 'review' AND assignee IS NOT NULL "
-        "    AND claim_lock IS NULL"
+        "    AND claim_lock IS NULL AND COALESCE(acceptance, '') != 'owner'"
     ).fetchall()
     if not rows:
         return False
@@ -10267,18 +10492,23 @@ def _dispatch_once_locked(
             )
             spawn_budget = 1
 
+    # Human steps are done by the owner: never spawned or auto-assigned.
     ready_rows = conn.execute(
         "SELECT id, assignee FROM tasks "
         "WHERE status = 'ready' AND claim_lock IS NULL "
+        "AND COALESCE(actor_kind, '') != 'human' "
         "ORDER BY priority DESC, created_at ASC"
     ).fetchall()
     # Review rows are enumerated up front (not after the ready loop) so the
     # budget split below can see whether review work exists at all.
     review_rows = []
     if review_dispatch_enabled():
+        # A result held for the owner's acceptance is the owner's to judge,
+        # never an autonomous reviewer's.
         review_rows = conn.execute(
             "SELECT id, assignee FROM tasks "
             "WHERE status = 'review' AND claim_lock IS NULL "
+            "AND COALESCE(acceptance, '') != 'owner' "
             "ORDER BY priority DESC, created_at ASC"
         ).fetchall()
     # Review-lane reservation (OOF-30 review finding): the ready loop runs

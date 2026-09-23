@@ -202,6 +202,7 @@ def _task_dict(
     *,
     latest_summary: Optional[str] = None,
     block_revision: Optional[int] = None,
+    submitted_version: Optional[int] = None,
 ) -> dict[str, Any]:
     d = asdict(task)
     # The question text is meaningful only while the task waits on it; it is
@@ -212,6 +213,7 @@ def _task_dict(
     d["owner_attention"] = _owner_attention(
         task, sticky_block=(block_revision is not None) if task.status == "blocked" else None,
     )
+    d["submitted_version"] = submitted_version
     # Add derived age metrics so the UI can colour stale cards without
     # computing deltas client-side.
     try:
@@ -606,6 +608,10 @@ def get_task(
         task_d = _task_dict(
             task, latest_summary=full_summary,
             block_revision=kanban_db.block_revision(conn, task_id),
+            submitted_version=(
+                kanban_db.submitted_version(conn, task_id)
+                if task.status == "review" and task.acceptance == "owner" else None
+            ),
         )
         links = _links_for(conn, task_id)
         child_ids = links["children"]
@@ -677,6 +683,12 @@ class CreateTaskBody(BaseModel):
     # Explicit project link; when omitted, create_task inherits the board's
     # scoped project (if any) so a project-scoped board anchors every task.
     project_id: Optional[str] = None
+    # Owner journey (K21-141…143): who accepts the result, a human step,
+    # plan membership. The board's form sends acceptance="owner".
+    acceptance: Optional[str] = None
+    actor_kind: Optional[str] = None
+    plan_id: Optional[str] = None
+    plan_title: Optional[str] = None
 
 
 @router.post("/tasks")
@@ -706,6 +718,10 @@ def create_task(payload: CreateTaskBody, board: Optional[str] = Query(None)):
             reasoning_effort=payload.reasoning_effort,
             project_id=payload.project_id,
             board=board,
+            acceptance=payload.acceptance,
+            actor_kind=payload.actor_kind,
+            plan_id=payload.plan_id,
+            plan_title=payload.plan_title,
         )
         task = kanban_db.get_task(conn, task_id)
         body: dict[str, Any] = {"task": _task_dict(task) if task else None}
@@ -1391,6 +1407,82 @@ def respond_to_task(task_id: str, payload: RespondBody, board: Optional[str] = Q
 
 
 # ---------------------------------------------------------------------------
+# Owner acceptance of a submitted result (K21-141)
+# ---------------------------------------------------------------------------
+
+class AcceptBody(BaseModel):
+    # ``submitted_version`` the owner saw; a newer submission rejects it.
+    version: Optional[int] = None
+    request_id: str = Field(..., min_length=1, max_length=128)
+    author: Optional[str] = None
+
+
+class ReworkBody(AcceptBody):
+    comment: str = Field(..., min_length=1)
+
+
+_OWNER_REVIEW_REJECTIONS = {
+    "not_found": (404, "task_not_found"),
+    "not_waiting": (409, "not_waiting_acceptance"),
+    "stale": (409, "result_changed"),
+    "parents": (409, "parents_not_done"),
+}
+
+
+def _owner_review_outcome(conn, task_id: str, outcome: dict) -> dict:
+    if not outcome["ok"]:
+        status_code, code = _OWNER_REVIEW_REJECTIONS.get(
+            outcome["reason"], (409, "not_waiting_acceptance"),
+        )
+        raise HTTPException(status_code=status_code, detail={"code": code})
+    task = kanban_db.get_task(conn, task_id)
+    return {
+        "ok": True,
+        "duplicate": outcome["duplicate"],
+        "status": outcome["status"],
+        "task": _task_dict(task) if task else None,
+    }
+
+
+@router.post("/tasks/{task_id}/accept")
+def accept_task_result(task_id: str, payload: AcceptBody, board: Optional[str] = Query(None)):
+    """The owner accepts the result they saw (``review`` → ``done``)."""
+    board = _resolve_board(board)
+    conn = _conn(board=board)
+    try:
+        outcome = kanban_db.accept_result(
+            conn, task_id,
+            author=(payload.author or "Владелец").strip() or "Владелец",
+            version=payload.version,
+            request_id=payload.request_id,
+        )
+        return _owner_review_outcome(conn, task_id, outcome)
+    finally:
+        conn.close()
+
+
+@router.post("/tasks/{task_id}/request-changes")
+def return_task_for_rework(task_id: str, payload: ReworkBody, board: Optional[str] = Query(None)):
+    """The owner returns the result with a remark; the assignee reworks it."""
+    board = _resolve_board(board)
+    conn = _conn(board=board)
+    try:
+        try:
+            outcome = kanban_db.return_for_rework(
+                conn, task_id,
+                comment=payload.comment,
+                author=(payload.author or "Владелец").strip() or "Владелец",
+                version=payload.version,
+                request_id=payload.request_id,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        return _owner_review_outcome(conn, task_id, outcome)
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
 # What waits for the owner, across boards (K21-139/143)
 # ---------------------------------------------------------------------------
 
@@ -1437,6 +1529,10 @@ def get_attention(limit: int = Query(50, ge=1, le=200)):
                         "assignee": t.assignee,
                         "question": t.block_reason if t.status == "blocked" else None,
                         "revision": rev,
+                        "version": (
+                            kanban_db.submitted_version(conn, t.id)
+                            if kind == "accept" else None
+                        ),
                         "plan_id": t.plan_id,
                         "plan_title": t.plan_title,
                         "priority": t.priority,

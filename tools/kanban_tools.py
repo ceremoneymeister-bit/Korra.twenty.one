@@ -771,6 +771,9 @@ def _handle_complete(args: dict, **kw) -> str:
                     result=result, summary=summary, metadata=metadata,
                     created_cards=created_cards,
                     expected_run_id=_worker_run_id(tid),
+                    # An agent never accepts on the owner's behalf: a task
+                    # with acceptance='owner' is submitted, not finished.
+                    as_worker=True,
                 )
             except kb.ArtifactPreservationError as artifact_err:
                 return tool_error(
@@ -1353,10 +1356,13 @@ def _handle_create(args: dict, **kw) -> str:
     if not title or not str(title).strip():
         return tool_error("title is required")
     assignee = args.get("assignee")
-    if not assignee:
+    actor_kind = args.get("actor_kind")
+    human_step = str(actor_kind or "").strip().lower() == "human"
+    if not assignee and not human_step:
         return tool_error(
             "assignee is required — name the profile that should execute this "
-            "task (the dispatcher will only spawn tasks with an assignee)"
+            "task (the dispatcher will only spawn tasks with an assignee). "
+            "For a step the owner does themselves pass actor_kind='human'."
         )
     body = args.get("body")
     parents = args.get("parents") or []
@@ -1437,7 +1443,11 @@ def _handle_create(args: dict, **kw) -> str:
                 conn,
                 title=str(title).strip(),
                 body=body,
-                assignee=str(assignee),
+                assignee=str(assignee) if assignee and not human_step else None,
+                acceptance=args.get("acceptance"),
+                actor_kind=actor_kind,
+                plan_id=args.get("plan_id"),
+                plan_title=args.get("plan_title"),
                 parents=tuple(parents),
                 tenant=tenant,
                 priority=int(priority) if priority is not None else 0,
@@ -2151,8 +2161,45 @@ KANBAN_CREATE_SCHEMA = {
                 "description": (
                     "Profile name that should execute this task "
                     "(e.g. 'researcher-a', 'reviewer', 'writer'). "
-                    "Required — tasks without an assignee are never "
-                    "dispatched."
+                    "Required for agent steps — tasks without an assignee "
+                    "are never dispatched. Omit only with actor_kind='human'."
+                ),
+            },
+            "actor_kind": {
+                "type": "string",
+                "enum": ["agent", "human"],
+                "description": (
+                    "'human' for a step the owner does themselves (train the "
+                    "team, sign, launch). It is shown to the owner as their "
+                    "step and never given to an agent; agents may prepare "
+                    "material for it in a separate step. Default 'agent'."
+                ),
+            },
+            "acceptance": {
+                "type": "string",
+                "enum": ["owner", "auto"],
+                "description": (
+                    "'owner' when the owner must accept the result before "
+                    "the task counts as done: the final step of a plan and "
+                    "any task the owner asked for directly. Internal steps "
+                    "that only feed the next step use 'auto' (default)."
+                ),
+            },
+            "plan_title": {
+                "type": "string",
+                "description": (
+                    "Name of the plan this step belongs to, in the owner's "
+                    "words (e.g. 'Новая система ботов'). Give every step of "
+                    "one plan the same plan_id and plan_title; children "
+                    "inherit them from their parents when omitted."
+                ),
+            },
+            "plan_id": {
+                "type": "string",
+                "description": (
+                    "Stable id shared by all steps of one plan, e.g. "
+                    "'plan-bots-2026-09'. Reuse it on retries so the plan "
+                    "is not duplicated."
                 ),
             },
             "body": {
@@ -2305,7 +2352,7 @@ KANBAN_CREATE_SCHEMA = {
             },
             "board": _board_schema_prop(),
         },
-        "required": ["title", "assignee"],
+        "required": ["title"],
     },
 }
 

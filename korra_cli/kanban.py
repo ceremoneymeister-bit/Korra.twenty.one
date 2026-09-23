@@ -2285,15 +2285,20 @@ def _cmd_complete(args: argparse.Namespace) -> int:
                 failed.append(tid)
                 continue
 
+            # The CLI runs inside agents' terminals too: a task that waits
+            # for the owner's acceptance is submitted, never accepted, here.
             if not kb.complete_task(
                 conn, tid,
                 result=args.result,
                 summary=summary,
                 metadata=metadata,
                 expected_run_id=_worker_run_id_for(tid),
+                as_worker=True,
             ):
                 failed.append(tid)
                 print(f'Не удалось завершить {tid} (неизвестный ID или задача уже в конечном состоянии)', file=sys.stderr)
+            elif getattr(kb.get_task(conn, tid) or task, "status", None) == "review":
+                print(f'Результат {tid} передан владельцу на проверку')
             else:
                 print(f'Завершена задача {tid}')
     return 0 if not failed else 1

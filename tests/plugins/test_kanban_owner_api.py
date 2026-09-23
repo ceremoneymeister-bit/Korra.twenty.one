@@ -162,3 +162,71 @@ def test_failure_breaker_block_is_a_problem_not_a_question(client):
     task = client.get(f"{API}/tasks/{tid}").json()["task"]
     assert task["owner_attention"] == "problem"
     assert task["block_revision"] is None
+
+
+# ---------------------------------------------------------------------------
+# Owner acceptance (K21-141)
+# ---------------------------------------------------------------------------
+
+def _submitted_via_form(client, title="3 названия"):
+    r = client.post(f"{API}/tasks", json={
+        "title": title, "body": "…", "assignee": "pm", "acceptance": "owner",
+    })
+    assert r.status_code == 200, r.text
+    tid = r.json()["task"]["id"]
+    assert r.json()["task"]["acceptance"] == "owner"
+    with kb.connect_closing() as conn:
+        assert kb.claim_task(conn, tid, claimer="worker") is not None
+        run_id = kb.get_task(conn, tid).current_run_id
+        kb.complete_task(conn, tid, result="1. Поручения — знакомое слово", summary="3 варианта",
+                         expected_run_id=run_id, as_worker=True)
+    return tid
+
+
+def test_form_task_waits_for_the_owner_and_is_accepted(client):
+    tid = _submitted_via_form(client)
+    task = client.get(f"{API}/tasks/{tid}").json()["task"]
+    assert task["status"] == "review" and task["owner_attention"] == "accept"
+    assert task["result"].startswith("1. Поручения")
+    version = task["submitted_version"]
+    assert isinstance(version, int)
+    attention = client.get(f"{API}/attention").json()
+    item = next(i for i in attention["items"] if i["task_id"] == tid)
+    assert item["kind"] == "accept" and item["version"] == version
+    r = client.post(f"{API}/tasks/{tid}/accept", json={"version": version, "request_id": "acc-1"})
+    assert r.status_code == 200, r.text
+    assert r.json()["task"]["status"] == "done"
+    assert client.get(f"{API}/attention").json()["count"] == 0
+
+
+def test_owner_returns_result_with_a_remark(client):
+    tid = _submitted_via_form(client)
+    version = client.get(f"{API}/tasks/{tid}").json()["task"]["submitted_version"]
+    r = client.post(f"{API}/tasks/{tid}/request-changes", json={
+        "version": version, "request_id": "rw-1", "comment": "Добавь четвёртый вариант",
+    })
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "ready"
+    detail = client.get(f"{API}/tasks/{tid}").json()
+    assert detail["comments"][-1]["body"] == "Добавь четвёртый вариант"
+    stale = client.post(f"{API}/tasks/{tid}/accept", json={"version": version, "request_id": "acc-2"})
+    assert stale.status_code == 409
+    assert stale.json()["detail"]["code"] == "not_waiting_acceptance"
+
+
+def test_accept_of_an_outdated_version_is_explained(client):
+    tid = _submitted_via_form(client)
+    r = client.post(f"{API}/tasks/{tid}/accept", json={"version": 1, "request_id": "acc-3"})
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "result_changed"
+
+
+def test_human_step_is_owner_attention_when_ready(client):
+    r = client.post(f"{API}/tasks", json={
+        "title": "Обучить команду", "actor_kind": "human",
+        "plan_id": "plan-1", "plan_title": "Новая система ботов",
+    })
+    assert r.status_code == 200, r.text
+    task = r.json()["task"]
+    assert task["assignee"] is None and task["owner_attention"] == "human_step"
+    item = next(i for i in client.get(f"{API}/attention").json()["items"] if i["task_id"] == task["id"])
+    assert item["kind"] == "human_step" and item["plan_title"] == "Новая система ботов"
