@@ -523,13 +523,13 @@ def _normalize_string_set(values) -> Set[str]:
 
 # ── External skills directories ──────────────────────────────────────────
 
-# (config_path_str, mtime_ns) -> resolved external dirs list.  Keyed by
-# mtime_ns so a config.yaml edit mid-run is picked up automatically;
+# (config_path_str, mtime_ns, shared_dir_exists, opted_out) -> dirs.  Keyed by
+# mtime_ns and installation shared-dir state so edits appear mid-run;
 # otherwise every call would re-read + re-YAML-parse the 15KB config,
 # which becomes the dominant cost of ``hermes`` startup when ~120 skills
 # each trigger a category lookup during banner construction (10+ seconds
 # of pure waste).
-_EXTERNAL_DIRS_CACHE: Dict[Tuple[str, int], List[Path]] = {}
+_EXTERNAL_DIRS_CACHE: Dict[Tuple[str, int, bool, bool], List[Path]] = {}
 
 
 def _external_dirs_cache_clear() -> None:
@@ -539,28 +539,35 @@ def _external_dirs_cache_clear() -> None:
 
 
 def get_external_skills_dirs() -> List[Path]:
-    """Read ``skills.external_dirs`` from config.yaml and return validated paths.
+    """Return configured dirs plus the installation's shared skills directory.
 
-    Each entry is expanded (``~`` and ``${VAR}``) and resolved to an absolute
-    path.  Only directories that actually exist are returned.  Duplicates and
-    paths that resolve to the local ``~/.hermes/skills/`` are silently skipped.
+    ``<installation-root>/shared-skills`` is an operator-curated directory
+    visible to every profile, including profiles created later. A profile's
+    own skills take precedence; ``--no-skills`` opts out of this shared set.
+    Configured ``skills.external_dirs`` retain their existing precedence over
+    the shared directory. Only existing directories are returned.
 
     Cached in-process, keyed on ``config.yaml`` mtime — the function is
     called once per skill during banner / tool-registry scans, and YAML
     parsing a non-trivial config dominates ``hermes`` cold-start time
     when the cache is absent.
     """
+    from korra_constants import get_default_hermes_root, get_hermes_home
+
     config_path = get_config_path()
-    if not config_path.exists():
-        return []
+    shared_dir = (get_default_hermes_root() / "shared-skills").resolve()
+    shared_exists = shared_dir.is_dir()
+    opted_out = (get_hermes_home() / ".no-bundled-skills").exists()
 
     # Cache key: (absolute path, mtime_ns).  stat() is ~2us vs ~85ms for
     # the full YAML parse, so the fast path is nearly free.
     try:
         stat = config_path.stat()
-        cache_key: Tuple[str, int] = (str(config_path), stat.st_mtime_ns)
+        cache_key: Tuple[str, int, bool, bool] = (
+            str(config_path), stat.st_mtime_ns, shared_exists, opted_out,
+        )
     except OSError:
-        cache_key = None  # type: ignore[assignment]
+        cache_key = (str(config_path), -1, shared_exists, opted_out)
 
     if cache_key is not None:
         cached = _EXTERNAL_DIRS_CACHE.get(cache_key)
@@ -569,25 +576,12 @@ def get_external_skills_dirs() -> List[Path]:
             return list(cached)
 
     parsed = _load_raw_config()
-    if not parsed:
-        return []
-
     skills_cfg = parsed.get("skills")
-    if not isinstance(skills_cfg, dict):
-        return []
-
-    raw_dirs = skills_cfg.get("external_dirs")
-    if not raw_dirs:
-        result: List[Path] = []
-        if cache_key is not None:
-            _EXTERNAL_DIRS_CACHE[cache_key] = list(result)
-        return result
+    raw_dirs = skills_cfg.get("external_dirs") if isinstance(skills_cfg, dict) else []
     if isinstance(raw_dirs, str):
         raw_dirs = [raw_dirs]
     if not isinstance(raw_dirs, list):
-        return []
-
-    from korra_constants import get_hermes_home
+        raw_dirs = []
 
     hermes_home = get_hermes_home()
     local_skills = get_skills_dir().resolve()
@@ -615,6 +609,9 @@ def get_external_skills_dirs() -> List[Path]:
             result.append(p)
         else:
             logger.debug("External skills dir does not exist, skipping: %s", p)
+
+    if shared_exists and not opted_out and shared_dir != local_skills and shared_dir not in seen:
+        result.append(shared_dir)
 
     if cache_key is not None:
         _EXTERNAL_DIRS_CACHE[cache_key] = list(result)
