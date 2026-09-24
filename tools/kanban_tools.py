@@ -619,6 +619,8 @@ def _handle_show(args: dict, **kw) -> str:
             children = kb.child_ids(conn, tid)
 
             def _task_dict(t):
+                waiting = t.status in ("blocked", "triage")
+                owner_review = t.status == "review" and t.acceptance == "owner"
                 return {
                     "id": t.id, "title": t.title, "body": t.body,
                     "assignee": t.assignee, "status": t.status,
@@ -632,6 +634,18 @@ def _handle_show(args: dict, **kw) -> str:
                     "current_run_id": t.current_run_id,
                     "model_override": t.model_override,
                     "provider_override": t.provider_override,
+                    # What the card waits for — the chat answers a question
+                    # with this ``block_revision`` and leaves a permission
+                    # (``needs_approval``) and an acceptance to the owner.
+                    "block_kind": t.block_kind if waiting else None,
+                    "block_reason": t.block_reason if waiting else None,
+                    "block_revision": kb.block_revision(conn, t.id) if waiting else None,
+                    "needs_approval": waiting and t.block_kind == kb.APPROVAL_BLOCK_KIND,
+                    "acceptance": t.acceptance,
+                    "submitted_version": kb.submitted_version(conn, t.id) if owner_review else None,
+                    "actor_kind": t.actor_kind,
+                    "plan_id": t.plan_id,
+                    "plan_title": t.plan_title,
                 }
 
             def _run_dict(r):
@@ -1167,6 +1181,22 @@ def _handle_heartbeat(args: dict, **kw) -> str:
         return tool_error(f"kanban_heartbeat: {e}")
 
 
+def _chat_comment_author() -> str:
+    """Author of a comment written from a chat, not by a dispatcher worker.
+
+    The gateway serving the owner's chat has no ``KORRA_PROFILE``; its
+    comments used to be signed «worker» on the owner's card (live run 24.09).
+    Still derived from runtime identity, never from tool arguments.
+    """
+    try:
+        from korra_cli.profiles import get_active_profile_name
+
+        name = get_active_profile_name() or "default"
+    except Exception:
+        name = "default"
+    return f"{name} (чат)"
+
+
 def _handle_comment(args: dict, **kw) -> str:
     """Append a comment to a task's thread."""
     delegated_err = _reject_delegated_child_mutation("kanban_comment")
@@ -1191,7 +1221,7 @@ def _handle_comment(args: dict, **kw) -> str:
     # the future-worker context with what reads as a system directive.
     # Cross-task commenting itself remains unrestricted (see #19713) —
     # comments are the deliberate handoff channel between tasks.
-    author = korra_env("KORRA_PROFILE") or "worker"
+    author = korra_env("KORRA_PROFILE") or _chat_comment_author()
     board = args.get("board")
     try:
         kb, conn = _connect(board=board)

@@ -7254,7 +7254,9 @@ def respond_to_block(
                 "Владелец РАЗРЕШИЛ изменения, о которых вы спрашивали."
                 if decision == "grant" else
                 "Владелец НЕ РАЗРЕШИЛ эти изменения. Ничего не меняйте во "
-                "внешних системах; продолжайте только подготовку."
+                "внешних системах. Сделайте то, что возможно без них, и "
+                "сдайте результат: что подготовлено и что не сделано. "
+                "Повторно это разрешение не запрашивайте."
             )
             text = "\n\n".join(filter(None, [verdict, f"Вопрос: {question}" if question else "", text]))
             _append_event(conn, task_id, "owner_granted" if decision == "grant" else "owner_denied", {
