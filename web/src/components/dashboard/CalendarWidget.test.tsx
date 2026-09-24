@@ -255,4 +255,93 @@ describe("Календарь на дашборде", () => {
     expect(text()).toContain("Сегодня ничего не запланировано");
     expect(text()).toContain("Дальше: Завтра, 08:00 · Утренняя сводка");
   });
+
+  it("S показывает событие на весь день завтра, а не встречу через шесть дней", async () => {
+    const BIRTHDAY: DashboardCalendarItem = {
+      kind: "event",
+      id: "bd",
+      title: "День рождения мамы",
+      start: "2026-09-24",
+      end: "2026-09-25",
+      all_day: true,
+    };
+    const REVIEW = { ...MEETING, id: "rv", title: "Обзор квартала", start: "2026-09-29T10:00:00+07:00", end: "2026-09-29T11:00:00+07:00" };
+    api.getDashboardCalendar.mockResolvedValue(feed([REVIEW, BIRTHDAY]));
+    await mount("s");
+    const next = container!.querySelector("[data-calendar-next]");
+    expect(next?.textContent).toContain("Завтра");
+    expect(next?.textContent).toContain("Весь день");
+    expect(next?.textContent).toContain("День рождения мамы");
+    expect(next?.textContent).not.toContain("Обзор квартала");
+  });
+
+  describe("сбой расписания агентов не прячется", () => {
+    const withoutGoogle = { state: "not_connected" as const, action: "connect" as const, fetched_at: null, account: "" };
+    function brokenSchedule(items: DashboardCalendarItem[], google: Partial<DashboardCalendarFeed["google"]> = {}) {
+      return { ...feed(items, google), schedule: { state: "error" as const } };
+    }
+
+    it("M без Google: и подключить календарь, и расписание не прочитано с повтором", async () => {
+      api.getDashboardCalendar.mockResolvedValue(brokenSchedule([], withoutGoogle));
+      await mount("m");
+      expect(text()).toContain("Календарь не подключён");
+      expect(link("Подключить Google").getAttribute("href")).toContain("/env?connect=calendar");
+      const alert = container!.querySelector("[data-calendar-schedule-error]");
+      expect(alert?.getAttribute("role")).toBe("alert");
+      expect(alert?.textContent).toContain("Расписание агентов не прочитано");
+      const retry = Array.from(container!.querySelectorAll("button")).find((node) =>
+        node.textContent?.includes("Повторить"),
+      );
+      expect(retry).toBeTruthy();
+      await act(async () => retry!.click());
+      expect(api.getDashboardCalendar).toHaveBeenLastCalledWith(true);
+    });
+
+    it("S с ближайшей встречей помечает, что расписание не прочитано", async () => {
+      api.getDashboardCalendar.mockResolvedValue(brokenSchedule([MEETING]));
+      await mount("s");
+      expect(container!.querySelector("[data-calendar-next]")?.textContent).toContain("Созвон с поставщиком");
+      expect(container!.querySelector("[data-calendar-schedule-error]")?.textContent).toBe(
+        "Запуски не прочитаны",
+      );
+    });
+
+    it("M с Google: повтор на месте строки «обновлено», встреча остаётся видна", async () => {
+      api.getDashboardCalendar.mockResolvedValue(brokenSchedule([PAST, MEETING]));
+      await mount("m");
+      expect(text()).toContain("Созвон с поставщиком");
+      expect(container!.querySelector("[data-calendar-live]")).toBeNull();
+      const alert = container!.querySelector("[data-calendar-schedule-error]");
+      expect(alert?.querySelector("button")?.textContent).toContain("Повторить");
+    });
+
+    it("L без Google со строками: подключение и сбой расписания — обе строки", async () => {
+      api.getDashboardCalendar.mockResolvedValue(brokenSchedule([TASK], withoutGoogle));
+      await mount("l");
+      expect(container!.querySelector("[data-calendar-notice='not_connected']")?.textContent).toContain(
+        "Календарь не подключён",
+      );
+      expect(container!.querySelector("[data-calendar-schedule-error]")?.textContent).toContain(
+        "Расписание агентов не прочитано",
+      );
+    });
+
+    it("с Google пустой день не называется «ничего не запланировано»", async () => {
+      api.getDashboardCalendar.mockResolvedValue(brokenSchedule([]));
+      await mount("m");
+      expect(text()).not.toContain("ничего не запланировано");
+      expect(text()).toContain("Сегодня встреч нет");
+      expect(container!.querySelector("[data-calendar-schedule-error]")).not.toBeNull();
+    });
+
+    it("S с Google не обещает «ни встреч, ни запусков»", async () => {
+      api.getDashboardCalendar.mockResolvedValue(brokenSchedule([]));
+      await mount("s");
+      expect(text()).not.toContain("Неделя свободна");
+      expect(text()).toContain("Встреч на неделе нет");
+      expect(container!.querySelector("[data-calendar-schedule-error]")?.textContent).toBe(
+        "Запуски не прочитаны",
+      );
+    });
+  });
 });

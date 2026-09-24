@@ -14,13 +14,16 @@ import { useAvailableHeight } from "@/hooks/useAvailableHeight";
 import { api, type DashboardCalendarFeed, type DashboardCalendarItem } from "@/lib/api";
 import {
   KIND_LABELS,
+  SCHEDULE_UNREAD,
   agentLabel,
   calendarNotice,
   dayKey,
   dayLabel,
+  emptyDayTitle,
   groupByDay,
   isPast,
   nextItem,
+  scheduleUnread,
   timeLabel,
   todayItems,
   todayKeyOf,
@@ -42,6 +45,9 @@ import { cn } from "@/lib/utils";
  * агенты. Если его нет, карточка не прикидывается пустой неделей: она
  * говорит, чего не хватает, и ведёт на экран сервисов тем же OAuth, что и
  * раньше. Задачи и запуски агентов видны и без Google.
+ *
+ * Сбой чтения расписания агентов виден на любом размере и при любом
+ * состоянии Google: пустой день без прочитанного расписания — не «свободно».
  */
 
 /** Высота строки — та же цель пальца, что у «Агентов». В разметке она задана
@@ -162,8 +168,12 @@ function CompactBody({
   onRetry: () => void;
 }) {
   const upcoming = nextItem(feed);
+  const unread = scheduleUnread(feed);
   // Без подключённого календаря плитка S не показывает запуск агента вместо
   // встречи: её назначение — встречи, поэтому первым делом — как подключить.
+  // О запусках она в этом состоянии не судит, поэтому и сбой расписания
+  // здесь не называет: на 390 px третьей строке рядом с кнопкой нет места.
+  // M и L показывают его всегда.
   if (notice && (notice.tone === "action" || !upcoming)) {
     return (
       <Note>
@@ -173,6 +183,15 @@ function CompactBody({
     );
   }
   if (!upcoming) {
+    if (unread) {
+      // «Неделя свободна» обещала бы и про запуски, которых не прочитали.
+      return (
+        <Note>
+          <NoteTitle>Встреч на неделе нет</NoteTitle>
+          <ScheduleUnreadText short />
+        </Note>
+      );
+    }
     return (
       <Note>
         <NoteTitle>Неделя свободна</NoteTitle>
@@ -191,14 +210,65 @@ function CompactBody({
       <p className="text-3xl leading-none font-medium tabular-nums text-[var(--neo-text-primary)]">
         {item.all_day ? "Весь день" : timeLabel(item.start, feed.timezone)}
       </p>
-      <p className="line-clamp-2 text-sm font-semibold text-[var(--neo-text-primary)]">{item.title}</p>
-      {notice ? (
+      {/* С отметкой сбоя название — в одну строку: на 390 px плитке S две
+          строки названия и отметка вместе не помещаются. */}
+      <p
+        className={cn(
+          "text-sm font-semibold text-[var(--neo-text-primary)]",
+          unread ? "line-clamp-1" : "line-clamp-2",
+        )}
+      >
+        {item.title}
+      </p>
+      {/* Ближайшее без прочитанного расписания может оказаться не ближайшим:
+          отметка сбоя занимает место подписи вида строки. */}
+      {unread ? (
+        <ScheduleUnreadText short text={notice ? "Данные не обновились" : undefined} />
+      ) : notice ? (
         <p className="truncate text-xs text-[var(--neo-text-secondary)]" role="status">
           {notice.title}
         </p>
       ) : (
         <p className="truncate text-xs text-[var(--neo-text-secondary)]">{KIND_LABELS[item.kind]}</p>
       )}
+    </div>
+  );
+}
+
+/**
+ * Отметка сбоя расписания одной строкой текста. `shrink-0` обязателен:
+ * строка с `truncate` иначе сжимается колонкой до нуля и молча исчезает.
+ * `short` — для плитки S: 145 px на 390 px экране, полная фраза не входит.
+ */
+function ScheduleUnreadText({ short, text }: { short?: boolean; text?: string }) {
+  return (
+    <p
+      className="shrink-0 truncate text-xs text-[var(--neo-text-secondary)]"
+      role="alert"
+      title={SCHEDULE_UNREAD}
+      data-calendar-schedule-error
+    >
+      {text ?? (short ? "Запуски не прочитаны" : SCHEDULE_UNREAD)}
+    </p>
+  );
+}
+
+/**
+ * M и L при прочитанном Google: сбой расписания с повтором на месте строки
+ * «Google · обновлено» — кнопка занимает 44 px, и вторая такая строка
+ * отняла бы у списка встречу.
+ */
+function ScheduleUnreadLine({ busy, hidden, onRetry }: { busy: boolean; hidden: number; onRetry: () => void }) {
+  return (
+    <div className="flex shrink-0 items-center gap-2" role="alert" data-calendar-schedule-error>
+      {/* Рядом кнопка на 126 px: полная фраза на 390 px обрезалась бы на
+          «не пр…». Значок робота говорит, чьё расписание. */}
+      <p className="min-w-0 flex-1 truncate text-xs text-[var(--neo-text-secondary)]" title={SCHEDULE_UNREAD}>
+        <Bot aria-hidden className="mr-1 inline size-3.5 align-[-2px]" />
+        Расписание не прочитано
+        {hidden > 0 ? ` · ещё ${hidden}` : ""}
+      </p>
+      <RetryButton onClick={onRetry} busy={busy} />
     </div>
   );
 }
@@ -293,8 +363,36 @@ function ListBody({
   const hidden = itemCount - visible.filter((entry) => entry.type === "item").length;
   const nothingToday = size === "m" && itemCount === 0;
   const upcoming = nothingToday ? nextItem(feed) : null;
+  const unread = scheduleUnread(feed);
+  const emptyTitle = emptyDayTitle(feed);
 
-  if (itemCount === 0 && notice && notice.tone === "action" && feed.items.length === 0) {
+  if (
+    itemCount === 0 &&
+    notice &&
+    feed.items.length === 0 &&
+    // Ни встреч, ни расписания не прочитано — о свободных днях сказать нечего.
+    (notice.tone === "action" || !emptyTitle)
+  ) {
+    if (unread) {
+      // Два состояния и два действия в 98 px тела M на 390 px: заголовок со
+      // строкой сбоя одним блоком, пояснение — сколько останется, кнопки в
+      // ряд. Повтор в уведомлении Google перечитывает и расписание.
+      return (
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div className="flex shrink-0 flex-col gap-0.5">
+            <NoteTitle>{notice.title}</NoteTitle>
+            <ScheduleUnreadText />
+          </div>
+          <div className="flex min-h-0 flex-1 flex-col py-1">
+            <FittedText text={notice.text} linesBeforeMeasure={1} className="text-[var(--neo-text-secondary)]" />
+          </div>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <NoticeAction notice={notice} onRetry={onRetry} busy={busy} />
+            {notice.action?.kind === "retry" ? null : <RetryButton onClick={onRetry} busy={busy} />}
+          </div>
+        </div>
+      );
+    }
     return (
       <Note>
         <NoteTitle>{notice.title}</NoteTitle>
@@ -309,9 +407,9 @@ function ListBody({
       <div ref={listRef} className="min-h-0 flex-1 overflow-hidden">
         {nothingToday ? (
           <div className="flex flex-col gap-1">
-            <p className="text-sm font-semibold text-[var(--neo-text-primary)]">
-              Сегодня ничего не запланировано
-            </p>
+            {emptyTitle ? (
+              <p className="text-sm font-semibold text-[var(--neo-text-primary)]">{emptyTitle}</p>
+            ) : null}
             {upcoming ? (
               <p className="truncate text-sm text-[var(--neo-text-secondary)]">
                 Дальше: {whenLabel(upcoming.item, feed, { withDay: true })} · {upcoming.item.title}
@@ -337,7 +435,14 @@ function ListBody({
           </ul>
         )}
       </div>
-      <StatusLine feed={feed} notice={notice} hidden={nothingToday ? 0 : hidden} onRetry={onRetry} busy={busy} />
+      {unread && !notice ? (
+        <ScheduleUnreadLine hidden={nothingToday ? 0 : hidden} onRetry={onRetry} busy={busy} />
+      ) : (
+        <>
+          {unread ? <ScheduleUnreadText /> : null}
+          <StatusLine feed={feed} notice={notice} hidden={nothingToday ? 0 : hidden} onRetry={onRetry} busy={busy} />
+        </>
+      )}
     </div>
   );
 }
@@ -443,12 +548,12 @@ function StatusLine({
       </div>
     );
   }
+  // Сбой расписания здесь не пишется: его показывает `ScheduleUnreadLine`
+  // вместо этой строки или `ScheduleUnreadText` над строкой уведомления.
   const fetched = feed.google.fetched_at ? timeLabel(feed.google.fetched_at, feed.timezone) : "";
-  const schedule = feed.schedule.state === "error" ? " · расписание агентов не прочитано" : "";
   return (
     <p className="shrink-0 truncate text-xs text-[var(--neo-text-secondary)]" data-calendar-live>
       Google{fetched ? ` · обновлено в ${fetched}` : ""}
-      {schedule}
       {rest}
     </p>
   );

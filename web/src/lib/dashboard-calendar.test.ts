@@ -116,6 +116,38 @@ describe("лента недели", () => {
     expect(whenLabel(conference, later)).toBe("Весь день");
     expect(nextItem(feed([]))).toBeNull();
   });
+
+  it("событие на весь день завтра ближе встречи через шесть дней", () => {
+    const birthday: DashboardCalendarItem = {
+      kind: "event",
+      id: "bd",
+      title: "День рождения мамы",
+      start: "2026-09-24",
+      end: "2026-09-25",
+      all_day: true,
+    };
+    const review: DashboardCalendarItem = {
+      kind: "event",
+      id: "rv",
+      title: "Обзор квартала",
+      start: "2026-09-29T10:00:00+07:00",
+      end: "2026-09-29T11:00:00+07:00",
+      all_day: false,
+    };
+    expect(nextItem(feed([review, birthday]))).toEqual({ item: birthday, ongoing: false });
+    // В тот же день встреча со временем важнее отметки на весь день.
+    const breakfast = { ...review, id: "br", title: "Завтрак", start: "2026-09-24T09:00:00+07:00", end: "2026-09-24T10:00:00+07:00" };
+    expect(nextItem(feed([birthday, breakfast]))).toEqual({ item: breakfast, ongoing: false });
+    // Сегодняшнее событие на весь день идёт сейчас и ближе завтрашних дел.
+    const dayOff = { ...birthday, id: "off", title: "Выходной", start: "2026-09-23", end: "2026-09-24" };
+    expect(nextItem(feed([reminder, dayOff]))).toEqual({ item: dayOff, ongoing: true });
+    // Многодневное событие, начавшееся раньше окна, тоже идёт сейчас;
+    // закончившееся вчера ближайшим не бывает.
+    const trip = { ...birthday, id: "trip", title: "Командировка", start: "2026-09-21", end: "2026-09-25" };
+    expect(nextItem(feed([review, trip]))).toEqual({ item: trip, ongoing: true });
+    const past = { ...birthday, id: "past", title: "Прошло", start: "2026-09-21", end: "2026-09-23" };
+    expect(nextItem(feed([past, review]))).toEqual({ item: review, ongoing: false });
+  });
 });
 
 describe("что сказать владельцу", () => {

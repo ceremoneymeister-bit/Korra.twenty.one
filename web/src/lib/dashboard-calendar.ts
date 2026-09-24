@@ -138,18 +138,45 @@ export interface NextItem {
   ongoing: boolean;
 }
 
-/** Ближайшее: идущая сейчас или следующая по времени строка недели. */
+/**
+ * Ближайшее: идущая сейчас или следующая строка недели.
+ *
+ * Сначала решает день владельца: событие на весь день завтра ближе встречи
+ * через шесть дней. Внутри одного дня встреча со временем идёт раньше
+ * отметки на весь день — у неё есть час, к которому надо успеть. Событие на
+ * весь день, начавшееся раньше, идёт сегодня, пока не наступил его конец
+ * (у Google он не включительно).
+ */
 export function nextItem(feed: DashboardCalendarFeed): NextItem | null {
   const now = new Date(feed.now).getTime();
-  const timed = feed.items
-    .filter((item) => !item.all_day && endOf(item) > now)
-    .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
-  if (timed.length) {
-    const item = timed[0];
-    return { item, ongoing: new Date(item.start).getTime() <= now };
+  const today = todayKeyOf(feed);
+  let best: { item: DashboardCalendarItem; day: string; order: number; at: number } | null = null;
+  for (const item of feed.items) {
+    let candidate: { day: string; order: number; at: number };
+    if (item.all_day) {
+      const first = dayKey(item.start, feed.timezone);
+      const end = item.end && isDateOnly(item.end) ? item.end : shiftDay(first, 1);
+      if (end <= today) continue;
+      candidate = { day: first > today ? first : today, order: 1, at: 0 };
+    } else {
+      if (endOf(item) <= now) continue;
+      const start = new Date(item.start).getTime();
+      candidate = { day: start <= now ? today : dayKey(item.start, feed.timezone), order: 0, at: start };
+    }
+    if (
+      !best ||
+      candidate.day < best.day ||
+      (candidate.day === best.day &&
+        (candidate.order < best.order || (candidate.order === best.order && candidate.at < best.at)))
+    ) {
+      best = { item, ...candidate };
+    }
   }
-  const allDay = feed.items.find((item) => item.all_day);
-  return allDay ? { item: allDay, ongoing: dayKey(allDay.start, feed.timezone) === todayKeyOf(feed) } : null;
+  if (!best) return null;
+  return {
+    item: best.item,
+    ongoing: best.item.all_day ? best.day === today : new Date(best.item.start).getTime() <= now,
+  };
 }
 
 /** Время строки на плитке: «Весь день», «14:00» или «Завтра, 10:00». */
@@ -228,10 +255,33 @@ export function calendarNotice(feed: DashboardCalendarFeed): CalendarNotice | nu
       return {
         tone: "warning",
         title: "Не удалось прочитать календарь",
-        text: "Google не ответил. Задачи и запуски агентов показаны.",
+        text: scheduleUnread(feed)
+          ? "Google не ответил."
+          : "Google не ответил. Задачи и запуски агентов показаны.",
         action: { kind: "retry", label: "Повторить" },
       };
   }
+}
+
+/** Строка о сбое чтения расписания агентов: задачи и запуски неизвестны. */
+export const SCHEDULE_UNREAD = "Расписание агентов не прочитано";
+
+/** Задачи и запуски агентов не прочитаны — сказать об этом при любом Google. */
+export function scheduleUnread(feed: DashboardCalendarFeed): boolean {
+  return feed.schedule.state === "error";
+}
+
+/**
+ * Заголовок дня без строк — только о том, что действительно прочитано.
+ * `null` — не прочитано ничего, говорить о свободном дне нельзя.
+ */
+export function emptyDayTitle(feed: DashboardCalendarFeed): string | null {
+  const meetings = feed.google.state === "connected";
+  const schedule = !scheduleUnread(feed);
+  if (meetings && schedule) return "Сегодня ничего не запланировано";
+  if (meetings) return "Сегодня встреч нет";
+  if (schedule) return "Сегодня задач и запусков нет";
+  return null;
 }
 
 /** «304 раза за неделю», «5 раз за неделю» — для свёрнутых частых запусков. */
