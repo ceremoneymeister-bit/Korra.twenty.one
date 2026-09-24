@@ -116,6 +116,8 @@ CONFIGURABLE_TOOLSETS = [
     # it onto saved lists — see _RECENTLY_SHIPPED_TOOLSETS.
     ("google_calendar", "📅 Google Календарь",
      "Встречи владельца из подключённого Google-календаря; только в разговоре владельца"),
+    ("icloud_calendar", "📅 iCloud Календарь",
+     "Встречи владельца из подключённого iCloud-календаря; только в разговоре владельца"),
     ("tts", "🔊 Синтез речи", "Преобразование текста в речь"),
     ("stt", "🎙️ Распознавание речи", "Расшифровка голосовых сообщений и голосовой режим"),
     ("skills", "📚 Навыки", "Просмотр и управление навыками"),
@@ -2605,12 +2607,12 @@ def _exempt_explicit_platform_native(
 #: same split Home Assistant uses. Probing a remote service from this path
 #: would put a network call on every CLI start, gateway session and cron tick.
 #:
-#: 0.21.13: ``google_calendar`` — Dmitry's decision (23.09): a connected
+#: 0.21.13: ``google_calendar`` and ``icloud_calendar`` — Dmitry's decision (23.09): a connected
 #: service belongs to the platform and every agent, also a ready-made one with
 #: an explicit list, uses it at the owner's request. Who may use it is checked
 #: per call (gateway.principal); a profile that must never have it declines
 #: it in its tool list or via ``agent.disabled_toolsets``. Empty this in 0.21.14.
-_RECENTLY_SHIPPED_TOOLSETS: frozenset = frozenset({"google_calendar"})
+_RECENTLY_SHIPPED_TOOLSETS: frozenset = frozenset({"google_calendar", "icloud_calendar"})
 
 
 def _enable_recently_shipped_toolsets(
