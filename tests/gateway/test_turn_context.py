@@ -71,77 +71,92 @@ class TestTurnRunner:
 
     def test_normal_response_preserves_compression_exhausted(self):
         """A non-empty exhaustion response must still reach auto-reset consumers."""
-
-        class _ExhaustedAgent:
-            def __init__(self, **kwargs):
-                self.model = kwargs["model"]
-                self.session_id = kwargs["session_id"]
-                self.tools = []
-                self.context_compressor = SimpleNamespace(
-                    last_prompt_tokens=0,
-                    context_length=200_000,
-                )
-                self.session_prompt_tokens = 0
-                self.session_completion_tokens = 0
-
-            def run_conversation(self, _message, **_kwargs):
-                return {
-                    "final_response": "Context length exceeded. Cannot compress further.",
-                    "failed": True,
-                    "compression_exhausted": True,
-                    "messages": [],
-                }
-
-        gateway_runner = MagicMock()
-        gateway_runner.config = SimpleNamespace(streaming=None)
-        gateway_runner._provider_routing = {}
-        gateway_runner._agent_cache_lock = None
-        gateway_runner._agent_cache = {}
-        gateway_runner._session_db = None
-        gateway_runner._prefill_messages = None
-        gateway_runner._pending_model_notes = {}
-        gateway_runner._pending_skills_reload_notes = {}
-        gateway_runner.session_store._entries = {}
-        gateway_runner._get_system_prompt_for_channel.return_value = None
-        gateway_runner._resolve_session_agent_runtime.return_value = ("test-model", {})
-        gateway_runner._resolve_session_reasoning_config.return_value = None
-        gateway_runner._resolve_session_service_tier.return_value = None
-        gateway_runner._resolve_turn_agent_config.return_value = {
-            "model": "test-model",
-            "runtime": {},
-        }
-        gateway_runner._agent_config_signature.return_value = ("test-signature",)
-        gateway_runner._extract_cache_busting_config.return_value = {}
-        gateway_runner._refresh_fallback_model.return_value = None
-        gateway_runner._consume_pending_native_image_paths.return_value = []
-        gateway_runner._consume_pending_turn_sidecar_notes.return_value = []
-        gateway_runner._is_telegram_topic_lane.return_value = False
-        gateway_runner._is_discord_auto_thread_lane.return_value = False
-        gateway_runner._is_relay_discord_channel_lane.return_value = False
-
         source = SessionSource(
             platform=Platform.LOCAL,
             chat_id="test-chat",
             user_id="test-user",
         )
-        ctx = TurnContext(
-            source=source,
-            message="continue",
-            history=[],
-            session_id="test-session",
-            session_key="test-session-key",
-            user_config={},
-            AIAgent=_ExhaustedAgent,
-            resolve_display_setting=lambda *_args: False,
-            _run_still_current=lambda: True,
-            _hooks_ref=SimpleNamespace(loaded_hooks=False),
-        )
-
-        from gateway.run import TurnRunner
-
-        result = TurnRunner(gateway_runner, ctx).run_sync()
+        result, _ = _run_exhausted_turn(source)
 
         assert result["final_response"] == (
             "Context length exceeded. Cannot compress further."
         )
         assert result["compression_exhausted"] is True
+
+    @pytest.mark.parametrize("verdict,acts_for_owner", [("live", True), ("delegated", True), ("", False)])
+    def test_owner_verdict_is_part_of_the_cached_agent_signature(self, verdict, acts_for_owner):
+        """Owner-only tool schemas freeze by this verdict (installation owner, 24.09.2026)."""
+        source = SessionSource(platform=Platform.TELEGRAM, chat_id="42", chat_type="dm", user_id="42")
+        source._owner_principal = verdict
+        _, gateway_runner = _run_exhausted_turn(source)
+
+        kwargs = gateway_runner._agent_config_signature.call_args.kwargs
+        assert kwargs["acts_for_owner"] is acts_for_owner
+
+
+def _run_exhausted_turn(source):
+    """One turn through ``TurnRunner.run_sync`` against a stub runner and agent."""
+
+    class _ExhaustedAgent:
+        def __init__(self, **kwargs):
+            self.model = kwargs["model"]
+            self.session_id = kwargs["session_id"]
+            self.tools = []
+            self.context_compressor = SimpleNamespace(
+                last_prompt_tokens=0,
+                context_length=200_000,
+            )
+            self.session_prompt_tokens = 0
+            self.session_completion_tokens = 0
+
+        def run_conversation(self, _message, **_kwargs):
+            return {
+                "final_response": "Context length exceeded. Cannot compress further.",
+                "failed": True,
+                "compression_exhausted": True,
+                "messages": [],
+            }
+
+    gateway_runner = MagicMock()
+    gateway_runner.config = SimpleNamespace(streaming=None)
+    gateway_runner._provider_routing = {}
+    gateway_runner._agent_cache_lock = None
+    gateway_runner._agent_cache = {}
+    gateway_runner._session_db = None
+    gateway_runner._prefill_messages = None
+    gateway_runner._pending_model_notes = {}
+    gateway_runner._pending_skills_reload_notes = {}
+    gateway_runner.session_store._entries = {}
+    gateway_runner._get_system_prompt_for_channel.return_value = None
+    gateway_runner._resolve_session_agent_runtime.return_value = ("test-model", {})
+    gateway_runner._resolve_session_reasoning_config.return_value = None
+    gateway_runner._resolve_session_service_tier.return_value = None
+    gateway_runner._resolve_turn_agent_config.return_value = {
+        "model": "test-model",
+        "runtime": {},
+    }
+    gateway_runner._agent_config_signature.return_value = ("test-signature",)
+    gateway_runner._extract_cache_busting_config.return_value = {}
+    gateway_runner._refresh_fallback_model.return_value = None
+    gateway_runner._consume_pending_native_image_paths.return_value = []
+    gateway_runner._consume_pending_turn_sidecar_notes.return_value = []
+    gateway_runner._is_telegram_topic_lane.return_value = False
+    gateway_runner._is_discord_auto_thread_lane.return_value = False
+    gateway_runner._is_relay_discord_channel_lane.return_value = False
+
+    ctx = TurnContext(
+        source=source,
+        message="continue",
+        history=[],
+        session_id="test-session",
+        session_key="test-session-key",
+        user_config={},
+        AIAgent=_ExhaustedAgent,
+        resolve_display_setting=lambda *_args: False,
+        _run_still_current=lambda: True,
+        _hooks_ref=SimpleNamespace(loaded_hooks=False),
+    )
+
+    from gateway.run import TurnRunner
+
+    return TurnRunner(gateway_runner, ctx).run_sync(), gateway_runner

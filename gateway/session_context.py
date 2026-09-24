@@ -111,7 +111,8 @@ _CREDENTIAL_MANAGEMENT_AUTHORIZED: ContextVar = ContextVar(
 )
 # Server-derived verdict about who is speaking in this turn, bound by the
 # gateway from the same owner mapping as credential management
-# (``gateway.credential_management.owners`` + a direct chat):
+# (``gateway.credential_management.owners`` of the installation root or the
+# profile + a direct chat):
 # ``"live"`` — the verified owner wrote this message; ``"delegated"`` — a
 # system turn (background completion, board notification) inside the owner's
 # own direct chat; ``""`` — anybody else. Read through

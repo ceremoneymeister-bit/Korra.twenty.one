@@ -165,7 +165,8 @@ def gui_toolset_label(label: str) -> str:
 # setup. The tool's check_fn means the schema still won't appear to the
 # model if the credential later goes missing or expires.
 # Google Workspace connection management is off by default. Its single tool
-# only ever answers an owner named in ``gateway.credential_management.owners``;
+# only ever answers an owner named in ``gateway.credential_management.owners``
+# (of the installation root or of the profile);
 # on every other profile it would occupy a schema slot to refuse each call, and
 # advertise a credential surface to a chat that cannot use it. The owner's own
 # path — Settings → Keys → Google Workspace — is a web route and needs no

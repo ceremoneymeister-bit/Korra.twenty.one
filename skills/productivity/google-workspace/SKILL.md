@@ -43,9 +43,9 @@ Connection management is native and self-service. The agent may call
 message. It must never ask the user to paste a callback URL, authorization
 code, access token, refresh token, client ID, or client secret into chat.
 
-Chat-based connection is disabled until the host operator names exact owners
-in that profile's `config.yaml`; ordinary allowlists and pairing do not grant
-this capability:
+Chat-based connection is disabled until the host operator names exact owners,
+once for the whole installation in the root `config.yaml` or in that profile's
+`config.yaml`; ordinary allowlists and pairing do not grant this capability:
 
 ```yaml
 gateway:

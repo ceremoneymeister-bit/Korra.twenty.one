@@ -123,6 +123,30 @@ def test_scheduled_jobs_use_the_board_only_when_the_owner_created_them(board):
             reset_background_owner(token)
 
 
+def test_installation_owner_reaches_the_board_from_the_direct_chat_only(board, tmp_path):
+    """Owner named once in the installation root (24.09.2026): DM yes, group/outsider no."""
+    import yaml
+
+    from gateway.credential_management import owner_principal
+    from gateway.session_context import clear_session_vars
+
+    kt, tid, _ = board
+    (tmp_path / ".hermes" / "config.yaml").write_text(
+        yaml.safe_dump({"gateway": {"credential_management": {"owners": {"telegram": ["42"]}}}}),
+        encoding="utf-8",
+    )
+    for user_id, chat_type, allowed in (("42", "dm", True), ("42", "group", False), ("777", "dm", False)):
+        verdict = owner_principal({}, platform="telegram", user_id=user_id, chat_type=chat_type, internal=False)
+        tokens = _turn({"platform": "telegram", "chat_type": chat_type, "chat_id": user_id,
+                        "user_id": user_id, "owner_principal": verdict})
+        try:
+            assert kt._check_kanban_mode() is allowed
+            assert kt._check_kanban_orchestrator_mode() is allowed
+            assert ("Private owner board task" in kt._handle_show({"task_id": tid})) is allowed
+        finally:
+            clear_session_vars(tokens)
+
+
 def test_dispatcher_worker_path_is_unchanged(board, monkeypatch):
     from gateway.session_context import clear_session_vars
 

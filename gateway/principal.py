@@ -15,9 +15,10 @@ Principal rules
 * **Owner, live** — the owner's own machine or cabinet: CLI/TUI/desktop/ACP
   (no messaging platform bound) and the API server, which the dashboard chat
   reaches with the installation's ``API_SERVER_KEY``; or a messaging direct
-  chat whose sender is named in the profile's
-  ``gateway.credential_management.owners`` (the one owner mapping the
-  gateway already uses for credential management).
+  chat whose sender is named in ``gateway.credential_management.owners`` —
+  once for the whole installation in the root ``config.yaml``, or in the
+  profile's own config (the one owner mapping the gateway already uses for
+  credential management; see :mod:`gateway.credential_management`).
 * **Owner, delegated** (acts for the owner, nobody typing): a system turn in
   the owner's direct chat; a dispatcher-spawned Kanban worker (the board is
   the owner's and only owner surfaces can put work on it); a scheduled job
@@ -144,7 +145,8 @@ def cron_job_acts_for_owner(job: Mapping[str, Any], config: Mapping[str, Any] | 
     Jobs created by the agent carry the creator's verdict in their origin.
     Jobs without an origin were created on the owner's machine or in the
     cabinet (CLI, dashboard). Older jobs with a messaging origin and no verdict
-    count as the owner's only when their creator is a configured owner.
+    count as the owner's only when their creator is a configured owner of the
+    installation or of the profile.
     """
     origin = job.get("origin") if isinstance(job, Mapping) else None
     if not isinstance(origin, Mapping) or not origin.get("platform"):

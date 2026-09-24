@@ -9,6 +9,7 @@ contract), because that resolution *is* the contract under test.
 from __future__ import annotations
 
 import asyncio
+import itertools
 import json
 import os
 import time
@@ -815,6 +816,135 @@ def test_owner_mapping_decides_live_delegated_and_nobody():
     assert owner_principal(config, user_id="777", **common) == ""
     assert owner_principal(config, user_id="42", **{**common, "chat_type": "group"}) == ""
     assert owner_principal({}, user_id="42", **common) == ""  # no mapping configured: nobody
+
+
+# ---------------------------------------------------------------------------
+# The installation's owner (decision of 24.09.2026): named once in the root
+# config.yaml, recognized in the direct chat of every profile's bot.
+# ---------------------------------------------------------------------------
+
+
+_ROOT_TICKS = itertools.count(1)
+
+
+def _root_owner(install: Path, *telegram_ids: str) -> None:
+    import yaml
+
+    path = install / "config.yaml"
+    path.write_text(
+        yaml.safe_dump({"gateway": {"credential_management": {"owners": {"telegram": list(telegram_ids)}}}}),
+        encoding="utf-8",
+    )
+    stamp = time.time_ns() + next(_ROOT_TICKS) * 1_000_000_000  # distinct, increasing mtime for the caches
+    os.utime(path, ns=(stamp, stamp))
+
+
+def _gateway_verdict(profile_home: Path, user_id: str, *, chat_type: str = "dm", internal: bool = False) -> str:
+    """What the gateway binds for one message routed to this profile (run.py, auth gate)."""
+    from gateway.credential_management import owner_principal
+    from gateway.run import _load_gateway_config
+    from korra_constants import reset_hermes_home_override, set_hermes_home_override
+
+    token = set_hermes_home_override(str(profile_home))
+    try:
+        return owner_principal(
+            _load_gateway_config(), platform="telegram", user_id=user_id,
+            chat_type=chat_type, internal=internal,
+        )
+    finally:
+        reset_hermes_home_override(token)
+
+
+def _turn_in(monkeypatch, home: Path, args: dict, session: dict) -> dict:
+    from korra_constants import reset_hermes_home_override, set_hermes_home_override
+
+    token = set_hermes_home_override(str(home))
+    try:
+        return _tool(monkeypatch, home, args, session)
+    finally:
+        reset_hermes_home_override(token)
+
+
+def test_installation_owner_uses_the_calendar_from_the_bot_of_any_profile(install, fake_api, monkeypatch):
+    a = install / "profiles" / "assistant"
+    b = install / "profiles" / "designer"
+    _write_token(a, ("calendar",), access="tok-a")
+    google.configure_sharing(source_profile="assistant", profiles=["designer"])
+    fake_api.calendars["tok-a"] = [
+        _event("p", "Owner meeting", "2026-09-24T09:00:00+07:00", "2026-09-24T10:00:00+07:00"),
+    ]
+    for home in (a, b):  # neither profile names an owner of its own
+        (home / "config.yaml").write_text("model:\n  default: test\n", encoding="utf-8")
+    assert _gateway_verdict(a, "42") == ""  # before the operator's step: the R2 refusal
+    _root_owner(install, "42")
+
+    for home in (a, b):
+        verdict = _gateway_verdict(home, "42")
+        assert verdict == "live"
+        owner = {"platform": "telegram", "chat_type": "dm", "chat_id": "42", "user_id": "42",
+                 "profile": home.name, "owner_principal": verdict}
+        answer = _turn_in(monkeypatch, home, LIST, owner)
+        assert answer["ok"] is True and answer["events"][0]["title"] == "Owner meeting"
+        assert _gateway_verdict(home, "42", internal=True) == "delegated"
+    created = _turn_in(monkeypatch, a, CREATE, {**OWNER_DM, "profile": "assistant"})
+    assert created["ok"] is True
+
+    reads_before = len(fake_api.calls)
+    for home in (a, b):
+        outsider = _gateway_verdict(home, "777")
+        in_group = _gateway_verdict(home, "42", chat_type="group")
+        assert outsider == "" and in_group == ""
+        for session in (
+            {"platform": "telegram", "chat_type": "dm", "chat_id": "777", "user_id": "777",
+             "owner_principal": outsider},
+            {"platform": "telegram", "chat_type": "group", "chat_id": "-100", "user_id": "42",
+             "owner_principal": in_group},
+        ):
+            for args in (LIST, CREATE):
+                assert _turn_in(monkeypatch, home, args, {**session, "profile": home.name})["error"] == "owner_only"
+    assert len(fake_api.calls) == reads_before  # the grant was never used for them
+
+
+def test_profile_owner_list_keeps_working_next_to_the_installation_list(install):
+    a = install / "profiles" / "assistant"
+    b = install / "profiles" / "designer"
+    (a / "config.yaml").write_text(
+        "gateway:\n  credential_management:\n    owners:\n      telegram: ['55']\n", encoding="utf-8"
+    )
+    (b / "config.yaml").write_text("model:\n  default: test\n", encoding="utf-8")
+    assert _gateway_verdict(a, "55") == "live"
+    assert _gateway_verdict(b, "55") == ""  # the profile list is that profile's only
+    _root_owner(install, "42")
+    assert _gateway_verdict(a, "55") == "live"
+    assert _gateway_verdict(a, "42") == "live" and _gateway_verdict(b, "42") == "live"
+    _root_owner(install)  # an emptied root list: back to the profile lists alone
+    assert _gateway_verdict(a, "55") == "live" and _gateway_verdict(b, "42") == ""
+
+
+def test_job_the_installation_owner_creates_in_telegram_acts_for_the_owner(install):
+    from gateway.principal import cron_job_acts_for_owner
+    from gateway.session_context import clear_session_vars, set_session_vars
+    from tools.cronjob_tools import _origin_from_env
+
+    home = install / "profiles" / "designer"
+    (home / "config.yaml").write_text("model:\n  default: test\n", encoding="utf-8")
+    _root_owner(install, "42")
+    origins = {}
+    for user_id in ("42", "777"):
+        tokens = set_session_vars(
+            cron_session="", platform="telegram", chat_type="dm", chat_id=user_id, user_id=user_id,
+            profile="designer", owner_principal=_gateway_verdict(home, user_id),
+        )
+        try:
+            origins[user_id] = _origin_from_env()
+        finally:
+            clear_session_vars(tokens)
+    assert origins["42"]["owner"] is True and origins["777"]["owner"] is False
+    assert cron_job_acts_for_owner({"origin": origins["42"]}, {}) is True
+    assert cron_job_acts_for_owner({"origin": origins["777"]}, {}) is False
+    # Jobs from before 0.21.13 carry no verdict: the installation list decides too.
+    assert cron_job_acts_for_owner({"origin": {"platform": "telegram", "chat_id": "42", "user_id": "42"}}, {})
+    assert not cron_job_acts_for_owner({"origin": {"platform": "telegram", "chat_id": "7", "user_id": "7"}}, {})
 
 
 def test_gateway_binds_the_owner_verdict_for_tools(monkeypatch):

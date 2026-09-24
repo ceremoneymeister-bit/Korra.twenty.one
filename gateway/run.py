@@ -5962,6 +5962,11 @@ class TurnRunner:
             user_id=getattr(ctx.source, "user_id", None),
             user_id_alt=getattr(ctx.source, "user_id_alt", None),
             skip_context_files=skip_context_files,
+            # Owner tools (calendar, board) enter the frozen schemas only
+            # for a turn that acts for the owner. An operator's edit of the
+            # owner mapping must rebuild this session's agent on the next
+            # message; live and delegated turns share one agent.
+            acts_for_owner=bool(getattr(ctx.source, "_owner_principal", "")),
         )
         agent = None
         reused_cached_agent = False
@@ -18208,8 +18213,10 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
         # Credential-management tools require a narrower capability than
         # ordinary gateway access. Pairing, roles, and allow-all never imply
-        # ownership: the active profile must name this exact platform principal
-        # under gateway.credential_management.owners.
+        # ownership: the installation root or the active profile must name this
+        # exact platform principal under gateway.credential_management.owners.
+        # Both configs are re-read per message (mtime-keyed caches), so an
+        # operator's edit applies to the next message without a restart.
         from gateway.credential_management import owner_principal
 
         # The same owner mapping decides who may use the owner's connected
@@ -28136,6 +28143,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         user_id: str | None = None,
         user_id_alt: str | None = None,
         skip_context_files: bool = False,
+        acts_for_owner: bool = False,
     ) -> str:
         """Compute a stable string key from agent config values.
 
@@ -28163,6 +28171,12 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         broke #27371's per-user-peer contract in multi-user gateways.
         Per-user agent rebuilds in shared threads trade prompt-cache
         warmth for correct memory attribution.
+
+        ``acts_for_owner`` is whether the turn acts for the installation's
+        owner (``gateway.principal``). Owner-only tools pass their check_fn
+        only for such a turn, so their schemas are frozen into the agent by
+        this verdict; when the operator names or removes the owner, the next
+        message must rebuild the agent rather than keep the old tool list.
         """
         import hashlib, json as _j
 
@@ -28195,6 +28209,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 # (context files in vs out) — a toggled config edit must
                 # rebuild the cached agent, not silently reuse it.
                 bool(skip_context_files),
+                bool(acts_for_owner),
             ],
             sort_keys=True,
             default=str,
