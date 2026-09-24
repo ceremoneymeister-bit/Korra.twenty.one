@@ -438,6 +438,21 @@ def _quota(root: Path, used: float, *, resets_in: float = 86400, captured: float
     )
 
 
+def _connect_codex(home: Path) -> None:
+    """A ChatGPT subscription login, stored the way ``korra auth`` stores it."""
+    tokens = {"access_token": "at-test", "refresh_token": "rt-test"}
+    (home / "auth.json").write_text(json.dumps({
+        "version": 1,
+        "active_provider": "openai-codex",
+        "providers": {"openai-codex": {"tokens": tokens, "last_refresh": "2026-09-23T10:00:00Z"}},
+        "credential_pool": {"openai-codex": [{"id": "p1", "auth_type": "oauth", **tokens}]},
+    }), encoding="utf-8")
+
+
+def _codex_model(home: Path) -> None:
+    (home / "config.yaml").write_text("model:\n  default: gpt-5\n  provider: openai-codex\n", encoding="utf-8")
+
+
 def test_quota_card_is_absent_without_a_subscription(tmp_path):
     main = _agent(tmp_path, "default", "Корра")
     assert ds.quota_section([main], now=NOW, root=tmp_path) == {"available": False, "status": "absent"}
@@ -445,13 +460,24 @@ def test_quota_card_is_absent_without_a_subscription(tmp_path):
 
 def test_quota_waits_for_the_first_reply_when_codex_is_connected(tmp_path):
     main = _agent(tmp_path, "default", "Корра")
-    (main.home / "config.yaml").write_text("model:\n  default: gpt-5\n  provider: openai-codex\n", encoding="utf-8")
+    _codex_model(main.home)
+    _connect_codex(main.home)
     assert ds.quota_section([main], now=NOW, root=tmp_path) == {"available": True, "status": "waiting"}
+
+
+def test_a_profile_on_the_installation_login_counts_as_connected(tmp_path):
+    # The profile has no login of its own and uses the root one, as the
+    # runtime does; the root agent itself need not be on the roster.
+    _connect_codex(tmp_path)
+    writer = _agent(tmp_path, "writer", "Автор")
+    _codex_model(writer.home)
+    assert ds.quota_section([writer], now=NOW, root=tmp_path)["available"] is True
 
 
 @pytest.mark.parametrize(("used", "level"), [(55.0, "normal"), (80.0, "warn"), (96.0, "critical")])
 def test_quota_levels(tmp_path, used, level):
     main = _agent(tmp_path, "default", "Корра")
+    _connect_codex(main.home)
     _quota(tmp_path, used)
     value = ds.quota_section([main], now=NOW, root=tmp_path)
     assert value["status"] == "ok" and value["level"] == level
@@ -461,9 +487,44 @@ def test_quota_levels(tmp_path, used, level):
 
 def test_quota_after_the_window_reset_is_not_shown_as_current(tmp_path):
     main = _agent(tmp_path, "default", "Корра")
+    _connect_codex(main.home)
     _quota(tmp_path, 99.0, resets_in=-60)
     value = ds.quota_section([main], now=NOW, root=tmp_path)
     assert value["status"] == "reset" and "used_percent" not in value
+
+
+def test_old_quota_is_not_shown_without_a_subscription(tmp_path):
+    """Audit P1: a snapshot left behind must not revive the card."""
+    _quota(tmp_path, 96.0)
+    assert ds.quota_section([], now=NOW, root=tmp_path) == {"available": False, "status": "absent"}
+    # Choosing a Codex model is not a subscription: without a stored login
+    # the agent cannot answer, and the percent is history.
+    main = _agent(tmp_path, "default", "Корра")
+    _codex_model(main.home)
+    ds.reset_cache()
+    assert ds.quota_section([main], now=NOW, root=tmp_path) == {"available": False, "status": "absent"}
+
+
+def test_disconnecting_the_subscription_hides_the_last_percent(tmp_path, monkeypatch):
+    """Disconnect through the product's own path, then read the card again."""
+    from korra_cli.auth import clear_provider_auth
+
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    main = _agent(tmp_path, "default", "Корра")
+    _codex_model(main.home)
+    _connect_codex(main.home)
+    _quota(tmp_path, 96.0)
+    before = ds.quota_section([main], now=NOW, root=tmp_path)
+    assert before["available"] is True and before["level"] == "critical"
+
+    assert clear_provider_auth("openai-codex") is True
+    # The model choice stays behind in config.yaml; the login is gone.
+    assert "openai-codex" in (main.home / "config.yaml").read_text(encoding="utf-8")
+    after = ds.quota_section([main], now=NOW, root=tmp_path)
+    assert after == {"available": False, "status": "absent"}
+    attention = ds.attention_section([main], now=NOW, tz=MSK, quota=after)
+    assert "quota" not in attention["checked"]
+    assert not [item for item in attention["items"] if item["source"] == "quota"]
 
 
 # ── Attention ──────────────────────────────────────────────────────────────

@@ -71,7 +71,19 @@ function QuotaBody({ size = "m" }: DashboardWidgetBodyProps) {
       />
     );
   }
-  if (quota.status === "waiting" || quota.status === "absent") {
+  if (quota.status === "absent") {
+    // Обычно такой карточки на доске нет (`isAvailable`); если она всё же
+    // нарисована, старый процент или «ждём ответа» без подписки — выдумка.
+    return (
+      <FirstStep
+        size={size}
+        title="Подписка ChatGPT не подключена"
+        text="Квота появится, когда агенты будут работать через подписку ChatGPT."
+        action={{ label: "Ключи и доступы", to: "/env" }}
+      />
+    );
+  }
+  if (quota.status === "waiting") {
     return (
       <FirstStep
         size={size}

@@ -379,4 +379,12 @@ describe("«Квота Codex»", () => {
     ).toBe(false);
     expect(CODEX_QUOTA_WIDGET.isAvailable?.(null)).toBe(false);
   });
+
+  it("без подписки не обещает ответа Codex и не показывает процент", async () => {
+    served = dashboardStateFixture({ quota: { available: false, status: "absent" } });
+    await mount(CODEX_QUOTA_WIDGET, "m");
+    expect(text()).toContain("Подписка ChatGPT не подключена");
+    expect(text()).not.toContain("Ждём первого ответа");
+    expect(text()).not.toContain("%");
+  });
 });

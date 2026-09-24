@@ -1007,20 +1007,21 @@ QUOTA_CRITICAL_PERCENT = 95.0
 _QUOTA_STALE_SECONDS = 24 * 3600
 
 
-def _codex_configured(agents: list[Agent]) -> bool:
-    """Is a ChatGPT/Codex subscription connected anywhere in the installation?"""
-    from korra_cli.profiles import _read_config_model
+def _codex_connected(agents: list[Agent], root: Path) -> bool:
+    """Is a ChatGPT/Codex subscription login stored anywhere in the installation?
 
-    for agent in agents:
-        try:
-            _model, provider = _read_config_model(agent.home)
-        except Exception:
-            provider = None
-        if provider == "openai-codex":
-            return True
-        auth = agent.home / "auth.json"
-        if not auth.is_file():
+    Only a stored login counts. A Codex model in ``config.yaml`` is not a
+    subscription: disconnecting removes the login from ``auth.json`` and
+    leaves ``model.provider: openai-codex`` behind, and an agent without the
+    login cannot answer at all. A profile without a login of its own uses the
+    installation root one, so the root store is read as well.
+    """
+    seen: set[Path] = set()
+    for home in [*(agent.home for agent in agents), root]:
+        auth = home / "auth.json"
+        if auth in seen:
             continue
+        seen.add(auth)
         try:
             store = json.loads(auth.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -1051,18 +1052,17 @@ def quota_section(
     agents: list[Agent], *, now: float, root: Optional[Path] = None
 ) -> dict[str, Any]:
     from agent.rate_limit_tracker import load_codex_quota
+    from korra_constants import get_default_hermes_root
 
+    # The subscription is checked before the snapshot is read: a percent
+    # recorded before a disconnect is history, not the current quota. The
+    # check reads the same auth.json files as the attention strip, on the
+    # same short section cache, so a disconnect shows on the next refresh.
+    installation = Path(root) if root is not None else get_default_hermes_root()
+    if not _codex_connected(agents, installation):
+        return {"available": False, "status": "absent"}
     data = load_codex_quota(root=root)
-    # Whether a subscription is connected changes rarely; the percent itself
-    # is re-read every time, the per-profile config/auth scan once a minute.
-    configured = _cached(
-        ("codex-configured",) + tuple(str(agent.home) for agent in agents),
-        60.0,
-        lambda: _codex_configured(agents),
-    )
     if data is None:
-        if not configured:
-            return {"available": False, "status": "absent"}
         return {"available": True, "status": "waiting"}
 
     windows = []
