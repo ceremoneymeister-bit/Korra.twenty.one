@@ -257,3 +257,25 @@ def test_caldav_redirects_stay_on_icloud(monkeypatch):
         with pytest.raises(ic.ICloudCalendarError, match="недопустимый адрес"):
             ic._request(client, "PROPFIND", ic.BASE_URL, "<x/>", depth="0")
     assert len(urls) == 1
+
+
+def test_agent_tool_is_owner_only_like_google_calendar(tmp_path, monkeypatch):
+    # Review R2 applies to every owner service: a visitor of a public bot
+    # must not read the owner's iCloud Calendar.
+    from gateway.session_context import clear_session_vars, set_session_vars
+    from tools import icloud_calendar_tool
+
+    requests = fake_client(monkeypatch)
+    monkeypatch.setattr(ic, "get_default_hermes_root", lambda: tmp_path)
+    ic.connect("person@icloud.com", "secret", root=tmp_path)
+    before = len(requests)
+    tokens = set_session_vars(platform="telegram", user_id="outsider", chat_id="outsider",
+                              chat_type="dm", profile="assistant", credential_management_authorized=False)
+    try:
+        denied = json.loads(icloud_calendar_tool._handle({"date": "2026-09-23"}))
+        offered = icloud_calendar_tool._calendar_available()
+    finally:
+        clear_session_vars(tokens)
+    assert denied["error"] == "owner_only" and "events" not in denied
+    assert offered is False
+    assert len(requests) == before  # Apple is not even asked

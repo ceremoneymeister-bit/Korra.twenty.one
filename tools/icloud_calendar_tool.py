@@ -5,12 +5,24 @@ from __future__ import annotations
 import json
 from datetime import date, datetime, timedelta
 
+from gateway.principal import current_principal
 from korra_cli import google_calendar, icloud_calendar
-from tools.registry import registry
+from tools.registry import no_cache_check_fn, registry
+
+_OWNER_ONLY = (
+    "The iCloud Calendar belongs to the owner and is available only in the "
+    "owner's own conversation (the Korra cabinet, the owner's computer, or the "
+    "owner's direct chat when the owner is configured for this bot). Do not "
+    "describe the owner's calendar here."
+)
 
 
 def _handle(args: dict, **_kwargs) -> str:
     args = args or {}
+    # Same boundary as google_calendar: decided by the server on every call,
+    # so a visitor of a public bot never reads the owner's calendar.
+    if not current_principal().owner:
+        return json.dumps({"ok": False, "error": "owner_only", "message": _OWNER_ONLY}, ensure_ascii=False)
     zone = google_calendar.owner_timezone()
     today = datetime.now(zone).date()
     try:
@@ -32,6 +44,12 @@ def _handle(args: dict, **_kwargs) -> str:
                        "count": len(result["events"]), "events": result["events"]}, ensure_ascii=False)
 
 
+@no_cache_check_fn
+def _calendar_available() -> bool:
+    """Offer the schema to owner turns only; uncached like google_calendar."""
+    return current_principal().owner
+
+
 registry.register(
     name="icloud_calendar",
     toolset="icloud_calendar",
@@ -48,6 +66,7 @@ registry.register(
         },
     },
     handler=_handle,
+    check_fn=_calendar_available,
     description="Owner's iCloud Calendar for all agents on this installation.",
     emoji="📅",
 )
