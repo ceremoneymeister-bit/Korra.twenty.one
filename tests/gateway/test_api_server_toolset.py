@@ -48,6 +48,25 @@ class TestApiServerPlatformConfig:
         discover_builtin_tools()
         assert "terminal" in _get_platform_tools({}, "api_server")
 
+    def test_api_server_offers_the_owner_board(self):
+        """K21-142: the cabinet chat reaches the agent through the API server,
+        and the main agent plans on the owner's board there. The composite
+        must carry the kanban tools, or ``kanban.chat_tools: main`` is a dead
+        setting in the owner's main chat (the check_fns in
+        tools/kanban_tools.py still decide per call who may see them)."""
+        from tools.registry import discover_builtin_tools
+        from korra_cli.tools_config import _get_platform_tools
+        discover_builtin_tools()
+        assert set(resolve_toolset("kanban", include_registry=False)) <= set(
+            resolve_toolset("hermes-api-server")
+        )
+        assert "kanban" in _get_platform_tools({}, "api_server")
+        # A saved per-platform list keeps the board: kanban is not a
+        # configurable toolset, so the owner could never re-tick it.
+        assert "kanban" in _get_platform_tools(
+            {"platform_toolsets": {"api_server": ["clarify"]}}, "api_server"
+        )
+
 
 class TestApiServerAdapterToolset:
     @patch("gateway.platforms.api_server.AIOHTTP_AVAILABLE", True)

@@ -503,7 +503,18 @@ TOOLSETS = {
             # The owner's Google Calendar (gated on the installation OAuth app)
             "google_calendar",
             "icloud_calendar",
-
+            # The owner's Kanban board (K21-142). The cabinet chat reaches the
+            # main agent through this server, so without these the main agent
+            # cannot plan in the owner's main chat. Who sees them is decided
+            # per call by kanban.chat_tools and the turn's principal
+            # (tools/kanban_tools.py), as on every other platform.
+            "kanban_show", "kanban_list",
+            "kanban_complete", "kanban_block", "kanban_request_review",
+            "kanban_request_changes",
+            "kanban_heartbeat",
+            "kanban_comment", "kanban_create", "kanban_link",
+            "kanban_unblock",
+            "kanban_attach", "kanban_attach_url", "kanban_attachments",
         ],
         "includes": []
     },
