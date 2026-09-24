@@ -102,6 +102,19 @@ describe("Доска поручений", () => {
     await click(button("Завершить поручение")); const payload = JSON.parse(writes()[0][1].body);
     expect(payload.status).toBe("done"); expect(payload.summary).toBe(payload.result); expect(payload.result).toContain("поставщик А");
   });
+  it("пауза из карточки показывает исход в снова открытой карточке, а не под ней", async () => {
+    boardTasks = [task];
+    const base = fetchJSON.getMockImplementation()!;
+    fetchJSON.mockImplementation(async (url: string, options?: { method: string }) =>
+      options?.method === "PATCH" ? { warning: "worker_stop_unconfirmed" } : base(url, options));
+    await renderPage(); await click(host.querySelector('[data-task-id]')!);
+    await click(button("Приостановить")); await click(button("Приостановить"));
+    expect(JSON.parse(writes()[0][1].body)).toMatchObject({ status: "blocked" });
+    expect(host.querySelector('[role="dialog"]')?.textContent).toContain("остановку агента подтвердить не удалось");
+    await click(button("Закрыть")); expect(host.textContent).toContain("остановку агента подтвердить не удалось");
+    await click(host.querySelector('[data-task-id]')!);
+    expect(host.querySelector('[role="dialog"]')?.textContent).not.toContain("остановку агента");
+  });
   it("называет причину остановки и не выдаёт её за готовый результат", async () => {
     boardTasks = [{ ...task, status: "blocked", latest_summary: "Нужно согласовать бюджет" }];
     await renderPage(); await click(host.querySelector('[data-task-id]')!);

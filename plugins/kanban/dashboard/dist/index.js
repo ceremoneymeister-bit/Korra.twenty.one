@@ -423,7 +423,7 @@
           h("span", { className: "k21-muted" }, " · ", step.actor_kind === "human" ? "ваш шаг, " + statusLabel(step.status).toLowerCase() : statusLabel(step.status)))))));
   }
 
-  function TaskDetail({ taskId, board, profiles, onClose, onMove, onEdit, onRefresh, onOpenTask }) {
+  function TaskDetail({ taskId, board, profiles, onClose, onMove, onEdit, onRefresh, onOpenTask, outerNotice }) {
     const [data, setData] = useState(null);
     const [error, setError] = useState("");
     const [comment, setComment] = useState("");
@@ -481,7 +481,7 @@
     const legacyReview = task && task.status === "review" && attention !== "accept";
     return h(Modal, { title: task ? task.title : "Поручение", description, busy, onClose },
       error && h("div", { role: "alert", className: "k21-error" }, error, " ", h(Button, { onClick: () => { setError(""); setVersion(v => v + 1); } }, "Повторить")),
-      notice && h("div", { role: "status", className: "k21-note" }, notice),
+      (notice || outerNotice) && h("div", { role: "status", className: "k21-note" }, notice || outerNotice),
       task && h("div", { className: "k21-task-detail" },
         data.plan && h(PlanStrip, { plan: data.plan, current: task.id, onOpenTask }),
         (attention === "question" || attention === "paused" || attention === "problem") && h(DecisionPanel, { key: task.block_revision || attention, task, board, agentName, runs: data.runs, onDone: decided }),
@@ -553,7 +553,7 @@
       setParams(current => { const next = new URLSearchParams(current); if (value === "all") next.delete("view"); else next.set("view", value); return next; });
     }
     function closeTask() {
-      setModal(null);
+      setModal(null); setCardNotice(null);
       setParams(current => { const next = new URLSearchParams(current); next.delete("task"); return next; }, { replace: true });
     }
     const [boards, setBoards] = useState([]);
@@ -563,6 +563,10 @@
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
     const [notice, setNotice] = useState("");
+    // Исход действия, после которого карточка открывается снова (пауза, архив,
+    // правка, новое поручение): сообщение доски осталось бы под окном карточки,
+    // вместе с предупреждением «остановку агента подтвердить не удалось».
+    const [cardNotice, setCardNotice] = useState(null);
     const [search, setSearch] = useState("");
     const [assignee, setAssignee] = useState("");
     const [archived, setArchived] = useState(false);
@@ -619,11 +623,16 @@
       return plan;
     });
     function openWaiting(item) {
-      setModal(null);
+      setModal(null); setCardNotice(null);
       setParams(current => { const next = new URLSearchParams(current); next.set("board", item.board); next.set("task", item.task_id); return next; });
     }
     const activeModal = modal || (taskId ? { kind: "task", id: taskId } : null);
-    function saved(message, id) { setModal(null); setNotice(message); if (id) openTask(id); void load(); void loadLists(); }
+    function saved(message, id) {
+      setModal(null); setNotice(message); if (id) openTask(id);
+      const card = id || taskId;
+      setCardNotice(card ? { task: card, text: message } : null);
+      void load(); void loadLists();
+    }
     function move(task, target) {
       setDragged(null);
       if (!task || task.status === target) return;
@@ -631,7 +640,7 @@
       setModal({ kind: "move", task, target });
     }
     function openTask(id) {
-      setModal(null);
+      setModal(null); setCardNotice(null);
       setParams(current => { const next = new URLSearchParams(current); next.set("board", board); next.set("task", id); return next; });
     }
     return h("div", { className: "k21-board", "aria-busy": loading },
@@ -726,7 +735,7 @@
       activeModal && activeModal.kind === "edit" && h(TaskForm, { board, profiles, task: activeModal.task, onClose: () => openTask(activeModal.task.id), onSaved: saved }),
       activeModal && activeModal.kind === "move" && h(MoveDialog, { board, profiles, task: activeModal.task, target: activeModal.target, onClose: () => setModal(null), onSaved: saved }),
       activeModal && activeModal.kind.startsWith("board-") && h(BoardSettings, { board: meta, creating: activeModal.kind === "board-new", onClose: () => setModal(null), onSaved: next => { setBoards(list => [...list.filter(item => item.slug !== next.slug), next]); setBoard(next.slug); setModal(null); void loadLists(); } }),
-      activeModal && activeModal.kind === "task" && h(TaskDetail, { key: activeModal.id, taskId: activeModal.id, board, profiles, onClose: closeTask, onRefresh: () => void load(), onMove: move, onEdit: task => setModal({ kind: "edit", task }), onOpenTask: openTask }));
+      activeModal && activeModal.kind === "task" && h(TaskDetail, { key: activeModal.id, taskId: activeModal.id, board, profiles, onClose: closeTask, onRefresh: () => void load(), onMove: move, onEdit: task => setModal({ kind: "edit", task }), onOpenTask: openTask, outerNotice: cardNotice && cardNotice.task === activeModal.id ? cardNotice.text : "" }));
   }
   function KanbanEntry() {
     return h("section", { className: "k21-note k21-board-header" },
