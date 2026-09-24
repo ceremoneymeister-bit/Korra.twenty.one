@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowUpRight, CalendarDays, RefreshCw } from "lucide-react";
 
 import { ProductButton } from "@/components/ProductButton";
-import { ErrorNote, LoadingNote, NoteTitle, WidgetLink, WidgetStack } from "@/components/dashboard/widget-states";
+import { ErrorNote, LoadingNote, NoteTitle, WidgetLink, WidgetStack, useNowSeconds } from "@/components/dashboard/widget-states";
 import { FittedText } from "@/components/dashboard/FittedText";
 import type { DashboardWidget, DashboardWidgetBodyProps } from "@/components/dashboard/widget-types";
 import { useAvailableHeight } from "@/hooks/useAvailableHeight";
@@ -53,6 +53,9 @@ function ICloudCalendarBody({ size = "m" }: DashboardWidgetBodyProps) {
   const ticket = useRef(0);
   const mounted = useRef(true);
   const [listRef, listHeight] = useAvailableHeight<HTMLUListElement>();
+  // Часы — подписка, а не чтение в рендере (react-hooks/purity): лента
+  // приходит со временем сервера, клиентские часы нужны только без него.
+  const clockSeconds = useNowSeconds(0, 60_000);
 
   const load = useCallback(async (refresh = false) => {
     const current = ++ticket.current;
@@ -109,8 +112,8 @@ function ICloudCalendarBody({ size = "m" }: DashboardWidgetBodyProps) {
   }
 
   const zone = feed.timezone || "UTC";
-  const today = feed.now ? dayKey(feed.now, zone) : dayKey(new Date().toISOString(), zone);
-  const now = feed.now ? new Date(feed.now).getTime() : Date.now();
+  const now = feed.now ? new Date(feed.now).getTime() : clockSeconds * 1000;
+  const today = dayKey(feed.now || new Date(now).toISOString(), zone);
   const events = feed.events.filter((event) => event.all_day
     ? (event.end ? event.end.slice(0, 10) > today : event.start.slice(0, 10) >= today)
     : event.end ? new Date(event.end).getTime() > now : new Date(event.start).getTime() >= now);
