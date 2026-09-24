@@ -18,7 +18,10 @@ import { $chatRuns, $chatRunsReachable, $chatRunsUpdatedAt } from "@/lib/chat-ru
 import { agentHref } from "@/lib/dashboard-agents";
 import {
   $dashboardState,
+  $dashboardUpdatedAt,
   attentionView,
+  dashboardTimeZone,
+  formatClock,
   sectionReady,
   type AttentionRow,
 } from "@/lib/dashboard-state";
@@ -35,7 +38,12 @@ import { cn } from "@/lib/utils";
  *
  * «Всё спокойно» карточка говорит только тогда, когда каждый источник
  * действительно прочитан. Непрочитанный источник называется словами — пустая
- * полоса на месте сбоя читалась бы как «решать нечего».
+ * полоса на месте сбоя читалась бы как «решать нечего». Если последний опрос
+ * сводки не удался, её строки остаются как последнее известное — с временем
+ * проверки и повтором, но без «спокойно».
+ *
+ * Сервер присылает первые 20 строк и полное число в `count`: «Ещё N» и
+ * подпись о первой странице считаются от него, а не от длины списка.
  */
 
 const VISIBLE_ROWS = 3;
@@ -43,6 +51,7 @@ const VISIBLE_ROWS = 3;
 function AttentionBody() {
   const view = useDashboardSection("attention");
   const state = useStore($dashboardState);
+  const updatedAt = useStore($dashboardUpdatedAt);
   const runs = useStore($chatRuns);
   const runsUpdatedAt = useStore($chatRunsUpdatedAt);
   const runsReachable = useStore($chatRunsReachable);
@@ -57,7 +66,14 @@ function AttentionBody() {
     for (const agent of state.agents.agents) labels.set(agent.profile, agent.label);
   }
   const attention = view.phase === "ready" ? view.section : null;
-  const sectionState = view.phase === "ready" ? "ready" : view.phase === "error" ? "error" : "pending";
+  const sectionState =
+    view.phase === "ready"
+      ? view.stale
+        ? "stale"
+        : "ready"
+      : view.phase === "error"
+        ? "error"
+        : "pending";
   const result = attentionView(attention, sectionState, {
     runs,
     known: runsUpdatedAt !== null,
@@ -82,12 +98,26 @@ function AttentionBody() {
     );
   }
 
+  // Строки, которых сервер не прислал: `count` — всё, что ждёт, `items` —
+  // первая страница.
+  const unlisted = attention ? Math.max(0, attention.count - attention.items.length) : 0;
+  const total = result.rows.length + unlisted;
+  const expandable = result.rows.length > VISIBLE_ROWS;
   const visible = expanded ? result.rows : result.rows.slice(0, VISIBLE_ROWS);
-  const hidden = result.rows.length - visible.length;
+  const hidden = total - visible.length;
   const retry = view.phase === "loading" ? undefined : view.retry;
+  const checkedAt =
+    result.stale && updatedAt !== null ? formatClock(updatedAt / 1000, dashboardTimeZone(state)) : null;
+  const when = checkedAt ? ` в ${checkedAt}` : "";
 
   return (
     <div className="flex flex-col gap-2">
+      {result.lastKnownCalm ? (
+        <p className="text-sm text-[var(--neo-text-secondary)]" data-attention-stale>
+          При последней проверке{when} решений от вас не ждали
+        </p>
+      ) : null}
+
       {visible.length ? (
         <ul className="kdw-attention-list" aria-label="Что ждёт вашего решения">
           {visible.map((row) => (
@@ -96,7 +126,7 @@ function AttentionBody() {
         </ul>
       ) : null}
 
-      {hidden > 0 || (expanded && result.rows.length > VISIBLE_ROWS) ? (
+      {expandable ? (
         <button
           type="button"
           className="kdw-text-button w-fit"
@@ -105,6 +135,18 @@ function AttentionBody() {
         >
           {expanded ? "Свернуть" : `Ещё ${hidden}`}
         </button>
+      ) : null}
+
+      {unlisted > 0 && (expanded || !expandable) ? (
+        <p className="text-xs text-[var(--neo-text-secondary)]" data-attention-truncated>
+          Показаны первые {result.rows.length} из {total}
+        </p>
+      ) : null}
+
+      {result.stale && visible.length ? (
+        <p className="text-xs text-[var(--neo-text-secondary)]" role="status" data-attention-stale>
+          Показано на момент последней проверки{when}
+        </p>
       ) : null}
 
       {!visible.length && !result.unverified.length ? (
@@ -116,7 +158,11 @@ function AttentionBody() {
       {result.unverified.length ? (
         <div className="flex flex-wrap items-center gap-2" role="alert" data-attention-unverified>
           <p className="min-w-0 flex-1 text-sm text-[var(--neo-text-secondary)]">
-            {visible.length ? "Кроме того, не удалось проверить: " : "Не удалось проверить: "}
+            {result.stale
+              ? "Не удалось обновить: "
+              : visible.length
+                ? "Кроме того, не удалось проверить: "
+                : "Не удалось проверить: "}
             {result.unverified.join(", ")}.
           </p>
           {retry ? <RetryButton onClick={retry} /> : null}

@@ -189,6 +189,75 @@ describe("«Требует внимания» на живой сводке", () 
     await act(async () => more!.click());
     expect(container.querySelectorAll("[data-attention-kind]")).toHaveLength(5);
   });
+
+  it("«Ещё N» считает и то, что сервер не прислал, и честно говорит о первой странице", async () => {
+    const base = dashboardStateFixture();
+    const attention = base.attention as Extract<DashboardState["attention"], { items: unknown }>;
+    const page = Array.from({ length: 20 }, (_, index) => ({
+      ...attention.items[1],
+      id: `delivery:${index}`,
+      title: `Ответ ${index} не дошёл`,
+    }));
+    served = dashboardStateFixture({ attention: { ...attention, items: page, count: 45, truncated: true } });
+    await mount(ATTENTION_WIDGET);
+
+    expect(container.querySelectorAll("[data-attention-kind]")).toHaveLength(3);
+    // 17 полученных строк не видно, ещё 25 сервер не прислал.
+    const more = Array.from(container.querySelectorAll("button")).find((node) => node.textContent === "Ещё 42");
+    expect(more).toBeTruthy();
+    await act(async () => more!.click());
+    expect(container.querySelectorAll("[data-attention-kind]")).toHaveLength(20);
+    expect(container.querySelector("[data-attention-truncated]")?.textContent).toBe("Показаны первые 20 из 45");
+  });
+
+  describe("сбой обновления после удачной сводки", () => {
+    async function failNextRefresh() {
+      served = new Error("offline");
+      await act(async () => {
+        await refreshDashboardState();
+      });
+      await flush();
+    }
+
+    it("пустая сводка не остаётся «решений не ждут»: последнее известное с пометкой и повтором", async () => {
+      served = dashboardStateFixture({
+        attention: { status: "ok", items: [], count: 0, errors: [], checked: ["kanban", "cron"] },
+      });
+      await mount(ATTENTION_WIDGET);
+      expect(container.querySelector("[data-attention-calm]")).not.toBeNull();
+
+      await failNextRefresh();
+      expect($dashboardStatus.get()).toBe("error");
+      expect(container.querySelector("[data-attention-calm]")).toBeNull();
+      expect(text()).not.toContain("Решений от вас не ждут");
+      const stale = container.querySelector("[data-attention-stale]");
+      expect(stale?.textContent).toContain("При последней проверке в 13:00 решений от вас не ждали");
+      const alert = container.querySelector("[data-attention-unverified]");
+      expect(alert?.textContent).toContain("Не удалось обновить");
+      const retry = Array.from(alert!.querySelectorAll("button")).find((node) =>
+        node.textContent?.includes("Повторить"),
+      );
+      expect(retry).toBeTruthy();
+
+      // Повтор удался — снова честное «спокойно».
+      served = dashboardStateFixture({
+        attention: { status: "ok", items: [], count: 0, errors: [], checked: ["kanban", "cron"] },
+      });
+      await act(async () => retry!.click());
+      await flush();
+      expect(container.querySelector("[data-attention-calm]")).not.toBeNull();
+    });
+
+    it("строки остаются, но помечены как последнее известное", async () => {
+      await mount(ATTENTION_WIDGET);
+      await failNextRefresh();
+      expect(container.querySelectorAll("[data-attention-kind]")).toHaveLength(2);
+      expect(container.querySelector("[data-attention-stale]")?.textContent).toContain(
+        "Показано на момент последней проверки в 13:00",
+      );
+      expect(container.querySelector("[data-attention-unverified]")?.textContent).toContain("Не удалось обновить");
+    });
+  });
 });
 
 describe("«Мои показатели»", () => {

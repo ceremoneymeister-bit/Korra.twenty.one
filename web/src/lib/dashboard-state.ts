@@ -39,8 +39,12 @@ export interface AttentionItem {
 
 export interface DashboardAttention {
   status: SectionStatus;
+  /** Первая страница: сервер присылает не больше 20 строк. */
   items: AttentionItem[];
+  /** Сколько всего ждёт, включая то, что не вошло в `items`. */
   count: number;
+  /** `items` — не всё: `count` больше присланного. */
+  truncated?: boolean;
   errors: { source: string; label: string }[];
   checked: string[];
 }
@@ -407,6 +411,13 @@ export interface AttentionView {
   unverified: string[];
   /** Все источники прочитаны и пусты: можно честно сказать «всё спокойно». */
   calm: boolean;
+  /** Серверная часть — последнее известное: последний опрос не удался. */
+  stale: boolean;
+  /**
+   * Последняя удачная проверка была полной и пустой. Это можно назвать, но
+   * только как прошлое, с временем проверки, — не как «всё спокойно».
+   */
+  lastKnownCalm: boolean;
 }
 
 export interface ChatAttentionInput {
@@ -428,10 +439,14 @@ export interface ChatAttentionInput {
  * командах всех каналов в одно состояние `waiting_decision` на разговор.
  * Отдельного запроса к решениям здесь нет, поэтому один и тот же вопрос не
  * появляется дважды.
+ *
+ * `stale` — сводка есть, но последний опрос не удался. Её строки остаются
+ * на месте как последнее известное, а источники сервера считаются
+ * непроверенными: «всё спокойно» после сбоя обновления было бы выдумкой.
  */
 export function attentionView(
   section: DashboardAttention | null,
-  sectionState: "ready" | "pending" | "error",
+  sectionState: "ready" | "stale" | "pending" | "error",
   chat: ChatAttentionInput,
 ): AttentionView {
   const rows: AttentionRow[] = [];
@@ -466,15 +481,28 @@ export function attentionView(
   rows.sort((a, b) => rank[a.severity] - rank[b.severity] || (b.at ?? 0) - (a.at ?? 0));
 
   const unverified: string[] = [];
-  if (sectionState === "error") unverified.push("канбан, расписание, доставку ответов и подключения");
-  else if (section) for (const error of section.errors) unverified.push(error.label);
-  if (chat.reachable === false || (!chat.known && chat.reachable !== null)) unverified.push("чаты агентов");
+  if (sectionState === "error" || sectionState === "stale") {
+    unverified.push("канбан, расписание, доставку ответов и подключения");
+  } else if (section) {
+    for (const error of section.errors) unverified.push(error.label);
+  }
+  const chatsUnverified = chat.reachable === false || (!chat.known && chat.reachable !== null);
+  if (chatsUnverified) unverified.push("чаты агентов");
 
+  const stale = sectionState === "stale" && section !== null;
   return {
     rows,
     unverified: [...new Set(unverified)],
     // «Всё спокойно» — только когда каждый источник действительно ответил.
     calm: rows.length === 0 && unverified.length === 0 && sectionState === "ready" && chat.known,
+    stale,
+    lastKnownCalm:
+      stale &&
+      section !== null &&
+      rows.length === 0 &&
+      section.errors.length === 0 &&
+      chat.known &&
+      !chatsUnverified,
   };
 }
 

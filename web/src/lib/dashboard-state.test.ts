@@ -169,4 +169,20 @@ describe("полоса «Требует внимания»", () => {
     expect(attentionView(broken, "ready", chat([])).unverified).toEqual(["канбан"]);
     expect(attentionView(null, "error", chat([])).unverified[0]).toContain("канбан");
   });
+
+  it("последнее известное после сбоя обновления — не «всё спокойно»", () => {
+    const empty = { ...SECTION, items: [], count: 0 };
+    const stale = attentionView(empty, "stale", chat([]));
+    expect(stale.calm).toBe(false);
+    expect(stale.stale).toBe(true);
+    expect(stale.unverified[0]).toContain("канбан");
+    // Последняя удачная проверка была пустой и полной — это можно сказать,
+    // но только как прошлое.
+    expect(stale.lastKnownCalm).toBe(true);
+    expect(attentionView({ ...empty, errors: [{ source: "cron", label: "расписание" }] }, "stale", chat([])).lastKnownCalm).toBe(false);
+    // Строки последней сводки остаются на месте.
+    const rows = attentionView(SECTION, "stale", chat([]));
+    expect(rows.rows.map((row) => row.id)).toEqual(["cron:1"]);
+    expect(rows.lastKnownCalm).toBe(false);
+  });
 });
