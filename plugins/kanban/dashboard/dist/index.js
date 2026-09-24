@@ -605,11 +605,15 @@
       return function () { clearInterval(timer); generation.current++; };
     }, [board, boardKey, load]);
     const tasks = data ? data.columns.flatMap(column => column.tasks) : [];
-    const visible = tasks.filter(task => (view !== "attention" || attentionOf(task)) && (view !== "done" || task.status === "done") && (!assignee || task.assignee === assignee) && (!search || [task.title, task.body, task.tenant, task.id, task.plan_title].join(" ").toLocaleLowerCase("ru-RU").includes(search.toLocaleLowerCase("ru-RU"))));
+    // «Ждёт вас» — то, что без владельца не двинется: вопрос, приёмка, его шаг,
+    // сбой. Собственная пауза владельца видна в «Все» с пометкой «На паузе»;
+    // здесь она расходилась бы со счётчиком, который паузу не считает.
+    const waitsForOwner = task => { const kind = attentionOf(task); return !!kind && kind !== "paused"; };
+    const visible = tasks.filter(task => (view !== "attention" || waitsForOwner(task)) && (view !== "done" || task.status === "done") && (!assignee || task.assignee === assignee) && (!search || [task.title, task.body, task.tenant, task.id, task.plan_title].join(" ").toLocaleLowerCase("ru-RU").includes(search.toLocaleLowerCase("ru-RU"))));
     const columns = ["triage", "todo", "scheduled", ...PRIMARY, "archived"].filter(status => PRIMARY.includes(status) || visible.some(task => task.status === status));
     const meta = boards.find(b => b.slug === board) || { slug: board, name: board === "default" ? "Основная доска" : board };
-    const boardAttention = tasks.filter(task => attentionOf(task) && attentionOf(task) !== "paused").length;
-    const waitingItems = (waiting && waiting.items) || [];
+    const boardAttention = tasks.filter(waitsForOwner).length;
+    const waitingItems = ((waiting && waiting.items) || []).filter(item => item.kind !== "paused");
     const attention = waiting && !waiting.errors?.length ? waiting.count : boardAttention;
     const plans = Object.values(tasks.reduce((acc, task) => {
       if (!task.plan_id || task.status === "archived") return acc;
@@ -618,7 +622,7 @@
     }, {})).map(plan => {
       plan.steps.sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
       plan.done = plan.steps.filter(step => step.status === "done").length;
-      plan.waiting = plan.steps.filter(step => attentionOf(step) && attentionOf(step) !== "paused");
+      plan.waiting = plan.steps.filter(waitsForOwner);
       plan.next = plan.waiting[0] || plan.steps.find(step => step.status !== "done");
       return plan;
     });

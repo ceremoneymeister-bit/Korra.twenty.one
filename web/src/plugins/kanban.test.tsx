@@ -237,6 +237,15 @@ describe("Доска поручений", () => {
     await click(button("Ответить"));
     expect(fetchJSON.mock.calls.some(([url]) => url.includes("/tasks/task-1?board=sales"))).toBe(true);
   });
+  it("собственная пауза владельца не попадает в «Ждёт вас» и не расходится со счётчиком", async () => {
+    attentionPayload = { count: 0, errors: [], items: [{ board: "default", task_id: "task-1", title: "Сравнить поставщиков", kind: "paused", assignee: "default" }] };
+    boardTasks = [{ ...task, status: "blocked", block_kind: "paused", owner_attention: "paused" }];
+    await renderPage();
+    expect(host.querySelector('section[aria-label="Ждёт вас"]')).toBeNull();
+    expect(host.querySelector('[data-task-id="task-1"]')?.textContent).toContain("На паузе");
+    await click(button("Ждёт вас · 0"));
+    expect(host.querySelector('[data-task-id="task-1"]')).toBeNull();
+  });
   it("шаг владельца не отдаётся агенту и отмечается выполненным самим владельцем", async () => {
     boardTasks = [{ ...task, assignee: null as unknown as string, actor_kind: "human", owner_attention: "human_step" }];
     await renderPage();
