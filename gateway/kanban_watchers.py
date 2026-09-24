@@ -28,20 +28,30 @@ def _is_quiet_owner_event(ev, task) -> bool:
 
     * an intermediate plan step finishing — the owner hears about the
       plan's questions, problems and its final result, not every hop;
-    * the owner's own pause from the board.
+    * the owner's own actions: a pause, accepting a result, finishing
+      their own step;
+    * a step becoming ready — unless it is the owner's own step.
     """
     kind = getattr(ev, "kind", None)
     payload = getattr(ev, "payload", None) or {}
     if kind == "blocked" and payload.get("kind") == "paused":
         return True
-    if (
-        kind == "completed"
-        and task is not None
-        and getattr(task, "plan_id", None)
-        and getattr(task, "acceptance", None) != "owner"
-    ):
-        return True
+    if kind == "promoted":
+        return not _is_owner_step(task) or getattr(task, "status", None) != "ready"
+    if kind == "completed":
+        if payload.get("accepted_by") or _is_owner_step(task):
+            return True
+        if (
+            task is not None
+            and getattr(task, "plan_id", None)
+            and getattr(task, "acceptance", None) != "owner"
+        ):
+            return True
     return False
+
+
+def _is_owner_step(task) -> bool:
+    return task is not None and getattr(task, "actor_kind", None) == "human"
 from korra_constants import korra_env, korra_env_set, korra_env_pop
 
 # Match the logger run.py uses (logging.getLogger(__name__) where __name__ ==
@@ -285,7 +295,10 @@ class GatewayKanbanWatchersMixin:
         # but is not a block (see kanban_db.request_review); the task is not
         # archived, so the subscription stays alive and later review
         # cycles keep notifying.
-        TERMINAL_KINDS = ("completed", "submitted", "blocked", "gave_up", "crashed", "timed_out", "status", "archived", "unblocked", "block_loop_detected", "review_requested", "changes_requested")
+        # ``promoted`` is claimed so the owner hears when their own step
+        # becomes ready; for agent steps it stays silent (see
+        # ``_is_quiet_owner_event``).
+        TERMINAL_KINDS = ("completed", "submitted", "blocked", "gave_up", "crashed", "timed_out", "status", "archived", "unblocked", "block_loop_detected", "review_requested", "changes_requested", "promoted")
         # Subscriptions are removed only when the task reaches the irreversible
         # archived status. ``done`` is reversible in review/controller flows,
         # so removing its subscription would silence a later reopen. We used
@@ -593,12 +606,19 @@ class GatewayKanbanWatchersMixin:
                     # exists on the board.
                     wake_handoff = ""
                     wake_review_detail = ""
+                    # The owner's chat answers from the wake text alone
+                    # (live run 24.09: without the question the web chat
+                    # called a new question a repeat of the old one).
+                    wake_question = ""
+                    wake_approval = False
+                    wake_new_version = False
                     for ev in d["events"]:
                         kind = ev.kind
                         if _is_quiet_owner_event(ev, task):
                             # Owner-facing silence: an intermediate plan step
-                            # finishing, or the owner's own pause. The cursor
-                            # still advances (claimed via TERMINAL_KINDS).
+                            # finishing, the owner's own actions, an agent
+                            # step becoming ready. The cursor still advances
+                            # (claimed via TERMINAL_KINDS).
                             continue
                         # Identity prefix: attribute terminal pings to the
                         # worker that did the work. Makes fleets (where one
@@ -632,14 +652,29 @@ class GatewayKanbanWatchersMixin:
                                 r = lines[0][:160] if lines else task.result[:160]
                                 handoff = f"\n{r}"
                                 wake_handoff = r
+                            if kind == "submitted" and payload.get("previous_version"):
+                                handoff = t("gateway.kanban.notify.new_version") + handoff
+                                wake_new_version = True
                             notify_args["detail"] = handoff
                             msg = t(f"gateway.kanban.notify.{kind}", **notify_args)
                         elif kind == "blocked":
                             # The owner answers from this text alone: carry
                             # the whole question (and the material in it).
-                            if payload.get("reason"):
-                                notify_args["detail"] = f"\n{str(payload['reason'])[:1500]}"
-                            msg = t("gateway.kanban.notify.blocked", **notify_args)
+                            reason = str(payload.get("reason") or "")[:1500]
+                            if reason:
+                                notify_args["detail"] = f"\n{reason}"
+                            wake_question = reason
+                            # A permission for external changes is decided
+                            # only on the card, never by a chat answer.
+                            wake_approval = payload.get("kind") == "approval"
+                            msg = t(
+                                "gateway.kanban.notify.approval" if wake_approval
+                                else "gateway.kanban.notify.blocked",
+                                **notify_args,
+                            )
+                        elif kind == "promoted":
+                            # Only the owner's own step reaches here.
+                            msg = t("gateway.kanban.notify.human_step", **notify_args)
                         elif kind == "gave_up":
                             if payload.get("error"):
                                 notify_args["detail"] = f"\n{str(payload['error'])[:200]}"
@@ -853,10 +888,13 @@ class GatewayKanbanWatchersMixin:
                         # (routed to triage) belong here for the same reason
                         # ``blocked`` does. ``status`` / ``archived`` /
                         # ``unblocked`` stay out: bookkeeping.
+                        # ``promoted`` survives the quiet filter only for the
+                        # owner's own step: the chat tells the owner it is
+                        # their turn.
                         _WAKE_KINDS = (
                             "completed", "submitted", "gave_up", "crashed", "timed_out",
                             "blocked", "review_requested", "changes_requested",
-                            "block_loop_detected",
+                            "block_loop_detected", "promoted",
                         )
                         _wake_kinds = (
                             {
@@ -891,8 +929,11 @@ class GatewayKanbanWatchersMixin:
                                 )
                         if _wake_kinds:
                             _title = (task.title if task else sub["task_id"])[:120]
-                            _assignee = task.assignee if task else ""
+                            _assignee = (task.assignee if task else "") or (
+                                t("gateway.kanban.wake.owner") if _is_owner_step(task) else ""
+                            )
                             _parts = []
+                            if "promoted" in _wake_kinds: _parts.append(t("gateway.kanban.wake.human_step"))
                             if "completed" in _wake_kinds: _parts.append(t("gateway.kanban.wake.completed"))
                             if "submitted" in _wake_kinds: _parts.append(t("gateway.kanban.wake.submitted"))
                             if "gave_up" in _wake_kinds: _parts.append(t("gateway.kanban.wake.gave_up"))
@@ -926,6 +967,17 @@ class GatewayKanbanWatchersMixin:
                                     "gateway.kanban.wake.review_detail",
                                     reason=wake_review_detail,
                                 )
+                            if wake_new_version and "submitted" in _wake_kinds:
+                                _synth += "\n" + t("gateway.kanban.wake.new_version")
+                            if wake_question and "blocked" in _wake_kinds:
+                                _synth += "\n" + t(
+                                    "gateway.kanban.wake.question",
+                                    reason=wake_question,
+                                )
+                                if wake_approval:
+                                    _synth += "\n" + t("gateway.kanban.wake.approval")
+                            if "promoted" in _wake_kinds:
+                                _synth += "\n" + t("gateway.kanban.wake.human_step_guidance")
                             _synth += "\n\n" + t(
                                 "gateway.kanban.wake.guidance"
                             )

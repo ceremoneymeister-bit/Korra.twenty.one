@@ -217,3 +217,42 @@ def test_apiserver_wake_failure_rewinds_then_retries_destination(
     assert "worker-session" not in attempted_sessions
     assert _unseen_terminal_events(tid, "api_server", "origin-session") == []
 
+
+
+def _wake_texts(monkeypatch):
+    posts = []
+
+    async def fake_self_post(adapter, *, text, session_id):
+        posts.append(text)
+
+    import gateway.wake as wake_mod
+
+    monkeypatch.setattr(wake_mod, "_self_post_chat_completion", fake_self_post)
+    runner = _make_runner({Platform.API_SERVER: ApiServerLikeAdapter()})
+    asyncio.run(_run_one_notifier_tick(monkeypatch, runner))
+    return posts
+
+
+def test_apiserver_wake_carries_the_question_and_who_decides(tmp_path, monkeypatch):
+    """Live run 24.09: the web-chat wake said only «заблокирована», so the
+    main agent told the owner a NEW question was «повторное уведомление о той
+    же блокировке» and offered to pass a permission itself. The wake must
+    carry the question and say that a permission is the owner's, on the card."""
+    monkeypatch.setenv("HERMES_KANBAN_DB", str(tmp_path / "apiserver-question.db"))
+    kb.init_db()
+    conn = kb.connect()
+    try:
+        ask = kb.create_task(conn, title="Письмо", assignee="writer")
+        crm = kb.create_task(conn, title="CRM", assignee="manager")
+        for tid in (ask, crm):
+            kb.add_notify_sub(conn, task_id=tid, platform="api_server", chat_id="origin")
+            kb.claim_task(conn, tid, claimer="w")
+        kb.block_task(conn, ask, reason="Какую цену указать?", kind="needs_input")
+        kb.block_task(conn, crm, reason="Статус → «Предложение отправлено»", kind=kb.APPROVAL_BLOCK_KIND)
+    finally:
+        conn.close()
+    posts = {text.split()[2]: text for text in _wake_texts(monkeypatch)}
+    assert "Какую цену указать?" in posts[ask]
+    assert "Разрешить эти изменения" not in posts[ask]
+    assert "Статус → «Предложение отправлено»" in posts[crm]
+    assert "Разрешить эти изменения" in posts[crm]

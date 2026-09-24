@@ -5697,6 +5697,13 @@ def complete_task(
         }
         if verified_cards:
             completed_payload["verified_cards"] = verified_cards
+        if hold:
+            # A result submitted after the owner returned the previous one
+            # is a new version, not a repeat: the notifier says so, so the
+            # owner's chat does not dismiss it as a duplicate.
+            previous = submitted_version(conn, task_id)
+            if previous is not None:
+                completed_payload["previous_version"] = previous
         # Carry artifact paths in the event payload so the gateway
         # notifier can upload them as native attachments alongside the
         # completion message. Workers pass these via
