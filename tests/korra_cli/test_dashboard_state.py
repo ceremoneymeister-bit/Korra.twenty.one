@@ -113,17 +113,34 @@ def test_unreadable_store_is_an_error_not_a_zero(tmp_path):
     assert value["unreadable"] == ["Корра"]
 
 
+def _data_snapshot(root: Path) -> dict[str, int]:
+    """mtime of every file except SQLite's WAL sidecars.
+
+    Opening a quiescent WAL database even with ``mode=ro`` makes SQLite create
+    an empty ``-wal`` and its ``-shm`` index (3.50+; CI runs 3.53). That is
+    SQLite bookkeeping, not a write: the data files must stay untouched and
+    any journal that appears must stay empty (checked by the callers).
+    """
+    return {str(p): p.stat().st_mtime_ns for p in root.rglob("*")
+            if p.is_file() and not p.name.endswith(("-wal", "-shm"))}
+
+
+def _no_journal_written(root: Path, before: set[str]) -> bool:
+    return all(p.stat().st_size == 0 for p in root.rglob("*-wal") if str(p) not in before)
+
+
 def test_metrics_never_write_to_the_store(tmp_path):
     main = _agent(tmp_path, "default", "Корра")
     conn = _state_db(main.home)
     _session(conn, "a", at=_msk(23, 10))
     conn.commit()
     conn.close()
-    before = {p.name: p.stat().st_mtime_ns for p in main.home.iterdir()}
+    wal_before = {str(p) for p in main.home.rglob("*-wal")}
+    before = _data_snapshot(main.home)
     ds.metrics_section([main], period="week", now=NOW, tz=MSK)
     ds.agents_section([main])
-    after = {p.name: p.stat().st_mtime_ns for p in main.home.iterdir()}
-    assert before == after
+    assert _data_snapshot(main.home) == before
+    assert _no_journal_written(main.home, wal_before)
 
 
 def test_agents_section_reports_last_activity(tmp_path):
@@ -710,8 +727,9 @@ def test_state_route_serves_every_section_without_writing(tmp_path, monkeypatch)
     monkeypatch.setattr(ds, "list_agents", lambda: [main])
 
     def snapshot() -> dict[str, int]:
-        return {str(p): p.stat().st_mtime_ns for p in tmp_path.rglob("*") if p.is_file()}
+        return _data_snapshot(tmp_path)
 
+    wal_before = {str(p) for p in tmp_path.rglob("*-wal")}
     before = snapshot()
     client = TestClient(web_server.app)
     response = client.get(
@@ -727,6 +745,7 @@ def test_state_route_serves_every_section_without_writing(tmp_path, monkeypatch)
     assert body["metrics"]["totals"]["dialogs"] == 1
     assert body["quota"] == {"available": False, "status": "absent"}
     assert snapshot() == before
+    assert _no_journal_written(tmp_path, wal_before)
 
     # Anonymous callers get nothing.
     assert TestClient(web_server.app).get("/api/dashboard/state").status_code == 401
