@@ -177,6 +177,11 @@
           handoffStarted.current = false;
         }
         const payload = { title: title.trim(), body: body.trim(), assignee, priority: Number(priority) || 0 };
+        if (task) {
+          // Правка текста не должна писать в журнал «назначен» и «приоритет».
+          if (assignee === (task.assignee || "")) delete payload.assignee;
+          if (payload.priority === (Number(task.priority) || 0)) delete payload.priority;
+        }
         if (!task) {
           payload.tenant = tenant.trim() || null;
           payload.idempotency_key = key.current;

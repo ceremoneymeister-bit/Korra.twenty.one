@@ -95,6 +95,18 @@ describe("Доска поручений", () => {
     expect(writes()).toHaveLength(0); await click(button("Отмена")); expect(writes()).toHaveLength(0);
     expect(host.querySelector('[data-status="ready"] [data-task-id]')).not.toBeNull();
   });
+  it("правка текста не переназначает задачу и не меняет приоритет в журнале", async () => {
+    boardTasks = [{ ...task, priority: 2 }]; await renderPage(); await click(host.querySelector('[data-task-id]')!);
+    await click(button("Изменить задание"));
+    await change(field("Что нужно сделать"), "Сравнить четырёх поставщиков");
+    await click(button("Сохранить"));
+    const [, options] = writes()[0];
+    expect(options.method).toBe("PATCH");
+    const payload = JSON.parse(options.body);
+    expect(payload.title).toBe("Сравнить четырёх поставщиков");
+    expect(payload).not.toHaveProperty("assignee");
+    expect(payload).not.toHaveProperty("priority");
+  });
   it("завершает задачу только с сохранённым итогом", async () => {
     boardTasks = [task]; await renderPage(); await click(host.querySelector('[data-task-id]')!);
     await click(button("Завершить поручение")); expect(button("Завершить поручение").hasAttribute("disabled")).toBe(true);
