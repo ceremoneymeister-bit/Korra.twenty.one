@@ -1,25 +1,42 @@
 import { Link } from "react-router";
+import { CircleAlert, LoaderCircle } from "lucide-react";
 import type { StatusResponse } from "@/lib/api";
 import { isProductUiMode } from "@/lib/dashboard-flags";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/i18n";
 
-/** Gateway + session summary for the System sidebar block (no separate strip chrome). */
-export function SidebarStatusStrip({ status, reachable }: SidebarStatusStripProps) {
+/** Product footer stays quiet until the connection or gateway needs attention. */
+export function SidebarStatusStrip({ status, reachable, collapsed = false }: SidebarStatusStripProps) {
   const { t } = useI18n();
+
+  if (isProductUiMode()) {
+    const starting = reachable !== false && status?.gateway_state === "starting";
+    const message = reachable === false
+      ? "Нет связи с Коррой"
+      : status === null || gatewayLine(status, t).tone === "text-success"
+        ? null
+        : starting
+          ? "Корра запускается…"
+          : status.gateway_state === "startup_failed"
+            ? "Не удалось запустить Корру"
+            : "Корра остановлена";
+    if (!message) return null;
+    const Icon = starting ? LoaderCircle : CircleAlert;
+    return (
+      <div
+        role="status"
+        className={cn("flex items-center gap-2 px-5 py-2 text-xs leading-snug text-text-secondary", collapsed && "lg:justify-center lg:px-0")}
+        title={message}
+      >
+        <Icon aria-hidden className={cn("size-[15px] shrink-0", starting ? "animate-spin text-warning" : "text-destructive")} />
+        <span className={cn(collapsed && "lg:sr-only")}>{message}</span>
+      </div>
+    );
+  }
 
   // Обрыв связи с панелью важнее любого прошлого ответа: пока опрос не
   // доходит, про шлюз ничего не известно, и молчать об этом нельзя.
   if (reachable === false) {
-    if (isProductUiMode()) {
-      return (
-        <div className="px-5 pb-2 pt-0.5">
-          <p className="font-sans text-xs leading-snug tracking-[0.08em] text-text-secondary">
-            <span className="font-medium text-destructive">Нет связи с Коррой</span>
-          </p>
-        </div>
-      );
-    }
     return (
       <div className="px-5 pb-2 pt-0.5">
         <p className="font-sans text-xs leading-snug tracking-[0.08em] text-text-secondary">
@@ -40,22 +57,6 @@ export function SidebarStatusStrip({ status, reachable }: SidebarStatusStripProp
 
   const gw = gatewayLine(status, t);
   const { activeSessionsLabel, gatewayStatusLabel } = t.app;
-
-  // «Статус шлюза» и «Активные сессии» — слова инженера. Владельцу продукта
-  // важен один факт: на связи Корра или нет.
-  if (isProductUiMode()) {
-    const online = gw.tone === "text-success";
-    return (
-      <div className="px-5 pb-2 pt-0.5">
-        <p className="font-sans text-xs leading-snug tracking-[0.08em] text-text-secondary">
-          <span className="inline-flex items-center gap-2 font-medium text-text-primary">
-            <span aria-hidden className={cn("size-2 rounded-full", online ? "bg-primary" : "bg-muted-foreground")} />
-            {online ? "Корра на связи" : "Корра сейчас недоступна"}
-          </span>
-        </p>
-      </div>
-    );
-  }
 
   return (
     <Link
@@ -108,6 +109,7 @@ export function gatewayLine(
 
 interface SidebarStatusStripProps {
   status: StatusResponse | null;
+  collapsed?: boolean;
   /** `false` — последний опрос `/api/status` не дошёл. */
   reachable: boolean | null;
 }

@@ -294,6 +294,26 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
   border-radius: 0.625rem;
 }
 
+/* The footer stays on one row even with compact sidebar density. The exit
+   keeps its full accessible name when only its icon fits beside the theme. */
+.sidebar-controls-row {
+  container: sidebar-controls / inline-size;
+}
+
+@container sidebar-controls (max-width: 165px) {
+  .sidebar-logout-label {
+    display: none;
+  }
+}
+
+@media (pointer: coarse) {
+  @container sidebar-controls (max-width: 181px) {
+    .sidebar-logout-label {
+      display: none;
+    }
+  }
+}
+
 /* The package's default Button calls its filled action `midground`. In the
    product shell that action is semantic `primary`: route only that exact
    variant through the theme accent, leaving text, ghost and disabled chrome

@@ -955,24 +955,18 @@ export default function App() {
 
             <div
               className={cn(
-                "flex shrink-0 items-center gap-2",
-                "px-3 py-2",
-
-                isDesktopCollapsed
-                  ? "lg:flex-col lg:items-start lg:gap-3 lg:py-3"
-                  : "w-full justify-between",
+                "flex shrink-0 flex-col gap-2 px-5 pt-3 pb-1",
+                isDesktopCollapsed && "lg:items-center lg:px-0",
               )}
+              data-sidebar-controls
             >
+              <PluginSlot name="header-right" />
               <div
                 className={cn(
-                  "flex min-w-0 items-center gap-2",
-                  isDesktopCollapsed
-                    ? "lg:flex-col lg:items-start"
-                    : "w-full flex-1",
+                  "sidebar-controls-row flex min-h-[44px] w-full items-center justify-between gap-[8px]",
+                  isDesktopCollapsed && "lg:flex-col lg:gap-2",
                 )}
               >
-                <PluginSlot name="header-right" />
-
                 <SidebarIconWithTooltip
                   collapsed={isDesktopCollapsed}
                   label={t.theme?.switchTheme ?? "Сменить тему"}
@@ -980,11 +974,11 @@ export default function App() {
                 >
                   <ThemeSwitcher collapsed={isDesktopCollapsed} />
                 </SidebarIconWithTooltip>
-
+                {isProductUiMode() && <AuthWidget compact collapsed={isDesktopCollapsed} />}
               </div>
             </div>
 
-            <AuthWidget collapsed={isDesktopCollapsed} />
+            {!isProductUiMode() && <AuthWidget collapsed={isDesktopCollapsed} />}
             <div
               className={cn(
                 "flex shrink-0 flex-col",
@@ -1289,6 +1283,10 @@ function SidebarSystemActions({
     onNavigate();
   };
 
+  if (isProductUiMode()) {
+    return <SidebarStatusStrip collapsed={collapsed} reachable={reachable} status={status} />;
+  }
+
   return (
     <>
     <div
@@ -1476,7 +1474,8 @@ function SidebarIconWithTooltip({
     <div
       className={cn(
         "relative",
-        collapsed ? "group/icon w-fit" : "w-full",
+        "w-fit shrink-0",
+        collapsed && "group/icon",
       )}
       onMouseEnter={collapsed ? showTooltip : undefined}
       onMouseLeave={collapsed ? hideTooltip : undefined}

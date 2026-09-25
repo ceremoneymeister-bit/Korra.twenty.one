@@ -30,9 +30,12 @@ import { cn } from "@/lib/utils";
 import { LogOut } from "lucide-react";
 import { useI18n } from "@/i18n";
 
+const compactLogoutClassName = "group/logout inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-full text-[var(--neo-text-secondary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--neo-accent-line)]";
+
 interface AuthWidgetProps {
   className?: string;
   collapsed?: boolean;
+  compact?: boolean;
 }
 
 /** Truncate ``user_id`` to fit a small UI without revealing the full
@@ -43,7 +46,7 @@ function truncateUserId(id: string): string {
   return `${id.slice(0, 14)}…`;
 }
 
-export function AuthWidget({ className, collapsed = false }: AuthWidgetProps) {
+export function AuthWidget({ className, collapsed = false, compact = false }: AuthWidgetProps) {
   const { tr } = useI18n();
   const [me, setMe] = useState<AuthMeResponse | null>(null);
   const [hidden, setHidden] = useState(false);
@@ -95,7 +98,12 @@ export function AuthWidget({ className, collapsed = false }: AuthWidgetProps) {
 
   if (cabinetLogout) return <a href={cabinetLogout}
     aria-label="Выйти из кабинета" title="Выйти из кабинета"
-    className={cn("mx-3 my-2 inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-current/10 focus-visible:ring-2", className)}
+    className={cn(
+      compact
+        ? compactLogoutClassName
+        : "mx-3 my-2 inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-current/10 focus-visible:ring-2",
+      className,
+    )}
     onClick={event => {
       event.preventDefault();
       // If the browser restores this document from its back/forward cache,
@@ -103,7 +111,11 @@ export function AuthWidget({ className, collapsed = false }: AuthWidgetProps) {
       document.documentElement.style.visibility = "hidden";
       window.location.assign(cabinetLogout);
     }}>
-    <LogOut size={17} aria-hidden /><span className={collapsed ? "lg:sr-only" : undefined}>Выйти из кабинета</span>
+    {compact ? (
+      <CompactLogoutContent collapsed={collapsed} />
+    ) : (
+      <><LogOut size={17} aria-hidden /><span className={collapsed ? "lg:sr-only" : undefined}>Выйти из кабинета</span></>
+    )}
   </a>;
 
   // Nothing to show in ungated mode — there is no logged-in identity.
@@ -153,16 +165,15 @@ export function AuthWidget({ className, collapsed = false }: AuthWidgetProps) {
   return (
     <div
       className={cn(
-        "flex shrink-0 items-center justify-between gap-2",
-        "px-5 py-2",
-        "border-t border-current/10",
-        "text-[0.65rem] tracking-[0.05em]",
+        compact
+          ? "relative shrink-0"
+          : "flex shrink-0 items-center justify-between gap-2 border-t border-current/10 px-5 py-2 text-[0.65rem] tracking-[0.05em]",
         className,
       )}
       role="status"
       aria-label={tr("Logged in as {name}", { name: label })}
     >
-      <div className={cn("flex min-w-0 flex-col", collapsed && "lg:hidden")}>
+      <div className={cn("flex min-w-0 flex-col", compact ? "sr-only" : collapsed && "lg:hidden")}>
         <span className="truncate font-mono text-foreground/90" title={me.user_id}>
           {label}
         </span>
@@ -174,16 +185,31 @@ export function AuthWidget({ className, collapsed = false }: AuthWidgetProps) {
         type="button"
         onClick={handleLogout}
         className={cn(
-          "inline-flex min-h-11 shrink-0 items-center gap-2 rounded px-3 py-2 text-muted-foreground/70",
-          "transition-colors hover:bg-current/10 hover:text-foreground",
-          "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-current/40",
+          compact
+            ? compactLogoutClassName
+            : "inline-flex min-h-11 shrink-0 items-center gap-2 rounded px-3 py-2 text-muted-foreground/70 transition-colors hover:bg-current/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-current/40",
         )}
         aria-label={tr("Log out")}
         title={tr("Log out")}
       >
-        <LogOut className="h-3.5 w-3.5" /><span className={collapsed ? "lg:sr-only" : undefined}>Выйти</span>
+        {compact ? <CompactLogoutContent collapsed={collapsed} /> : (
+          <><LogOut className="h-3.5 w-3.5" /><span className={collapsed ? "lg:sr-only" : undefined}>Выйти</span></>
+        )}
       </button>
-      {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
+      {error && <p role="alert" className={cn("text-xs text-destructive", compact && "absolute bottom-full right-0 mb-2 w-[180px] rounded-lg bg-[var(--neo-surface)] p-3 shadow-[var(--neo-depth-2)]")}>{error}</p>}
     </div>
+  );
+}
+
+function CompactLogoutContent({ collapsed }: { collapsed: boolean }) {
+  return (
+    <span className={cn(
+      "inline-flex h-[32px] min-w-[40px] items-center justify-center gap-[6px] rounded-full bg-[var(--neo-surface)] px-[6px] text-[13px] shadow-[var(--neo-depth-1)] pointer-coarse:h-[40px]",
+      "transition-[box-shadow,color] group-hover/logout:text-[var(--neo-text-primary)] group-hover/logout:shadow-[var(--neo-inset-compact)] group-active/logout:shadow-[var(--neo-inset-compact)]",
+      collapsed && "lg:px-0",
+    )}>
+      <LogOut className="size-[15px] shrink-0" aria-hidden />
+      <span className={cn("sidebar-logout-label", collapsed && "lg:sr-only")}>Выйти</span>
+    </span>
   );
 }

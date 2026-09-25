@@ -18,8 +18,8 @@ export interface SidebarStatus {
  * its own faster interval; we keep this slower to avoid duplicate load.
  *
  * Провал опроса отдаётся наружу отдельным полем, а не молча проглатывается:
- * подвал показывает единственный постоянный индикатор состояния, и при обрыве
- * он обязан погаснуть, а не светить последним удачным ответом.
+ * подвал показывает предупреждение при обрыве, даже если сохранён прошлый
+ * удачный ответ. В штатном состоянии продуктовый подвал остаётся спокойным.
  */
 export function useSidebarStatus(profile: string | null = null): SidebarStatus {
   // One shared monitor lives with the shell, including non-chat routes.

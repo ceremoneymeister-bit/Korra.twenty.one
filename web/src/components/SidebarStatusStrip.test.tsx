@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 /**
- * Единственный постоянный индикатор состояния не имеет права врать.
+ * Предупреждение об обрыве не должно пропадать из-за старого ответа.
  *
  * До правки `useSidebarStatus` глотал ошибку опроса, а полоса продолжала
  * показывать последний удачный ответ: при полном обрыве связи чат писал «не
@@ -53,11 +53,33 @@ function render(node: React.ReactNode) {
 }
 
 describe("SidebarStatusStrip", () => {
-  it("при удачном опросе говорит, что Корра на связи", () => {
+  it("при удачном опросе оставляет подвал без сообщения", () => {
     const text = render(
       <SidebarStatusStrip reachable={true} status={RUNNING} />,
     );
-    expect(text).toContain("Корра на связи");
+    expect(text).toBe("");
+    expect(container.children).toHaveLength(0);
+  });
+
+  it("до первого ответа не сообщает о неисправности", () => {
+    render(<SidebarStatusStrip reachable={null} status={null} />);
+    expect(container.children).toHaveLength(0);
+  });
+
+  it.each([
+    ["starting", "Корра запускается"],
+    ["startup_failed", "Не удалось запустить Корру"],
+    ["stopped", "Корра остановлена"],
+  ])("показывает состояние %s, требующее внимания", (gateway_state, message) => {
+    render(<SidebarStatusStrip reachable={true} status={{ ...RUNNING, gateway_state }} />);
+    expect(container.querySelector('[role="status"]')?.textContent).toContain(message);
+  });
+
+  it("убирает предупреждение после восстановления связи", () => {
+    render(<SidebarStatusStrip reachable={false} status={RUNNING} />);
+    expect(container.textContent).toContain("Нет связи");
+    render(<SidebarStatusStrip reachable={true} status={RUNNING} />);
+    expect(container.children).toHaveLength(0);
   });
 
   it("при обрыве не показывает прошлый удачный статус", () => {

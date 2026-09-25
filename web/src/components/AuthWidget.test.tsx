@@ -26,3 +26,22 @@ it("does not invent an authenticated session for a local panel", async () => {
   await act(async () => root.render(<AuthWidget />));
   expect(host.textContent).toBe("");
 });
+
+it("keeps the full accessible name and cabinet route in the compact footer", async () => {
+  state.base = "/c/probe";
+  await act(async () => root.render(<AuthWidget compact />));
+  const link = host.querySelector("a");
+  expect(link?.textContent).toBe("Выйти");
+  expect(link?.getAttribute("aria-label")).toBe("Выйти из кабинета");
+  expect(link?.getAttribute("href")).toBe("/cab/logout");
+});
+
+it("keeps OAuth logout failures visible in the compact footer", async () => {
+  window.__HERMES_AUTH_REQUIRED__ = true;
+  state.getAuthMe.mockResolvedValue({ user_id: "test-user", provider: "test" });
+  state.logout.mockRejectedValue(new Error("offline"));
+  await act(async () => root.render(<AuthWidget compact />));
+  await act(async () => host.querySelector("button")?.click());
+  expect(state.logout).toHaveBeenCalledOnce();
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain("Не удалось выйти");
+});
