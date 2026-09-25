@@ -778,6 +778,7 @@ def _resolve_minimax_tts_runtime(
 # Built-in provider names. Any ``tts.provider`` value NOT in this set is
 # interpreted as a reference to ``tts.providers.<name>``.
 BUILTIN_TTS_PROVIDERS = frozenset({
+    "compatible",
     "edge",
     "elevenlabs",
     "openai",
@@ -1766,6 +1767,11 @@ def _generate_elevenlabs(text: str, output_path: str, tts_config: Dict[str, Any]
     Returns:
         Path to the saved audio file.
     """
+    from korra_cli.agent_voice import settings as agent_voice_settings
+    managed_voice = agent_voice_settings()
+    if managed_voice is not None:
+        from korra_cli.agent_voice import generate_elevenlabs
+        return generate_elevenlabs(text, output_path, tts_config)
     api_key = (_resolve_provider_key("ELEVENLABS_API_KEY", "elevenlabs") or "")
     if not api_key:
         raise ValueError("ELEVENLABS_API_KEY not set. Get one at https://elevenlabs.io/")
@@ -3250,7 +3256,7 @@ def _text_to_speech_single(
             file_path = out_dir / f"tts_{timestamp}.{fmt}"
         # Use .ogg for Telegram with providers that support native Opus output,
         # otherwise fall back to .mp3 (Edge TTS will attempt ffmpeg conversion later).
-        elif want_opus and provider in {"openai", "elevenlabs", "mistral", "gemini"}:
+        elif want_opus and provider in {"openai", "elevenlabs", "mistral", "gemini", "compatible"}:
             file_path = out_dir / f"tts_{timestamp}.ogg"
         else:
             file_path = out_dir / f"tts_{timestamp}.mp3"
@@ -3284,9 +3290,15 @@ def _text_to_speech_single(
         ) is not None:
             file_str = _plugin_path
 
+        elif provider == "compatible":
+            from korra_cli.agent_voice import generate_compatible
+            file_str = generate_compatible(text, file_str, tts_config)
+
         elif provider == "elevenlabs":
             try:
-                _import_elevenlabs()
+                from korra_cli.agent_voice import settings as agent_voice_settings
+                if agent_voice_settings() is None:
+                    _import_elevenlabs()
             except ImportError:
                 return json.dumps({
                     "success": False,
@@ -3457,7 +3469,7 @@ def _text_to_speech_single(
             if opus_path:
                 file_str = opus_path
                 voice_compatible = True
-        elif provider in {"elevenlabs", "openai", "mistral", "gemini"}:
+        elif provider in {"elevenlabs", "openai", "mistral", "gemini", "compatible"}:
             voice_compatible = want_opus and file_str.endswith(".ogg")
 
         file_size = os.path.getsize(file_str)
@@ -3528,6 +3540,13 @@ def text_to_speech_tool(
     """
     if not text or not text.strip():
         return tool_error("Text is required", success=False)
+
+    from korra_cli.agent_voice import settings as agent_voice_settings
+    managed_voice = agent_voice_settings()
+    if managed_voice is not None and not managed_voice.get("enabled"):
+        return tool_error("Голос агента выключен в настройках", success=False)
+    if managed_voice is not None and provider and provider != managed_voice.get("provider"):
+        return tool_error("Используйте сервис, выбранный в настройках голоса агента", success=False)
 
     # Normalize text via the shared cleaner: markdown, emoji, think blocks,
     # verifier footer, units, newline flattening.
@@ -3606,7 +3625,7 @@ def text_to_speech_tool(
         if command_provider_config is not None:
             fmt = _get_command_tts_output_format(command_provider_config)
             base_path = out_dir / f"tts_{timestamp}.{fmt}"
-        elif want_opus and provider in {"openai", "elevenlabs", "mistral", "gemini"}:
+        elif want_opus and provider in {"openai", "elevenlabs", "mistral", "gemini", "compatible"}:
             base_path = out_dir / f"tts_{timestamp}.ogg"
         else:
             base_path = out_dir / f"tts_{timestamp}.mp3"
@@ -3723,6 +3742,18 @@ def check_tts_requirements() -> bool:
     """
     tts_config = _load_tts_config()
     provider = _get_provider(tts_config)
+    from korra_cli.agent_voice import profile_key, settings as agent_voice_settings
+    managed_voice = agent_voice_settings()
+    if managed_voice is not None and not managed_voice.get("enabled"):
+        return False
+    if provider == "compatible":
+        from korra_cli.agent_voice import validate_endpoint
+        section = tts_config.get("compatible") or {}
+        try:
+            validate_endpoint(str(section.get("base_url") or ""))
+        except ValueError:
+            return False
+        return bool(section.get("model") and section.get("voice"))
     command_config = _resolve_command_provider_config(provider, tts_config)
     if command_config is not None:
         return True
@@ -3734,6 +3765,8 @@ def check_tts_requirements() -> bool:
         except ImportError:
             return _check_neutts_available()
     if provider == "elevenlabs":
+        if managed_voice is not None:
+            return bool(profile_key("elevenlabs"))
         try:
             _import_elevenlabs()
         except ImportError:

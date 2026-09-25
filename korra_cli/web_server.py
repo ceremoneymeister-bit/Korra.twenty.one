@@ -8126,6 +8126,8 @@ from korra_cli.web_routers.sessions import (  # noqa: E402,F401 — legacy re-ex
 from korra_cli.web_routers import profiles as _profiles_routes  # noqa: E402
 
 app.include_router(_profiles_routes.sessions_router)
+from korra_cli.web_routers import agent_voice as _agent_voice_routes  # noqa: E402
+app.include_router(_agent_voice_routes.router)
 from korra_cli.web_routers.profiles import (  # noqa: E402,F401 — legacy re-exports; tests call these via web_server.<name>
     get_profiles_sessions,
     get_profiles_sessions_sidebar,

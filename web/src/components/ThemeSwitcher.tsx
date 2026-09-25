@@ -9,8 +9,8 @@ import { useTheme } from "@/themes";
  * A direct light/dark control for the bottom of the sidebar.
  *
  * The expanded sidebar shows a compact 32 px pill with two icon-only
- * segments instead of a full-width block; the narrow rail shows one toggle
- * with the current mode. With a mouse the targets stay small so the control
+ * segments instead of a full-width block; the narrow rail shows the mode
+ * pressing it will choose. With a mouse the targets stay small so the control
  * does not crowd the sidebar; on touch screens (`pointer-coarse`) they grow
  * back to finger size.
  */
@@ -29,6 +29,7 @@ export function ThemeSwitcher({ collapsed = false }: ThemeSwitcherProps) {
         <button
           aria-busy={isSaving || undefined}
           aria-label={isDark ? "Включить светлую тему" : "Включить тёмную тему"}
+          data-theme-control
           className={cn(
             "grid size-[36px] place-items-center rounded-full pointer-coarse:size-[44px]",
             "text-[var(--neo-text-secondary)] transition-[box-shadow,color,opacity]",
@@ -39,7 +40,7 @@ export function ThemeSwitcher({ collapsed = false }: ThemeSwitcherProps) {
           onClick={() => chooseTheme(isDark ? "light" : "dark")}
           type="button"
         >
-          {isDark ? <Moon aria-hidden className="size-[16px]" /> : <Sun aria-hidden className="size-[16px]" />}
+          {isDark ? <Sun aria-hidden className="size-[16px]" /> : <Moon aria-hidden className="size-[16px]" />}
         </button>
       ) : (
         <div
@@ -95,18 +96,24 @@ function ThemeChoice({ active, children, label, onClick }: ThemeChoiceProps) {
     <button
       aria-label={label}
       aria-pressed={active}
+      data-theme-control
       className={cn(
-        "grid h-full place-items-center rounded-full",
-        "transition-[box-shadow,color,background-color]",
+        "relative grid h-full place-items-center rounded-full",
         "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--neo-accent-line)]",
         active
-          ? "bg-[var(--neo-surface)] text-[var(--neo-text-primary)] shadow-[var(--neo-depth-1)]"
+          ? "text-[var(--neo-text-primary)]"
           : "text-[var(--neo-text-secondary)] hover:text-[var(--neo-text-primary)]",
       )}
       onClick={onClick}
       type="button"
     >
-      {children}
+      <span className={cn(
+        "absolute inset-x-0 top-0 grid h-[26px] place-items-center rounded-full pointer-coarse:h-[34px]",
+        "transition-[box-shadow,color,background-color]",
+        active && "bg-[var(--neo-surface)] shadow-[var(--neo-depth-1)]",
+      )}>
+        {children}
+      </span>
     </button>
   );
 }

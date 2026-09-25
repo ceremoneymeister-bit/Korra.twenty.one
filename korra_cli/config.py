@@ -4526,8 +4526,8 @@ def _env_line_defines_key(
     ) == _env_var_policy_name(key, is_windows=is_windows)
 
 
-def save_env_value(key: str, value: str):
-    """Save or update a value in ~/.hermes/.env."""
+def save_env_value(key: str, value: str, *, update_process: bool = True):
+    """Save a profile .env value; optionally update the process environment."""
     if is_managed():
         managed_error(f'задать {key}')
         return
@@ -4613,7 +4613,8 @@ def save_env_value(key: str, value: str):
             pass
         raise
 
-    korra_env_set(os.environ, key, value)
+    if update_process:
+        korra_env_set(os.environ, key, value)
     invalidate_env_cache()
 
 
@@ -4636,8 +4637,8 @@ def custom_endpoint_key_env(identity: str) -> str:
     return f"HERMES_CUSTOM_{slug}_API_KEY" if slug else "HERMES_CUSTOM_API_KEY"
 
 
-def remove_env_value(key: str) -> bool:
-    """Remove a key from ~/.hermes/.env and os.environ.
+def remove_env_value(key: str, *, update_process: bool = True) -> bool:
+    """Remove a profile .env key; optionally remove it from os.environ.
 
     Returns True if the key was found and removed, False otherwise.
     """
@@ -4659,7 +4660,8 @@ def remove_env_value(key: str) -> bool:
         raise ValueError(f'Неверное имя переменной среды: {key!r}')
     env_path = get_env_path()
     if not env_path.exists():
-        korra_env_pop(os.environ, key)
+        if update_process:
+            korra_env_pop(os.environ, key)
         return False
 
     read_kw = {"encoding": "utf-8-sig", "errors": "replace"}
@@ -4710,7 +4712,8 @@ def remove_env_value(key: str) -> bool:
                 pass
             raise
 
-    korra_env_pop(os.environ, key)
+    if update_process:
+        korra_env_pop(os.environ, key)
     invalidate_env_cache()
     return found
 

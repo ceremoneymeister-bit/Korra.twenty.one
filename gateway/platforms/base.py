@@ -256,13 +256,9 @@ def build_auto_tts_output_path(platform) -> str:
     from tools.tts_tool import OPUS_VOICE_PLATFORMS
 
     ext = "ogg" if _platform_name(platform) in OPUS_VOICE_PLATFORMS else "mp3"
-    audio_path = os.path.join(
-        tempfile.gettempdir(),
-        "hermes_voice",
-        f"tts_reply_{uuid.uuid4().hex[:12]}.{ext}",
-    )
-    os.makedirs(os.path.dirname(audio_path), exist_ok=True)
-    return audio_path
+    # The box constrains writes to DATA. Its profile-scoped audio cache is
+    # writable under that policy, unlike the process-wide /tmp directory.
+    return str(get_audio_cache_dir() / f"tts_reply_{uuid.uuid4().hex[:12]}.{ext}")
 
 
 def utf16_len(s: str) -> int:
@@ -6747,7 +6743,8 @@ class BasePlatformAdapter(ABC):
                 _tts_path = None
                 _tts_paths: List[str] = []
                 _tts_requested_path = None
-                if (self._should_auto_tts_for_chat(event.source.chat_id)
+                if (not getattr(event, "_korra_voice_handled", False)
+                        and self._should_auto_tts_for_chat(event.source.chat_id)
                         and event.message_type == MessageType.VOICE
                         and text_content
                         and not media_files

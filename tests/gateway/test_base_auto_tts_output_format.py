@@ -86,6 +86,22 @@ def test_output_path_is_mp3_for_non_opus_platforms(platform):
     assert path.endswith(".mp3"), path
 
 
+def test_auto_tts_path_is_allowed_under_installed_data_root(tmp_path, monkeypatch):
+    from pathlib import Path
+    from agent.file_safety import is_write_denied
+    from korra_constants import set_hermes_home_override, reset_hermes_home_override
+    monkeypatch.setenv("KORRA_WRITE_SAFE_ROOT", str(tmp_path))
+    profile = tmp_path / "profiles/listener"
+    token = set_hermes_home_override(profile)
+    try:
+        path = build_auto_tts_output_path(Platform.TELEGRAM)
+        assert Path(path).is_relative_to(profile)
+        assert not is_write_denied(path)
+        assert path.endswith(".ogg")
+    finally:
+        reset_hermes_home_override(token)
+
+
 # ---------------------------------------------------------------------------
 # Base-adapter auto-TTS block: explicit output_path, no contextvar reliance
 # ---------------------------------------------------------------------------

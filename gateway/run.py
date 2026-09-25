@@ -23988,6 +23988,18 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         chat_id = event.source.chat_id
         voice_key = self._voice_key(event.source.platform, chat_id)
         voice_mode = self._voice_mode.get(voice_key)
+        configured_mode = None
+        if event.source.platform == Platform.TELEGRAM:
+            from korra_cli.agent_voice import telegram_mode
+            configured_mode = telegram_mode()
+            if configured_mode is not None:
+                # Base-adapter postprocessing runs after the profile scope exits.
+                # Handle managed voices here, including opt-out, exactly once.
+                event._korra_voice_handled = True
+            if configured_mode == "off":
+                return False
+            if voice_mode is None and configured_mode is not None:
+                voice_mode = configured_mode
         is_voice_input = (event.message_type == MessageType.VOICE)
 
         adapter = self.adapters.get(event.source.platform)
@@ -24035,7 +24047,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # When streaming already delivered the text (already_sent=True),
         # the base adapter will receive None and can't run auto-TTS,
         # so the runner must take over.
-        if is_voice_input and not already_sent:
+        if is_voice_input and not already_sent and configured_mode is None:
             return False
 
         return True

@@ -197,7 +197,7 @@ function failedReply(status: number, message: string) {
 }
 
 /** Открыть мастер и дождаться списка профилей и моделей. */
-async function openWizard() {
+async function openWizard(mode: "custom" | "catalog" = "custom") {
   await render(
     <MemoryRouter initialEntries={["/profiles/new"]}>
       <PageHeaderHost>
@@ -207,6 +207,7 @@ async function openWizard() {
     </MemoryRouter>,
   );
   await flush();
+  if (mode === "custom") await click(findButton("Создать своего"));
 }
 
 const nameInput = () => container.querySelector<HTMLInputElement>("#pb-name")!;
@@ -263,6 +264,54 @@ afterEach(async () => {
 });
 
 describe("ProfileBuilderPage — мастер создания агента", () => {
+  it("сначала предлагает способ создания и не выдаёт будущие пакеты за готовые", async () => {
+    await openWizard("catalog");
+    expect(findButton("Готовый агент")?.getAttribute("aria-pressed")).toBe("true");
+    expect(findButton("Создать своего")?.getAttribute("aria-pressed")).toBe("false");
+    expect(nameInput()).toBeNull();
+    expect(findButton("Дизайнер")?.getAttribute("aria-pressed")).toBe("false");
+    for (const id of ["korra.secretary", "korra.psychologist", "korra.chinese-teacher", "korra.english-teacher"]) {
+      const card = container.querySelector<HTMLButtonElement>(`[data-agent-template="${id}"]`)!;
+      expect(card.disabled).toBe(true);
+      expect(card.textContent).toContain("Скоро");
+      await click(card);
+    }
+    expect(apiMocks.createProfile).not.toHaveBeenCalled();
+    expect(nameInput()).toBeNull();
+    await click(findButton("Дизайнер"));
+    expect(findButton("Дизайнер")?.getAttribute("aria-pressed")).toBe("true");
+    expect(findButton("Дизайнер")?.textContent).toContain("Выбран");
+  });
+
+  it("подключает будущую карточку только по реальному пакету из каталога", async () => {
+    apiMocks.getAgentTemplates.mockResolvedValueOnce({ templates: [{
+      id: "korra.secretary", name: "Секретарь", version: "1.0.0", description: "Помощник по делам", requirements: [],
+    }] });
+    await openWizard("catalog");
+    expect(container.querySelectorAll('[data-agent-template="korra.secretary"]')).toHaveLength(1);
+    const secretary = container.querySelector<HTMLButtonElement>('[data-agent-template="korra.secretary"]')!;
+    expect(secretary.disabled).toBe(false);
+    await click(secretary);
+    await click(findButton("Добавить агента"));
+    await flush();
+    expect(apiMocks.createProfile).toHaveBeenCalledWith(expect.objectContaining({
+      template_id: "korra.secretary", template_version: "1.0.0", soul: undefined,
+    }));
+    expect(container.textContent).not.toContain("GPT Image");
+  });
+
+  it("дополнительные поля открываются отдельно от имени и задачи", async () => {
+    await openWizard();
+    expect(idInput()).toBeNull();
+    expect(providerSelect()).toBeNull();
+    expect(container.querySelector('[data-starter]')).toBeNull();
+    expect(findButton("Создать своего")?.getAttribute("aria-pressed")).toBe("true");
+    await click(findButton("Модель и подключение"));
+    expect(providerSelect()).not.toBeNull();
+    await click(findButton("Дополнительно"));
+    expect(idInput()).not.toBeNull();
+  });
+
   it("называется «Новый агент» и спрашивает имя и роль, а не slug", async () => {
     await openWizard();
 
@@ -278,6 +327,7 @@ describe("ProfileBuilderPage — мастер создания агента", ()
 
   it("выводит системное имя транслитом и обходит занятые", async () => {
     await openWizard();
+    await click(findButton("Дополнительно"));
 
     await enterText(nameInput(), "Учитель китайского");
     expect(idInput().value).toBe("uchitel-kitayskogo");
@@ -289,6 +339,7 @@ describe("ProfileBuilderPage — мастер создания агента", ()
 
   it("даёт поправить системное имя руками и объясняет ошибку", async () => {
     await openWizard();
+    await click(findButton("Дополнительно"));
     await enterText(nameInput(), "Секретарь");
 
     await enterText(idInput(), "Секретарь");
@@ -308,6 +359,7 @@ describe("ProfileBuilderPage — мастер создания агента", ()
 
   it("заготовка роли подставляет имя и текст, а свой текст можно вернуть", async () => {
     await openWizard();
+    await click(findButton("Примеры описания"));
     const secretary = ROLE_STARTERS.find((starter) => starter.id === "secretary")!;
     const requests = ROLE_STARTERS.find((starter) => starter.id === "requests")!;
 
@@ -336,6 +388,7 @@ describe("ProfileBuilderPage — мастер создания агента", ()
 
   it("подставляет модель главного агента и показывает, что доступ настроен", async () => {
     await openWizard();
+    await click(findButton("Модель и подключение"));
 
     expect(providerSelect()?.textContent).toContain("Как у главного агента");
     expect(modelSelect()).toBeNull();
@@ -346,6 +399,7 @@ describe("ProfileBuilderPage — мастер создания агента", ()
 
   it("выбирает модель в два шага: провайдер по-русски, потом его модели", async () => {
     await openWizard();
+    await click(findButton("Модель и подключение"));
 
     await click(providerSelect());
     expect(optionLabels(providerSelect())).toEqual([
@@ -384,6 +438,7 @@ describe("ProfileBuilderPage — мастер создания агента", ()
 
   it("предупреждает о провайдере без ключа", async () => {
     await openWizard();
+    await click(findButton("Модель и подключение"));
 
     await pickOption(providerSelect(), "Anthropic (Claude)");
     expect(modelSelect()?.textContent).toContain("claude-opus-5[1m]");
@@ -599,11 +654,13 @@ describe("ProfileBuilderPage — мастер создания агента", ()
       },
     });
     vi.mocked(globalThis.fetch).mockResolvedValueOnce(okReply("Я — Дизайнер."));
-    await openWizard();
+    await openWizard("catalog");
     await click(findButton("Дизайнер"));
     expect(nameInput().value).toBe("Дизайнер");
     expect(roleInput()).toBeNull();
-    expect(findButton("Дополнительно")).toBeUndefined();
+    await click(findButton("Дополнительно"));
+    expect(container.querySelector("#pb-clone")).toBeNull();
+    expect(idInput()).not.toBeNull();
     expect(container.textContent).toContain("GPT Image 2.5 настраивается автоматически");
     await click(findButton("Добавить агента"));
     await flush();
@@ -636,7 +693,7 @@ describe("ProfileBuilderPage — мастер создания агента", ()
       },
     });
     vi.mocked(globalThis.fetch).mockResolvedValueOnce(okReply("Я — Дизайнер."));
-    await openWizard();
+    await openWizard("catalog");
     await click(findButton("Дизайнер"));
     await click(findButton("Добавить агента"));
     await flush();
@@ -650,7 +707,7 @@ describe("ProfileBuilderPage — мастер создания агента", ()
   it("после потерянного ответа повторяет ту же операцию", async () => {
     apiMocks.createProfile.mockRejectedValueOnce(new Error("Network error"));
     apiMocks.createProfile.mockResolvedValueOnce({ ok: true, name: "designer", model_set: false });
-    await openWizard();
+    await openWizard("catalog");
     await click(findButton("Дизайнер"));
     await click(findButton("Добавить агента"));
     await click(findButton("Добавить агента"));
@@ -666,6 +723,7 @@ describe("ProfileBuilderPage — мастер создания агента", ()
     await openWizard();
     await enterText(nameInput(), "Помощник");
     await enterText(roleInput(), "Моя собственная роль");
+    await click(findButton("Готовый агент"));
     await click(findButton("Дизайнер"));
     await click(findButton("Создать своего"));
     expect(nameInput().value).toBe("Помощник");
@@ -674,9 +732,11 @@ describe("ProfileBuilderPage — мастер создания агента", ()
 
   it("отказ каталога оставляет свой мастер и позволяет повторить загрузку", async () => {
     apiMocks.getAgentTemplates.mockRejectedValueOnce(new Error("unavailable"));
-    await openWizard();
+    await openWizard("catalog");
     expect(container.textContent).toContain("Не удалось загрузить готовых агентов");
+    await click(findButton("Создать своего"));
     expect(nameInput()).not.toBeNull();
+    await click(findButton("Готовый агент"));
     await click(findButton("Повторить загрузку"));
     expect(findButton("Дизайнер")).toBeDefined();
   });
@@ -689,6 +749,7 @@ describe("ProfileBuilderPage — мастер создания агента", ()
     await pickOption(container.querySelector("#pb-clone"), "Секретарь (sekretar)");
     await flush();
 
+    await click(findButton("Модель и подключение"));
     expect(providerSelect()?.textContent).toContain("Как у агента-источника");
     expect(container.textContent).toContain("dario · claude-sonnet-5 — настройки подключения найдены.");
 
