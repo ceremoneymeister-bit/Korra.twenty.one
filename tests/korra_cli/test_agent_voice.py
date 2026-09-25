@@ -101,6 +101,25 @@ def test_synthesis_error_does_not_expose_provider_secret(client, monkeypatch):
     assert "secret-should-not-leak" not in reply.text
 
 
+def test_real_tts_api_respects_installed_image_write_root(client, monkeypatch):
+    import httpx
+    http, root = client
+    monkeypatch.setenv("KORRA_WRITE_SAFE_ROOT", str(root))
+    assert http.post("/api/profiles", json={"name": "listener", "no_skills": True}).status_code == 200
+    assert http.put("/api/profiles/listener/voice", json=draft()).status_code == 200
+    requests = []
+    def audio_service(request):
+        requests.append(request)
+        return httpx.Response(200, content=b"ID3fixture", headers={"content-type": "audio/mpeg"})
+    client_class = httpx.Client
+    monkeypatch.setattr(httpx, "Client", lambda **kw: client_class(transport=httpx.MockTransport(audio_service), **kw))
+    result = http.post("/api/profiles/listener/voice/speak", json={"text": "Привет"})
+    assert result.status_code == 200, result.text
+    assert result.json()["clips"] == ["data:audio/mpeg;base64,SUQzZml4dHVyZQ=="]
+    assert len(requests) == 1
+    assert not list((root / "profiles/listener").rglob("korra-voice-*"))
+
+
 @pytest.mark.parametrize("mode,kind,expected", [("all", "text", True), ("voice_only", "text", False), ("voice_only", "voice", True), ("off", "voice", False)])
 def test_telegram_mode_handles_voice_in_scoped_runner_once(tmp_path, mode, kind, expected):
     from gateway.run import GatewayRunner

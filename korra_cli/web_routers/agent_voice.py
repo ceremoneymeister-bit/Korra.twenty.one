@@ -142,8 +142,10 @@ async def speak(name: str, body: SpeechRequest):
             if not value["enabled"]:
                 raise HTTPException(409, "Сначала включите и сохраните голос агента")
             from tools.tts_tool import text_to_speech_tool
+            from gateway.platforms.base import get_audio_cache_dir
             # Own temporary directory: cleanup every chunk even on partial failure.
-            with tempfile.TemporaryDirectory(prefix="korra-voice-") as directory:
+            # The installed image permits tool output only under DATA, not /tmp.
+            with tempfile.TemporaryDirectory(prefix="korra-voice-", dir=get_audio_cache_dir()) as directory:
                 result = json.loads(text_to_speech_tool(body.text, output_path=str(Path(directory) / "speech.mp3"), provider=value["provider"]))
                 if not result.get("success"):
                     raise HTTPException(502, "Не удалось озвучить ответ. Проверьте сервис, ключ, модель и голос.")
