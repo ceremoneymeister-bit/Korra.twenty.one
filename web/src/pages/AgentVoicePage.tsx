@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { ArrowLeft, Volume2 } from "lucide-react";
 import { Button } from "@nous-research/ui/ui/components/button";
@@ -8,7 +8,7 @@ import { Label } from "@nous-research/ui/ui/components/label";
 import { Select, SelectOption } from "@nous-research/ui/ui/components/select";
 import { useProfileScope } from "@/contexts/useProfileScope";
 import { usePageHeader } from "@/contexts/usePageHeader";
-import { agentVoiceApi, type AgentVoiceSettings } from "@/lib/agent-voice";
+import { agentVoiceApi, releaseSpeechClips, type AgentVoiceSettings } from "@/lib/agent-voice";
 
 export default function AgentVoicePage() {
   const { profile, profiles } = useProfileScope();
@@ -29,6 +29,9 @@ export function VoiceForm({ profile, name }: { profile: string; name: string }) 
   const [notice, setNotice] = useState("");
   const [voices, setVoices] = useState<{ id: string; name: string }[]>([]);
   const [clips, setClips] = useState<string[]>([]);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useEffect(() => () => releaseSpeechClips(clips), [clips]);
   useEffect(() => {
     let current = true;
     void agentVoiceApi.get(profile).then(result => { if (current) setValue(result); })
@@ -56,7 +59,11 @@ export function VoiceForm({ profile, name }: { profile: string; name: string }) 
   }
   async function preview() {
     setBusy(true); setError(""); setClips([]);
-    try { setClips((await agentVoiceApi.speak(profile, "Здравствуйте! Это мой голос. Я рядом и готов помочь.")).clips); }
+    try {
+      const result = await agentVoiceApi.speak(profile, "Здравствуйте! Это мой голос. Я рядом и готов помочь.");
+      if (mounted.current) setClips(result.clips);
+      else releaseSpeechClips(result.clips);
+    }
     catch { setError("Не удалось создать пробу. Проверьте подключение, модель и голос."); }
     finally { setBusy(false); }
   }

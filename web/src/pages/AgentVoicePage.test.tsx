@@ -5,7 +5,7 @@ import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { VoiceForm } from "./AgentVoicePage";
 const api = vi.hoisted(() => ({ get: vi.fn(), save: vi.fn(), voices: vi.fn(), speak: vi.fn() }));
-vi.mock("@/lib/agent-voice", () => ({ agentVoiceApi: api }));
+vi.mock("@/lib/agent-voice", async (original) => ({ ...await original<typeof import("@/lib/agent-voice")>(), agentVoiceApi: api }));
 const settings = { enabled: false, provider: "elevenlabs", voice: "warm", model: "eleven_multilingual_v2", base_url: "", speed: 1, web_mode: "manual", telegram_mode: "off", has_key: false };
 let host: HTMLDivElement, root: Root;
 beforeEach(() => {

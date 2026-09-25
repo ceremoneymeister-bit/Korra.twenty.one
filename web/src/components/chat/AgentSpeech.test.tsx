@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentSpeech } from "./AgentSpeech";
 import type { AgentVoiceSettings } from "@/lib/agent-voice";
 const speak = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/agent-voice", () => ({ agentVoiceApi: { speak } }));
+vi.mock("@/lib/agent-voice", async (original) => ({ ...await original<typeof import("@/lib/agent-voice")>(), agentVoiceApi: { speak } }));
 const settings: AgentVoiceSettings = { enabled: true, provider: "compatible", voice: "warm", model: "tts", base_url: "http://localhost/v1", speed: 1, web_mode: "auto", telegram_mode: "off", has_key: false };
 let host: HTMLDivElement, root: Root;
 beforeEach(() => {

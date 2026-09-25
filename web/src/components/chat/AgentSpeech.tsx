@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Volume2 } from "lucide-react";
-import { agentVoiceApi, type AgentVoiceSettings } from "@/lib/agent-voice";
+import { agentVoiceApi, releaseSpeechClips, type AgentVoiceSettings } from "@/lib/agent-voice";
 
 interface AgentSpeechProps {
   profile: string;
@@ -21,6 +21,7 @@ export function AgentSpeech({ profile, text, streaming, active, settings }: Agen
   const audio = useRef<HTMLAudioElement>(null);
   const activeRef = useRef(active);
   useEffect(() => { activeRef.current = active; }, [active]);
+  useEffect(() => () => releaseSpeechClips(clips), [clips]);
 
   async function speak(autoplay: boolean) {
     if (inFlight.current || clips.length || !settings?.enabled) return;
@@ -30,6 +31,7 @@ export function AgentSpeech({ profile, text, streaming, active, settings }: Agen
     try {
       const result = await agentVoiceApi.speak(profile, text);
       if (request.current === current) { setClips(result.clips); setPlay(autoplay && activeRef.current); }
+      else releaseSpeechClips(result.clips);
     } catch { if (request.current === current) setError("Озвучка недоступна. Можно повторить; текст ответа сохранён."); }
     finally { if (request.current === current) { inFlight.current = false; setLoading(false); } }
   }
