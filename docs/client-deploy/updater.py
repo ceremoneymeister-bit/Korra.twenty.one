@@ -1131,7 +1131,11 @@ class Updater:
             self.receipt["error_code"] = "expected_target_mismatch"
             self.receipt["target_image_id"] = info["Id"]
             raise UpdateError("Resolved Docker image differs from the approved target image")
-        self.free_space(int(info.get("Size", 0)))
+        # pull/load (or inspection of a cached image) has already put the image
+        # on disk. disk_usage now excludes those occupied bytes. Reserve only
+        # the remaining backup/restore work, not a second copy of the image.
+        self.receipt["resolved_image_bytes"] = int(info.get("Size", 0))
+        self.free_space()
         return info["Id"]
 
     def protect_image(self, image, purpose):

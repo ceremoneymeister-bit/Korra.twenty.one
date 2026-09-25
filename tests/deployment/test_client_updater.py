@@ -1207,6 +1207,39 @@ def test_tar_resolver_uses_verified_oci_or_classic_docker_identity(updater, tmp_
     assert seen[0][0] == "load"
 
 
+@pytest.mark.parametrize("source", ["pull", "cached", "archive"])
+@pytest.mark.parametrize("sufficient", [True, False])
+def test_resolved_image_space_counts_only_remaining_work(updater, tmp_path, monkeypatch, source, sufficient):
+    """An installed image consumes disk already; backup headroom still must fit."""
+    archive = tmp_path / "image.tar"
+    expected = saved_image_archive(archive)[0] if source == "archive" else NEW
+    reference = {"pull": "registry.example/korra:release", "cached": NEW,
+                 "archive": str(archive)}[source]
+    seen = []
+
+    def docker(*args, **kwargs):
+        seen.append(args)
+        if args[0] in {"pull", "load"}:
+            return "ok"
+        if args[:2] == ("image", "inspect"):
+            return json.dumps([{"Id": expected, "Size": 8 * 1024**3}])
+        raise AssertionError(args)
+
+    updater.docker = docker
+    updater.free_space = u.Updater.free_space.__get__(updater)
+    # Available space is measured after pull/load, with the image on disk.
+    free = (2 * 1024**3 + 100 * 1024**2) if sufficient else 1024**3
+    monkeypatch.setattr(u.shutil, "disk_usage", lambda path: types.SimpleNamespace(free=free))
+    if sufficient:
+        assert updater.resolve_image(reference) == expected
+    else:
+        with pytest.raises(u.UpdateError, match="Insufficient space"):
+            updater.resolve_image(reference)
+    assert any(call[:2] == ("image", "inspect") for call in seen)
+    if source != "cached":
+        assert seen[0][0] == ("load" if source == "archive" else "pull")
+
+
 def test_classic_docker_tar_without_oci_index(tmp_path):
     path = tmp_path / "classic.tar"
     ids = saved_image_archive(path, oci=False)
