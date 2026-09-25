@@ -9,8 +9,8 @@ import { useTheme } from "@/themes";
  * A direct light/dark control for the bottom of the sidebar.
  *
  * The expanded sidebar shows a compact 32 px pill with two icon-only
- * segments instead of a full-width block; the narrow rail shows one toggle
- * with the current mode. With a mouse the targets stay small so the control
+ * segments instead of a full-width block; the narrow rail shows the mode
+ * pressing it will choose. With a mouse the targets stay small so the control
  * does not crowd the sidebar; on touch screens (`pointer-coarse`) they grow
  * back to finger size.
  */
@@ -39,7 +39,7 @@ export function ThemeSwitcher({ collapsed = false }: ThemeSwitcherProps) {
           onClick={() => chooseTheme(isDark ? "light" : "dark")}
           type="button"
         >
-          {isDark ? <Moon aria-hidden className="size-[16px]" /> : <Sun aria-hidden className="size-[16px]" />}
+          {isDark ? <Sun aria-hidden className="size-[16px]" /> : <Moon aria-hidden className="size-[16px]" />}
         </button>
       ) : (
         <div
@@ -97,10 +97,10 @@ function ThemeChoice({ active, children, label, onClick }: ThemeChoiceProps) {
       aria-pressed={active}
       className={cn(
         "grid h-full place-items-center rounded-full",
-        "transition-[box-shadow,color,background-color]",
+        "transition-[color,box-shadow]",
         "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--neo-accent-line)]",
         active
-          ? "bg-[var(--neo-surface)] text-[var(--neo-text-primary)] shadow-[var(--neo-depth-1)]"
+          ? "text-[var(--neo-text-primary)] ring-1 ring-inset ring-[var(--neo-accent-line)]"
           : "text-[var(--neo-text-secondary)] hover:text-[var(--neo-text-primary)]",
       )}
       onClick={onClick}

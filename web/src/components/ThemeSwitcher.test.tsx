@@ -51,6 +51,9 @@ it("renders two centered icon-only choices in the expanded sidebar", async () =>
   expect(dark?.textContent).toBe("");
   expect(light?.getAttribute("aria-pressed")).toBe("true");
   expect(dark?.getAttribute("aria-pressed")).toBe("false");
+  expect(light?.className).toContain("rounded-full");
+  expect(light?.className).toContain("ring-inset");
+  expect(light?.className).not.toContain("shadow-[var(--neo-depth-1)]");
 
   await act(async () => dark?.click());
   expect(state.setTheme).toHaveBeenCalledWith("dark");
@@ -63,6 +66,7 @@ it("uses one compact direct toggle in the collapsed sidebar, finger-sized on tou
   expect(host.querySelectorAll("button")).toHaveLength(1);
   expect(toggle?.className).toContain("size-[36px]");
   expect(toggle?.className).toContain("pointer-coarse:size-[44px]");
+  expect(toggle?.querySelector("svg")?.classList.contains("lucide-moon")).toBe(true);
 
   await act(async () => toggle?.click());
   expect(state.setTheme).toHaveBeenCalledWith("dark");
