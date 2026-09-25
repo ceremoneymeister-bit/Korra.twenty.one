@@ -98,17 +98,22 @@ function ThemeChoice({ active, children, label, onClick }: ThemeChoiceProps) {
       aria-pressed={active}
       data-theme-control
       className={cn(
-        "grid h-full place-items-center rounded-full",
-        "transition-[box-shadow,color,background-color]",
+        "relative grid h-full place-items-center rounded-full",
         "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--neo-accent-line)]",
         active
-          ? "bg-[var(--neo-surface)] text-[var(--neo-text-primary)] shadow-[var(--neo-depth-1)]"
+          ? "text-[var(--neo-text-primary)]"
           : "text-[var(--neo-text-secondary)] hover:text-[var(--neo-text-primary)]",
       )}
       onClick={onClick}
       type="button"
     >
-      {children}
+      <span className={cn(
+        "absolute inset-x-0 top-0 grid h-[26px] place-items-center rounded-full pointer-coarse:h-[34px]",
+        "transition-[box-shadow,color,background-color]",
+        active && "bg-[var(--neo-surface)] shadow-[var(--neo-depth-1)]",
+      )}>
+        {children}
+      </span>
     </button>
   );
 }
