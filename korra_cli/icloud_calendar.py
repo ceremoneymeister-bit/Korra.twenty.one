@@ -1,4 +1,4 @@
-"""Installation-wide iCloud Calendar connection and bounded CalDAV reads.
+"""Installation-wide iCloud Calendar connection, reads and verified creates.
 
 The owner's app-specific password is kept in a private file under the
 installation root.  Callers receive status and events, never the password.
@@ -9,6 +9,7 @@ without copying credentials into profiles or rebuilding model tool schemas.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import re
 import threading
@@ -207,7 +208,8 @@ def _moment(raw: tuple[str, dict[str, str]] | None) -> tuple[datetime | None, bo
 
 
 def _unescape(value: str) -> str:
-    return value.replace("\\n", "\n").replace("\\N", "\n").replace("\\,", ",").replace("\\;", ";").replace("\\\\", "\\")
+    # Decode once: a literal backslash followed by n is not a newline.
+    return re.sub(r"\\([nN,;\\])", lambda match: "\n" if match[1] in "nN" else match[1], value)
 
 
 def _events(ics: str, calendar: str, start: datetime, end: datetime) -> list[dict]:
@@ -308,6 +310,164 @@ def list_events(start: datetime, end: datetime, *, root: Path | None = None) -> 
     with _client(creds["username"], creds["password"]) as client:
         items = _read(client, start, end)
     return {"account": creds["username"], "fetched_at": datetime.now(timezone.utc).isoformat(), "events": items}
+
+
+def _calendar_id(url: str) -> str:
+    parsed = urlsplit(url)
+    # Apple's discovery may spell the same HTTPS address with or without :443.
+    canonical = f"https://{parsed.hostname}{parsed.path.rstrip('/')}/"
+    return hashlib.sha256(canonical.encode()).hexdigest()[:24]
+
+
+def list_calendars(*, root: Path | None = None) -> dict:
+    """Return opaque selection IDs; no credential or private CalDAV URL."""
+    creds = _credentials(root)
+    if creds is None:
+        raise ICloudCalendarError("not_connected", "iCloud Calendar не подключён.", 404)
+    with _client(creds["username"], creds["password"]) as client:
+        calendars = _calendars(client)
+    return {"calendars": [{"id": _calendar_id(url), "name": name} for name, url in calendars]}
+
+
+def _calendar_text(value: str, limit: int) -> str:
+    value = value.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if len(value) > limit or any(ord(char) < 32 and char not in "\n\t" for char in value):
+        raise ICloudCalendarError("invalid_request", "Текст события слишком длинный или содержит служебные символы.", 422)
+    return value
+
+
+def _ical_line(name: str, value: str) -> str:
+    """RFC 5545 TEXT escaping and UTF-8 line folding at 75 octets."""
+    escaped = value.replace("\\", "\\\\").replace("\n", "\\n").replace(";", "\\;").replace(",", "\\,")
+    lines, line, size = [], "", 0
+    for char in f"{name}:{escaped}":
+        width = len(char.encode("utf-8"))
+        if size + width > 75:
+            lines.append(line)
+            line, size = " ", 1
+        line += char
+        size += width
+    return "\r\n".join([*lines, line])
+
+
+def _object_request(client: httpx.Client, method: str, url: str, body: str = "") -> tuple[int, bytes]:
+    """Bounded calendar-object I/O, with the same Apple-only redirect boundary."""
+    url = _safe_url(url, BASE_URL)
+    headers = {"Accept": "text/calendar"}
+    if method == "PUT":
+        headers.update({"Content-Type": "text/calendar; charset=utf-8", "If-None-Match": "*"})
+    for _ in range(4):
+        with client.stream(method, url, content=body.encode(), headers=headers, timeout=15) as response:
+            if response.status_code in (301, 302, 307, 308):
+                location = response.headers.get("location")
+                if not location:
+                    raise ICloudCalendarError("invalid_response", "iCloud вернул переход без адреса.")
+                url = _safe_url(location, url)
+                continue
+            content = bytearray()
+            for part in response.iter_bytes():
+                content.extend(part)
+                if len(content) > MAX_RESPONSE_BYTES:
+                    raise ICloudCalendarError("invalid_response", "Ответ iCloud слишком большой.")
+            return response.status_code, bytes(content)
+    raise ICloudCalendarError("invalid_response", "Слишком много переходов iCloud Calendar.")
+
+
+def _verify_created(raw: bytes, uid: str, expected: dict, calendar: str) -> dict:
+    """Verify actual stored fields, including an existing but user-edited object."""
+    text = re.sub(r"\r?\n[ \t]", "", raw.decode("utf-8"))
+    lines = text.replace("\r\n", "\n").split("\n")
+    if lines.count("BEGIN:VEVENT") != 1 or lines.count("END:VEVENT") != 1:
+        raise ValueError("Expected one event")
+    block = lines[lines.index("BEGIN:VEVENT") + 1:lines.index("END:VEVENT")]
+    props = _properties(block)
+    begin, all_day = _moment(props.get("DTSTART"))
+    finish, _ = _moment(props.get("DTEND"))
+    matches = (
+        props.get("UID", (None, {}))[0] == uid
+        and begin == expected["start"] and finish == expected["end"] and not all_day
+        and props.get("STATUS", ("", {}))[0].upper() != "CANCELLED"
+        and not {"RRULE", "RDATE", "RECURRENCE-ID", "ATTENDEE", "ORGANIZER"}.intersection(props)
+        and all(_unescape(props.get(key, ("", {}))[0]) == expected[field]
+                for key, field in (("SUMMARY", "title"), ("LOCATION", "location"), ("DESCRIPTION", "description")))
+    )
+    if not matches:
+        raise ICloudCalendarError("create_conflict", "Запись с этим ID отличается от поручения. Проверьте календарь; существующее событие не перезаписано.", 409)
+    return {"id": uid, "calendar": calendar, "title": expected["title"],
+            "start": begin.isoformat(), "end": finish.isoformat(), "all_day": False,
+            "location": expected["location"], "description": expected["description"]}
+
+
+def create_event(*, title: str, start: datetime, end: datetime, calendar_id: str = "",
+                 location: str = "", description: str = "", root: Path | None = None) -> dict:
+    """Create one timed event, no attendees; repeat-safe and read back from Apple.
+
+    CalDAV conditional PUT (RFC 4791 §5.3.2) never overwrites an existing
+    object. Ambiguous writes are verified by their deterministic UID before
+    returning; an unavailable verification is explicitly an unknown outcome.
+    """
+    title = _calendar_text(title, 300)
+    location, description = _calendar_text(location, 300), _calendar_text(description, 4000)
+    if (not title or start.utcoffset() is None or end.utcoffset() is None
+            or start.microsecond or end.microsecond or not start < end
+            or end - start > timedelta(days=MAX_DAYS)):
+        raise ICloudCalendarError("invalid_request", "Нужны название, время с часовым поясом и окончание после начала (не более 31 дня, точность до секунды).", 422)
+    expected = {"title": title, "start": start.astimezone(timezone.utc),
+                "end": end.astimezone(timezone.utc), "location": location, "description": description}
+    identity = json.dumps({**expected, "start": expected["start"].isoformat(),
+                           "end": expected["end"].isoformat()}, ensure_ascii=False, sort_keys=True)
+    uid = "korra-" + hashlib.sha256(identity.encode()).hexdigest()
+    ics = "\r\n".join([
+        "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Korra//Calendar//RU", "BEGIN:VEVENT",
+        f"UID:{uid}", f"DTSTAMP:{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}",
+        f"DTSTART:{expected['start']:%Y%m%dT%H%M%SZ}", f"DTEND:{expected['end']:%Y%m%dT%H%M%SZ}",
+        _ical_line("SUMMARY", title), _ical_line("LOCATION", location),
+        _ical_line("DESCRIPTION", description), "END:VEVENT", "END:VCALENDAR", "",
+    ])
+    root_path = Path(root or get_default_hermes_root())
+    with _lock:
+        fetch_lock = _dashboard_fetch_locks.setdefault(root_path, threading.Lock())
+    # Serialize with dashboard reads so a pre-create refresh cannot later
+    # repopulate its cache with a feed missing the newly created event.
+    with fetch_lock:
+        creds = _credentials(root_path)
+        if creds is None:
+            raise ICloudCalendarError("not_connected", "iCloud Calendar не подключён.", 404)
+        with _client(creds["username"], creds["password"]) as client:
+            calendars = _calendars(client)
+            selected = [(name, url) for name, url in calendars if _calendar_id(url) == calendar_id] if calendar_id else calendars
+            if len(selected) != 1:
+                raise ICloudCalendarError("calendar_selection_required", "Выберите один календарь из action=calendars и передайте его calendar_id.", 422)
+            name, url = selected[0]
+            object_url = _safe_url(url.rstrip("/") + "/" + uid + ".ics", BASE_URL)
+            if _credentials(root_path) != creds:
+                raise ICloudCalendarError("connection_changed", "Подключение изменилось. Проверьте выбранный календарь заново.", 409)
+            status_code = None
+            try:
+                try:
+                    status_code, _ = _object_request(client, "PUT", object_url, ics)
+                except (httpx.HTTPError, ICloudCalendarError):
+                    pass  # Verify the deterministic resource before considering a retry.
+                if status_code == 401:
+                    raise ICloudCalendarError("auth_error", "Пароль приложения iCloud не принят.", 424)
+                if status_code == 403:
+                    raise ICloudCalendarError("write_forbidden", "Выбранный календарь iCloud недоступен для записи.", 403)
+                if status_code is not None and 400 <= status_code < 500 and status_code not in (408, 409, 412, 429):
+                    raise ICloudCalendarError("create_rejected", "iCloud отклонил создание события. Проверьте календарь и параметры.", 422)
+                try:
+                    stored_status, raw = _object_request(client, "GET", object_url)
+                    if stored_status != 200:
+                        raise ValueError("Cannot verify stored event")
+                    event = _verify_created(raw, uid, expected, name)
+                except (httpx.HTTPError, ValueError, ICloudCalendarError) as exc:
+                    if isinstance(exc, ICloudCalendarError) and exc.code == "create_conflict":
+                        raise
+                    raise ICloudCalendarError("create_outcome_unknown", "Создание не подтверждено: событие могло сохраниться. Проверьте календарь; не создавайте другую запись повторно.") from exc
+                return {**event, "calendar_id": _calendar_id(url), "already_existed": status_code in (409, 412),
+                        "reconciled": status_code not in (200, 201, 204, 409, 412)}
+            finally:
+                with _lock:
+                    _dashboard_cache.pop(root_path, None)
 
 
 def _credential_stamp(root: Path) -> tuple[int, int, int]:
