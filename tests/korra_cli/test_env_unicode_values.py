@@ -50,5 +50,22 @@ def test_a_key_made_only_of_non_ascii_is_refused_not_saved_empty(home):
     from korra_cli.config import save_env_value
 
     with pytest.raises(ValueError, match="не похоже на ключ"):
-        save_env_value("DEEPGRAM_API_KEY", "секрет")
+        save_env_value("DEEPGRAM_API_KEY", "ъъ")
     assert _read(home, "DEEPGRAM_API_KEY") is None
+
+
+def test_invisible_characters_are_dropped_from_every_value(home):
+    from korra_cli.config import save_env_value
+
+    save_env_value("ONEC_USERNAME", "\u200bнюра\ufeff")
+    save_env_value("A2A_PEER_TOKENS", "peer\u200b-token")
+    assert _read(home, "ONEC_USERNAME") == "нюра"
+    assert _read(home, "A2A_PEER_TOKENS") == "peer-token"
+
+
+def test_a_key_typed_in_the_russian_layout_is_refused(home):
+    from korra_cli.config import save_env_value
+
+    with pytest.raises(ValueError, match="русской раскладке"):
+        save_env_value("OPENAI_API_KEY", "sk-ыл-фис123")
+    assert _read(home, "OPENAI_API_KEY") is None

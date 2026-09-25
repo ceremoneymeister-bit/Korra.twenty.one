@@ -13025,6 +13025,10 @@ async def update_messaging_platform(
         return {"ok": True, "platform": platform_id}
     except HTTPException:
         raise
+    except ValueError as exc:
+        # save_env_value refuses a value it cannot store as meant (e.g. a key
+        # typed in the Russian layout): tell the owner instead of a 500.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception:
         _log.exception("PUT /api/messaging/platforms/%s failed", platform_id)
         raise HTTPException(status_code=500, detail="Internal server error")

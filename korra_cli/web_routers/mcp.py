@@ -536,7 +536,10 @@ async def install_mcp_catalog_entry(body: MCPCatalogInstall, profile: Optional[s
                     if v:
                         save_env_value(k, v)
 
-        await asyncio.to_thread(_write_env)
+        try:
+            await asyncio.to_thread(_write_env)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # Git-bootstrap entries can take a while to clone — run via the background
     # action path so the request returns immediately and the UI can tail logs.
