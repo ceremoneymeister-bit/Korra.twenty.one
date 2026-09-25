@@ -1,0 +1,8 @@
+name: chinese-teacher
+version: 0.1.0
+description: Учитель китайского — короткая практика путунхуа с понятной обратной связью.
+author: Korra 21
+distribution_owned:
+  - SOUL.md
+  - skills/chinese-practice
+  - distribution.yaml

@@ -1,0 +1,8 @@
+name: english-teacher
+version: 0.1.1
+description: Учитель английского для взрослых — практика поездок, работы и общения.
+author: Korra 21
+distribution_owned:
+  - SOUL.md
+  - skills/english-practice
+  - distribution.yaml
