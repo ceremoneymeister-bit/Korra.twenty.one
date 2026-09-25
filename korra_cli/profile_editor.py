@@ -161,8 +161,8 @@ def _entries() -> list[dict]:
     return out
 
 
-def _record(agent: str, kind: str, summary: str, reason: str, **data) -> dict:
-    entry = {"id": uuid.uuid4().hex[:12], "at": _now(), "agent": agent, "kind": kind,
+def _record(agent: str, kind: str, summary: str, reason: str, *, entry_id: str = "", **data) -> dict:
+    entry = {"id": entry_id or uuid.uuid4().hex[:12], "at": _now(), "agent": agent, "kind": kind,
              "summary": summary, **({"reason": reason.strip()[:500]} if reason and reason.strip() else {}), **data}
     path = _journal_dir() / "journal.jsonl"
     with open(path, "a", encoding="utf-8") as handle:
@@ -278,7 +278,7 @@ def update_role(agent: str, *, content: str | None = None, old_text: str = "", n
         snapshot_after = _snapshot(change_id, "SOUL.after.md", after)
         _write_role(path, after)
         try:
-            entry = _record(canon, "role", "Изменена роль агента", reason,
+            entry = _record(canon, "role", "Изменена роль агента", reason, entry_id=change_id,
                             before_sha=_sha(before), after_sha=_sha(after),
                             before=snapshot_before, after=snapshot_after)
         except Exception:

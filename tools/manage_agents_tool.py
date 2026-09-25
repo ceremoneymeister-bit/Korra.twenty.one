@@ -177,7 +177,7 @@ registry.register(
                 "new_text": {"type": "string", "description": "update_role: replacement for old_text."},
                 "version": {"type": "string", "description": "role_version from show; protects against overwriting a newer role."},
                 "memory_action": {"type": "string", "enum": ["add", "replace", "remove"]},
-                "target": {"type": "string", "enum": ["memory", "user"], "description": "memory: agent notes (memory) or facts about the owner (user)."},
+                "target": {"type": "string", "enum": ["memory", "user"], "description": "memory: facts about the business and the agent's work (default); user: the owner's personal preferences and style."},
                 "title": {"type": "string", "description": "add_material: short title."},
                 "url": {"type": "string", "description": "add_material: a link instead of or with text."},
                 "material": {"type": "string", "description": "remove_material: the material id from show."},

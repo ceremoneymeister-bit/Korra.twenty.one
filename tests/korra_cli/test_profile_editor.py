@@ -51,7 +51,9 @@ def test_role_edit_by_display_name_is_journaled_and_undone_exactly(install):
     assert done["applies"] == editor.APPLIES
 
     journal = (root / "agent-changes" / "journal.jsonl").read_text(encoding="utf-8").splitlines()
-    assert json.loads(journal[-1])["reason"] == "короче отвечать"
+    entry = json.loads(journal[-1])
+    assert entry["reason"] == "короче отвечать"
+    assert entry["before"] == f"snapshots/{done['change_id']}/SOUL.before.md"  # one id for entry and snapshot
 
     editor.undo(done["change_id"])
     assert soul(root, "lawyer") == before
