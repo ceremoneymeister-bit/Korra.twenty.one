@@ -1,0 +1,8 @@
+name: secretary
+version: 0.1.0
+description: Секретарь — заметки, письма, рабочие договорённости и план дня.
+author: Korra 21
+distribution_owned:
+  - SOUL.md
+  - skills/secretarial-work
+  - distribution.yaml

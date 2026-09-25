@@ -51,6 +51,103 @@ def test_catalogue_requires_auth_and_returns_only_public_metadata(client):
         assert template["requirements"]
 
 
+def test_every_catalogue_package_installs_loadable_payload_and_replay_preserves_user_work(client):
+    """Exercise the public catalogue without assuming Designer is the only role."""
+    http, _, registrations = client
+    from agent.prompt_builder import load_soul_md
+    from korra_cli import agent_templates, profiles
+    from korra_constants import set_hermes_home_override, reset_hermes_home_override
+    from tools.skills_tool import skill_view
+
+    catalogue = http.get("/api/agent-templates").json()["templates"]
+    assert catalogue
+    for index, template in enumerate(catalogue):
+        name = f"ready-{index}"
+        body = {
+            "name": name, "template_id": template["id"],
+            "template_version": template["version"],
+            "idempotency_key": f"ready-package-operation-{index}",
+            "initial_knowledge": {
+                "user": ["Пиши коротко, обращайся на вы."],
+                "material": {"title": "Рабочие часы", "text": "Работаем с 10 до 18."},
+            },
+        }
+        response = http.post("/api/profiles", json=body)
+        assert response.status_code == 200, response.text
+        target = Path(response.json()["path"])
+        entry, source, manifest = agent_templates._template(template["id"])
+        assert load_soul_md(home_override=target).strip() == (source / "SOUL.md").read_text().strip()
+        scope = set_hermes_home_override(str(target))
+        try:
+            for owned in manifest.distribution_owned:
+                src = source / owned
+                files = [src] if src.is_file() else list(src.rglob("*"))
+                for file in files:
+                    if not file.is_file():
+                        continue
+                    installed = target / file.relative_to(source)
+                    assert installed.read_bytes() == file.read_bytes()
+                    if file.name == "SKILL.md":
+                        skill_name = yaml.safe_load(file.read_text().split("---")[1])["name"]
+                        viewed = json.loads(skill_view(skill_name, preprocess=False))
+                        assert viewed["success"], viewed
+        finally:
+            reset_hermes_home_override(scope)
+        if not entry.get("image_generation"):
+            assert response.json()["generation"] is None
+            assert response.json()["generation_checked"] is False
+        materials = http.get(f"/api/profiles/{name}/materials").json()["materials"]
+        assert [item["title"] for item in materials] == ["Рабочие часы"]
+        assert http.post(f"/api/profiles/{name}/memory", json={
+            "action": "add", "target": "user", "content": "Предпочитаю списки без эмодзи.",
+        }).status_code == 200
+        customized = {target / "SOUL.md": "Моя уточнённая роль"}
+        for skill in (target / "skills").rglob("SKILL.md"):
+            if skill.relative_to(target).as_posix().startswith(tuple(
+                owned + "/" for owned in manifest.distribution_owned if owned.startswith("skills/")
+            )):
+                customized[skill] = "Моя уточнённая методика"
+        for file, text in customized.items():
+            file.write_text(text)
+        assert http.post("/api/profiles", json=body).json() == response.json()
+        assert profiles.seed_profile_skills(target, quiet=True) is not None
+        for file, text in customized.items():
+            assert file.read_text() == text
+        assert http.get(f"/api/profiles/{name}/memory").json()["user"] == [
+            "Пиши коротко, обращайся на вы.", "Предпочитаю списки без эмодзи.",
+        ]
+        assert http.get(f"/api/profiles/{name}/materials").json()["materials"] == materials
+    # Replaying publication may reconcile the gateway again, but only the
+    # published profiles may be registered (never a staging directory).
+    expected = {f"ready-{index}" for index in range(len(catalogue))}
+    assert set(registrations) == expected
+    installed = [item["name"] for item in http.get("/api/profiles").json()["profiles"]]
+    assert all(installed.count(name) == 1 for name in expected)
+
+
+def test_secretary_creation_without_connections_has_no_automatic_jobs_or_generation(client, monkeypatch):
+    http, root, _ = client
+    from korra_cli import agent_templates
+
+    def forbidden_image_probe(*args, **kwargs):
+        pytest.fail("The Secretary must not probe or configure image generation")
+
+    monkeypatch.setattr(agent_templates, "_template_image_generation_available", forbidden_image_probe)
+    template = next(item for item in http.get("/api/agent-templates").json()["templates"]
+                    if item["id"] == "korra.secretary")
+    body = {"name": "secretary", "template_id": template["id"],
+            "template_version": template["version"], "idempotency_key": "secretary-no-connections"}
+    response = http.post("/api/profiles", json=body)
+    assert response.status_code == 200, response.text
+    assert response.json()["model_set"] is False
+    assert response.json()["generation"] is None
+    target = Path(response.json()["path"])
+    assert not (target / "auth.json").exists()
+    assert not (target / "cron/jobs.json").exists()
+    assert not (root / "cron/jobs.json").exists()
+    assert "secretary" in [item["name"] for item in http.get("/api/profiles").json()["profiles"]]
+
+
 def test_add_loads_role_and_skills_without_user_state_and_replay_preserves_edits(client):
     http, root, registrations = client
     from agent.prompt_builder import load_soul_md
