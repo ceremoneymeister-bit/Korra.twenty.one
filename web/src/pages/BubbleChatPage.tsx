@@ -1,3 +1,6 @@
+import { AgentSpeech } from "@/components/chat/AgentSpeech";
+import { useAgentVoice } from "@/hooks/useAgentVoice";
+import type { AgentVoiceSettings } from "@/lib/agent-voice";
 import { useChatAttachmentDraft, restoreChatAttachmentDraft } from "@/hooks/useChatAttachmentDraft";
 import { useSessionRun } from "@/hooks/useSessionRun";
 import { chatViewKey, readChatView, writeChatView } from "@/lib/chat-view-state";
@@ -253,6 +256,7 @@ function UserBubble({
 /* ------------------------------------------------------------------ */
 
 function AssistantBubble({
+  voiceSettings, profile = "default", active = true,
   message,
   streaming,
   busyState,
@@ -260,6 +264,9 @@ function AssistantBubble({
   decisionsBusy,
   decided,
 }: {
+  voiceSettings?: AgentVoiceSettings | null;
+  profile?: string;
+  active?: boolean;
   message: ChatMessage;
   streaming?: boolean;
   /** Что агент делает прямо сейчас — ровно настолько, насколько мы это знаем. */
@@ -310,6 +317,7 @@ function AssistantBubble({
         {message.content && (
           <article className="korra-chat-answer" aria-label="Ответ агента">
             <Markdown content={artifactSplit.text} streaming={streaming} />
+            <AgentSpeech profile={profile} text={artifactSplit.text} streaming={Boolean(streaming)} active={active} settings={voiceSettings ?? null} />
             {/* Готовое вложение идёт после пояснения. Недописанный маркер
                 потока пока не превращаем в карточку файла. */}
             {!streaming && (
@@ -524,6 +532,7 @@ export function BubbleChatSidebar({
 /* ------------------------------------------------------------------ */
 
 export function BubbleChatTranscript({
+  voiceSettings, profile = "default", active = true,
   messages,
   streaming,
   error,
@@ -539,6 +548,9 @@ export function BubbleChatTranscript({
   approvals,
   onApprovalDecision,
 }: {
+  voiceSettings?: AgentVoiceSettings | null;
+  profile?: string;
+  active?: boolean;
   /** Имя агента вкладки для пустого экрана; пусто — главная Корра. */
   agentLabel?: string;
   /** Черновик этого профиля из другого чата — напоминаем баннером. */
@@ -608,6 +620,7 @@ export function BubbleChatTranscript({
                 />
               ) : (
                 <AssistantBubble
+                  voiceSettings={voiceSettings} profile={profile} active={active}
                   key={m.id}
                   message={m}
                   streaming={
@@ -1385,6 +1398,7 @@ export default function BubbleChatPage({
   active,
 }: BubbleChatPageProps = {}) {
   const { t } = useI18n();
+  const voiceSettings = useAgentVoice(agentProfile || "default", active !== false);
   // Live SSE state from useChatStream. Sends POST to /api/chat/completions
   // and streams response chunks back into messages[]. Tool progress events
   // update the last assistant message's toolCalls[].
@@ -1734,6 +1748,7 @@ export default function BubbleChatPage({
           onCurrentDecision={resolveApproval}
         />
         <BubbleChatTranscript
+          voiceSettings={voiceSettings} profile={agentProfile || "default"} active={active !== false}
           scrollKey={`${chatViewKey(agentProfile, sessionId)}:scroll`}
           messages={messages}
           streaming={isStreaming && !queued}

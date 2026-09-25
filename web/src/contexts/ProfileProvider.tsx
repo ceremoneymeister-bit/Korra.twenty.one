@@ -17,7 +17,8 @@ const PROFILE_SCOPED_ROUTES = new Set([
   '/models',
   '/pairing',
   '/sessions',
-  '/skills'
+  '/skills',
+  '/voice'
 ])
 
 const PROFILE_SCOPE_STORAGE_PREFIX = 'korra.profileScope.'

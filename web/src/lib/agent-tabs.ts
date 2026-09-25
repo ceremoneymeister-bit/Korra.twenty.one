@@ -140,7 +140,7 @@ export function sameAgentTabs(
 }
 
 /** Что можно открыть для конкретного агента из меню его вкладки. */
-export type AgentSettingsKind = "role" | "model" | "skills" | "schedule";
+export type AgentSettingsKind = "role" | "model" | "skills" | "schedule" | "voice";
 
 /**
  * Адрес настроек выбранного агента.
@@ -159,6 +159,7 @@ export function agentSettingsHref(
   edit: AgentSettingsKind,
 ): string {
   const target = encodeURIComponent(profile || "default");
+  if (edit === "voice") return `/voice?profile=${target}`;
   if (edit === "skills") return `/skills?profile=${target}`;
   if (edit === "schedule") return `/cron?profile=${target}`;
   return `/profiles?agent=${target}&edit=${edit}`;

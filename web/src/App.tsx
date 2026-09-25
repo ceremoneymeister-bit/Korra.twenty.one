@@ -88,6 +88,7 @@ const LogsPage = lazy(() => import("@/pages/LogsPage"));
 const AnalyticsPage = lazy(() => import("@/pages/AnalyticsPage"));
 const ModelsPage = lazy(() => import("@/pages/ModelsPage"));
 const CronPage = lazy(() => import("@/pages/CronPage"));
+const AgentVoicePage = lazy(() => import("@/pages/AgentVoicePage"));
 const ProfilesPage = lazy(() => import("@/pages/ProfilesPage"));
 const ProfileBuilderPage = lazy(() => import("@/pages/ProfileBuilderPage"));
 const SkillsPage = lazy(() => import("@/pages/SkillsPage"));
@@ -234,6 +235,7 @@ const BUILTIN_ROUTES_CORE: Record<string, ComponentType> = {
   "/system": SystemPage,
   "/profiles": ProfilesPage,
   "/profiles/new": ProfileBuilderPage,
+  "/voice": AgentVoicePage,
   "/config": ConfigPage,
   "/env": EnvPage,
   // Прежний адрес экрана «Сервисы»: теперь это раздел «Ключей и доступов».

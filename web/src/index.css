@@ -416,7 +416,8 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
 
   /* Field captions need no extra touch target: their inputs already have one.
      Keep the full-height wrapping label on checkboxes. */
-  [data-client-ui="true"] [data-agent-builder] label[for] {
+  [data-client-ui="true"] [data-agent-builder] label[for],
+  [data-client-ui="true"] [data-agent-voice] label[for] {
     min-height: 0;
   }
 

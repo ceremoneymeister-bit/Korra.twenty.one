@@ -45,6 +45,7 @@ import {
   Trash2,
   UserRoundPlus,
   UsersRound,
+  Volume2,
   X,
 } from "lucide-react";
 import { Toast } from "@nous-research/ui/ui/components/toast";
@@ -881,6 +882,9 @@ export default function AgentWorkbenchPage() {
                 >
                   <Cpu size={15} aria-hidden />
                   Модель
+                </button>
+                <button type="button" role="menuitem" className="neo-select-option flex w-full items-center gap-2 px-3 py-2 text-left font-sans text-sm normal-case tracking-normal" onClick={() => { setOpenMenu(null); navigate(agentSettingsHref(menuTab.profile, "voice")); }}>
+                  <Volume2 size={15} aria-hidden />Голос
                 </button>
                 {/* Обучение агента живёт в трёх разделах панели; из меню
                     вкладки они открываются сразу для этого агента (адрес
