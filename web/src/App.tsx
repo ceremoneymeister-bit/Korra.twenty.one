@@ -713,7 +713,7 @@ export default function App() {
           onClick={() => setMobileOpen(true)}
         />
 
-        <KorraBrand themeName={theme.name} className="h-[18px]" />
+        <KorraBrand themeName={theme.name} className="h-[21px]" />
       </header>
 
       {mobileOpen && (
