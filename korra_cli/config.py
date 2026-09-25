@@ -4440,6 +4440,12 @@ def sanitize_env_file() -> int:
     return fixes
 
 
+#: Only these keys are forced to ASCII: API keys, tokens and secrets travel as
+#: HTTP header values. Logins, passwords, URLs and names keep their Unicode —
+#: a Cyrillic 1C login («нюра») was silently saved empty (Nagrada, 25.09.2026).
+_ASCII_ONLY_CREDENTIAL_KEY = re.compile(r"(?:^|_)(?:API_KEY|KEY|TOKEN|SECRET)$")
+
+
 def _check_non_ascii_credential(key: str, value: str) -> str:
     """Warn and strip non-ASCII characters from credential values.
 
@@ -4458,6 +4464,8 @@ def _check_non_ascii_credential(key: str, value: str) -> str:
         return value  # all ASCII — nothing to do
     except UnicodeEncodeError:
         pass
+    if not _ASCII_ONLY_CREDENTIAL_KEY.search(key.upper()):
+        return value  # a login, password, URL or name: Unicode is legitimate
 
     # Build a readable list of the offending characters
     bad_chars: list[str] = []
@@ -4473,6 +4481,13 @@ def _check_non_ascii_credential(key: str, value: str) -> str:
         + '  Недопустимые символы автоматически удалены. Если вход не удаётся, скопируйте ключ заново из кабинета провайдера.',
         file=sys.stderr,
     )
+    if value.strip() and not sanitized.strip():
+        # Nothing of the value would survive: refuse instead of saving an
+        # empty key and reporting success.
+        raise ValueError(
+            f'{key}: значение состоит только из символов не из ASCII и не похоже на ключ. '
+            'Скопируйте ключ заново из кабинета сервиса.'
+        )
     return sanitized
 
 
