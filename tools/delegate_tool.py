@@ -55,6 +55,7 @@ DELEGATE_BLOCKED_TOOLS = frozenset(
         "memory",  # no writes to shared MEMORY.md
         "send_message",  # no cross-platform side effects
         "cronjob",  # no scheduling more work in the parent's name
+        "manage_agents",  # only the owner's live turn changes other agents
     ]
 )
 

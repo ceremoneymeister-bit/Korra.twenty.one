@@ -91,6 +91,10 @@ _HERMES_CORE_TOOLS = [
     "kanban_comment", "kanban_create", "kanban_link",
     "kanban_unblock",
     "kanban_attach", "kanban_attach_url", "kanban_attachments",
+    # The main agent improves the installation's agents for the owner. Only in
+    # schema for profile ``default`` in an owner-live turn (check_fn in
+    # tools/manage_agents_tool.py), so other agents never pay for it.
+    "manage_agents",
     # Computer use (macOS, gated on cua-driver being installed via check_fn)
     "computer_use",
 ]
@@ -318,6 +322,16 @@ TOOLSETS = {
     # "honcho" toolset removed — Honcho is now a memory provider plugin.
     # Tools are injected via MemoryManager, not the toolset system.
 
+    "agent_profiles": {
+        "description": (
+            "The main agent improves the installation's agents at the owner's "
+            "request: role, memory, materials, name, description; journaled "
+            "and undoable. Offered only to the main agent in owner turns."
+        ),
+        "tools": ["manage_agents"],
+        "includes": [],
+    },
+
     "homeassistant": {
         "description": "Home Assistant smart home control and monitoring",
         "tools": ["ha_list_entities", "ha_get_state", "ha_list_services", "ha_call_service"],
@@ -515,6 +529,9 @@ TOOLSETS = {
             "kanban_comment", "kanban_create", "kanban_link",
             "kanban_unblock",
             "kanban_attach", "kanban_attach_url", "kanban_attachments",
+            # The owner improves agents by asking the main agent in the
+            # cabinet chat (tools/manage_agents_tool.py decides per call).
+            "manage_agents",
         ],
         "includes": []
     },
