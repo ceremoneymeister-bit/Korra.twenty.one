@@ -153,9 +153,21 @@ def origin_owner_verdict() -> bool:
     current = current_principal()
     if not current.owner:
         return False
-    if current.kind == "owner" and current.live and _one_shot_run():
+    if current.kind == "owner" and current.live and (_one_shot_run() or _room_turn()):
         return False
     return True
+
+
+def _room_turn() -> bool:
+    """A turn in a room of agents: it reaches the API server like the cabinet does."""
+    try:
+        from gateway.hosted_room_execution_policy import current_room_execution_policy
+        from gateway.session_context import get_session_env
+
+        return (current_room_execution_policy() is not None
+                or str(get_session_env("KORRA_SESSION_SOURCE", "")).strip().lower() == "bot_room")
+    except Exception:
+        return True
 
 
 def cron_job_acts_for_owner(job: Mapping[str, Any], config: Mapping[str, Any] | None = None) -> bool:

@@ -113,6 +113,12 @@ def test_every_job_records_who_created_it(cron_dir, monkeypatch):
         clear_session_vars(tokens)
     assert _create(created_by_owner=True)["created_by_owner"] is True  # the cabinet «Задачи» form
 
+    tokens = _as({"platform": "", "source": "bot_room"})  # a room of agents
+    try:
+        assert _create()["created_by_owner"] is False
+    finally:
+        clear_session_vars(tokens)
+
     monkeypatch.setenv("KORRA_SINGLE_QUERY_SESSION", "1")  # bot-chat delivery, agent-to-agent
     assert _create()["created_by_owner"] is False
     monkeypatch.delenv("KORRA_SINGLE_QUERY_SESSION")
