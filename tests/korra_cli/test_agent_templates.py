@@ -142,6 +142,11 @@ def test_secretary_creation_without_connections_has_no_automatic_jobs_or_generat
     assert response.json()["model_set"] is False
     assert response.json()["generation"] is None
     target = Path(response.json()["path"])
+    from korra_cli.tools_config import _get_platform_tools
+    config_path = target / "config.yaml"
+    config = yaml.safe_load(config_path.read_text()) if config_path.exists() else {}
+    for platform in ("api_server", "telegram", "cli"):
+        assert {"google_calendar", "icloud_calendar"} <= _get_platform_tools(config or {}, platform)
     assert not (target / "auth.json").exists()
     assert not (target / "cron/jobs.json").exists()
     assert not (root / "cron/jobs.json").exists()
