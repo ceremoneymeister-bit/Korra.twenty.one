@@ -383,6 +383,12 @@ DEFAULT_CONFIG = {
         # ``false`` keeps the historical strict-provider behavior (Mistral,
         # Groq, Cerebras reject the field with HTTP 400).
         "reasoning_echo": False,
+        # Who may improve the installation's agents from a chat with the
+        # ``manage_agents`` tool (role, memory, materials, name, description;
+        # every change journaled and undoable): "main" — the main agent,
+        # only for the owner speaking live; "off" — nobody. Read from the
+        # main agent's own config.
+        "manage_profiles": "main",
     },
 
     "terminal": {

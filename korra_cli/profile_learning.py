@@ -478,7 +478,29 @@ def delete_material(name: str) -> dict:
     ok, message = archive_skill(name)
     if not ok:
         raise ValueError("Не удалось убрать материал: " + message)
-    return {"ok": True}
+    archived = message.removeprefix("archived to ").strip()
+    return {"ok": True, **({"archived_to": archived} if archived != message else {})}
+
+
+def restore_material(name: str, archived_to: str) -> dict:
+    """Return an archived material to this agent's materials, pinned again."""
+    from tools.skill_usage import STATE_ACTIVE, _archive_dir, set_pinned, set_state
+
+    path = _material_dir(name)
+    if path.exists():
+        raise LearningConflict("Материал с таким именем уже есть у агента.")
+    source = Path(archived_to)
+    archive = _archive_dir().resolve()
+    if source.is_symlink() or not source.resolve().is_relative_to(archive) or not (source / "SKILL.md").is_file():
+        raise FileNotFoundError("Архивная копия материала не найдена.")
+    if not _material_info(source):
+        raise ValueError("В архиве лежит не материал владельца.")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(source), str(path))
+    set_state(name, STATE_ACTIVE)
+    if not set_pinned(name, True):
+        raise OSError("Материал возвращён, но не закреплён от автоматической уборки.")
+    return {"ok": True, "name": name}
 
 
 def apply_initial_knowledge(home: Path, knowledge) -> None:
