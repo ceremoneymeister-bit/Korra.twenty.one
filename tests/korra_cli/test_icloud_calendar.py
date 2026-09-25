@@ -279,3 +279,225 @@ def test_agent_tool_is_owner_only_like_google_calendar(tmp_path, monkeypatch):
     assert denied["error"] == "owner_only" and "events" not in denied
     assert offered is False
     assert len(requests) == before  # Apple is not even asked
+
+
+@pytest.fixture
+def writable_calendar(tmp_path, monkeypatch):
+    """Stateful CalDAV wire peer; real discovery, serialization and handlers."""
+    from korra_cli import google_calendar
+
+    state = {"requests": [], "objects": {}, "mode": "normal", "listing": LISTING}
+
+    def respond(request):
+        state["requests"].append(request)
+        path = request.url.path
+        if request.method == "PUT":
+            assert request.headers["if-none-match"] == "*"
+            assert request.headers["content-type"].startswith("text/calendar")
+            if state["mode"] == "forbidden":
+                return httpx.Response(403)
+            if state["mode"] == "unsafe_redirect":
+                return httpx.Response(307, headers={"Location": "https://evil.example/event.ics"})
+            if path in state["objects"]:
+                return httpx.Response(412)
+            if state["mode"] != "timeout_missing":
+                state["objects"][path] = request.content
+            if state["mode"] in {"timeout_stored", "timeout_missing"}:
+                raise httpx.ReadTimeout("synthetic lost answer", request=request)
+            return httpx.Response(201)
+        if request.method == "GET":
+            if state["mode"] == "unavailable_readback":
+                return httpx.Response(503)
+            raw = state["objects"].get(path)
+            return httpx.Response(200, content=raw) if raw is not None else httpx.Response(404)
+        if request.method == "REPORT":
+            root = ic.ET.Element("{DAV:}multistatus")
+            for path, raw in state["objects"].items():
+                if path.startswith(request.url.path):
+                    node = ic.ET.SubElement(root, "{urn:ietf:params:xml:ns:caldav}calendar-data")
+                    node.text = raw.decode()
+            return httpx.Response(207, content=ic.ET.tostring(root))
+        if path == "/":
+            return httpx.Response(207, content=PRINCIPAL)
+        if path.endswith("/principal/"):
+            return httpx.Response(207, content=HOME)
+        return httpx.Response(207, content=state["listing"])
+
+    monkeypatch.setattr(ic, "_client", lambda *_: httpx.Client(transport=httpx.MockTransport(respond)))
+    monkeypatch.setattr(ic, "get_default_hermes_root", lambda: tmp_path)
+    monkeypatch.setattr(google_calendar, "owner_timezone", lambda: ZoneInfo("Asia/Novosibirsk"))
+    ic.reset_dashboard_cache()
+    ic.connect("calendar@example.invalid", "synthetic-app-password", root=tmp_path)
+    yield state
+    ic.reset_dashboard_cache()
+
+
+def create_args(**overrides):
+    return {"action": "create", "title": "Встреча", "start": "2026-09-29T15:00:00+07:00",
+            "end": "2026-09-29T16:00:00+07:00", **overrides}
+
+
+def test_create_from_agent_is_visible_in_calendar_and_repeat_is_not_a_duplicate(writable_calendar):
+    from tools import icloud_calendar_tool as tool
+
+    first = json.loads(tool._handle(create_args()))
+    assert first["ok"] and not first["already_existed"]
+    assert first["created"]["start"] == "2026-09-29T15:00:00+07:00"
+    assert first["created"]["calendar"] == "Работа"
+    repeated = json.loads(tool._handle(create_args()))
+    assert repeated["ok"] and repeated["already_existed"]
+    assert repeated["created"]["id"] == first["created"]["id"]
+    assert len(writable_calendar["objects"]) == 1
+    listing = json.loads(tool._handle({"date": "2026-09-29"}))  # old action-less calls still work
+    assert listing["count"] == 1
+    assert listing["events"][0]["title"] == "Встреча"
+    assert datetime.fromisoformat(listing["events"][0]["start"]) == datetime.fromisoformat(first["created"]["start"])
+
+
+def test_cyrillic_and_escaped_text_round_trip_without_calendar_injection(writable_calendar):
+    from tools import icloud_calendar_tool as tool
+
+    title = 'Обсуждение проекта; "Весна", ' + "Ю" * 90
+    description = "Путь C:\\new\nBEGIN:VEVENT\nATTENDEE:someone@example.invalid\nEND:VEVENT"
+    result = json.loads(tool._handle(create_args(title=title, description=description, location="Зал, 2; офис")))
+    assert result["ok"], result
+    assert result["created"]["title"] == title
+    assert result["created"]["description"] == description
+    raw = next(iter(writable_calendar["objects"].values()))
+    assert raw.count(b"\r\nBEGIN:VEVENT\r\n") == 1
+    assert b"\r\nATTENDEE:" not in raw
+    assert all(len(line) <= 75 for line in raw.split(b"\r\n"))
+
+
+def test_multiple_calendars_require_selection_and_do_not_guess_by_name(writable_calendar):
+    from tools import icloud_calendar_tool as tool
+
+    root = ic._xml(LISTING)
+    second = ic._xml(LISTING.replace(b"/work/", b"/personal/"))
+    root.append(second.find("{DAV:}response"))  # same display name, distinct IDs
+    writable_calendar["listing"] = ic.ET.tostring(root)
+    denied = json.loads(tool._handle(create_args()))
+    assert denied["error"] == "calendar_selection_required"
+    assert not writable_calendar["objects"]
+    calendars = json.loads(tool._handle({"action": "calendars"}))["calendars"]
+    assert len(calendars) == 2 and calendars[0]["id"] != calendars[1]["id"]
+    assert all(set(item) == {"id", "name"} for item in calendars)
+    selected = json.loads(tool._handle(create_args(calendar_id=calendars[1]["id"])))
+    assert selected["ok"]
+    assert all("/personal/" in path for path in writable_calendar["objects"])
+    assert json.loads(tool._handle(create_args(calendar_id="https://evil.example/")))["error"] == "calendar_selection_required"
+    assert all(request.url.host == "caldav.icloud.com" for request in writable_calendar["requests"])
+
+
+@pytest.mark.parametrize("mode", ["timeout_stored", "timeout_missing", "unavailable_readback"])
+def test_lost_write_answer_is_reconciled_or_reported_unknown_without_duplicate(writable_calendar, mode):
+    from tools import icloud_calendar_tool as tool
+
+    writable_calendar["mode"] = mode
+    result = json.loads(tool._handle(create_args()))
+    if mode == "timeout_stored":
+        assert result["ok"] and result["reconciled"]
+    else:
+        assert not result["ok"] and result["error"] == "create_outcome_unknown"
+        assert "action=list" in result["next_step"]
+    writable_calendar["mode"] = "normal"
+    assert json.loads(tool._handle(create_args()))["ok"]
+    assert len(writable_calendar["objects"]) == 1
+
+
+def test_repeat_does_not_overwrite_a_user_edited_event(writable_calendar):
+    from tools import icloud_calendar_tool as tool
+
+    assert json.loads(tool._handle(create_args()))["ok"]
+    path, raw = next(iter(writable_calendar["objects"].items()))
+    edited = raw.replace("SUMMARY:Встреча".encode(), "SUMMARY:Изменено владельцем".encode())
+    writable_calendar["objects"][path] = edited
+    result = json.loads(tool._handle(create_args()))
+    assert result["error"] == "create_conflict"
+    assert writable_calendar["objects"][path] == edited
+
+
+@pytest.mark.parametrize("mode,error", [("forbidden", "write_forbidden"), ("unsafe_redirect", "create_outcome_unknown")])
+def test_write_refusal_and_external_redirect_do_not_switch_destination(writable_calendar, mode, error):
+    from tools import icloud_calendar_tool as tool
+
+    writable_calendar["mode"] = mode
+    result = json.loads(tool._handle(create_args()))
+    assert result["error"] == error
+    assert not writable_calendar["objects"]
+    assert all(request.url.host == "caldav.icloud.com" for request in writable_calendar["requests"])
+
+
+@pytest.mark.parametrize("owner,live,error", [(False, True, "owner_only"), (True, False, "owner_confirmation_required")])
+def test_create_is_denied_before_network_for_visitor_or_background(writable_calendar, monkeypatch, owner, live, error):
+    from gateway.principal import Principal
+    from tools import icloud_calendar_tool as tool
+
+    monkeypatch.setattr(tool, "current_principal", lambda: Principal("test", owner=owner, live=live))
+    before = len(writable_calendar["requests"])
+    result = json.loads(tool._handle(create_args()))
+    assert result["error"] == error
+    assert len(writable_calendar["requests"]) == before
+
+
+@pytest.mark.parametrize("fields", [
+    {"title": ""}, {"title": "x" * 301}, {"description": "unsafe\x00control"},
+    {"start": "2026-09-30T10:00:00Z"}, {"start": "2026-09-29T15:00:00.123+07:00"},
+    {"start": "not-a-date"}, {"end": "", "duration_minutes": 0},
+])
+def test_invalid_create_never_contacts_apple(writable_calendar, fields):
+    from tools import icloud_calendar_tool as tool
+
+    before = len(writable_calendar["requests"])
+    assert json.loads(tool._handle(create_args(**fields)))["error"] == "invalid_request"
+    assert len(writable_calendar["requests"]) == before
+
+
+def test_create_invalidates_dashboard_and_disconnect_revokes_next_write(writable_calendar, tmp_path):
+    from tools import icloud_calendar_tool as tool
+
+    assert ic.dashboard_feed(root=tmp_path)["events"] == []
+    assert tmp_path in ic._dashboard_cache
+    assert json.loads(tool._handle(create_args()))["ok"]
+    assert tmp_path not in ic._dashboard_cache
+    ic.disconnect(root=tmp_path)
+    before = len(writable_calendar["requests"])
+    assert json.loads(tool._handle(create_args()))["error"] == "not_connected"
+    assert len(writable_calendar["requests"]) == before
+
+
+def test_connection_changed_during_discovery_prevents_write(writable_calendar, tmp_path, monkeypatch):
+    from tools import icloud_calendar_tool as tool
+
+    discover = ic._calendars
+
+    def disconnect_after_discovery(client):
+        calendars = discover(client)
+        ic.disconnect(root=tmp_path)
+        return calendars
+
+    monkeypatch.setattr(ic, "_calendars", disconnect_after_discovery)
+    result = json.loads(tool._handle(create_args()))
+    assert result["error"] == "connection_changed"
+    assert not any(request.method == "PUT" for request in writable_calendar["requests"])
+
+
+def test_same_instants_with_different_offsets_are_one_event(writable_calendar):
+    from tools import icloud_calendar_tool as tool
+
+    first = json.loads(tool._handle(create_args()))
+    repeated = json.loads(tool._handle(create_args(start="2026-09-29T08:00:00Z", end="2026-09-29T09:00:00Z")))
+    assert first["ok"] and repeated["ok"] and repeated["already_existed"]
+    assert len(writable_calendar["objects"]) == 1
+    assert ic._calendar_id("https://p01-caldav.icloud.com:443/123/work/") == ic._calendar_id("https://p01-caldav.icloud.com/123/work/")
+
+
+def test_cancelled_stored_event_is_not_reported_as_created(writable_calendar):
+    from tools import icloud_calendar_tool as tool
+
+    assert json.loads(tool._handle(create_args()))["ok"]
+    path, raw = next(iter(writable_calendar["objects"].items()))
+    cancelled = raw.replace(b"END:VEVENT", b"STATUS:CANCELLED\r\nEND:VEVENT")
+    writable_calendar["objects"][path] = cancelled
+    assert json.loads(tool._handle(create_args()))["error"] == "create_conflict"
+    assert writable_calendar["objects"][path] == cancelled
