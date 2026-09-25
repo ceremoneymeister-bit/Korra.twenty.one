@@ -134,9 +134,28 @@ def may_change_owner_services(principal: Principal | None = None) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _one_shot_run() -> bool:
+    """A ``chat -q``/``-Q`` or ``-z`` run: bot-chat delivery, agent-to-agent messages."""
+    from gateway.session_context import get_session_env
+    from korra_constants import korra_env
+    from utils import is_truthy_value
+
+    return is_truthy_value(get_session_env("KORRA_SINGLE_QUERY_SESSION", "")) or bool(korra_env("KORRA_ONESHOT_SESSION"))
+
+
 def origin_owner_verdict() -> bool:
-    """Owner verdict to stamp on a job created in the current turn."""
-    return current_principal().owner
+    """Owner verdict to stamp on a job created in the current turn.
+
+    A one-shot run looks like the owner's own terminal (no platform is bound)
+    but nobody is typing: bot-chat delivery and agent-to-agent messages feed
+    it text written elsewhere, so the jobs it creates are not the owner's.
+    """
+    current = current_principal()
+    if not current.owner:
+        return False
+    if current.kind == "owner" and current.live and _one_shot_run():
+        return False
+    return True
 
 
 def cron_job_acts_for_owner(job: Mapping[str, Any], config: Mapping[str, Any] | None = None) -> bool:
@@ -149,11 +168,16 @@ def cron_job_acts_for_owner(job: Mapping[str, Any], config: Mapping[str, Any] | 
     installation or of the profile.
     """
     origin = job.get("origin") if isinstance(job, Mapping) else None
+    stamped = job.get("created_by_owner") if isinstance(job, Mapping) else None
+    verdict = origin.get("owner") if isinstance(origin, Mapping) else None
+    # An explicit verdict wins over the platform heuristics below: a job with
+    # no origin platform is the owner's only when nothing says otherwise.
+    if stamped is False or verdict is False:
+        return False
+    if stamped is True or verdict is True:
+        return True
     if not isinstance(origin, Mapping) or not origin.get("platform"):
         return True
-    verdict = origin.get("owner")
-    if isinstance(verdict, bool):
-        return verdict
     platform = str(origin.get("platform") or "").strip().lower()
     if platform in OWNER_SURFACES:
         return True

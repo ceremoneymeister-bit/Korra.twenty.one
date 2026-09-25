@@ -7705,6 +7705,8 @@ def _run_one_job_body(
                     delivery_attempted = True
                     delivery_error = _deliver_result(
                         job,
+                        # A failure notice is not a report the owner asked for:
+                        # it keeps its exact decision even for the owner's jobs.
                         # Composed exactly like the normal failure delivery above.
                         # mark_job_run below records THIS run in failure_streak
                         # whichever layer failed, so a job that fails before the
@@ -7715,8 +7717,8 @@ def _run_one_job_body(
                         + _failure_streak_nudge(job),
                         adapters=adapters,
                         loop=loop,
-                        decision_session_id=_delivery_decision_session(
-                            job, execution_id
+                        decision_session_id=(
+                            f"cron:{job['id']}:{execution_id}"
                         ),
                     )
                     if delivery_error and delivery_error.startswith(

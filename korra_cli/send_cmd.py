@@ -38,6 +38,19 @@ _FAILURE_EXIT = 1
 _SUCCESS_EXIT = 0
 
 
+def _run_by_agent() -> bool:
+    """Whether this process was started from an agent turn, not by a person."""
+    from gateway.session_context import get_session_env
+    from korra_constants import korra_env
+    from utils import is_truthy_value
+
+    if any(get_session_env(name, "") for name in ("KORRA_SESSION_KEY", "KORRA_SESSION_ID", "KORRA_SESSION_PLATFORM")):
+        return True
+    if get_session_env("KORRA_CRON_SESSION", "") == "1" or korra_env("KORRA_KANBAN_TASK"):
+        return True
+    return is_truthy_value(get_session_env("KORRA_SINGLE_QUERY_SESSION", "")) or bool(korra_env("KORRA_ONESHOT_SESSION"))
+
+
 def _read_message_body(
     positional: Optional[str],
     file_path: Optional[str],
@@ -373,10 +386,11 @@ def cmd_send(args: argparse.Namespace) -> None:
         "message": message,
     }
 
-    # This process is executing the owner's explicit ``korra send`` command,
-    # not an agent-originated tool call.  The command itself is the exact
-    # authorization for this payload, so do not ask the owner a second time.
-    result = send_message_tool(tool_args, owner_initiated=True)
+    # A person typing ``korra send`` is the exact authorization for this
+    # payload. The same command run from an agent's terminal (its session
+    # vars are bridged into the child env) is an agent-proposed send and
+    # waits for an exact decision like send_message does.
+    result = send_message_tool(tool_args, owner_initiated=not _run_by_agent())
     exit_code = _emit_result(
         result,
         json_mode=getattr(args, "json", False),
