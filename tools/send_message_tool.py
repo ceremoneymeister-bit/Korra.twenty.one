@@ -796,6 +796,22 @@ def resolve_outbound_message_decision(
     )
 
 
+def _owner_configured_run() -> bool:
+    """A scheduled job the owner set up sends without a per-message decision.
+
+    The owner already decided when they configured the job (Dmitry,
+    25.09.2026). One-off sends an agent proposes in a conversation, and jobs
+    created by anybody else, still wait for an exact decision.
+    """
+    try:
+        from gateway.principal import current_principal
+
+        principal = current_principal()
+        return principal.kind == "cron" and principal.owner
+    except Exception:
+        return False
+
+
 def _handle_send(args, *, owner_initiated: bool = False):
     """Send a message to a platform target."""
     target = args.get("target", "")
@@ -918,7 +934,7 @@ def _handle_send(args, *, owner_initiated: bool = False):
 
     try:
         decision = None
-        if not owner_initiated:
+        if not owner_initiated and not _owner_configured_run():
             decision = _queue_outbound_decision(
                 platform_name=platform_name,
                 pconfig=pconfig,

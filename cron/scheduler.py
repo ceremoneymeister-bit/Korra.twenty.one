@@ -3063,6 +3063,25 @@ def _is_channel_dm_topic(
 _WAITING_DECISION_PREFIX = "waiting_decision:"
 
 
+def _delivery_decision_session(job: dict, execution_id: str) -> str:
+    """Session that must approve this run's external delivery, or "" to send now.
+
+    A job the owner set up — in the cabinet, on their own computer, or by
+    asking an agent in their own chat — already carries the owner's decision:
+    its reports go out as configured, without a per-message approval (Dmitry,
+    25.09.2026, refining K21-114). A job created by anybody else still waits
+    for an exact decision in the profile decision center.
+    """
+    try:
+        from gateway.principal import cron_job_acts_for_owner
+
+        if cron_job_acts_for_owner(job):
+            return ""
+    except Exception:
+        logger.warning("Job '%s': owner verdict unavailable; delivery waits for a decision", job.get("id"), exc_info=True)
+    return f"cron:{job['id']}:{execution_id}"
+
+
 def _deliver_result(
     job: dict,
     content: str,
@@ -3317,9 +3336,11 @@ def _deliver_result(
             continue
 
         # Scheduled delivery is an external message whose exact text only
-        # exists after the cron turn. Queue that immutable payload instead of
-        # sending under cron/yolo/off. The decision survives this worker and is
-        # visible from every chat in the profile decision center.
+        # exists after the cron turn. For a job somebody other than the owner
+        # set up, queue that immutable payload instead of sending under
+        # cron/yolo/off; the decision survives this worker and is visible from
+        # every chat in the profile decision center. The owner's own jobs get
+        # no decision session (_delivery_decision_session) and send below.
         if decision_session_id:
             try:
                 from korra_cli.profiles import get_active_profile_name
@@ -7514,8 +7535,8 @@ def _run_one_job_body(
                             deliver_content,
                             adapters=adapters,
                             loop=loop,
-                            decision_session_id=(
-                                f"cron:{job['id']}:{execution_id}"
+                            decision_session_id=_delivery_decision_session(
+                                job, execution_id
                             ),
                         )
                         if delivery_error and delivery_error.startswith(
@@ -7694,8 +7715,8 @@ def _run_one_job_body(
                         + _failure_streak_nudge(job),
                         adapters=adapters,
                         loop=loop,
-                        decision_session_id=(
-                            f"cron:{job['id']}:{execution_id}"
+                        decision_session_id=_delivery_decision_session(
+                            job, execution_id
                         ),
                     )
                     if delivery_error and delivery_error.startswith(
