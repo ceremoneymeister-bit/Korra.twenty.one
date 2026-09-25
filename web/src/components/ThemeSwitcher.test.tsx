@@ -52,8 +52,8 @@ it("renders two centered icon-only choices in the expanded sidebar", async () =>
   expect(light?.getAttribute("aria-pressed")).toBe("true");
   expect(dark?.getAttribute("aria-pressed")).toBe("false");
   expect(light?.className).toContain("rounded-full");
-  expect(light?.className).toContain("ring-inset");
-  expect(light?.className).not.toContain("shadow-[var(--neo-depth-1)]");
+  expect(light?.hasAttribute("data-theme-control")).toBe(true);
+  expect(light?.className).toContain("shadow-[var(--neo-depth-1)]");
 
   await act(async () => dark?.click());
   expect(state.setTheme).toHaveBeenCalledWith("dark");

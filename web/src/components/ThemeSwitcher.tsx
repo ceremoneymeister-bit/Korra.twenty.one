@@ -99,10 +99,10 @@ function ThemeChoice({ active, children, label, onClick }: ThemeChoiceProps) {
       data-theme-control
       className={cn(
         "grid h-full place-items-center rounded-full",
-        "transition-[color,box-shadow]",
+        "transition-[box-shadow,color,background-color]",
         "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--neo-accent-line)]",
         active
-          ? "text-[var(--neo-text-primary)] ring-1 ring-inset ring-[var(--neo-accent-line)]"
+          ? "bg-[var(--neo-surface)] text-[var(--neo-text-primary)] shadow-[var(--neo-depth-1)]"
           : "text-[var(--neo-text-secondary)] hover:text-[var(--neo-text-primary)]",
       )}
       onClick={onClick}
