@@ -381,6 +381,31 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
   font-size: max(13px, 0.8125rem);
 }
 
+/* Quiet arrow at rest; reveal an inset surface only during interaction.
+   Hover is restricted to a mouse so a touch does not leave a sticky tablet. */
+.sidebar-toggle__surface {
+  background: transparent;
+  box-shadow: none;
+  transition: background-color 160ms ease, box-shadow 160ms ease, color 160ms ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  [data-sidebar-toggle]:hover .sidebar-toggle__surface {
+    background: var(--neo-surface);
+    color: var(--neo-text-primary);
+    box-shadow: var(--neo-inset-compact);
+  }
+}
+[data-sidebar-toggle]:active .sidebar-toggle__surface,
+[data-sidebar-toggle][data-pressed="true"] .sidebar-toggle__surface,
+[data-sidebar-toggle]:focus-visible .sidebar-toggle__surface {
+  background: var(--neo-surface);
+  color: var(--neo-text-primary);
+  box-shadow: var(--neo-inset-compact);
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-toggle__surface { transition: none; }
+}
+
 /* Touch target по канону — 44 px. Правило про палец, поэтому и включается
    только там, где указатель грубый: на десктопе мышь попадает и в 38 px, и
    раздувать ради неё интерфейс незачем. */

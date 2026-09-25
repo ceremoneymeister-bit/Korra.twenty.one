@@ -1,4 +1,5 @@
-import { ChevronLeft, Menu } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+import { useState } from "react";
 import { cn } from "@/lib/utils";
 
 /** The 44 px target and centred surface are shared by drawer and desktop. */
@@ -8,7 +9,8 @@ export function SidebarToggle({ expanded, label, onClick, className }: {
   onClick: () => void;
   className?: string;
 }) {
-  const Icon = expanded ? ChevronLeft : Menu;
+  const [pressed, setPressed] = useState(false);
+  const Icon = expanded ? ChevronLeft : ChevronRight;
   return (
     <button
       type="button"
@@ -17,11 +19,18 @@ export function SidebarToggle({ expanded, label, onClick, className }: {
       aria-controls="app-sidebar"
       title={label}
       data-sidebar-toggle
+      data-pressed={pressed || undefined}
+      onPointerDown={() => setPressed(true)}
+      onPointerUp={() => setPressed(false)}
+      onPointerCancel={() => setPressed(false)}
+      onPointerLeave={() => setPressed(false)}
+      onLostPointerCapture={() => setPressed(false)}
+      onBlur={() => setPressed(false)}
       onClick={onClick}
-      className={cn("group/sidebar-toggle grid size-[44px] shrink-0 place-items-center text-[var(--neo-text-secondary)]", className)}
+      className={cn("grid size-[44px] shrink-0 place-items-center text-[var(--neo-text-secondary)]", className)}
       style={{ borderRadius: "50%" }}
     >
-      <span className="grid size-[32px] place-items-center rounded-full bg-[var(--neo-surface)] shadow-[var(--neo-depth-1)] transition-[box-shadow,color] group-hover/sidebar-toggle:text-[var(--neo-text-primary)] group-hover/sidebar-toggle:shadow-[var(--neo-inset-compact)] group-active/sidebar-toggle:shadow-[var(--neo-inset-compact)] pointer-coarse:size-[36px]">
+      <span className="sidebar-toggle__surface grid size-[32px] place-items-center rounded-full pointer-coarse:size-[36px]">
         <Icon aria-hidden className="size-[18px]" strokeWidth={1.75} />
       </span>
     </button>
