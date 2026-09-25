@@ -44,31 +44,56 @@ SYSTEM_IN_OWNER_DM = {"platform": "telegram", "chat_type": "dm", "chat_id": "42"
 
 
 @pytest.mark.parametrize(
-    "session,allowed",
+    "session,in_schema,allowed",
     [
-        ({"platform": "api_server"}, True),  # the owner's cabinet chat
-        ({}, True),  # the owner's own computer (CLI/TUI)
-        (OWNER_DM, True),
-        (OUTSIDER, False),
-        (GROUP, False),
-        (SYSTEM_IN_OWNER_DM, False),  # acts for the owner, but nobody is asking
-        ({"platform": "webhook", "chat_id": "hook"}, False),
-        ({"cron_session": "1"}, False),
+        ({"platform": "api_server"}, True, True),  # the owner's cabinet chat
+        ({}, True, True),  # the owner's own computer (CLI/TUI)
+        (OWNER_DM, True, True),
+        # A system turn in the owner's DM shares the cached agent with the
+        # owner's live turns (gateway/run.py), so the schema stays; the call
+        # is refused because nobody is asking.
+        (SYSTEM_IN_OWNER_DM, True, False),
+        (OUTSIDER, False, False),
+        (GROUP, False, False),
+        ({"platform": "webhook", "chat_id": "hook"}, False, False),
+        ({"cron_session": "1"}, False, False),
+        ({"platform": "", "source": "bot_room"}, False, False),  # a room of agents
     ],
 )
-def test_only_the_owner_speaking_live_gets_the_tool(tool, session, allowed):
+def test_only_the_owner_speaking_live_changes_agents(tool, session, in_schema, allowed):
     from gateway.session_context import clear_session_vars
 
     mat, root, _, _ = tool
     tokens = _turn(dict(session))
     try:
-        assert mat._available() is allowed
+        assert mat._available() is in_schema
         answer = json.loads(mat._handle({"action": "update_role", "agent": "lawyer", "content": "Взлом.\n"}))
     finally:
         clear_session_vars(tokens)
     if not allowed:
         assert "owner" in answer["error"]
     assert ((root / "profiles" / "lawyer" / "SOUL.md").read_text(encoding="utf-8") == "Взлом.\n") is allowed
+
+
+def test_rooms_neither_get_the_tool_nor_change_their_grants(tool):
+    from gateway.hosted_room_execution_policy import (
+        RoomExecutionPolicy, bind_room_execution_policy, execution_policy_mapping, reset_room_execution_policy,
+    )
+    from gateway.session_context import clear_session_vars
+
+    mat, _, _, _ = tool
+    mapping = execution_policy_mapping(target_profile="default", config={})
+    assert "agent_profiles" not in mapping["enabled_toolsets"]
+    tokens = _turn({"platform": "api_server"})
+    try:
+        token = bind_room_execution_policy(RoomExecutionPolicy.from_mapping(mapping))
+        try:
+            assert mat._available() is False
+        finally:
+            reset_room_execution_policy(token)
+        assert mat._available() is True
+    finally:
+        clear_session_vars(tokens)
 
 
 def test_other_agents_one_shot_runs_children_and_the_off_switch_are_refused(tool, monkeypatch):
@@ -90,7 +115,13 @@ def test_other_agents_one_shot_runs_children_and_the_off_switch_are_refused(tool
     finally:
         clear_session_vars(tokens)
     config.clear()
-    monkeypatch.setenv("KORRA_SINGLE_QUERY_SESSION", "1")
+    config["agent"] = {"manage_profiles": True}  # YAML `on`
+    assert mat._enabled() is True
+    config.clear()
+    monkeypatch.setenv("KORRA_SINGLE_QUERY_SESSION", "1")  # chat -q
+    assert mat._available() is False
+    monkeypatch.delenv("KORRA_SINGLE_QUERY_SESSION")
+    monkeypatch.setenv("KORRA_ONESHOT_SESSION", "1")  # -z
     assert mat._available() is False
 
 
@@ -101,7 +132,7 @@ def test_owner_edits_an_agent_through_the_tool_and_can_undo(tool):
     tokens = _turn({"platform": "api_server"})
     try:
         shown = json.loads(mat._handle({"action": "show", "agent": "Юрист"}))
-        done = json.loads(mat._handle({"action": "update_role", "agent": "Юрист", "old_text": "Ты юрист.",
+        done = json.loads(mat._handle({"action": "update_role", "agent": "Юрист", "content": "", "old_text": "Ты юрист.",
                                        "new_text": "Ты юрист «Награды».", "version": shown["role_version"],
                                        "reason": "уточнить компанию"}))
         assert done["ok"] and (root / "profiles" / "lawyer" / "SOUL.md").read_text(encoding="utf-8") == "Ты юрист «Награды».\n"

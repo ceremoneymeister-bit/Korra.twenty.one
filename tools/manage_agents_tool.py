@@ -13,8 +13,9 @@ Who gets it — decided per call from server-bound state, never from arguments:
 
 * the main agent (profile ``default``) with ``agent.manage_profiles: main``;
 * the owner speaking live (cabinet, own computer, or the owner's direct chat);
-* not a delegate_task child, a scheduled job, a Kanban worker or a one-shot
-  ``chat -q`` run (bot-chat delivery, agent-to-agent messages).
+* not a delegate_task child, a scheduled job, a Kanban worker, a room of
+  agents, or a one-shot ``chat -q`` / ``-z`` run (bot-chat delivery,
+  agent-to-agent messages).
 """
 
 from __future__ import annotations
@@ -33,45 +34,59 @@ _OWNER_ONLY = (
 )
 
 
-def _setting() -> str:
+def _enabled() -> bool:
     try:
         from korra_cli.config import cfg_get, load_config
 
-        return str(cfg_get(load_config(), "agent", "manage_profiles", default="main")).strip().lower()
+        value = str(cfg_get(load_config(), "agent", "manage_profiles", default="main")).strip().lower()
     except Exception:
-        return "off"
+        return False
+    # YAML turns a bare ``on``/``yes`` into a boolean; both mean "main".
+    return value in {"main", "true", "on", "yes", "1"}
 
 
-def _refusal() -> str | None:
-    """Why this turn may not change agents, or None when it may."""
+def _refusal(*, live: bool = True) -> str | None:
+    """Why this turn may not change agents, or None when it may.
+
+    ``live=False`` is the schema question. The gateway caches one agent for
+    live and system turns of the owner's direct chat, so the schema follows
+    ``owner`` (like google_calendar and the board) and the handler insists
+    on the owner speaking live.
+    """
     try:
         from agent.delegation_context import is_delegated_child_context
+        from gateway.hosted_room_execution_policy import current_room_execution_policy
         from gateway.principal import current_principal
         from gateway.session_context import get_session_env
         from korra_cli.profiles import get_active_profile_name
+        from korra_constants import korra_env
         from utils import is_truthy_value
     except Exception:
         return _OWNER_ONLY
-    if _setting() != "main":
+    if not _enabled():
         return "Changing agents from chat is turned off in this installation (agent.manage_profiles)."
     try:
         if get_active_profile_name() != "default":
             return "Only the main agent changes other agents. Ask the owner to use the main agent."
-        if is_delegated_child_context():
+        if is_delegated_child_context() or current_room_execution_policy() is not None:
             return _OWNER_ONLY
-        if is_truthy_value(get_session_env("KORRA_SINGLE_QUERY_SESSION", "")):
+        if str(get_session_env("KORRA_SESSION_SOURCE", "")).strip().lower() == "bot_room":
+            return _OWNER_ONLY
+        # One-shot runs (`chat -q`, `-z`) serve bot-chat delivery and
+        # agent-to-agent messages: nobody is asking in person.
+        if is_truthy_value(get_session_env("KORRA_SINGLE_QUERY_SESSION", "")) or korra_env("KORRA_ONESHOT_SESSION"):
             return _OWNER_ONLY
         principal = current_principal()
     except Exception:
         return _OWNER_ONLY
-    if principal.kind != "owner" or not (principal.owner and principal.live):
+    if principal.kind != "owner" or not principal.owner or (live and not principal.live):
         return _OWNER_ONLY
     return None
 
 
 @no_cache_check_fn
 def _available() -> bool:
-    return _refusal() is None
+    return _refusal(live=False) is None
 
 
 def _text(args: dict, key: str) -> str:
@@ -93,6 +108,8 @@ def _dispatch(args: dict) -> dict:
         return editor.history(agent, int(args.get("limit") or 20))
     if action == "update_role":
         content = args.get("content") if isinstance(args.get("content"), str) else None
+        if _text(args, "old_text"):
+            content = None  # a fragment edit; models often send an empty content too
         return editor.update_role(agent, content=content, old_text=_text(args, "old_text"),
                                   new_text=_text(args, "new_text"), version=_text(args, "version"), reason=reason)
     if action == "memory":
@@ -140,7 +157,7 @@ _DESCRIPTION = (
     "use update_role with old_text/new_text copied exactly from `role`; pass `version` from show. For "
     "'all agents' requests, apply to each agent separately. Memory entries are short facts (add/replace/"
     "remove with the exact entry text); long texts go to materials. After changing, tell the owner in plain "
-    "words what changed, that it applies to the agent's new chats, and that you can undo it. Model, tools, "
+    "words what changed, that it applies to the agent's new chats (in Telegram after /new), and that you can undo it. Model, tools, "
     "keys, channels, schedules and permissions are not changed here — point the owner to Settings."
 )
 

@@ -48,7 +48,7 @@ def test_role_edit_by_display_name_is_journaled_and_undone_exactly(install):
                               version=shown["role_version"], reason="короче отвечать")
     assert soul(root, "lawyer") == "Ты юрист компании.\nОтвечай коротко, по пунктам.\n"
     assert soul(root, "designer") == "Ты дизайнер.\n"  # only the named agent changed
-    assert done["applies"] == "в новых чатах этого агента"
+    assert done["applies"] == editor.APPLIES
 
     journal = (root / "agent-changes" / "journal.jsonl").read_text(encoding="utf-8").splitlines()
     assert json.loads(journal[-1])["reason"] == "короче отвечать"
@@ -137,3 +137,37 @@ def test_unknown_agent_is_a_clear_error(install):
     _, editor = install
     with pytest.raises(editor.ProfileEditError, match="не найден"):
         editor.show_agent("бухгалтер")
+
+
+def test_a_fact_the_agent_already_had_survives_undo(install):
+    """Review P1: a duplicate add is not a change, so undo cannot delete it."""
+    _, editor = install
+    editor.change_memory("lawyer", action="add", content="Работаем с НДС.")
+    again = editor.change_memory("lawyer", action="add", content="Работаем с НДС.")
+    assert again["changed"] is False and "change_id" not in again
+    assert editor.show_agent("lawyer")["memory"] == ["Работаем с НДС."]
+    assert [c["kind"] for c in editor.history("lawyer")["changes"]] == ["memory"]
+
+
+def test_a_role_saved_with_a_bom_is_editable_like_the_loader_reads_it(install):
+    root, editor = install
+    path = root / "profiles" / "lawyer" / "SOUL.md"
+    path.write_text("\ufeffТы юрист.\n", encoding="utf-8")
+    editor.update_role("lawyer", old_text="Ты юрист.", new_text="Ты юрист «Награды».")
+    assert path.read_text(encoding="utf-8") == "\ufeffТы юрист «Награды».\n"
+
+
+def test_a_failed_journal_write_leaves_no_unrecorded_change(install, monkeypatch):
+    root, editor = install
+    before = soul(root, "lawyer")
+
+    def broken(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(editor, "_record", broken)
+    with pytest.raises(OSError):
+        editor.update_role("lawyer", content="Новая роль.\n")
+    assert soul(root, "lawyer") == before
+    with pytest.raises(OSError):
+        editor.change_memory("lawyer", action="add", content="Факт.")
+    assert editor.show_agent("lawyer")["memory"] == []

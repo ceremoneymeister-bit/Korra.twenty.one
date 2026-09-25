@@ -255,6 +255,9 @@ def run_oneshot(
     # definition — a prompt would hang forever.
     korra_env_set(os.environ, "KORRA_YOLO_MODE", "1")
     korra_env_set(os.environ, "KORRA_ACCEPT_HOOKS", "1")
+    # Nobody is at the keyboard: tools that act only on the owner's live
+    # request (manage_agents) refuse this run.
+    korra_env_set(os.environ, "KORRA_ONESHOT_SESSION", "1")
 
     # One-shot prints a single final response and exits: there is no later turn
     # for a detached subagent's completion to re-enter, and nothing here drains

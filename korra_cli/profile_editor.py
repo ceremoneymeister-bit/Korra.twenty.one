@@ -28,6 +28,9 @@ SOUL_MAX_CHARS = 40_000
 SOUL_SOFT_CHARS = 20_000
 DESCRIPTION_MAX_CHARS = 500
 JOURNAL_DIR = "agent-changes"
+#: Role and memory are read when a chat starts; a long Telegram chat keeps
+#: the old ones until the owner starts a new one.
+APPLIES = "в новых чатах этого агента; в Telegram — после команды /new"
 
 
 class ProfileEditError(ValueError):
@@ -231,7 +234,9 @@ def _check_role(text: str) -> None:
         raise ProfileEditError("Роль не может быть пустой.")
     if len(text) > SOUL_MAX_CHARS:
         raise ProfileEditError(f"Роль длиннее {SOUL_MAX_CHARS} символов. Сократите её; справочные сведения лучше добавить материалом.")
-    findings = scan_for_threats(text, scope="context")
+    # Same input as agent/prompt_builder._scan_context_content, which strips
+    # a leading UTF-8 BOM (an editor artifact) before scanning.
+    findings = scan_for_threats(text[1:] if text.startswith("\ufeff") else text, scope="context")
     if findings:
         # prompt_builder replaces such a SOUL.md with a BLOCKED placeholder at
         # load time: writing it would silently leave the agent without a role.
@@ -272,10 +277,14 @@ def update_role(agent: str, *, content: str | None = None, old_text: str = "", n
         snapshot_before = _snapshot(change_id, "SOUL.before.md", before)
         snapshot_after = _snapshot(change_id, "SOUL.after.md", after)
         _write_role(path, after)
-        entry = _record(canon, "role", "Изменена роль агента", reason,
-                        before_sha=_sha(before), after_sha=_sha(after),
-                        before=snapshot_before, after=snapshot_after)
-    extra = {"role_version": _version(after), "applies": "в новых чатах этого агента"}
+        try:
+            entry = _record(canon, "role", "Изменена роль агента", reason,
+                            before_sha=_sha(before), after_sha=_sha(after),
+                            before=snapshot_before, after=snapshot_after)
+        except Exception:
+            _write_role(path, before)  # an unjournaled change could not be undone
+            raise
+    extra = {"role_version": _version(after), "applies": APPLIES}
     if len(after) > SOUL_SOFT_CHARS:
         extra["warning"] = f"Роль длиннее {SOUL_SOFT_CHARS} символов: в небольшом контексте середина может сокращаться."
     return _done(entry, **extra)
@@ -298,18 +307,40 @@ def _change_memory(home: Path, action: str, target: str, content: str, old_text:
             raise ProfileEditConflict(str(exc)) from None
 
 
+def _undo_memory(home: Path, action: str, target: str, content: str, old_text: str) -> None:
+    if action == "add":
+        _change_memory(home, "remove", target, "", content)
+    elif action == "remove":
+        _change_memory(home, "add", target, old_text, "")
+    else:
+        _change_memory(home, "replace", target, old_text, content)
+
+
 def change_memory(agent: str, *, action: str, target: str = "memory", content: str = "",
                   old_text: str = "", reason: str = "") -> dict:
     canon, home = _resolve(agent)
     if action not in _MEMORY_INVERSE:
         raise ProfileEditError("memory_action: add, replace или remove.")
     with _locked():
+        if action == "add" or (action == "replace" and content.strip() == old_text.strip()):
+            from korra_cli import profile_learning
+
+            with _scoped(home):
+                entries = profile_learning.read_memory().get(target, [])
+            if content.strip() in entries:
+                # MemoryStore reports success for a duplicate without writing;
+                # journaling it would make undo delete the entry that was there.
+                return {"ok": True, "changed": False, "agent": canon, "message": "Агент уже помнит это."}
         _change_memory(home, action, target, content, old_text)
         labels = {"add": "Добавлено в память", "replace": "Изменена запись памяти", "remove": "Удалено из памяти"}
         where = "о пользователе" if target == "user" else "агента"
-        entry = _record(canon, "memory", f"{labels[action]} ({where})", reason,
-                        action=action, target=target, content=content, old_text=old_text)
-    return _done(entry, applies="в новых чатах этого агента")
+        try:
+            entry = _record(canon, "memory", f"{labels[action]} ({where})", reason,
+                            action=action, target=target, content=content, old_text=old_text)
+        except Exception:
+            _undo_memory(home, action, target, content, old_text)
+            raise
+    return _done(entry, applies=APPLIES)
 
 
 # ---------------------------------------------------------------------------
@@ -326,7 +357,7 @@ def add_material(agent: str, *, title: str, text: str = "", url: str = "", reaso
         entry = _record(canon, "material_add", f"Добавлен материал «{title.strip()}»", reason,
                         material=created["name"], title=title.strip())
     _clear_skills_cache()
-    return _done(entry, material=created["name"], applies="в новых чатах этого агента")
+    return _done(entry, material=created["name"], applies=APPLIES)
 
 
 def remove_material(agent: str, *, material: str, reason: str = "") -> dict:
@@ -415,13 +446,7 @@ def undo(change_id: str, reason: str = "") -> dict:
                 raise ProfileEditConflict("Роль менялась после этого изменения. Откройте её и исправьте нужное место отдельной правкой.")
             _write_role(path, (_journal_dir() / entry["before"]).read_text(encoding="utf-8"))
         elif kind == "memory":
-            action = entry["action"]
-            if action == "add":
-                _change_memory(home, "remove", entry["target"], "", entry["content"])
-            elif action == "remove":
-                _change_memory(home, "add", entry["target"], entry["old_text"], "")
-            else:
-                _change_memory(home, "replace", entry["target"], entry["old_text"], entry["content"])
+            _undo_memory(home, entry["action"], entry["target"], entry["content"], entry["old_text"])
         elif kind == "material_add":
             with _scoped(home):
                 profile_learning.delete_material(entry["material"])
