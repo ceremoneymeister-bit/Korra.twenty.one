@@ -2204,6 +2204,15 @@ def _validate_job_mode_invariants(
         raise ValueError(NO_AGENT_WITHOUT_SCRIPT_ERROR)
 
 
+def _creator_is_owner() -> bool:
+    try:
+        from gateway.principal import origin_owner_verdict
+
+        return origin_owner_verdict()
+    except Exception:
+        return False
+
+
 def create_job(
     prompt: Optional[str],
     schedule: str,
@@ -2225,6 +2234,7 @@ def create_job(
     monitor_script: Optional[str] = None,
     monitor_url: Optional[str] = None,
     reasoning_effort: Optional[str] = None,
+    created_by_owner: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """
     Create a new cron job.
@@ -2431,6 +2441,10 @@ def create_job(
         # Delivery configuration
         "deliver": deliver,
         "origin": origin,  # Tracks where job was created for "origin" delivery
+        # Who created the job, recorded for every job — also those without an
+        # origin (cabinet, terminal). The owner's own jobs deliver without a
+        # per-message decision (gateway.principal.cron_job_acts_for_owner).
+        "created_by_owner": created_by_owner if isinstance(created_by_owner, bool) else _creator_is_owner(),
         "enabled_toolsets": normalized_toolsets,
         "workdir": normalized_workdir,
     }
