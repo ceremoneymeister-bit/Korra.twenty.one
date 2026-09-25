@@ -29,6 +29,7 @@ export function ThemeSwitcher({ collapsed = false }: ThemeSwitcherProps) {
         <button
           aria-busy={isSaving || undefined}
           aria-label={isDark ? "Включить светлую тему" : "Включить тёмную тему"}
+          data-theme-control
           className={cn(
             "grid size-[36px] place-items-center rounded-full pointer-coarse:size-[44px]",
             "text-[var(--neo-text-secondary)] transition-[box-shadow,color,opacity]",
@@ -95,6 +96,7 @@ function ThemeChoice({ active, children, label, onClick }: ThemeChoiceProps) {
     <button
       aria-label={label}
       aria-pressed={active}
+      data-theme-control
       className={cn(
         "grid h-full place-items-center rounded-full",
         "transition-[color,box-shadow]",

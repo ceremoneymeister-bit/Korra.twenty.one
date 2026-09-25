@@ -288,7 +288,9 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
   letter-spacing: 0.01em !important;
 }
 
-[data-client-ui="true"] button:not([role="switch"]):not([role="checkbox"]) {
+/* The theme selector's thumb follows its rounded track. Keep the product
+   button radius for other controls without flattening that thumb. */
+[data-client-ui="true"] button:not([role="switch"]):not([role="checkbox"]):not([data-theme-control]) {
   border-radius: 0.625rem;
 }
 
