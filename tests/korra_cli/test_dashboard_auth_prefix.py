@@ -206,8 +206,8 @@ class TestGateRedirectsCarryPrefix:
         assert 'href="/hermes/auth/login?provider=stub"' in r.text
         # Знаки бренда — такие же pre-auth ассеты, как шрифт: без префикса
         # под ingress-монтированием лок-ап уехал бы на чужой origin.
-        assert 'src="/hermes/brand/korra-wordmark.png"' in r.text
-        assert 'src="/hermes/brand/korra-21.png"' in r.text
+        assert 'src="/hermes/brand/korra-wordmark.png?v=0.21.14"' in r.text
+        assert 'src="/hermes/brand/korra-21.png?v=0.21.14"' in r.text
 
 
     def test_malformed_prefix_header_is_ignored(self, gated_app_proxied):

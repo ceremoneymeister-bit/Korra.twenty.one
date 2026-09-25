@@ -119,13 +119,11 @@ _LOGIN_HTML_TEMPLATE = """\
     to   {{ opacity: 1; transform: translateY(0); }}
   }}
 
-  /* The lockup is assembled from the brand PNGs. Both carry their own soft
-     shadow and transparent padding inside the frame: the letters fill 61.7%
-     of their frame height, the numeral 75.5%. Hence the .817 multiplier
-     (optically equal heights) and the near-zero gap — the optical gap is
-     already baked into the files' padding. */
+  /* Both PNGs have transparent padding. The new shadow-free letters fill
+     58.3% of their frame height, the numeral 67.8%; .86 keeps their visible
+     heights aligned. The optical gap is already in the files. */
   .brand-lockup {{
-    --word-h: clamp(2.2rem, 4.2vw, 3.2rem);
+    --word-h: clamp(2.55rem, 4.9vw, 3.75rem);
     display: flex;
     align-items: center;
     gap: 0.1rem;
@@ -133,7 +131,7 @@ _LOGIN_HTML_TEMPLATE = """\
   }}
 
   .brand-word {{ height: var(--word-h); width: auto; }}
-  .brand-number {{ height: calc(var(--word-h) * 0.817); width: auto; }}
+  .brand-number {{ height: calc(var(--word-h) * 0.86); width: auto; }}
 
   /* Строка слева меняется сама. Стек на grid, а не абсолютное
      позиционирование: блок получает высоту самой длинной фразы, и раскладка
@@ -378,8 +376,8 @@ _LOGIN_HTML_TEMPLATE = """\
   <div class="login-shell">
     <section class="identity">
       <div class="brand-lockup">
-        <img class="brand-word" src="{base_path}/brand/korra-wordmark.png" alt="Korra" width="740" height="149">
-        <img class="brand-number" src="{base_path}/brand/korra-21.png" alt="21" width="364" height="233">
+        <img class="brand-word" src="{base_path}/brand/korra-wordmark.png?v=0.21.14" alt="Korra" width="1144" height="235">
+        <img class="brand-number" src="{base_path}/brand/korra-21.png?v=0.21.14" alt="21" width="423" height="261">
       </div>
       <h1>
         <span class="tagline-line">Чтобы твои идеи не оставались идеями</span>
@@ -454,17 +452,17 @@ _EMPTY_HTML = """\
   main {
     width: 100%; max-width: 30rem;
   }
-  /* Тот же лок-ап из PNG, что и на /login: множитель .817 уравнивает
+  /* Тот же лок-ап из PNG, что и на /login: множитель .86 уравнивает
      оптические высоты литер и цифры внутри их кадров. */
   .brand {
-    --word-h: 2.35rem;
+    --word-h: 2.75rem;
     display: inline-flex;
     align-items: center;
     gap: 0.1rem;
     margin-bottom: clamp(2.4rem, 7vh, 3.6rem);
   }
   .brand-word { height: var(--word-h); width: auto; }
-  .brand-number { height: calc(var(--word-h) * 0.817); width: auto; }
+  .brand-number { height: calc(var(--word-h) * 0.86); width: auto; }
   h1 {
     margin: 0 0 1rem;
     font-weight: 680;
@@ -504,8 +502,8 @@ _EMPTY_HTML = """\
 <body>
 <main>
 <div class="brand">
-  <img class="brand-word" src="/brand/korra-wordmark.png" alt="Korra" width="740" height="149">
-  <img class="brand-number" src="/brand/korra-21.png" alt="21" width="364" height="233">
+  <img class="brand-word" src="/brand/korra-wordmark.png?v=0.21.14" alt="Korra" width="1144" height="235">
+  <img class="brand-number" src="/brand/korra-21.png?v=0.21.14" alt="21" width="423" height="261">
 </div>
 <h1>Настройте доступ</h1>
 <p>Панель готова принимать подключения. Добавьте провайдер логина и пароля или OAuth-провайдер в конфигурации Korra21.</p>

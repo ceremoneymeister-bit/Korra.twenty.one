@@ -720,7 +720,7 @@ export default function App() {
           <Menu />
         </Button>
 
-        <KorraBrand themeName={theme.name} className="h-[18px]" />
+        <KorraBrand themeName={theme.name} className="h-[21px]" />
       </header>
 
       {mobileOpen && (
