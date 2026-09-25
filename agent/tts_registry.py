@@ -12,7 +12,8 @@ Built-ins-always-win
 --------------------
 Plugin names that collide with a built-in TTS provider (``edge``,
 ``openai``, ``elevenlabs``, ``minimax``, ``gemini``, ``mistral``,
-``xai``, ``piper``, ``kittentts``, ``neutts``) are rejected at
+``xai``, ``piper``, ``kittentts``, ``neutts``, ``deepinfra``,
+``compatible``) are rejected at
 registration with a warning. This invariant is also re-checked at
 dispatch time in :func:`tools.tts_tool._dispatch_to_plugin_provider`.
 
@@ -47,6 +48,7 @@ logger = logging.getLogger(__name__)
 # create a circular dependency (``tools.tts_tool`` imports
 # ``agent.tts_registry`` for dispatch).
 _BUILTIN_NAMES = frozenset({
+    "compatible",
     "edge",
     "elevenlabs",
     "openai",
