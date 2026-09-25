@@ -17,7 +17,7 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.restoreAllMocks(); });
 async function render(streaming = false, active = true, enabled = true) {
-  await act(async () => { root.render(<AgentSpeech profile="psychologist" text="Я вас слушаю" streaming={streaming} active={active} settings={{ ...settings, enabled }} />); });
+  await act(async () => { root.render(<AgentSpeech profile="psychologist" text="Я вас слушаю" streaming={streaming} active={active} settings={{ ...settings, enabled }}><p data-transcript>Я вас слушаю</p></AgentSpeech>); });
 }
 describe("Голос ответа", () => {
   it("не озвучивает историю при открытии и не вызывает сервис при выключении", async () => {
@@ -26,9 +26,21 @@ describe("Голос ответа", () => {
     expect(speak).not.toHaveBeenCalled(); expect(host.querySelector("button")).toBeNull();
   });
   it("озвучивает новый ответ один раз для выбранного профиля", async () => {
-    await render(true); await render(false); await render(false);
+    await render(true);
+    expect(host.querySelector("[data-transcript]")).toBeNull();
+    await render(false); await render(false);
     expect(speak).toHaveBeenCalledExactlyOnceWith("psychologist", "Я вас слушаю");
     expect(host.querySelector("audio")?.getAttribute("src")).toContain("data:audio/");
+    expect(host.querySelector("[data-transcript]")).toBeNull();
+    const toggle = host.querySelector<HTMLButtonElement>("button[aria-expanded]")!;
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(host.querySelector("audio")!.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await act(async () => toggle.click());
+    expect(host.querySelector("[data-transcript]")?.textContent).toBe("Я вас слушаю");
+    expect(toggle.textContent).toContain("Скрыть текст");
+    await act(async () => toggle.click());
+    expect(host.querySelector("[data-transcript]")).toBeNull();
+    expect(speak).toHaveBeenCalledTimes(1);
     await render(false, false);
     expect(HTMLMediaElement.prototype.pause).toHaveBeenCalled();
   });
@@ -44,7 +56,20 @@ describe("Голос ответа", () => {
     expect(speak).toHaveBeenCalledTimes(1);
     await act(async () => reject(new Error("offline")));
     expect(host.textContent).toContain("текст ответа сохранён");
+    expect(host.querySelector("[data-transcript]")?.textContent).toBe("Я вас слушаю");
     await act(async () => host.querySelector("button")!.click());
     expect(speak).toHaveBeenCalledTimes(2);
+  });
+  it("оставляет текст истории доступным без повторного синтеза", async () => {
+    await render();
+    expect(host.querySelector("[data-transcript]")?.textContent).toBe("Я вас слушаю");
+    expect(speak).not.toHaveBeenCalled();
+  });
+  it("при запрете автозапуска оставляет плеер и раскрытие текста", async () => {
+    vi.mocked(HTMLMediaElement.prototype.play).mockRejectedValue(new Error("NotAllowedError"));
+    await render(true); await render(false);
+    expect(host.querySelector("audio")).not.toBeNull();
+    expect(host.querySelector("[data-transcript]")).toBeNull();
+    expect(host.querySelector("button[aria-expanded]")).not.toBeNull();
   });
 });

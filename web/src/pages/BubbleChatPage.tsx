@@ -316,8 +316,9 @@ function AssistantBubble({
         )}
         {message.content && (
           <article className="korra-chat-answer" aria-label="Ответ агента">
-            <Markdown content={artifactSplit.text} streaming={streaming} />
-            <AgentSpeech profile={profile} text={artifactSplit.text} streaming={Boolean(streaming)} active={active} settings={voiceSettings ?? null} />
+            <AgentSpeech profile={profile} text={artifactSplit.text} streaming={Boolean(streaming)} active={active} settings={voiceSettings ?? null}>
+              <Markdown content={artifactSplit.text} streaming={streaming} />
+            </AgentSpeech>
             {/* Готовое вложение идёт после пояснения. Недописанный маркер
                 потока пока не превращаем в карточку файла. */}
             {!streaming && (
