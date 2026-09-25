@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { BookOpen, ChevronDown, ChevronUp } from "lucide-react";
 import { Input } from "@nous-research/ui/ui/components/input";
 import { Label } from "@nous-research/ui/ui/components/label";
 import { Textarea } from "@nous-research/ui/ui/components/textarea";
@@ -12,9 +13,11 @@ export function InitialKnowledgeFields({ value, onChange, disabled, cloning }: {
 }) {
   const [open, setOpen] = useState(false);
   const change = <K extends keyof KnowledgeDraft>(key: K, next: KnowledgeDraft[K]) => onChange({ ...value, [key]: next });
-  return <div className="grid gap-3 border-t pt-4">
-    <button type="button" className="w-fit text-left font-medium" aria-expanded={open} aria-controls="pb-knowledge" onClick={() => setOpen(!open)}>
-      {open ? "−" : "+"} Память и материалы <span className="text-sm font-normal text-[var(--neo-text-secondary)]">— необязательно</span>
+  return <div className="grid gap-2 rounded-[var(--neo-radius-control)] px-3 py-1">
+    <button type="button" className="flex min-h-[52px] w-full items-center gap-3 text-left" aria-expanded={open} aria-controls="pb-knowledge" onClick={() => setOpen(!open)}>
+      <BookOpen aria-hidden className="size-[20px] shrink-0 text-[var(--neo-text-secondary)]" />
+      <span className="min-w-0 flex-1"><span className="block text-sm font-medium">Память и материалы</span><span className="mt-1 block text-xs text-[var(--neo-text-secondary)]">Факты и документы · необязательно</span></span>
+      {open ? <ChevronUp size={17} aria-hidden /> : <ChevronDown size={17} aria-hidden />}
     </button>
     <fieldset id="pb-knowledge" disabled={disabled} className={open ? "grid min-w-0 gap-4" : "hidden"}>
       <p className="text-sm text-[var(--neo-text-secondary)]">Короткие факты агент будет учитывать с первого сообщения. Большие документы добавьте в материал: агент сможет обращаться к нему по задаче.</p>
@@ -34,7 +37,7 @@ export function InitialKnowledgeFields({ value, onChange, disabled, cloning }: {
           <div className="grid gap-2"><Label htmlFor="pb-user-limit">О вас, символов</Label><Input id="pb-user-limit" type="number" min={100} max={50000} step={1} placeholder={cloning ? "Как у исходного агента" : "1375"} value={value.userLimit} onChange={(e) => change("userLimit", e.target.value)} /></div>
         </div>
       </details>
-      <div className="grid gap-2 border-t pt-3">
+      <div className="grid gap-2 pt-3">
         <Label htmlFor="pb-material-title">Первый материал</Label>
         <Input id="pb-material-title" value={value.title} maxLength={120} onChange={(e) => change("title", e.target.value)} placeholder="Название: например, условия доставки" />
         <Label htmlFor="pb-material-text">Текст материала</Label>

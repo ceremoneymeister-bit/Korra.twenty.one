@@ -22,7 +22,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp, Cpu, PenLine, Settings2 } from "lucide-react";
 import { ThinkingOrb } from "thinking-orbs";
 import { H2 } from "@nous-research/ui/ui/components/typography/h2";
 import { Card, CardContent } from "@nous-research/ui/ui/components/card";
@@ -63,6 +63,7 @@ import { cn } from "@/lib/utils";
 import { usePageHeader } from "@/contexts/usePageHeader";
 import { useProfileScope } from "@/contexts/useProfileScope";
 import { useTheme } from "@/themes";
+import { AgentTemplatePicker, type AgentCreationMode } from "@/components/profiles/AgentTemplatePicker";
 import { InitialKnowledgeFields } from "@/components/profiles/InitialKnowledgeFields";
 import { emptyKnowledge, prepareInitialKnowledge } from "@/lib/initial-knowledge";
 
@@ -78,8 +79,7 @@ export const PROBE_PROMPT = "Представься одной фразой: к�
 // календаря, расписания): только то, что агент умеет из коробки — читать,
 // уточнять, готовить текст (замечание Астры по ревью 05.09).
 const ROLE_PLACEHOLDER =
-  "Например: помогаешь разбирать заявки клиентов. Уточняешь количество, сроки " +
-  "и бюджет. Готовишь ответ клиенту, спорные вопросы передаёшь мне.";
+  "Например: помогает отвечать клиентам. Уточняет детали и готовит короткие, вежливые ответы.";
 
 /** Виртуальный агрегатор «смесь моделей» в мастере для предпринимателя не
  *  предлагаем: он не модель, а режим поверх выбранной. Остаётся на странице
@@ -100,6 +100,7 @@ interface CreatedAgent {
   label: string;
   /** Роль: своими словами, из заготовки или не задана. */
   role: "own" | "starter" | "none" | "template";
+  templateId?: string;
   /** Явно выбранная модель; null — унаследована от источника сервером. */
   model: ModelChoice | null;
   /** Сервер подтвердил запись модели (`model_set`). */
@@ -146,6 +147,9 @@ export default function ProfileBuilderPage() {
   const [templates, setTemplates] = useState<AgentTemplate[]>([]);
   const [templatesLoading, setTemplatesLoading] = useState(true);
   const [templatesError, setTemplatesError] = useState("");
+  const [creationMode, setCreationMode] = useState<AgentCreationMode>("catalog");
+  const [modelOpen, setModelOpen] = useState(false);
+  const [roleExamplesOpen, setRoleExamplesOpen] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<AgentTemplate | null>(null);
   const ownDraft = useRef({ name: "", id: null as string | null });
   const createInFlight = useRef(false);
@@ -374,7 +378,7 @@ export default function ProfileBuilderPage() {
 
   const handleCreate = async () => {
     const name = displayName.trim();
-    if (!name || !idReady || createInFlight.current) return;
+    if (!name || !idReady || createInFlight.current || (creationMode === "catalog" && !selectedTemplate)) return;
     createInFlight.current = true;
     setCreating(true);
     setCreateError("");
@@ -430,6 +434,7 @@ export default function ProfileBuilderPage() {
       setProbeFor({
         id: created,
         label: name,
+        templateId: selectedTemplate?.id,
         role: selectedTemplate ? "template" : !roleText
           ? "none"
           : ROLE_STARTERS.some((item) => item.role === roleText)
@@ -461,6 +466,10 @@ export default function ProfileBuilderPage() {
     probeRequest.current += 1;
     probeAbort.current?.abort();
     setProbeFor(null);
+    setCreationMode("catalog");
+    setModelOpen(false);
+    setRoleExamplesOpen(false);
+    setAdvancedOpen(false);
     setSelectedTemplate(null);
     templateAttempt.current = null;
     setKnowledge(emptyKnowledge());
@@ -567,7 +576,9 @@ export default function ProfileBuilderPage() {
                   Роль и навыки можно менять — обновления каталога их не перезапишут.
                   Проверка ответа ниже проверяет только чат. {probeFor.generation
                     ? "Настройка генератора проверена без создания картинки; экспорт презентаций ещё не проверен."
-                    : "Генерация изображений, GPT Image 2.5 и экспорт презентаций ещё не проверены."}
+                    : probeFor.templateId === "korra.designer"
+                      ? "Генерация изображений, GPT Image 2.5 и экспорт презентаций ещё не проверены."
+                      : ""}
                 </p>
                 {probeFor.generation && !probeFor.generation.available && (
                   <Button
@@ -707,102 +718,71 @@ export default function ProfileBuilderPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-6 p-4">
-      <div className="flex items-center justify-between">
-        <H2>Новый агент</H2>
-        <Button ghost onClick={goBack}>
-          Отмена
-        </Button>
+    <div className="mx-auto grid w-full max-w-4xl gap-6 px-2 py-4 sm:p-4" data-agent-builder>
+      <div className="flex items-start justify-between gap-3">
+        <div className="grid gap-2">
+          <h2 className="hidden text-[28px] font-semibold leading-tight lg:block">Новый агент</h2>
+          <p className="text-sm text-[var(--neo-text-secondary)]">Готовый помощник или агент под вашу задачу.</p>
+        </div>
+        <Button ghost onClick={goBack}>Отмена</Button>
       </div>
 
-      <Card>
-        <CardContent className="grid gap-3 p-5" aria-label="Готовые агенты">
-          <p className="font-semibold">Добавить из готовых агентов</p>
-          {templatesLoading && <p role="status">Загружаю каталог…</p>}
-          {templatesError && (
-            <div role="alert" className="grid gap-2 text-sm">
-              <p>{templatesError}</p>
-              <Button ghost disabled={templatesLoading} onClick={() => {
-                setTemplatesLoading(true);
-                void loadTemplates();
-              }}>Повторить загрузку</Button>
-            </div>
-          )}
-          <div className="grid gap-3 sm:grid-cols-2">
-            {templates.map((template) => (
-              <button
-                key={template.id}
-                type="button"
-                disabled={creating}
-                aria-pressed={selectedTemplate?.id === template.id}
-                onClick={() => chooseTemplate(template)}
-                className={cn("rounded-xl border p-4 text-left", selectedTemplate?.id === template.id && "ring-2 ring-current")}
-              >
-                <span className="block font-semibold">{template.name}</span>
-                <span className="mt-1 block text-sm text-[var(--neo-text-secondary)]">{template.description}</span>
-              </button>
-            ))}
-            <Button ghost disabled={creating} aria-pressed={!selectedTemplate} onClick={() => chooseTemplate(null)}>
-              Создать своего
-            </Button>
-          </div>
-          {selectedTemplate && (
-            <div className="grid gap-2 text-sm text-[var(--neo-text-secondary)]">
-              <p>Готовая роль и методики установятся в отдельный профиль, без чужой памяти и расписаний.</p>
-              {selectedTemplate.requirements.map((requirement) => <p key={requirement}>{requirement}</p>)}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      <AgentTemplatePicker
+        mode={creationMode}
+        onModeChange={mode => {
+          setCreationMode(mode);
+          if (mode === "custom") chooseTemplate(null);
+        }}
+        templates={templates}
+        loading={templatesLoading}
+        error={templatesError}
+        selected={selectedTemplate}
+        onSelect={template => {
+          chooseTemplate(template);
+          requestAnimationFrame(() => document.getElementById("pb-agent-details")?.scrollIntoView({ block: "start", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" }));
+        }}
+        onRetry={() => { setTemplatesLoading(true); void loadTemplates(); }}
+        disabled={creating}
+      />
 
-      <Card>
-        <CardContent className="grid gap-5 p-5">
-          <div className="grid gap-2">
-            <Label htmlFor="pb-name">Как зовут агента</Label>
-            <Input
-              id="pb-name"
-              autoFocus
-              placeholder="Например, Секретарь или Учитель китайского"
-              value={displayName}
-              maxLength={64}
-              onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
-                setDisplayName(event.target.value)
-              }
-            />
-            <div className="flex flex-wrap items-center gap-2 text-sm text-[var(--neo-text-secondary)]">
-              <label htmlFor="pb-id" className="shrink-0">
-                Системное имя:
-              </label>
-              <Input
-                id="pb-id"
-                className="h-9 min-h-9 w-56 text-sm"
-                value={profileId}
-                aria-invalid={idProblem !== null}
-                placeholder="латиницей"
-                onChange={(event: React.ChangeEvent<HTMLInputElement>) => {
-                  const value = event.target.value.trim().toLowerCase();
-                  // Пустое поле — снова выводить из имени.
-                  setCustomId(value === "" ? null : value);
-                }}
-              />
+      {(creationMode === "custom" || selectedTemplate) && <>
+        <Card id="pb-agent-details" className="scroll-mt-4">
+          <CardContent className="grid gap-5 p-4 sm:p-5">
+            <div className="flex items-center gap-3">
+              <PenLine aria-hidden className="size-[20px] text-[var(--neo-text-secondary)]" />
+              <div className="min-w-0 flex-1"><h3 className="text-base font-semibold">{selectedTemplate ? `Настройте агента «${selectedTemplate.name}»` : "Имя и задача"}</h3>
+                <p className="mt-1 text-xs text-[var(--neo-text-secondary)]">{selectedTemplate ? "Роль и навыки уже подготовлены. Выберите имя для своего помощника." : "Расскажите, какой помощник вам нужен."}</p>
+              </div>
             </div>
-            <p
-              className={
-                idProblem
-                  ? "text-sm text-destructive"
-                  : "text-sm text-[var(--neo-text-secondary)]"
-              }
-            >
-              {idProblem ??
-                "Латиницей, для адреса чата и папки на диске. Обычно менять не нужно."}
-            </p>
-          </div>
+            {selectedTemplate && <button type="button" className="min-h-[44px] justify-self-start px-2 text-xs font-medium underline underline-offset-4" onClick={() => document.getElementById("pb-template-picker")?.scrollIntoView({ block: "start", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" })}>Выбрать другого</button>}
+            {selectedTemplate && <details className="text-sm text-[var(--neo-text-secondary)]">
+              <summary className="min-h-[44px] cursor-pointer py-2 font-medium">Что входит и что нужно подключить</summary>
+              <div className="grid gap-2 pb-2">
+                <p>{selectedTemplate.description}</p>
+                <p>Роль и навыки добавятся новому агенту. Их можно будет изменить.</p>
+                <ul className="list-disc space-y-2 pl-5">{selectedTemplate.requirements.map(requirement => <li key={requirement}>{requirement}</li>)}</ul>
+              </div>
+            </details>}
+            <div className="grid gap-2">
+              <Label htmlFor="pb-name">Как зовут агента</Label>
+              <Input id="pb-name" placeholder="Например, Анна — помощник по работе" value={displayName} maxLength={64}
+                onChange={(event: React.ChangeEvent<HTMLInputElement>) => setDisplayName(event.target.value)} />
+              {idProblem && <p role="alert" className="text-xs text-destructive">{idProblem}</p>}
+            </div>
 
-          {!selectedTemplate && <div className="grid gap-2">
-            <Label htmlFor="pb-role">Что он делает и как себя ведёт</Label>
-            {/* Заготовки — не шаблоны «на выбор», а с чего начать: текст
-                попадает в поле и правится как свой. Имя подставляется, только
-                пока поле имени пустое. */}
+            {!selectedTemplate && <div className="grid gap-3">
+              <Label htmlFor="pb-role">Что он делает и как себя ведёт</Label>
+              <Textarea id="pb-role" className="min-h-[132px]" placeholder={ROLE_PLACEHOLDER} value={role}
+                onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => { setRole(event.target.value); setReplacedRole(null); }} />
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-[var(--neo-text-secondary)]">Своими словами. Инструкцию можно менять позже.</p>
+                <button type="button" onClick={() => setRoleExamplesOpen(!roleExamplesOpen)} aria-expanded={roleExamplesOpen} aria-controls="pb-examples"
+                  className="inline-flex min-h-[44px] items-center gap-2 px-2 text-xs font-medium">
+                  {roleExamplesOpen ? <ChevronUp size={15} aria-hidden /> : <ChevronDown size={15} aria-hidden />}Примеры описания
+                </button>
+              </div>
+              {roleExamplesOpen && <div id="pb-examples" className="grid gap-2">
+                <p className="text-xs text-[var(--neo-text-secondary)]">Выберите пример и отредактируйте под свою задачу.</p>
             <div
               role="group"
               aria-label="Заготовки роли"
@@ -816,7 +796,7 @@ export default function ProfileBuilderPage() {
                   data-starter={starter.id}
                   onClick={() => applyStarter(starter.id)}
                   className={cn(
-                    "neo-tab flex min-h-8 items-center px-3 py-1.5 font-sans text-sm normal-case tracking-normal",
+                    "flex min-h-[44px] items-center rounded-lg px-3 py-2 text-xs shadow-[var(--neo-depth-1)] hover:shadow-[var(--neo-inset-compact)]",
                     activeStarter === starter.id && "font-semibold",
                   )}
                 >
@@ -824,44 +804,21 @@ export default function ProfileBuilderPage() {
                 </button>
               ))}
             </div>
-            <Textarea
-              id="pb-role"
-              className="min-h-40"
-              placeholder={ROLE_PLACEHOLDER}
-              value={role}
-              onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => {
-                setRole(event.target.value);
-                setReplacedRole(null);
-              }}
-            />
-            {replacedRole !== null ? (
-              <p className="text-sm text-[var(--neo-text-secondary)]">
-                Заготовка заменила ваш текст.{" "}
-                <button
-                  type="button"
-                  className="underline underline-offset-2 hover:text-[var(--neo-text-primary)]"
-                  onClick={() => {
-                    setRole(replacedRole);
-                    setReplacedRole(null);
-                  }}
-                >
-                  Вернуть мой текст
-                </button>
-              </p>
-            ) : (
-              <p className="text-sm text-[var(--neo-text-secondary)]">
-                Напишите своими словами, как объяснили бы новому сотруднику. Это
-                станет инструкцией агента; потом её можно менять в меню вкладки —
-                «Роль и поведение».
-              </p>
-            )}
-          </div>}
+              </div>}
+              {replacedRole !== null && <p className="text-xs text-[var(--neo-text-secondary)]">Заготовка заменила ваш текст. <button type="button" className="min-h-[44px] underline underline-offset-2" onClick={() => { setRole(replacedRole); setReplacedRole(null); }}>Вернуть мой текст</button></p>}
+            </div>}
+          </CardContent>
+        </Card>
 
-          <div className="grid gap-2">
-            <Label htmlFor="pb-provider">Модель</Label>
-            {/* Два шага вместо одного списка на полсотни строк: сначала
-                провайдер (по-русски, с признаком ключа), потом его модели.
-                По умолчанию — как у главного агента: у него ключ точно есть. */}
+        <div className="grid gap-2">
+          <div className="rounded-[var(--neo-radius-control)] px-3 py-1">
+            <button type="button" className="flex min-h-[52px] w-full items-center gap-3 text-left" onClick={() => setModelOpen(!modelOpen)} aria-expanded={modelOpen} aria-controls="pb-model-settings">
+              <Cpu className="size-[20px] shrink-0 text-[var(--neo-text-secondary)]" aria-hidden />
+              <span className="min-w-0 flex-1"><span className="block text-sm font-medium">Модель и подключение</span><span className="mt-1 block text-xs text-[var(--neo-text-secondary)]">{modelChoices === null ? "Загружаем настройки…" : pickedModel?.ready ? "Подключение настроено · проверим ответ после создания" : pickedModel ? "Нужно подключить модель" : modelChoices.length === 0 ? "Модель не подключена" : "По настройкам главного агента"}</span></span>
+              {modelOpen ? <ChevronUp size={17} aria-hidden /> : <ChevronDown size={17} aria-hidden />}
+            </button>
+            {modelOpen && <div id="pb-model-settings" className="grid gap-3 pb-4 pt-2">
+              <Label htmlFor="pb-provider">Модель</Label>
             <Select
               id="pb-provider"
               value={providerChoice}
@@ -926,32 +883,50 @@ export default function ProfileBuilderPage() {
             {modelChoices !== null && !pickedModel && !providerChoice && (
               <p className="text-sm text-[var(--neo-text-secondary)]">
                 {modelChoices.length === 0
-                  ? "Нет провайдеров с ключами — добавьте ключ в «Ключах»."
+                  ? "Подключите подписку в разделе «Модели»."
                   : "Модель и ключ главного агента перейдут новому автоматически."}
               </p>
             )}
+            </div>}
           </div>
 
           <InitialKnowledgeFields value={knowledge} onChange={setKnowledge} disabled={creating} cloning={cloneFrom !== null} />
 
-          {!selectedTemplate && <div className="grid gap-3">
-            <button
-              type="button"
-              className="flex w-fit items-center gap-1.5 text-sm text-[var(--neo-text-secondary)] hover:text-[var(--neo-text-primary)]"
-              aria-expanded={advancedOpen}
-              aria-controls="pb-advanced"
-              onClick={() => setAdvancedOpen((open) => !open)}
-            >
-              {advancedOpen ? (
-                <ChevronUp size={16} aria-hidden />
-              ) : (
-                <ChevronDown size={16} aria-hidden />
-              )}
-              Дополнительно
+          <div className="rounded-[var(--neo-radius-control)] px-3 py-1">
+            <button type="button" className="flex min-h-[52px] w-full items-center gap-3 text-left" aria-expanded={advancedOpen} aria-controls="pb-advanced" onClick={() => setAdvancedOpen(!advancedOpen)}>
+              <Settings2 aria-hidden className="size-[20px] shrink-0 text-[var(--neo-text-secondary)]" />
+              <span className="min-w-0 flex-1"><span className="block text-sm font-medium">Дополнительно</span><span className="mt-1 block text-xs text-[var(--neo-text-secondary)]">{selectedTemplate ? "Системное имя" : "Системное имя и копирование настроек"}</span></span>
+              {advancedOpen ? <ChevronUp size={17} aria-hidden /> : <ChevronDown size={17} aria-hidden />}
             </button>
-
-            {advancedOpen && (
-              <div id="pb-advanced" className="grid gap-4">
+            {advancedOpen && <div id="pb-advanced" className="grid gap-4 pb-4 pt-2">
+            <div className="flex flex-wrap items-center gap-2 text-sm text-[var(--neo-text-secondary)]">
+              <label htmlFor="pb-id" className="shrink-0">
+                Системное имя:
+              </label>
+              <Input
+                id="pb-id"
+                className="h-9 min-h-9 w-56 text-sm"
+                value={profileId}
+                aria-invalid={idProblem !== null}
+                placeholder="латиницей"
+                onChange={(event: React.ChangeEvent<HTMLInputElement>) => {
+                  const value = event.target.value.trim().toLowerCase();
+                  // Пустое поле — снова выводить из имени.
+                  setCustomId(value === "" ? null : value);
+                }}
+              />
+            </div>
+            <p
+              className={
+                idProblem
+                  ? "text-sm text-destructive"
+                  : "text-sm text-[var(--neo-text-secondary)]"
+              }
+            >
+              {idProblem ??
+                "Латиницей, для адреса чата и папки на диске. Обычно менять не нужно."}
+            </p>
+              {!selectedTemplate && <>
                 <div className="grid gap-2">
                   <Label htmlFor="pb-clone">Скопировать настройки у агента</Label>
                   <Select
@@ -990,27 +965,19 @@ export default function ProfileBuilderPage() {
                     можно добавить позже
                   </span>
                 </label>
-              </div>
-            )}
-          </div>}
-        </CardContent>
-      </Card>
+              </>}
+            </div>}
+          </div>
+        </div>
 
-      {createError && (
-        <p role="alert" className="text-sm text-destructive">
-          {createError}
-        </p>
-      )}
-
-      <div className="flex items-center justify-end gap-2">
-        <Button
-          onClick={() => void handleCreate()}
-          disabled={!nameReady || !idReady || creating || profiles === null}
-        >
-          {creating ? "Создаю…" : selectedTemplate ? "Добавить агента" : "Создать агента"}
-        </Button>
-      </div>
-
+        {createError && <p role="alert" className="text-sm text-destructive">{createError}</p>}
+        <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-3 rounded-[var(--neo-radius-control)] bg-[var(--neo-surface)] p-4 shadow-[var(--neo-depth-2)]">
+          <p className="text-xs text-[var(--neo-text-secondary)]">{!nameReady ? "Укажите имя, чтобы продолжить" : "После создания проверим первый ответ агента"}</p>
+          <Button onClick={() => void handleCreate()} disabled={!nameReady || !idReady || creating || profiles === null}>
+            {creating ? "Создаю…" : selectedTemplate ? "Добавить агента" : "Создать агента"}
+          </Button>
+        </div>
+      </>}
       <Toast toast={toast} />
     </div>
   );

@@ -37,11 +37,8 @@ import {
   Heart,
   KeyRound,
   LayoutDashboard,
-  Menu,
   MessageSquare,
   Package,
-  PanelLeftClose,
-  PanelLeftOpen,
   Plug,
   Puzzle,
   Radio,
@@ -56,7 +53,6 @@ import {
   Users,
   Webhook,
   Wrench,
-  X,
   Zap,
 } from "lucide-react";
 import { Button } from "@nous-research/ui/ui/components/button";
@@ -107,6 +103,7 @@ const AgentWorkbenchPage = lazy(() => import("@/pages/AgentWorkbenchPage"));
 const UpdatesPage = lazy(() => import("@/pages/UpdatesPage"));
 const UiKitPage = lazy(() => import("@/pages/UiKitPage"));
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
+import { SidebarToggle } from "@/components/SidebarToggle";
 import { KorraBrand } from "@/components/KorraBrand";
 import { useI18n } from "@/i18n";
 import type { Translations } from "@/i18n/types";
@@ -708,17 +705,11 @@ export default function App() {
           clipPath: "var(--component-header-clip-path)",
         }}
       >
-        <Button
-          ghost
-          size="icon"
+        <SidebarToggle
+          expanded={mobileOpen}
+          label={t.app.openNavigation}
           onClick={() => setMobileOpen(true)}
-          aria-label={t.app.openNavigation}
-          aria-expanded={mobileOpen}
-          aria-controls="app-sidebar"
-          className="text-text-secondary hover:text-midground"
-        >
-          <Menu />
-        </Button>
+        />
 
         <KorraBrand themeName={theme.name} className="h-[18px]" />
       </header>
@@ -782,31 +773,18 @@ export default function App() {
                 <KorraBrand themeName={theme.name} />
               </div>
 
-              <Button
-                ghost
-                size="icon"
+              <SidebarToggle
+                expanded
+                label={t.app.closeNavigation}
                 onClick={closeMobile}
-                aria-label={t.app.closeNavigation}
-                className="lg:hidden text-text-secondary hover:text-midground"
-              >
-                <X />
-              </Button>
-
-              <Button
-                ghost
-                size="icon"
+                className="lg:hidden"
+              />
+              <SidebarToggle
+                expanded={!collapsed}
+                label={collapsed ? t.common.expand : t.common.collapse}
                 onClick={toggleCollapsed}
-                aria-label={
-                  collapsed ? t.common.expand : t.common.collapse
-                }
-                className="hidden lg:flex text-text-secondary hover:text-midground"
-              >
-                {collapsed ? (
-                  <PanelLeftOpen className="h-4 w-4" />
-                ) : (
-                  <PanelLeftClose className="h-4 w-4" />
-                )}
-              </Button>
+                className="hidden lg:grid"
+              />
             </div>
 
             <nav

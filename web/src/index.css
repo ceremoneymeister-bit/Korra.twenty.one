@@ -414,6 +414,12 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
     min-height: 44px;
   }
 
+  /* Field captions need no extra touch target: their inputs already have one.
+     Keep the full-height wrapping label on checkboxes. */
+  [data-client-ui="true"] [data-agent-builder] label[for] {
+    min-height: 0;
+  }
+
   /* Строка списка — тоже кнопка: по ней открывают папку и файл. Правило выше
      касалось только каркаса, а рабочие списки живут в основной области.
      Селектор был написан по тегу `main`, которого в оболочке нет, — правило
