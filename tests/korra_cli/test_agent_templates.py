@@ -79,6 +79,12 @@ def test_every_catalogue_package_installs_loadable_payload_and_replay_preserves_
         assert load_soul_md(home_override=target).strip() == (source / "SOUL.md").read_text().strip()
         scope = set_hermes_home_override(str(target))
         try:
+            if not entry.get("image_generation"):
+                from agent.background_review import load_background_review_settings
+                from tools.memory_tool import get_builtin_memory_store_flags
+
+                assert get_builtin_memory_store_flags() == (True, True)
+                assert load_background_review_settings()[0] is True
             for owned in manifest.distribution_owned:
                 src = source / owned
                 files = [src] if src.is_file() else list(src.rglob("*"))
@@ -96,6 +102,8 @@ def test_every_catalogue_package_installs_loadable_payload_and_replay_preserves_
         if not entry.get("image_generation"):
             assert response.json()["generation"] is None
             assert response.json()["generation_checked"] is False
+            assert not (target / "auth.json").exists()
+            assert not (target / "cron/jobs.json").exists()
         materials = http.get(f"/api/profiles/{name}/materials").json()["materials"]
         assert [item["title"] for item in materials] == ["Рабочие часы"]
         assert http.post(f"/api/profiles/{name}/memory", json={

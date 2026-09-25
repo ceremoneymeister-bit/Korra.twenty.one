@@ -582,6 +582,40 @@ describe("ProfileBuilderPage — мастер создания агента", ()
     expect(container.textContent).toContain("Добавьте текст, ссылку или файл");
   });
 
+  it.each([
+    ["korra.secretary", "Секретарь"],
+    ["korra.psychologist", "Психолог"],
+    ["korra.chinese-teacher", "Учитель китайского"],
+    ["korra.english-teacher", "Учитель английского"],
+  ])("создаёт %s из версии каталога и открывает его чат", async (id, title) => {
+    apiMocks.getAgentTemplates.mockResolvedValueOnce({ templates: [{
+      id, name: title, version: "1.2.3", description: "Готовая роль и методика",
+      requirements: ["Нужна подключённая чат-модель"],
+    }] });
+    apiMocks.createProfile.mockResolvedValueOnce({
+      ok: true, name: "ready-agent", model_set: true, generation: null,
+    });
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(okReply(`Я — ${title}.`));
+    await openWizard();
+    // Both the existing picker and the 0.21.14 catalog/custom switch use
+    // the same versioned package contract.
+    const catalogMode = findButton("Готовый агент");
+    if (catalogMode) await click(catalogMode);
+    expect(findButton(title)?.disabled).toBe(false);
+    await click(findButton(title));
+    expect(nameInput().value).toBe(title);
+    expect(roleInput()).toBeNull();
+    await click(findButton("Добавить агента"));
+    await flush();
+    expect(apiMocks.createProfile).toHaveBeenCalledTimes(1);
+    expect(apiMocks.createProfile).toHaveBeenCalledWith(expect.objectContaining({
+      template_id: id, template_version: "1.2.3", display_name: title,
+      idempotency_key: expect.any(String), soul: undefined, no_skills: false,
+    }));
+    await click(findButton("Открыть чат"));
+    expect(location()).toBe("/agents?agent=ready-agent");
+  });
+
   it("готовый Дизайнер ставится пакетом и открывает собственный чат", async () => {
     apiMocks.createProfile.mockResolvedValueOnce({
       ok: true,
