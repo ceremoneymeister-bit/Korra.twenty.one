@@ -463,8 +463,8 @@ class TestLoginPageRender:
             assert "color-scheme: dark" not in html
             assert "--canvas: #212121" not in html
             assert 'content="#e8e8e8"' in html
-            assert '<img class="brand-word" src="/brand/korra-wordmark.png"' in html
-            assert '<img class="brand-number" src="/brand/korra-21.png"' in html
+            assert '<img class="brand-word" src="/brand/korra-wordmark.png?v=0.21.14"' in html
+            assert '<img class="brand-number" src="/brand/korra-21.png?v=0.21.14"' in html
             assert '<span class="brand-word">KORRA</span>' not in html
         finally:
             clear_providers()
@@ -478,7 +478,7 @@ class TestLoginPageRender:
         assert "Настройте доступ" in html
         assert "color-scheme: light" in html
         assert "color-scheme: dark" not in html
-        assert 'src="/brand/korra-wordmark.png"' in html
+        assert 'src="/brand/korra-wordmark.png?v=0.21.14"' in html
 
     def test_oauth_only_page_stays_script_free(self):
         clear_providers()

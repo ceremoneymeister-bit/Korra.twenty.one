@@ -9,15 +9,15 @@ import { withBasePath } from "@/lib/api";
  */
 export function KorraBrand({ className, themeName }: KorraBrandProps) {
   const src = themeName === "dark"
-    ? withBasePath("/korra-logo-dark.png")
-    : withBasePath("/korra-logo-light.png");
+    ? withBasePath("/korra-logo-dark.png?v=0.21.14")
+    : withBasePath("/korra-logo-light.png?v=0.21.14");
 
   return (
     <img
       src={src}
       alt="Korra"
       className={cn(
-        "h-[22px] w-auto max-w-[132px] shrink-0 object-contain",
+        "h-[26px] w-auto max-w-[132px] shrink-0 object-contain",
         className,
       )}
     />

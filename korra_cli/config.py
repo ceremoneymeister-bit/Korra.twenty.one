@@ -4440,6 +4440,22 @@ def sanitize_env_file() -> int:
     return fixes
 
 
+#: Only these keys are forced to ASCII: API keys, tokens and secrets travel as
+#: HTTP header values. Logins, passwords, URLs and names keep their Unicode —
+#: a Cyrillic 1C login («нюра») was silently saved empty (Nagrada, 25.09.2026).
+_ASCII_ONLY_CREDENTIAL_KEY = re.compile(r"(?:^|_)(?:API_KEY|KEY|TOKENS?|SECRETS?)$")
+#: More non-ASCII letters than this in an API key is a wrong keyboard layout,
+#: not a stray lookalike glyph: refuse instead of saving a mangled key.
+_MAX_LOOKALIKE_LETTERS = 3
+
+
+def _strip_invisible_format_chars(value: str) -> str:
+    """Drop zero-width spaces, BOMs and direction marks pasted along with a value."""
+    import unicodedata
+
+    return "".join(ch for ch in value if unicodedata.category(ch) != "Cf")
+
+
 def _check_non_ascii_credential(key: str, value: str) -> str:
     """Warn and strip non-ASCII characters from credential values.
 
@@ -4453,11 +4469,20 @@ def _check_non_ascii_credential(key: str, value: str) -> str:
     Returns the sanitized (ASCII-only) value.  Prints a warning if any
     non-ASCII characters were found and removed.
     """
+    # Invisible formatting characters are never meant, whatever the key.
+    value = _strip_invisible_format_chars(value)
     try:
         value.encode("ascii")
         return value  # all ASCII — nothing to do
     except UnicodeEncodeError:
         pass
+    if not _ASCII_ONLY_CREDENTIAL_KEY.search(key.upper()):
+        return value  # a login, password, URL or name: Unicode is legitimate
+    if sum(1 for ch in value if ord(ch) > 127 and ch.isalpha()) > _MAX_LOOKALIKE_LETTERS:
+        raise ValueError(
+            f'{key}: в ключе много букв не латиницей — похоже, он набран в русской раскладке. '
+            'Скопируйте ключ заново из кабинета сервиса.'
+        )
 
     # Build a readable list of the offending characters
     bad_chars: list[str] = []
@@ -4473,6 +4498,13 @@ def _check_non_ascii_credential(key: str, value: str) -> str:
         + '  Недопустимые символы автоматически удалены. Если вход не удаётся, скопируйте ключ заново из кабинета провайдера.',
         file=sys.stderr,
     )
+    if value.strip() and not sanitized.strip():
+        # Nothing of the value would survive: refuse instead of saving an
+        # empty key and reporting success.
+        raise ValueError(
+            f'{key}: значение состоит только из символов не из ASCII и не похоже на ключ. '
+            'Скопируйте ключ заново из кабинета сервиса.'
+        )
     return sanitized
 
 

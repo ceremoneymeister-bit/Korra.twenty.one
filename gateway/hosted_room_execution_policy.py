@@ -132,7 +132,9 @@ def execution_policy_mapping(
     from korra_cli.tools_config import _get_platform_tools
     from tools.approval import _YOLO_MODE_FROZEN, _normalize_approval_mode
 
-    toolsets = sorted({*_get_platform_tools(dict(config), "api_server"), "bot_room"})
+    # Changing the installation's agents is for the owner's own chat, never a
+    # room of agents; leaving it out also keeps existing room grants valid.
+    toolsets = sorted({*_get_platform_tools(dict(config), "api_server"), "bot_room"} - {"agent_profiles"})
     agent = config.get("agent") if isinstance(config.get("agent"), Mapping) else {}
     approvals = (
         config.get("approvals") if isinstance(config.get("approvals"), Mapping) else {}

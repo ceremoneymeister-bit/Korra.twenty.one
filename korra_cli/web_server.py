@@ -13027,6 +13027,10 @@ async def update_messaging_platform(
         return {"ok": True, "platform": platform_id}
     except HTTPException:
         raise
+    except ValueError as exc:
+        # save_env_value refuses a value it cannot store as meant (e.g. a key
+        # typed in the Russian layout): tell the owner instead of a 500.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception:
         _log.exception("PUT /api/messaging/platforms/%s failed", platform_id)
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -15201,6 +15205,11 @@ def _call_cron_for_profile(target_profile: Optional[str], func_name: str, *args,
             if func_name == "create_job":
                 from cron.scheduler import create_job_with_scheduler_registration
 
+                # The cabinet is the owner's own surface (the client perimeter
+                # keeps visitors out). Say so explicitly: a dashboard process
+                # that also hosts chat turns cannot tell who is speaking on
+                # this thread and would otherwise fail closed.
+                kwargs.setdefault("created_by_owner", True)
                 result = create_job_with_scheduler_registration(*args, **kwargs)
             else:
                 result = getattr(cron_jobs, func_name)(*args, **kwargs)

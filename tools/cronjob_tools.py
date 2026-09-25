@@ -322,6 +322,26 @@ def _creator_is_owner() -> bool:
         return False
 
 
+def _refuse_change_of_owner_job(job: Dict[str, Any]) -> Optional[str]:
+    """Only the owner changes, pauses, removes or triggers the owner's job.
+
+    The owner's jobs deliver without a per-message decision, so a visitor who
+    could rewrite their prompt or target — or run one with their own text —
+    would send in the owner's name unchecked.
+    """
+    try:
+        from gateway.principal import cron_job_acts_for_owner, current_principal
+
+        if not cron_job_acts_for_owner(job) or current_principal().owner:
+            return None
+    except Exception:
+        pass
+    return tool_error(
+        "This scheduled job belongs to the owner; only the owner can change, pause, remove or run it.",
+        success=False,
+    )
+
+
 def _origin_from_env() -> Optional[Dict[str, str]]:
     from gateway.session_context import get_session_env
     origin_platform = get_session_env("KORRA_SESSION_PLATFORM")
@@ -1685,6 +1705,10 @@ def cronjob(
             )
         # Resolve to canonical ID (supports name-based lookup)
         job_id = job["id"]
+
+        refusal = _refuse_change_of_owner_job(job)
+        if refusal:
+            return refusal
 
         if normalized == "remove":
             removed = remove_job(job_id)
