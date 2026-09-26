@@ -99,7 +99,10 @@ export type EffectDecisionStatus =
   | "executing"
   | "succeeded"
   | "failed"
-  | "unknown";
+  | "unknown"
+  | "expired"
+  | "superseded"
+  | "needs_review";
 
 /** Запрос одобрения команды или долговечное решение по внешнему эффекту.
  *

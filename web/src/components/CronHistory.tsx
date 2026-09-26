@@ -32,8 +32,9 @@ export function CronHistory({ job }: { job: CronJob }) {
             {history.executions.length === 0 && <p>Сохранённых сведений о выполнении пока нет.</p>}
             {history.executions.map((run) => (
               <div key={run.id} className="flex flex-wrap gap-x-3 gap-y-1">
+                {run.result_text && <p className="w-full whitespace-pre-wrap break-words">{run.result_text}</p>}
                 <time dateTime={run.claimed_at}>{run.claimed_at ? new Date(run.claimed_at).toLocaleString("ru-RU", { timeZone: getOwnerTimeZone() }) : "—"}</time>
-                <span>{({ claimed: "Ожидает запуска", running: "Выполняется", completed: "Выполнено", failed: "Ошибка выполнения", unknown: "Выполнение не подтверждено" } as Record<string, string>)[run.status] || "Статус неизвестен"}</span>
+                <span>{(run.source === "missed" ? "Пропущено" : ({ claimed: "Ожидает запуска", running: "Выполняется", completed: "Выполнено", failed: "Ошибка выполнения", unknown: "Выполнение не подтверждено" } as Record<string, string>)[run.status] || "Статус неизвестен")}</span>
                 <span className="text-muted-foreground">{cronDeliveryLabel({ ...job, latest_execution: run }) || "Сведения о доставке не сохранены"}</span>
               </div>
             ))}

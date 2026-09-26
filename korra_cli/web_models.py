@@ -458,6 +458,8 @@ class SessionPrune(BaseModel):
 class CronJobCreate(BaseModel):
     prompt: str = ""
     reminder: Optional[str] = None
+    delivery_ttl_seconds: Optional[int] = None
+    pending_result_policy: str = "all"
     schedule: str
     name: str = ""
     deliver: str = "local"

@@ -37,6 +37,9 @@ EXECUTING = "executing"
 SUCCEEDED = "succeeded"
 FAILED = "failed"
 UNKNOWN = "unknown"
+EXPIRED = "expired"
+SUPERSEDED = "superseded"
+NEEDS_REVIEW = "needs_review"
 
 class DecisionError(RuntimeError):
     """Base error for an invalid durable-decision operation."""
@@ -163,7 +166,7 @@ def _connect(
                     dedupe_key TEXT NOT NULL,
                     status TEXT NOT NULL CHECK (status IN (
                         'pending', 'approved', 'denied', 'executing',
-                        'succeeded', 'failed', 'unknown'
+                        'succeeded', 'failed', 'unknown', 'expired', 'superseded', 'needs_review'
                     )),
                     idempotency_key TEXT NOT NULL UNIQUE,
                     executor_instance TEXT,
@@ -181,6 +184,9 @@ def _connect(
                 """
             )
             conn.commit()
+            from tools.effect_validity import migrate_lifecycle_states
+
+            migrate_lifecycle_states(conn)
         yield conn
     except EffectDecisionStoreUnavailable:
         raise
@@ -218,20 +224,38 @@ def _mark_foreign_execution_unknown(
 ) -> None:
     """Fail closed after restart: an in-flight effect is never replayed."""
     now = time.time()
-    params: list[Any] = [UNKNOWN, now, now, _executor_instance()]
+    from tools.effect_validity import refresh_validity
+
+    try:
+        refresh_validity(conn, now)
+    except (ValueError, TypeError, KeyError) as exc:
+        raise EffectDecisionStoreUnavailable() from exc
+    params: list[Any] = [_executor_instance()]
     where = "status = 'executing' AND COALESCE(executor_instance, '') != ?"
     if decision_id is not None:
         where += " AND id = ?"
         params.append(decision_id)
-    conn.execute(
-        f"""
-        UPDATE effect_decisions
-           SET status = ?, updated_at = ?, finished_at = ?,
-               outcome_json = '{{"reason":"executor_restarted","retry":false}}'
-         WHERE {where}
-        """,
-        params,
-    )
+    for row in conn.execute(f"SELECT id, executor_instance FROM effect_decisions WHERE {where}", params).fetchall():
+        owner = str(row["executor_instance"] or "")
+        try:
+            pid = int(owner.split(":", 1)[0])
+            if pid > 0 and pid != os.getpid():
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    pass
+                except PermissionError:
+                    continue  # alive, but owned by another OS principal
+                else:
+                    continue  # a live gateway worker is not a crashed executor
+        except (ValueError, TypeError):
+            pass
+        conn.execute(
+            """UPDATE effect_decisions SET status=?, updated_at=?, finished_at=?,
+               outcome_json='{"reason":"executor_restarted","retry":false}'
+               WHERE id=? AND status='executing'""",
+            (UNKNOWN, now, now, row["id"]),
+        )
 
 
 def create_pending(
@@ -277,6 +301,9 @@ def create_pending(
         raise ValueError("owner, profile, source session id and key are required")
 
     payload_json = canonical_payload(payload)
+    from tools.effect_validity import validate_validity
+
+    validate_validity(payload.get("validity"))
     digest = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
     dedupe_source = "\0".join(
         (kind, owner_id, profile, source_session_id, source_session_key, digest)
@@ -301,8 +328,8 @@ def create_pending(
             INSERT INTO effect_decisions (
                 id, kind, owner_id, profile, source_session_id,
                 source_session_key, payload_json, payload_sha256, dedupe_key,
-                status, idempotency_key, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+                status, idempotency_key, created_at, updated_at, result_key, occurrence_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)
             """,
             (
                 decision_id,
@@ -317,8 +344,13 @@ def create_pending(
                 idempotency_key,
                 now,
                 now,
+                (payload.get("validity") or {}).get("supersession_key"),
+                (payload.get("validity") or {}).get("occurrence_at"),
             ),
         )
+        from tools.effect_validity import refresh_validity
+
+        refresh_validity(conn, now)
         row = conn.execute(
             "SELECT * FROM effect_decisions WHERE id = ?", (decision_id,)
         ).fetchone()
@@ -379,6 +411,9 @@ def list_profile_decisions(
         SUCCEEDED,
         FAILED,
         UNKNOWN,
+        EXPIRED,
+        SUPERSEDED,
+        NEEDS_REVIEW,
     ),
     limit: int = 100,
     path: str | os.PathLike[str] | None = None,
@@ -397,6 +432,9 @@ def list_profile_decisions(
         SUCCEEDED,
         FAILED,
         UNKNOWN,
+        EXPIRED,
+        SUPERSEDED,
+        NEEDS_REVIEW,
     }
     if not statuses or any(status not in allowed for status in statuses):
         raise ValueError("invalid effect decision status filter")
@@ -414,13 +452,34 @@ def list_profile_decisions(
             f"""
             SELECT * FROM effect_decisions
              WHERE status IN ({placeholders}){profile_where}
-             ORDER BY (status = 'pending') DESC, created_at DESC, id DESC
+             ORDER BY (status = 'pending') DESC, (status = 'needs_review') DESC, created_at DESC, id DESC
              LIMIT ?
             """,
             params,
         ).fetchall()
         conn.commit()
         return [_row_dict(row) for row in rows]  # type: ignore[misc]
+
+
+def execution_delivery_states(executions: list[dict], *, path=None) -> dict[str, list[str]]:
+    """Current receipts, separate from the immutable execution audit record."""
+    sessions = {f"cron:{run['job_id']}:{run['id']}": run["id"] for run in executions
+                if run.get("delivery_outcome") == "waiting_decision"}
+    if not sessions or not _db_path(path).exists():
+        return {}
+    with _connect(path) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        _mark_foreign_execution_unknown(conn)
+        placeholders = ",".join("?" for _ in sessions)
+        rows = conn.execute(
+            f"SELECT source_session_id,status FROM effect_decisions WHERE kind='outbound_message' AND source_session_id IN ({placeholders})",
+            list(sessions),
+        ).fetchall()
+        conn.commit()
+    result: dict[str, list[str]] = {}
+    for row in rows:
+        result.setdefault(sessions[row["source_session_id"]], []).append(row["status"])
+    return result
 
 
 def decide(
@@ -455,16 +514,17 @@ def decide(
         if not belongs:
             raise DecisionConflict("effect decision does not belong to this session")
         status = row["status"]
-        if status == PENDING:
+        if status == PENDING or (status == NEEDS_REVIEW and choice == "deny"):
             conn.execute(
                 """
                 UPDATE effect_decisions
                    SET status = ?, updated_at = ?, decided_at = ?
-                 WHERE id = ? AND status = 'pending'
+                 WHERE id = ? AND status IN ('pending','needs_review')
                 """,
                 (target, now, now, decision_id),
             )
         elif status != target:
+            conn.commit()
             raise DecisionConflict(f"effect decision is already {status}")
         updated = conn.execute(
             "SELECT * FROM effect_decisions WHERE id = ?", (decision_id,)
@@ -492,6 +552,7 @@ def claim_execution(
         if row["payload_sha256"] != expected_payload_sha256:
             raise DecisionConflict("effect payload changed after approval")
         if row["status"] != APPROVED:
+            conn.commit()
             raise DecisionConflict(f"effect decision is {row['status']}, not approved")
         changed = conn.execute(
             """
@@ -518,8 +579,8 @@ def finish_execution(
     outcome: Mapping[str, Any] | None = None,
     path: str | os.PathLike[str] | None = None,
 ) -> dict[str, Any]:
-    if status not in {SUCCEEDED, FAILED, UNKNOWN}:
-        raise ValueError("execution can finish only as succeeded, failed, or unknown")
+    if status not in {SUCCEEDED, FAILED, UNKNOWN, EXPIRED}:
+        raise ValueError("execution can finish only as succeeded, failed, unknown, or expired")
     outcome_json = canonical_payload(outcome or {})
     now = time.time()
     with _connect(path) as conn:
@@ -619,6 +680,12 @@ def approval_payload(decision: Mapping[str, Any]) -> dict[str, Any]:
         if attachment_lines:
             command += "\n\n" + "\n".join(attachment_lines)
         description = "Проверьте адресата, текст и вложения перед внешней отправкой."
+    if decision["status"] == NEEDS_REVIEW:
+        description = "Актуальность старого результата неизвестна. Можно закрыть без отправки или запросить свежий результат у агента."
+    elif decision["status"] == EXPIRED:
+        description = "Срок отправки истёк. Результат сохранён в истории."
+    elif decision["status"] == SUPERSEDED:
+        description = "Этот результат заменён более свежим. Повторная отправка закрыта."
     return {
         "request_id": str(decision["id"]),
         "decision_kind": str(decision["kind"]),
@@ -630,7 +697,7 @@ def approval_payload(decision: Mapping[str, Any]) -> dict[str, Any]:
         "pattern_keys": [str(decision["kind"])],
         "allow_session": False,
         "allow_permanent": False,
-        "choices": ["once", "deny"],
+        "choices": ["deny"] if decision["status"] == NEEDS_REVIEW else (["once", "deny"] if decision["status"] == PENDING else []),
         "timestamp": decision.get("created_at"),
         "updated_at": decision.get("updated_at"),
     }

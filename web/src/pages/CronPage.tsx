@@ -451,6 +451,9 @@ function CronJobFormFields({
         >
           {deliveryOptions}
         </Select>
+        {form.mode === "reminder" && form.deliver === "local" && (
+          <p role="note" className="text-sm text-[var(--neo-text-primary)]">Без уведомления: текст сохранится в истории задачи. Чтобы напоминание пришло в Telegram, выберите подключённый канал.</p>
+        )}
         {onlyLocalAvailable && (
           <p className="text-xs text-muted-foreground">
             {ownerMode
@@ -460,6 +463,32 @@ function CronJobFormFields({
           </p>
         )}
       </div>
+
+      <details className="rounded-[var(--neo-radius-control)] p-3 shadow-[var(--neo-inset-compact)]">
+        <summary className="cursor-pointer text-sm">Актуальность результата</summary>
+        <div className="mt-3 grid gap-2">
+          <Label htmlFor={`${idPrefix}-ttl`}>Срок отправки</Label>
+          <Select id={`${idPrefix}-ttl`} value={form.delivery_ttl_seconds || "unlimited"}
+            onValueChange={(v) => update("delivery_ttl_seconds", v === "unlimited" ? "" : v)}>
+            <SelectOption value="unlimited">Без ограничения</SelectOption>
+            <SelectOption value="900">15 минут</SelectOption>
+            <SelectOption value="3600">1 час</SelectOption>
+            <SelectOption value="21600">6 часов</SelectOption>
+            <SelectOption value="86400">1 день</SelectOption>
+            <SelectOption value="604800">7 дней</SelectOption>
+            {form.delivery_ttl_seconds && !["900", "3600", "21600", "86400", "604800"].includes(form.delivery_ttl_seconds) &&
+              <SelectOption value={form.delivery_ttl_seconds}>{Number(form.delivery_ttl_seconds) / 60} мин.</SelectOption>}
+          </Select>
+          <p className="text-xs text-muted-foreground">От начала выполнения. После этого срока результат останется в истории, но отправлен не будет.</p>
+          <Label htmlFor={`${idPrefix}-pending-policy`}>Если отправка ждёт согласования</Label>
+          <Select id={`${idPrefix}-pending-policy`} value={form.pending_result_policy ?? "all"}
+            onValueChange={(v) => update("pending_result_policy", v === "latest" ? "latest" : "all")}>
+            <SelectOption value="all">Сохранять каждый результат</SelectOption>
+            <SelectOption value="latest">Заменять предыдущий свежим</SelectOption>
+          </Select>
+          <p className="text-xs text-muted-foreground">Замена подходит для обновляемых сводок. Для отдельных поручений сохраняйте каждый результат.</p>
+        </div>
+      </details>
 
       {!ownerMode && form.mode !== "reminder" && <div className="grid gap-2">
         <Label htmlFor={`${idPrefix}-skills`}>{tr("Skills (optional)")}</Label>

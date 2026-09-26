@@ -15466,6 +15466,8 @@ def _create_cron_job_sync(body: CronJobCreate, profile: Optional[str] = None):
             "create_job",
             prompt=body.prompt or "",
             reminder=body.reminder,
+            delivery_ttl_seconds=body.delivery_ttl_seconds,
+            pending_result_policy=body.pending_result_policy,
             schedule=body.schedule,
             name=body.name,
             deliver=_cron_optional_text(body.deliver) or "local",

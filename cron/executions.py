@@ -70,7 +70,7 @@ def _initialize_schema(conn: sqlite3.Connection) -> None:
     # Additive migration: old attempts have an unknown delivery outcome,
     # not an invented success. Another process may migrate the same ledger.
     columns = {row[1] for row in conn.execute("PRAGMA table_info(executions)")}
-    for column in ("delivery_outcome", "delivery_error"):
+    for column in ("delivery_outcome", "delivery_error", "result_text"):
         if column not in columns:
             try:
                 conn.execute(f"ALTER TABLE executions ADD COLUMN {column} TEXT")
@@ -193,6 +193,7 @@ def finish_execution(
     execution_id: str, *, success: bool, error: Optional[str] = None,
     delivery_outcome: Optional[str] = None,
     delivery_error: Optional[str] = None,
+    result_text: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Write a terminal result once; terminal attempts cannot be rewritten."""
     now = _hermes_now().isoformat()
@@ -201,9 +202,9 @@ def finish_execution(
     with _transaction() as conn:
         cur = conn.execute(
             """UPDATE executions SET status=?, finished_at=?, error=?,
-                 delivery_outcome=?, delivery_error=?
+                 delivery_outcome=?, delivery_error=?, result_text=?
                WHERE id=? AND status IN ('claimed','running')""",
-            (status, now, detail, delivery_outcome, delivery_error, execution_id),
+            (status, now, detail, delivery_outcome, delivery_error, result_text, execution_id),
         )
         if cur.rowcount != 1:
             return None
@@ -274,7 +275,8 @@ def list_executions(
             + " ORDER BY claimed_at DESC, id DESC LIMIT ?",
             params,
         ).fetchall()
-    return [dict(row) for row in rows]
+    from cron.result_validity import project_delivery
+    return project_delivery([dict(row) for row in rows])
 
 
 def latest_execution(job_id: str) -> Optional[Dict[str, Any]]:
@@ -297,4 +299,5 @@ def latest_executions(job_ids: List[str]) -> Dict[str, Dict[str, Any]]:
                             ORDER BY e2.claimed_at DESC, e2.id DESC LIMIT 1)""",
             clean,
         ).fetchall()
-    return {row["job_id"]: dict(row) for row in rows}
+    from cron.result_validity import project_delivery
+    return {row["job_id"]: row for row in project_delivery([dict(row) for row in rows])}

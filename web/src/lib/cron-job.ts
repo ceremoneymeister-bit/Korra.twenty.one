@@ -10,10 +10,14 @@ export function cronDeliveryLabel(job: CronJob): string | null {
     not_configured: "Нужно настроить получателя",
     suppressed: "Без уведомления",
     suppressed_acked: "Сбой уже отмечен",
-    expired: "Результат устарел",
+    expired: "Срок отправки истёк",
+    superseded: "Заменён свежим результатом",
+    needs_review: "Старая очередь — нужен разбор",
+    denied: "Закрыто без отправки",
+    partial: "Отправка завершена частично",
   };
   const outcome = job.latest_execution?.delivery_outcome;
-  if (outcome === "not_configured" && job.deliver === "local") return "Результат сохранён в платформе";
+  if ((outcome === "not_configured" || outcome === "suppressed") && job.deliver === "local") return "Результат сохранён в платформе";
   return outcome ? labels[outcome] ?? "Отправка не подтверждена" : null;
 }
 
@@ -21,6 +25,8 @@ export interface CronJobFormState {
   name: string;
   prompt: string;
   mode?: "agent" | "reminder";
+  delivery_ttl_seconds?: string;
+  pending_result_policy?: "all" | "latest";
   schedule: string;
   deliver: string;
   skills: string[];
@@ -60,8 +66,13 @@ function asString(value: unknown): string {
 /** Build the create/update payload. Optional fields collapse to null so an
  * update explicitly clears them rather than leaving stale values. */
 export function buildCronJobPayload(form: CronJobFormState): CronJobMutation {
+  const validity = {
+    delivery_ttl_seconds: form.delivery_ttl_seconds?.trim() ? Number(form.delivery_ttl_seconds) : null,
+    pending_result_policy: form.pending_result_policy ?? "all",
+  };
   if (form.mode === "reminder") {
     return {
+      ...validity,
       name: form.name.trim(), reminder: form.prompt.trim(), prompt: "",
       schedule: form.schedule.trim(), deliver: form.deliver.trim() || "local",
       skills: [], script: null, no_agent: false, context_from: null,
@@ -78,6 +89,7 @@ export function buildCronJobPayload(form: CronJobFormState): CronJobMutation {
   if (form.continuity) contextFrom.push("self");
   const enabledToolsets = form.enabled_toolsets.filter(Boolean);
   return {
+    ...validity,
     name: form.name.trim(),
     prompt: form.prompt.trim(),
     reminder: null,
@@ -114,6 +126,8 @@ export function cronJobFormFromJob(job: CronJob): CronJobFormState {
     name: asString(job.name),
     prompt: asString(job.reminder) || asString(job.prompt),
     mode: job.reminder ? "reminder" : "agent",
+    delivery_ttl_seconds: job.delivery_ttl_seconds == null ? "" : String(job.delivery_ttl_seconds),
+    pending_result_policy: job.pending_result_policy ?? "all",
     schedule:
       asString(job.schedule?.expr) ||
       asString(job.schedule?.run_at) ||

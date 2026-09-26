@@ -23,6 +23,9 @@ const STATUS_LABEL: Record<EffectDecisionStatus, string> = {
   succeeded: "Выполнено",
   failed: "Не выполнено",
   unknown: "Исход неизвестен",
+  expired: "Срок отправки истёк",
+  superseded: "Заменён новым результатом",
+  needs_review: "Старая очередь",
 };
 
 interface EffectDecisionCenterProps {
@@ -80,8 +83,11 @@ export function EffectDecisionCenter({
     () => items.filter((item) => item.effect_status === "pending"),
     [items],
   );
+  const legacy = useMemo(
+    () => items.filter((item) => item.effect_status === "needs_review"), [items],
+  );
   const history = useMemo(
-    () => items.filter((item) => item.effect_status !== "pending"),
+    () => items.filter((item) => item.effect_status !== "pending" && item.effect_status !== "needs_review"),
     [items],
   );
 
@@ -137,6 +143,7 @@ export function EffectDecisionCenter({
         <Inbox size={14} aria-hidden />
         <span className="font-medium text-[var(--neo-text-primary)]">Решения</span>
         <span>{pending.length > 0 ? `${pending.length} ждёт` : "нет ожидающих"}</span>
+        {legacy.length > 0 && <span>· {legacy.length} в старой очереди</span>}
         <ChevronDown
           size={14}
           aria-hidden
@@ -157,6 +164,23 @@ export function EffectDecisionCenter({
               onDecide={(choice) => void decide(item, choice)}
             />
           ))}
+
+          {legacy.length > 0 && (
+            <div className="space-y-2" aria-label="Старая очередь">
+              <p className="px-1 text-xs text-[var(--neo-text-secondary)]">Старая очередь · {legacy.length}</p>
+              <p className="px-1 text-xs text-[var(--neo-text-secondary)]">Актуальность этих результатов неизвестна. Текст сохранён; для отправки запросите свежий результат у агента.</p>
+              {legacy.map((item) => (
+                <details key={item.request_id} className="rounded-[var(--neo-radius-control)] p-2 shadow-[var(--neo-inset-compact)]">
+                  <summary className="cursor-pointer break-words text-xs">{shortTarget(item)}</summary>
+                  <pre className="my-2 max-h-40 overflow-auto whitespace-pre-wrap break-words text-xs">{item.command}</pre>
+                  <button type="button" disabled={busyId !== null} onClick={() => void decide(item, "deny")}
+                    className="min-h-10 rounded-[var(--neo-radius-control)] bg-[var(--neo-surface)] px-3 text-xs shadow-[var(--neo-depth-1)] disabled:opacity-50">
+                    {busyId === item.request_id ? "Закрываем…" : "Закрыть без отправки"}
+                  </button>
+                </details>
+              ))}
+            </div>
+          )}
 
           {history.length > 0 && (
             <div className="space-y-1" aria-label="История решений">

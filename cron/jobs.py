@@ -2238,6 +2238,8 @@ def create_job(
     reasoning_effort: Optional[str] = None,
     created_by_owner: Optional[bool] = None,
     reminder: Optional[str] = None,
+    delivery_ttl_seconds: Optional[int] = None,
+    pending_result_policy: str = "all",
 ) -> Dict[str, Any]:
     """
     Create a new cron job.
@@ -2310,7 +2312,10 @@ def create_job(
         The created job dict
     """
     parsed_schedule = parse_schedule(schedule)
-    from cron.reminders import reminder_text
+    from cron.result_validity import validate_policy
+    validate_policy({"delivery_ttl_seconds": delivery_ttl_seconds, "pending_result_policy": pending_result_policy})
+    from cron.reminders import reminder_text, validate_reminder_delivery
+    validate_reminder_delivery({"reminder": reminder, "deliver": deliver})
 
     reminder = reminder_text({"reminder": reminder, "prompt": prompt, "skills": skills,
         "skill": skill, "script": script, "no_agent": no_agent,
@@ -2424,6 +2429,8 @@ def create_job(
         "script": normalized_script,
         "no_agent": normalized_no_agent,
         "reminder": reminder,
+        "delivery_ttl_seconds": delivery_ttl_seconds,
+        "pending_result_policy": pending_result_policy,
         "monitor_script": normalized_monitor_script,
         "monitor_url": normalized_monitor_url,
         # Hash-suppression state for monitor jobs: {"last_output_hash": ...,
@@ -2605,6 +2612,10 @@ def update_job(job_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]
             from cron.reminders import reminder_text
 
             updated["reminder"] = reminder_text(updated)
+            from cron.reminders import validate_reminder_delivery
+            validate_reminder_delivery(updated)
+            from cron.result_validity import validate_policy
+            validate_policy(updated)
 
             if (
                 is_terminal_job(job)
@@ -4101,8 +4112,20 @@ def _get_due_jobs_locked() -> List[Dict[str, Any]]:
                         _write_missed_oneshot_diagnostic(job, next_run)
                         for rj in raw_jobs:
                             if rj["id"] == job["id"]:
-                                raw_jobs.remove(rj)
-                                intentionally_removed.add(str(job["id"]))
+                                if rj.get("reminder"):
+                                    # A missed reminder is an outstanding fact for the
+                                    # owner, never an invitation to send it hours late.
+                                    reason = "Напоминание пропущено: Korra не работала в назначенное время. Перенесите его, если оно ещё нужно."
+                                    from cron.executions import create_execution, finish_execution
+                                    attempt = create_execution(job["id"], source="missed")
+                                    finish_execution(attempt["id"], success=False, error=reason,
+                                                     delivery_outcome="expired", delivery_error=reason, result_text=rj["reminder"])
+                                    rj.update(enabled=False, state="error", next_run_at=None,
+                                              last_status="missed", last_error=reason,
+                                              last_delivery_error=reason)
+                                else:
+                                    raw_jobs.remove(rj)
+                                    intentionally_removed.add(str(job["id"]))
                                 needs_save = True
                                 break
                     # A (possibly stale) claim may mean a run is still in

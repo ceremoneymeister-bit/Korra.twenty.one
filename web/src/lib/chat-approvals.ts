@@ -41,6 +41,9 @@ const EFFECT_STATUSES: EffectDecisionStatus[] = [
   "succeeded",
   "failed",
   "unknown",
+  "expired",
+  "superseded",
+  "needs_review",
 ];
 
 function withProfile(url: string, profile?: string): string {

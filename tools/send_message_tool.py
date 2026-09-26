@@ -493,6 +493,7 @@ def _queue_outbound_decision(
     source_profile: str = "",
     source_owner_id: str = "",
     source_label: str = "",
+    validity: dict | None = None,
 ) -> dict | None:
     """Persist an external send and notify the user without blocking the turn."""
     if (
@@ -557,6 +558,7 @@ def _queue_outbound_decision(
         or get_session_env("KORRA_SESSION_PLATFORM", "cli")
         or "cli",
         "source_user_id": get_session_env("KORRA_SESSION_USER_ID", "") or None,
+        "validity": validity if validity is not None else {"version": 1},
     }
     decision, created = create_pending(
         kind="outbound_message",
@@ -566,7 +568,7 @@ def _queue_outbound_decision(
         source_session_key=session_key,
         payload=payload,
     )
-    if created:
+    if created and decision["status"] == "pending":
         notify_gateway_request(session_key, approval_payload(decision))
     return decision
 
@@ -667,6 +669,8 @@ def resolve_outbound_message_decision(
         decisions.SUCCEEDED,
         decisions.FAILED,
         decisions.UNKNOWN,
+        decisions.EXPIRED,
+        decisions.SUPERSEDED,
     }:
         return decision
     if status == decisions.DENIED:
@@ -749,6 +753,14 @@ def resolve_outbound_message_decision(
                 "detail": _sanitize_error_text(str(exc)),
                 "retry": False,
             },
+        )
+
+    import time
+    expires_at = (payload.get("validity") or {}).get("expires_at")
+    if expires_at is not None and time.time() >= expires_at:
+        return decisions.finish_execution(
+            decision_id, status=decisions.EXPIRED,
+            outcome={"reason": "expired_before_dispatch", "retry": False},
         )
 
     try:

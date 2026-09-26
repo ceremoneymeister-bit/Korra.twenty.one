@@ -163,3 +163,18 @@ describe("EffectDecisionCenter", () => {
     expect(deny?.disabled).toBe(false);
   });
 });
+
+it("старые результаты можно закрыть без отправки, истёкшие доступны только в истории", async () => {
+  vi.mocked(fetchEffectDecisions).mockResolvedValue([
+    { request_id: "legacy", effect_status: "needs_review", source_session_id: "old", command: "Кому: telegram:42\nСтарый отчёт", choices: ["deny"] },
+    { request_id: "expired", effect_status: "expired", source_session_id: "old", command: "Кому: telegram:42\nИстёкший отчёт", choices: [] },
+  ]);
+  await act(async () => root.render(<EffectDecisionCenter profile="sales" />));
+  await settle();
+  expect(container.textContent).toContain("нет ожидающих");
+  await click("Решения");
+  expect(container.textContent).toContain("Срок отправки истёк");
+  expect([...container.querySelectorAll("button")].some((b) => b.textContent === "Отправить")).toBe(false);
+  await click("Закрыть без отправки");
+  expect(sendApprovalDecision).toHaveBeenCalledWith({ sessionId: "old", requestId: "legacy", choice: "deny", profile: "sales" });
+});

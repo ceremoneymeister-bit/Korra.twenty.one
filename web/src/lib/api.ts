@@ -3247,6 +3247,8 @@ export interface CronJobMutation {
   name?: string;
   prompt?: string;
   reminder?: string | null;
+  delivery_ttl_seconds?: number | null;
+  pending_result_policy?: "all" | "latest";
   schedule?: string;
   deliver?: string;
   skills?: string[];
@@ -3261,6 +3263,8 @@ export interface CronJobMutation {
 }
 
 export interface CronExecution {
+  result_text?: string | null;
+  source?: string;
   id: string;
   status: string;
   claimed_at?: string;
@@ -3289,6 +3293,8 @@ export interface CronJob {
   name?: string | null;
   prompt?: string | null;
   reminder?: string | null;
+  delivery_ttl_seconds?: number | null;
+  pending_result_policy?: "all" | "latest";
   latest_execution?: {
     id: string;
     status: string;

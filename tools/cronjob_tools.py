@@ -811,6 +811,8 @@ def _format_job(job: Dict[str, Any]) -> Dict[str, Any]:
     }
     if job.get("script"):
         result["script"] = job["script"]
+    result["delivery_ttl_seconds"] = job.get("delivery_ttl_seconds")
+    result["pending_result_policy"] = job.get("pending_result_policy", "all")
     if job.get("reminder"):
         result["reminder"] = job["reminder"]
     if job.get("reasoning_effort"):
@@ -1513,6 +1515,8 @@ def cronjob(
     workdir: Optional[str] = None,
     no_agent: Optional[bool] = None,
     reminder: Optional[str] = None,
+    delivery_ttl_seconds: Optional[int] = None,
+    pending_result_policy: Optional[str] = None,
     attach_to_session: Optional[bool] = None,
     monitor_script: Optional[str] = None,
     monitor_url: Optional[str] = None,
@@ -1625,6 +1629,8 @@ def cronjob(
                     workdir=_normalize_optional_job_value(workdir),
                     no_agent=_no_agent,
                     reminder=reminder,
+                    delivery_ttl_seconds=delivery_ttl_seconds or None,
+                    pending_result_policy=pending_result_policy or "all",
                     attach_to_session=attach_to_session,
                     monitor_script=_normalize_optional_job_value(monitor_script),
                     monitor_url=_normalize_optional_job_value(monitor_url),
@@ -1822,6 +1828,10 @@ def cronjob(
 
         if normalized == "update":
             updates: Dict[str, Any] = {}
+            if delivery_ttl_seconds is not None:
+                updates["delivery_ttl_seconds"] = delivery_ttl_seconds or None
+            if pending_result_policy is not None:
+                updates["pending_result_policy"] = pending_result_policy
             if reminder is not None:
                 updates["reminder"] = reminder
             if prompt is not None:
@@ -2014,6 +2024,14 @@ Jobs run in a fresh session with no current-chat context, so prompts must be sel
                 "type": "string",
                 "description": "For create: the full self-contained prompt (paired with any skills as the task instruction). For run: optional transient context for that single fire (never persisted)."
             },
+            "delivery_ttl_seconds": {
+                "type": "integer", "minimum": 0, "maximum": 31536000,
+                "description": "Explicit result lifetime in seconds from run start; 0 clears the limit. Set only when user wants late results suppressed. Absent means no expiry; never infer that an obligation is fulfilled from age."
+            },
+            "pending_result_policy": {
+                "type": "string", "enum": ["all", "latest"],
+                "description": "all preserves every pending result (default). latest replaces older unsent approvals for this job/recipient with a newer result. Use only for replaceable reports, never independent obligations."
+            },
             "reminder": {
                 "type": "string",
                 "description": "For simple reminders, the exact text to deliver without a model call. Use instead of prompt/skills/script. Stored durably with the same schedule and delivery settings. Empty string clears on update."
@@ -2122,6 +2140,8 @@ def _cronjob_handler(args, **kw):
         job_id=args.get("job_id"),
         prompt=args.get("prompt"),
         reminder=args.get("reminder"),
+        delivery_ttl_seconds=args.get("delivery_ttl_seconds"),
+        pending_result_policy=args.get("pending_result_policy"),
         schedule=args.get("schedule"),
         name=args.get("name"),
         repeat=args.get("repeat"),

@@ -2666,6 +2666,9 @@ def _deliver_to_bot_chat(job: dict, content: str, profile: str) -> Optional[str]
         # loses custom/Docker installations and looks under ~/.hermes instead.
         # Never carry the scheduler's *profile* home into the child.
         korra_env_set(env, "KORRA_HOME", str(get_default_hermes_root()))
+    else:
+        # Multiplex workers keep the active profile in a context override.
+        korra_env_set(env, "KORRA_HOME", str(_get_hermes_home()))
 
     # The prefix tells the receiving bot this is scheduled output, not the
     # human typing — mirrors the Bot Mode sender-attribution convention.
@@ -3101,6 +3104,14 @@ def _deliver_result(
 
     Returns None on success, or an error string on failure.
     """
+    from cron.reminders import validate_reminder_delivery
+    try:
+        validate_reminder_delivery(job)
+    except ValueError as exc:
+        return str(exc)
+    from cron.result_validity import delivery_expired, EXPIRED_DELIVERY
+    if delivery_expired(job):
+        return EXPIRED_DELIVERY
     targets = _resolve_delivery_targets(job)
     if not targets:
         deliver_value = _normalize_deliver_value(job.get("deliver", "local"))
@@ -3214,6 +3225,9 @@ def _deliver_result(
     pending_decision_ids: list[str] = []
 
     for target in targets:
+        if delivery_expired(job):
+            delivery_errors.append(EXPIRED_DELIVERY)
+            break
         platform_name = target["platform"]
         chat_id = target["chat_id"]
         thread_id = target.get("thread_id")
@@ -3224,6 +3238,9 @@ def _deliver_result(
         # bot runs a turn and can respond — handled before the Platform enum
         # below, which knows nothing about this pseudo-platform.
         if platform_name == BOT_CHAT_PLATFORM:
+            if job.get("reminder"):
+                delivery_errors.append("Напоминание не запускает агента: выберите канал для человека.")
+                continue
             bot_chat_error = _deliver_to_bot_chat(job, content, chat_id)
             if bot_chat_error:
                 delivery_errors.append(bot_chat_error)
@@ -3350,7 +3367,8 @@ def _deliver_result(
         if decision_session_id:
             try:
                 from korra_cli.profiles import get_active_profile_name
-                from tools.send_message_tool import _queue_outbound_decision
+                from tools.send_message_tool import _queue_outbound_decision, _configured_account_identity
+                from cron.result_validity import result_validity
 
                 decision = _queue_outbound_decision(
                     platform_name=platform_name,
@@ -3372,6 +3390,8 @@ def _deliver_result(
                     source_session_key=decision_session_id,
                     source_profile=get_active_profile_name() or "default",
                     source_label="cron",
+                    validity=result_validity(job, f"{platform_name}:{chat_id}:{thread_id}",
+                                             _configured_account_identity(platform_name, pconfig)),
                 )
                 if decision is None:
                     raise RuntimeError("cron delivery was not classified as external")
@@ -7294,6 +7314,7 @@ def _run_one_job_body(
     execution_id = job.get("execution_id")
     if not execution_id:
         execution_id = create_execution(job["id"], source="direct")["id"]
+    job = {**job, "execution_id": execution_id, "_result_started_at": time.time()}
     delivery_attempted = False
     delivery_error = None
     delivery_waiting_decision = False
@@ -7652,7 +7673,8 @@ def _run_one_job_body(
         if delivery_waiting_decision:
             delivery_outcome = "waiting_decision"
         elif delivery_error:
-            delivery_outcome = "failed"
+            from cron.result_validity import EXPIRED_DELIVERY
+            delivery_outcome = "expired" if delivery_error == EXPIRED_DELIVERY else "failed"
         elif should_deliver and unresolved_origin:
             delivery_outcome = "not_configured"
         elif should_deliver and normalized_deliver != "local":
@@ -7675,6 +7697,7 @@ def _run_one_job_body(
             error=error,
             delivery_outcome=delivery_outcome,
             delivery_error=delivery_error,
+            result_text=job.get("reminder"),
         )
         return True
 
@@ -7752,7 +7775,8 @@ def _run_one_job_body(
                 if delivery_waiting_decision:
                     delivery_outcome = "waiting_decision"
                 elif delivery_error:
-                    delivery_outcome = "failed"
+                    from cron.result_validity import EXPIRED_DELIVERY
+                    delivery_outcome = "expired" if delivery_error == EXPIRED_DELIVERY else "failed"
                 elif unresolved_origin:
                     delivery_outcome = "not_configured"
                 elif normalized_deliver != "local":
