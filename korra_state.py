@@ -11706,6 +11706,7 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
         turn_lease_holder: Optional[str] = None,
         chunk_rows: Optional[int] = None,
         turn_lease_ttl_seconds: float = 300.0,
+        human_turn: bool = False,
     ) -> int:
         """Append multiple messages atomically in ONE write transaction.
 
@@ -11746,6 +11747,7 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                     compression_lock_holder=compression_lock_holder,
                     turn_lease_holder=turn_lease_holder,
                     turn_lease_ttl_seconds=turn_lease_ttl_seconds,
+                    human_turn=human_turn,
                 )
             return inserted_total
 
@@ -11785,6 +11787,13 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                     "UPDATE sessions SET message_count = message_count + ? WHERE id = ?",
                     (inserted, session_id),
                 )
+            if human_turn and any(
+                m.get("role") == "user" and not m.get("_compressed_summary")
+                and m.get("display_kind") not in {"internal_notification", "hidden"}
+                for m in messages
+            ):
+                from cron.session_discussions import promote
+                promote(conn, session_id)
             return inserted
 
         # Same criticality as append_message: this IS the turn's transcript.

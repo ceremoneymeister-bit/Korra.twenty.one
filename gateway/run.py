@@ -20098,20 +20098,23 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         session_key: Optional[str] = None,
     ) -> Optional[str]:
         """Run inbound preprocessing under the routed profile when multiplexed."""
+        async def prepare():
+            # Resolve under the routed profile. Keep technical identity out of
+            # the visible transcript and the cached system prompt.
+            event._cron_reply_context = None
+            try:
+                from cron.result_links import reply_context
+                event._cron_reply_context = reply_context(event, source)
+            except Exception:
+                logger.warning("Scheduled-result reply lookup failed", exc_info=True)
+            return await self._prepare_inbound_message_text(
+                event=event, source=source, history=history, session_key=session_key,
+            )
+
         if getattr(getattr(self, "config", None), "multiplex_profiles", False):
             with _profile_runtime_scope(self._resolve_profile_home_for_source(source)):
-                return await self._prepare_inbound_message_text(
-                    event=event,
-                    source=source,
-                    history=history,
-                    session_key=session_key,
-                )
-        return await self._prepare_inbound_message_text(
-            event=event,
-            source=source,
-            history=history,
-            session_key=session_key,
-        )
+                return await prepare()
+        return await prepare()
 
     async def _prepare_clarify_reply_text(self, event) -> str:
         """Return raw text or successful voice transcripts for a clarify reply."""
@@ -22096,6 +22099,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # (one-shot; consumed in run_sync).  Staged AFTER the message_text
         # early-out above so an aborted turn cannot leak its notes into the
         # next turn's user message.
+        if getattr(event, "_cron_reply_context", None):
+            turn_sidecar_notes.append(event._cron_reply_context)
         if turn_sidecar_notes and session_key:
             self._set_pending_turn_sidecar_notes(session_key, turn_sidecar_notes)
 
@@ -31570,6 +31575,10 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     )
                     if next_message is None:
                         return result
+                    if getattr(pending_event, "_cron_reply_context", None):
+                        self._set_pending_turn_sidecar_notes(
+                            next_session_key, [pending_event._cron_reply_context],
+                        )
                     next_message_id = self._reply_anchor_for_event(pending_event)
                     next_channel_prompt = getattr(pending_event, "channel_prompt", None)
                     next_message_type = getattr(pending_event, "message_type", None)
@@ -31628,6 +31637,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     event_message_id=next_message_id,
                     channel_prompt=next_channel_prompt,
                     message_type=next_message_type,
+                    persist_user_display_kind=(
+                        "internal_notification" if getattr(pending_event, "internal", False) else None
+                    ),
                 )
                 return _preserve_queued_followup_history_offset(result, followup_result)
         finally:

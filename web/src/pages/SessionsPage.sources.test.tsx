@@ -42,6 +42,11 @@ describe("таксономия источников истории", () => {
     expect(isAutomationSource("dashboard")).toBe(false);
   });
 
+  it("продолжение результата человеком остаётся в чатах", () => {
+    expect(isAutomationSource("cron_discussion")).toBe(false);
+    expect(sourceLabel("cron_discussion")).toBe("Обсуждение задачи");
+  });
+
   it("вызовы сторонних клиентов остаются автоматизацией", () => {
     expect(isAutomationSource("api_server")).toBe(true);
     expect(isAutomationSource("cron")).toBe(true);

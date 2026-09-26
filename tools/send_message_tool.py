@@ -793,6 +793,14 @@ def resolve_outbound_message_decision(
         )
 
     if result.get("success"):
+        stored_result = (payload.get("validity") or {}).get("result_snapshot")
+        if payload.get("platform") == "telegram" and isinstance(stored_result, dict):
+            try:
+                from cron.result_links import record
+                record(account=payload["account"], chat_id=payload["chat_id"],
+                       thread_id=payload.get("thread_id"), result=stored_result, receipt=result)
+            except Exception:
+                logger.exception("Could not persist approved scheduled-result reply link")
         return decisions.finish_execution(
             decision_id,
             status=decisions.SUCCEEDED,
@@ -2083,6 +2091,18 @@ async def _send_telegram(token, chat_id, message, media_files=None, thread_id=No
             text_kwargs["disable_web_page_preview"] = True
 
         last_msg = None
+        sent_message_ids = []
+        sent_message_receipts = []
+
+        def remember_receipt(msg):
+            sent_message_ids.append(str(msg.message_id))
+            actual_chat = getattr(msg, "chat_id", None)
+            actual_thread = getattr(msg, "message_thread_id", None)
+            sent_message_receipts.append({
+                "message_id": str(msg.message_id),
+                "chat_id": str(actual_chat) if isinstance(actual_chat, (str, int)) else str(chat_id),
+                "thread_id": actual_thread if isinstance(actual_thread, int) else None,
+            })
         warnings = []
 
         # MEDIA:<path> caption: when a single captionable file is accompanied
@@ -2158,6 +2178,8 @@ async def _send_telegram(token, chat_id, message, media_files=None, thread_id=No
                     else:
                         raise
 
+                remember_receipt(last_msg)
+
         for media_path, is_voice in media_files:
             if not os.path.exists(media_path):
                 warning = f"Media file not found, skipping: {media_path}"
@@ -2172,6 +2194,7 @@ async def _send_telegram(token, chat_id, message, media_files=None, thread_id=No
                             bot, chat_id=int_chat_id, text=_tg_caption,
                             parse_mode=send_parse_mode, **text_kwargs
                         )
+                        remember_receipt(last_msg)
                         _tg_caption = None  # delivered — don't re-caption a later file
                     except Exception as _cap_err:
                         logger.warning(
@@ -2284,6 +2307,7 @@ async def _send_telegram(token, chat_id, message, media_files=None, thread_id=No
                                 )
                         else:
                             raise
+                remember_receipt(last_msg)
             except Exception as e:
                 warning = _sanitize_error_text(f"Failed to send media {media_path}: {e}")
                 logger.error(warning)
@@ -2300,6 +2324,8 @@ async def _send_telegram(token, chat_id, message, media_files=None, thread_id=No
             "platform": "telegram",
             "chat_id": chat_id,
             "message_id": str(last_msg.message_id),
+            "message_ids": list(dict.fromkeys(sent_message_ids)),
+            "message_receipts": sent_message_receipts,
         }
         if warnings:
             result["warnings"] = warnings

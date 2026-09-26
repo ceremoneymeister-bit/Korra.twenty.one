@@ -2436,6 +2436,11 @@ class AIAgent:
                 self._session_db.append_messages_batch(
                     session_id=self.session_id,
                     messages=_batch_rows,
+                    human_turn=_session_source_for_agent(getattr(self, "platform", None)) in {
+                        "cli", "tui", "dashboard", "hermes_browser", "desktop",
+                        "api_server", "telegram", "discord", "slack", "whatsapp",
+                        "whatsapp_cloud", "signal", "matrix", "email", "sms",
+                    },
                     compression_lock_holder=getattr(
                         self, "_active_compression_lock_holder", None
                     ),

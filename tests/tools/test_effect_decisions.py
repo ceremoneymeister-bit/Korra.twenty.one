@@ -525,3 +525,34 @@ def test_tampered_durable_attachment_fails_before_transport(tmp_path, monkeypatc
     assert result["status"] == decisions.FAILED
     assert result["outcome"] == {"reason": "attachment_changed", "retry": False}
     dispatch.assert_not_called()
+
+
+def test_approved_scheduled_delivery_keeps_exact_reply_binding(tmp_path, monkeypatch):
+    from cron import result_links, executions
+    from gateway.config import Platform
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setattr(executions, "EXECUTIONS_FILE", tmp_path / "executions.db")
+    pconfig = SimpleNamespace(enabled=True, token="bot-token", extra={"account_id": "main"})
+    monkeypatch.setattr(outbound, "prepare_send_message_platforms", lambda: None)
+    monkeypatch.setattr("gateway.config.load_gateway_config", lambda: SimpleNamespace(platforms={Platform.TELEGRAM: pconfig}))
+    dispatch = Mock(return_value={"success": True, "message_id": "42"})
+    monkeypatch.setattr(outbound, "_dispatch_resolved_send", dispatch)
+    tokens = _bind_session()
+    try:
+        pending = outbound._queue_outbound_decision(
+            platform_name="telegram", pconfig=pconfig, chat_id="2002", thread_id=None,
+            cleaned_message="Отчёт", media_files=[], force_document=False, used_home_channel=False,
+            args={"target": "telegram:2002", "message": "Отчёт"},
+            validity={"version": 1, "result_snapshot": result_links.snapshot(
+                {"id": "report", "execution_id": "run-17"}, "Отчёт")},
+        )
+    finally:
+        from gateway.session_context import reset_session_vars
+        reset_session_vars()
+    for _ in range(2):
+        assert outbound.resolve_outbound_message_decision(
+            pending["id"], "once", source_session_id="chat-1")["status"] == decisions.SUCCEEDED
+    assert dispatch.call_count == 1
+    saved = result_links.lookup(account=outbound._configured_account_identity("telegram", pconfig),
+                                chat_id="2002", thread_id=None, message_id="42")
+    assert saved["job_id"] == "report" and saved["execution_id"] == "run-17"

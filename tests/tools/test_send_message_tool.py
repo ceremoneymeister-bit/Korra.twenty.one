@@ -1868,3 +1868,21 @@ class TestSendTelegramThreadNotFoundRetry:
         finally:
             if media_path and os.path.exists(media_path):
                 os.unlink(media_path)
+
+
+def test_telegram_receipts_cover_all_chunks_and_actual_routes(monkeypatch):
+    bot = MagicMock()
+    bot.initialize = AsyncMock()
+    bot.shutdown = AsyncMock()
+    bot.send_message = AsyncMock(side_effect=[
+        SimpleNamespace(message_id=10, chat_id=-100, message_thread_id=7),
+        SimpleNamespace(message_id=11, chat_id=-100, message_thread_id=7),
+    ])
+    with patch("telegram.Bot", return_value=bot):
+        result = asyncio.run(_send_telegram("tok", "@channel", "a" * 6000, thread_id="7"))
+    assert result["success"] is True
+    assert result["message_ids"] == ["10", "11"]
+    assert result["message_receipts"] == [
+        {"message_id": "10", "chat_id": "-100", "thread_id": 7},
+        {"message_id": "11", "chat_id": "-100", "thread_id": 7},
+    ]

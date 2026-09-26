@@ -5622,6 +5622,7 @@ class TelegramAdapter(BasePlatformAdapter):
                 ]
             
             message_ids = []
+            message_receipts = []
             thread_id = self._metadata_thread_id(metadata)
             requested_thread_id = self._message_thread_id_for_send(thread_id)
             used_thread_fallback = False
@@ -5851,6 +5852,13 @@ class TelegramAdapter(BasePlatformAdapter):
                                 continue
                         raise
                 message_ids.append(str(msg.message_id))
+                actual_chat = getattr(msg, "chat_id", None)
+                actual_thread = getattr(msg, "message_thread_id", None)
+                message_receipts.append({
+                    "message_id": str(msg.message_id),
+                    "chat_id": str(actual_chat) if isinstance(actual_chat, (str, int)) else str(chat_id),
+                    "thread_id": actual_thread if isinstance(actual_thread, int) else None,
+                })
 
             # Re-trigger typing indicator after sending a message.
             # Telegram clears the typing state when a new message is delivered,
@@ -5873,6 +5881,7 @@ class TelegramAdapter(BasePlatformAdapter):
                 message_id=message_ids[0] if message_ids else None,
                 raw_response={
                     "message_ids": message_ids,
+                    "message_receipts": message_receipts,
                     "requested_thread_id": requested_thread_id,
                     "thread_fallback": used_thread_fallback,
                 },

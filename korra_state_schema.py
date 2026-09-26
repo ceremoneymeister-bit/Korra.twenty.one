@@ -1472,6 +1472,9 @@ class SessionSchemaMixin:
             if getattr(self, "_fts_enabled", False):
                 self._migrate_broad_fts_update_triggers(cursor)
 
+        from cron.session_discussions import migrate_legacy
+        migrate_legacy(self._conn)
+
         self._conn.commit()
 
     def _run_admitted_startup_rebuild(self, cursor, rebuild_fn) -> None:

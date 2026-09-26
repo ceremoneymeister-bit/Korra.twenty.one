@@ -79,7 +79,8 @@ class SessionPortabilityMixin:
 
         Cron runs are flat, independent sessions whose id is
         ``cron_{job_id}_{timestamp}`` (see ``cron/scheduler.run_job``). They are
-        never compression roots and never branch, so this deliberately skips the
+        initially independent. Human continuations (cron_discussion) stay in
+        this history even if later compressed. This deliberately skips the
         ``list_sessions_rich`` recursive compression-chain CTE / leading-wildcard
         ``id_query`` path — that path seeds from *every* ``source='cron'`` row in
         the DB and only filters to one job's runs after the scan, so it scales
@@ -88,7 +89,7 @@ class SessionPortabilityMixin:
 
         Instead this binds to one job with a ``[prefix, prefix_hi)`` range over
         the id (an index range scan, not a ``%...%`` substring), filters
-        ``source='cron'``, and orders by ``started_at DESC``. Work scales with
+        the cron and cron_discussion sources, and orders by ``started_at DESC``. Work scales with
         the requested window, not the total cron history.
 
         Returns the same enriched row shape as ``list_sessions_rich`` (adds
@@ -115,7 +116,7 @@ class SessionPortabilityMixin:
                 {_sql_session_last_active("s")} AS last_active
             FROM sessions s
             LEFT JOIN system_prompts sp ON sp.hash = s.system_prompt_hash
-            WHERE s.source = 'cron' AND s.id >= ? AND s.id < ?
+            WHERE s.source IN ('cron', 'cron_discussion') AND s.id >= ? AND s.id < ?
             ORDER BY s.started_at DESC, s.id DESC
             LIMIT ? OFFSET ?
         """

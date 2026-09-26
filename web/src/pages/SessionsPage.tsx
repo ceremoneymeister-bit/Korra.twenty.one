@@ -99,6 +99,7 @@ const SOURCE_CONFIG: Record<string, { icon: typeof Terminal; color: string }> =
     email: { icon: MessageSquare, color: "text-[oklch(0.7_0.15_155)]" },
     sms: { icon: MessageCircle, color: "text-success" },
     cron: { icon: Clock, color: "text-warning" },
+    cron_discussion: { icon: MessageSquare, color: "text-primary" },
     tool: { icon: Play, color: "text-warning" },
     // Служебный ход обслуживания установки: в списках разговоров его нет,
     // но при явном выборе источника он должен честно называться.
@@ -171,6 +172,8 @@ export function sourceLabel(source: string): string {
       return "WhatsApp Cloud";
     case "sms":
       return "SMS";
+    case "cron_discussion":
+      return "Обсуждение задачи";
     case "cron":
       return "Расписание";
     case "tool":

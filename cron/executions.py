@@ -67,6 +67,13 @@ def _initialize_schema(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_executions_status_claimed "
         "ON executions(status, claimed_at DESC, id DESC)"
     )
+    conn.execute("""CREATE TABLE IF NOT EXISTS cron_reply_results (
+        id TEXT PRIMARY KEY, result_json TEXT NOT NULL)""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS cron_result_messages (
+        account TEXT NOT NULL, chat_id TEXT NOT NULL, thread_id TEXT NOT NULL,
+        message_id TEXT NOT NULL, job_id TEXT NOT NULL, execution_id TEXT NOT NULL,
+        result_id TEXT NOT NULL, created_at REAL NOT NULL,
+        PRIMARY KEY(account,chat_id,thread_id,message_id))""")
     # Additive migration: old attempts have an unknown delivery outcome,
     # not an invented success. Another process may migrate the same ledger.
     columns = {row[1] for row in conn.execute("PRAGMA table_info(executions)")}

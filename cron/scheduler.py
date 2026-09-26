@@ -2903,6 +2903,7 @@ def _send_media_via_adapter(
     loop,
     job: dict,
     platform=None,
+    on_receipt=None,
 ) -> list:
     """Send extracted MEDIA files as native platform attachments via a live adapter.
 
@@ -2968,6 +2969,8 @@ def _send_media_via_adapter(
             except TimeoutError:
                 future.cancel()
                 raise
+            if _confirm_adapter_delivery(result) and on_receipt is not None:
+                on_receipt(result)
             if result and not getattr(result, "success", True):
                 msg = (
                     f"media send failed for {media_path}: "
@@ -3369,6 +3372,7 @@ def _deliver_result(
                 from korra_cli.profiles import get_active_profile_name
                 from tools.send_message_tool import _queue_outbound_decision, _configured_account_identity
                 from cron.result_validity import result_validity
+                from cron.result_links import snapshot as result_snapshot
 
                 decision = _queue_outbound_decision(
                     platform_name=platform_name,
@@ -3390,8 +3394,9 @@ def _deliver_result(
                     source_session_key=decision_session_id,
                     source_profile=get_active_profile_name() or "default",
                     source_label="cron",
-                    validity=result_validity(job, f"{platform_name}:{chat_id}:{thread_id}",
+                    validity={**result_validity(job, f"{platform_name}:{chat_id}:{thread_id}",
                                              _configured_account_identity(platform_name, pconfig)),
+                              "result_snapshot": result_snapshot(job, mirror_text)},
                 )
                 if decision is None:
                     raise RuntimeError("cron delivery was not classified as external")
@@ -3739,6 +3744,11 @@ def _deliver_result(
                                 send_raw_response = getattr(send_result, "raw_response", None)
                                 delivered_message_id = getattr(send_result, "message_id", None)
 
+                            if send_success:
+                                from cron.result_links import record_delivery
+                                record_delivery(job, mirror_text, platform_name, pconfig,
+                                                chat_id, thread_id, send_result)
+
                             if not send_success:
                                 if isinstance(send_result, dict):
                                     err = send_result.get("error", "unknown")
@@ -3794,6 +3804,7 @@ def _deliver_result(
                                 routed_media_metadata["user_id"] = logical_home.user_id
                             if logical_home.scope_id:
                                 routed_media_metadata["scope_id"] = logical_home.scope_id
+                    from cron.result_links import record_delivery
                     _media_errors = _send_media_via_adapter(
                         runtime_adapter,
                         chat_id,
@@ -3802,6 +3813,10 @@ def _deliver_result(
                         loop,
                         job,
                         platform=platform,
+                        on_receipt=lambda receipt: record_delivery(
+                            job, mirror_text, platform_name, pconfig, chat_id,
+                            (routed_media_metadata or {}).get("thread_id"), receipt,
+                        ),
                     )
                     # Surface per-file failures into the run status (parity
                     # with the standalone lane): text delivered but an
@@ -3997,6 +4012,9 @@ def _deliver_result(
                 target_errors.extend([msg])
                 delivery_errors.extend(target_errors)
                 continue
+
+            from cron.result_links import record_delivery
+            record_delivery(job, mirror_text, platform_name, pconfig, chat_id, thread_id, result)
 
             # Standalone senders report per-file attachment failures in
             # ``warnings`` while still returning success (the text leg
