@@ -531,7 +531,7 @@ def _coerce_job_text(value: Any, fallback: str = "") -> str:
 
 
 # Fields whose presence in an update can turn a runnable job into an empty one.
-_PAYLOAD_FIELDS = frozenset({"prompt", "script", "skill", "skills", "no_agent"})
+_PAYLOAD_FIELDS = frozenset({"prompt", "script", "skill", "skills", "no_agent", "reminder"})
 
 EMPTY_PAYLOAD_ERROR = (
     "Cron job has nothing to run: the prompt is blank and no script or "
@@ -551,6 +551,8 @@ def job_payload_is_empty(job: Dict[str, Any]) -> bool:
     agent an empty instruction on every fire (incident a5e29e688dc0).
     ``no_agent`` needs no special case here — it already requires a script.
     """
+    if _coerce_job_text(job.get("reminder")).strip():
+        return False
     if _coerce_job_text(job.get("prompt")).strip():
         return False
     if _coerce_job_text(job.get("script")).strip():
@@ -2235,6 +2237,7 @@ def create_job(
     monitor_url: Optional[str] = None,
     reasoning_effort: Optional[str] = None,
     created_by_owner: Optional[bool] = None,
+    reminder: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Create a new cron job.
@@ -2307,6 +2310,11 @@ def create_job(
         The created job dict
     """
     parsed_schedule = parse_schedule(schedule)
+    from cron.reminders import reminder_text
+
+    reminder = reminder_text({"reminder": reminder, "prompt": prompt, "skills": skills,
+        "skill": skill, "script": script, "no_agent": no_agent,
+        "monitor_script": monitor_script, "monitor_url": monitor_url})
 
     # Normalize repeat: treat 0 or negative values as None (infinite).
     # String forms ('forever'/'once'/numeric) coerce via
@@ -2365,7 +2373,7 @@ def create_job(
 
     prompt_text = _coerce_job_text(prompt).strip()
 
-    if not prompt_text and not normalized_script and not normalized_skills:
+    if not reminder and not prompt_text and not normalized_script and not normalized_skills:
         raise ValueError(EMPTY_PAYLOAD_ERROR)
 
     # Reject cron jobs that schedule gateway-lifecycle commands. Prevents
@@ -2376,13 +2384,13 @@ def create_job(
     from cron.lifecycle_guard import check_gateway_lifecycle
     check_gateway_lifecycle(prompt_text, normalized_script)
 
-    label_source = (prompt_text or (normalized_skills[0] if normalized_skills else None) or (normalized_script if normalized_no_agent else None)) or "cron job"
+    label_source = (reminder or prompt_text or (normalized_skills[0] if normalized_skills else None) or (normalized_script if normalized_no_agent else None)) or "cron job"
 
     provider_snapshot, model_snapshot = _compute_provider_model_snapshots(
         provider=normalized_provider,
         model=normalized_model,
         base_url=normalized_base_url,
-        no_agent=normalized_no_agent,
+        no_agent=normalized_no_agent or bool(reminder),
     )
 
     next_run_at = compute_next_run(parsed_schedule)
@@ -2415,6 +2423,7 @@ def create_job(
         "base_url": normalized_base_url,
         "script": normalized_script,
         "no_agent": normalized_no_agent,
+        "reminder": reminder,
         "monitor_script": normalized_monitor_script,
         "monitor_url": normalized_monitor_url,
         # Hash-suppression state for monitor jobs: {"last_output_hash": ...,
@@ -2593,6 +2602,9 @@ def update_job(job_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]
 
             previous_inference_axes = _normalized_inference_axes(job)
             updated = _apply_skill_fields({**job, **updates})
+            from cron.reminders import reminder_text
+
+            updated["reminder"] = reminder_text(updated)
 
             if (
                 is_terminal_job(job)

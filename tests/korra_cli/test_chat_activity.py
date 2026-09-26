@@ -61,6 +61,17 @@ def test_panel_restart_keeps_durable_turn_running(monkeypatch, tmp_path):
     assert runs[0]["delivery"] == "pending"
 
 
+def test_scheduled_runs_do_not_appear_as_unread_or_running_chats(monkeypatch, tmp_path):
+    _session(tmp_path, "run-1", source="cron", title="Отчёт", holder="cron-run")
+    _session(tmp_path, "discussion", source="telegram", title="Обсуждение отчёта")
+    monkeypatch.setattr(chat_activity, "_profile_targets", lambda _: [("default", tmp_path)])
+    runs = chat_activity.project_chat_activity([], profile=None, session_id=None)
+    assert {run["session_id"] for run in runs} == {"discussion"}
+    db = SessionDB(tmp_path / "state.db")
+    assert db.get_session("run-1")["source"] == "cron"
+    db.close()
+
+
 def test_global_projection_keeps_parallel_channels_and_server_unread(
     monkeypatch, tmp_path
 ):

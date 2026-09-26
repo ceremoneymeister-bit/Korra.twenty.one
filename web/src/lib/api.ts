@@ -1112,6 +1112,8 @@ export const api = {
   // Cron jobs
   getCronJobs: (profile = "all") =>
     fetchJSON<CronJob[]>(`/api/cron/jobs?profile=${encodeURIComponent(profile)}`),
+  getCronJobHistory: (id: string, profile: string) =>
+    fetchJSON<CronJobHistory>(`/api/cron/jobs/${encodeURIComponent(id)}/history?profile=${encodeURIComponent(profile)}`),
   getCronDeliveryTargets: () =>
     fetchJSON<{ targets: CronDeliveryTarget[] }>("/api/cron/delivery-targets"),
   createCronJob: (job: CronJobMutation, profile = "default") =>
@@ -3240,8 +3242,11 @@ export interface CronJobRepeat {
 }
 
 export interface CronJobMutation {
+  monitor_script?: string | null;
+  monitor_url?: string | null;
   name?: string;
   prompt?: string;
+  reminder?: string | null;
   schedule?: string;
   deliver?: string;
   skills?: string[];
@@ -3253,6 +3258,20 @@ export interface CronJobMutation {
   context_from?: string[] | null;
   enabled_toolsets?: string[] | null;
   workdir?: string | null;
+}
+
+export interface CronExecution {
+  id: string;
+  status: string;
+  claimed_at?: string;
+  finished_at?: string | null;
+  delivery_outcome?: string | null;
+  delivery_error?: string | null;
+}
+
+export interface CronJobHistory {
+  executions: CronExecution[];
+  runs: Array<{ id: string; title?: string | null }>;
 }
 
 // Задачами управляет один набор маршрутов на все режимы панели:
@@ -3269,6 +3288,14 @@ export interface CronJob {
   is_default_profile?: boolean;
   name?: string | null;
   prompt?: string | null;
+  reminder?: string | null;
+  latest_execution?: {
+    id: string;
+    status: string;
+    delivery_outcome?: string | null;
+    delivery_error?: string | null;
+    finished_at?: string | null;
+  } | null;
   script?: string | null;
   skills?: string[] | null;
   schedule?: { kind?: string; expr?: string; run_at?: string; display?: string };

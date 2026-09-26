@@ -26,6 +26,7 @@ _KNOWN_STATUSES = {"claimed", "running", "completed", "failed", "unknown"}
 _KNOWN_SOURCES = {"builtin", "direct", "external"}
 _KNOWN_DELIVERY_OUTCOMES = {
     "delivered", "failed", "suppressed", "suppressed_acked", "not_configured",
+    "waiting_decision", "unknown", "expired",
 }
 
 
@@ -96,6 +97,7 @@ def project_execution_event(
     source = str(record.get("source") or "unknown").lower()
     if source not in _KNOWN_SOURCES and source != "unknown":
         source = "external"
+    delivery_outcome = delivery_outcome if delivery_outcome is not None else record.get("delivery_outcome")
     outcome = str(delivery_outcome).lower() if delivery_outcome is not None else None
     return CronExecutionEvent(
         status=status if status in _KNOWN_STATUSES else "unknown",

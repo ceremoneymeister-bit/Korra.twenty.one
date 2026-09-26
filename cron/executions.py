@@ -11,6 +11,7 @@ import os
 import sqlite3
 import threading
 import uuid
+from pathlib import Path
 from contextlib import contextmanager
 from typing import Any, Dict, Iterator, List, Optional
 
@@ -66,6 +67,16 @@ def _initialize_schema(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_executions_status_claimed "
         "ON executions(status, claimed_at DESC, id DESC)"
     )
+    # Additive migration: old attempts have an unknown delivery outcome,
+    # not an invented success. Another process may migrate the same ledger.
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(executions)")}
+    for column in ("delivery_outcome", "delivery_error"):
+        if column not in columns:
+            try:
+                conn.execute(f"ALTER TABLE executions ADD COLUMN {column} TEXT")
+            except sqlite3.OperationalError:
+                if column not in {row[1] for row in conn.execute("PRAGMA table_info(executions)")}:
+                    raise
 
 
 @contextmanager
@@ -181,6 +192,7 @@ def mark_execution_running(execution_id: str) -> Optional[Dict[str, Any]]:
 def finish_execution(
     execution_id: str, *, success: bool, error: Optional[str] = None,
     delivery_outcome: Optional[str] = None,
+    delivery_error: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Write a terminal result once; terminal attempts cannot be rewritten."""
     now = _hermes_now().isoformat()
@@ -188,9 +200,10 @@ def finish_execution(
     detail = None if success else (str(error) if error else "unknown failure")
     with _transaction() as conn:
         cur = conn.execute(
-            """UPDATE executions SET status=?, finished_at=?, error=?
+            """UPDATE executions SET status=?, finished_at=?, error=?,
+                 delivery_outcome=?, delivery_error=?
                WHERE id=? AND status IN ('claimed','running')""",
-            (status, now, detail, execution_id),
+            (status, now, detail, delivery_outcome, delivery_error, execution_id),
         )
         if cur.rowcount != 1:
             return None
@@ -218,7 +231,8 @@ def recover_interrupted_executions() -> int:
             if _owner_is_live(int(row["pid"]), row["process_started_at"]):
                 continue
             cur = conn.execute(
-                """UPDATE executions SET status='unknown', finished_at=?, error=?
+                """UPDATE executions SET status='unknown', finished_at=?, error=?,
+                     delivery_outcome='unknown'
                    WHERE id=? AND status IN ('claimed','running')""",
                 (now,
                  "Scheduler restarted after this execution's owner exited before a durable "

@@ -1,8 +1,26 @@
 import type { CronJob, CronJobMutation } from "./api";
 
+/** Delivery is separate from successful preparation; old rows stay unknown. */
+export function cronDeliveryLabel(job: CronJob): string | null {
+  const labels: Record<string, string> = {
+    delivered: "Результат отправлен",
+    failed: "Результат не доставлен",
+    waiting_decision: "Отправка ожидает решения",
+    unknown: "Отправка не подтверждена",
+    not_configured: "Нужно настроить получателя",
+    suppressed: "Без уведомления",
+    suppressed_acked: "Сбой уже отмечен",
+    expired: "Результат устарел",
+  };
+  const outcome = job.latest_execution?.delivery_outcome;
+  if (outcome === "not_configured" && job.deliver === "local") return "Результат сохранён в платформе";
+  return outcome ? labels[outcome] ?? "Отправка не подтверждена" : null;
+}
+
 export interface CronJobFormState {
   name: string;
   prompt: string;
+  mode?: "agent" | "reminder";
   schedule: string;
   deliver: string;
   skills: string[];
@@ -42,6 +60,15 @@ function asString(value: unknown): string {
 /** Build the create/update payload. Optional fields collapse to null so an
  * update explicitly clears them rather than leaving stale values. */
 export function buildCronJobPayload(form: CronJobFormState): CronJobMutation {
+  if (form.mode === "reminder") {
+    return {
+      name: form.name.trim(), reminder: form.prompt.trim(), prompt: "",
+      schedule: form.schedule.trim(), deliver: form.deliver.trim() || "local",
+      skills: [], script: null, no_agent: false, context_from: null,
+      monitor_script: null, monitor_url: null,
+      enabled_toolsets: null, workdir: null, provider: null, model: null, base_url: null,
+    };
+  }
   // The `continuity` toggle is stored as the reserved "self" entry in
   // context_from (the job's own previous output). Users never type "self" —
   // the checkbox is the surface; strip any hand-typed variant first.
@@ -53,6 +80,7 @@ export function buildCronJobPayload(form: CronJobFormState): CronJobMutation {
   return {
     name: form.name.trim(),
     prompt: form.prompt.trim(),
+    reminder: null,
     schedule: form.schedule.trim(),
     deliver: form.deliver.trim() || "local",
     skills: form.skills.filter(Boolean),
@@ -68,10 +96,10 @@ export function buildCronJobPayload(form: CronJobFormState): CronJobMutation {
 }
 
 export function cronJobHasExecutionContent(
-  job: Pick<CronJobMutation, "prompt" | "skills" | "script">,
+  job: Pick<CronJobMutation, "prompt" | "skills" | "script" | "reminder">,
 ): boolean {
   const skills = Array.isArray(job.skills) ? job.skills.filter(Boolean) : [];
-  return Boolean(asString(job.prompt).trim() || asString(job.script).trim() || skills.length);
+  return Boolean(asString(job.reminder).trim() || asString(job.prompt).trim() || asString(job.script).trim() || skills.length);
 }
 
 export function cronJobFormFromJob(job: CronJob): CronJobFormState {
@@ -84,7 +112,8 @@ export function cronJobFormFromJob(job: CronJob): CronJobFormState {
   const externalRefs = storedRefs.filter((item) => item.toLowerCase() !== "self");
   return {
     name: asString(job.name),
-    prompt: asString(job.prompt),
+    prompt: asString(job.reminder) || asString(job.prompt),
+    mode: job.reminder ? "reminder" : "agent",
     schedule:
       asString(job.schedule?.expr) ||
       asString(job.schedule?.run_at) ||

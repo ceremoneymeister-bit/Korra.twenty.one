@@ -68,6 +68,7 @@ export function useSessionList(
         limit,
         DEFAULT_OFFSET,
         profile === undefined ? undefined : profile || "default",
+        "recent",
       );
       if (!current()) return;
 

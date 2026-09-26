@@ -375,11 +375,10 @@ class TestDeliverResultWrapping:
 
         send_mock.assert_called_once()
         sent_content = send_mock.call_args.kwargs.get("content") or send_mock.call_args[0][-1]
-        assert "Cronjob Response: daily-report" in sent_content
-        assert "(job_id: test-job)" in sent_content
-        assert "-------------" in sent_content
+        assert "Результат задачи: daily-report" in sent_content
+        assert "job_id:" not in sent_content
         assert "Here is today's summary." in sent_content
-        assert "To stop or manage this job" in sent_content
+        assert "изменить расписание" in sent_content
 
     def test_cron_external_delivery_waits_for_exact_durable_decision(self):
         """off/yolo/cron never bypasses the immutable external-effect gate."""
@@ -414,7 +413,7 @@ class TestDeliverResultWrapping:
         assert queue.call_args.kwargs["source_session_id"] == "cron:daily-1:run-7"
         assert queue.call_args.kwargs["source_session_key"] == "cron:daily-1:run-7"
         assert queue.call_args.kwargs["source_label"] == "cron"
-        assert "Cronjob Response: daily-report" in queue.call_args.kwargs["cleaned_message"]
+        assert "Результат задачи: daily-report" in queue.call_args.kwargs["cleaned_message"]
 
 
     def test_relay_fronted_home_uses_relay_config_and_live_adapter(self, monkeypatch, tmp_path):

@@ -36,6 +36,27 @@ def _drain_queue(q):
             return values
 
 
+def test_reminder_history_without_chat_database_is_profile_scoped(isolated_profiles):
+    from cron.executions import create_execution, finish_execution
+    from korra_cli import web_server
+    from korra_constants import set_hermes_home_override, reset_hermes_home_override
+
+    job = web_server._call_cron_for_profile("worker_alpha", "create_job", prompt="", reminder="Позвонить", schedule="in 1h")
+    token = set_hermes_home_override(str(isolated_profiles["worker_alpha"]))
+    try:
+        row = create_execution(job["id"], source="builtin")
+        finish_execution(row["id"], success=True, delivery_outcome="failed", delivery_error="offline")
+    finally:
+        reset_hermes_home_override(token)
+    history = web_server._cron_job_history_sync(job["id"], "worker_alpha")
+    assert history["runs"] == []
+    assert history["executions"][0]["delivery_outcome"] == "failed"
+    assert not (isolated_profiles["worker_alpha"] / "state.db").exists()
+    with pytest.raises(HTTPException) as caught:
+        web_server._cron_job_history_sync(job["id"], "default")
+    assert caught.value.status_code == 404
+
+
 
 
 def test_fire_cron_job_scopes_store_and_runtime_home_together(

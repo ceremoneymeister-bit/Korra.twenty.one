@@ -115,16 +115,19 @@ def test_run_one_job_records_waiting_decision_without_delivery_failure(monkeypat
                 "success": True,
                 "error": None,
                 "delivery_outcome": "waiting_decision",
+                "delivery_error": None,
             },
         )
     ]
 
 
-def test_run_one_job_exception_delivers_failure_alert(monkeypatch):
+@pytest.mark.parametrize("owner", [True, False])
+def test_run_one_job_exception_delivers_failure_alert(monkeypatch, owner):
     """An exception escaping the run body must not become a silent error row."""
     delivered = []
     marked = []
     finished = []
+    decision_sessions = []
 
     monkeypatch.setattr(
         s, "create_execution", lambda *_a, **_kw: {"id": "exec-j3"}
@@ -141,7 +144,10 @@ def test_run_one_job_exception_delivers_failure_alert(monkeypatch):
     monkeypatch.setattr(
         s,
         "_deliver_result",
-        lambda job, content, **_kw: delivered.append((job["id"], content)) or None,
+        lambda job, content, **kw: (
+            decision_sessions.append(kw["decision_session_id"]),
+            delivered.append((job["id"], content)),
+        )[-1],
     )
     monkeypatch.setattr(
         s,
@@ -154,9 +160,10 @@ def test_run_one_job_exception_delivers_failure_alert(monkeypatch):
         lambda *args, **kwargs: finished.append((args, kwargs)),
     )
 
-    ok = s.run_one_job({"id": "j3", "name": "morning", "deliver": "telegram"})
+    ok = s.run_one_job({"id": "j3", "name": "morning", "deliver": "telegram", "created_by_owner": owner})
 
     assert ok is False
+    assert decision_sessions == ([""] if owner else ["cron:j3:exec-j3"])
     assert delivered == [
         ("j3", "⚠️ Cron 'morning' failed: Gemini HTTP 503 (UNAVAILABLE)")
     ]
@@ -170,6 +177,7 @@ def test_run_one_job_exception_delivers_failure_alert(monkeypatch):
                 "success": False,
                 "error": "Gemini HTTP 503 (UNAVAILABLE)",
                 "delivery_outcome": "delivered",
+                "delivery_error": None,
             },
         )
     ]
@@ -364,6 +372,7 @@ def test_run_one_job_keyboard_interrupt_skips_delivery_and_reraises(monkeypatch)
                 "success": False,
                 "error": "KeyboardInterrupt",
                 "delivery_outcome": "suppressed",
+                "delivery_error": None,
             },
         )
     ]

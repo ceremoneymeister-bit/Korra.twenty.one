@@ -34,6 +34,7 @@ vi.hoisted(() => {
 
 const apiMocks = vi.hoisted(() => ({
   getCronJobs: vi.fn(),
+  getCronJobHistory: vi.fn(),
   getCronDeliveryTargets: vi.fn(),
   createCronJob: vi.fn(),
   updateCronJob: vi.fn(),
@@ -204,6 +205,22 @@ afterEach(async () => {
 });
 
 describe("CronPage в режиме клиента", () => {
+  it("показывает историю доставки только выбранной задачи", async () => {
+    apiMocks.getCronJobHistory.mockResolvedValue({
+      executions: [{ id: "attempt", status: "completed", delivery_outcome: "failed" }],
+      runs: [],
+    });
+    await renderPage("secretary");
+    expect(apiMocks.getCronJobHistory).not.toHaveBeenCalled();
+    const details = container.querySelector("details")!;
+    await act(async () => {
+      details.open = true;
+      details.dispatchEvent(new Event("toggle"));
+    });
+    await flush();
+    expect(apiMocks.getCronJobHistory).toHaveBeenCalledWith("job-1", "secretary");
+    expect(container.textContent).toContain("Результат не доставлен");
+  });
   it("запрашивает задачи выбранного профиля, а не всех сразу", async () => {
     await renderPage("secretary");
     expect(apiMocks.getCronJobs).toHaveBeenCalledWith("secretary");

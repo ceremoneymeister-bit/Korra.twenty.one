@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { KorraLoader } from "@/components/KorraLoader";
+import { CronHistory } from "@/components/CronHistory";
 import {
   type CronTriggerController,
   createCronTriggerController,
@@ -21,6 +22,7 @@ import type {
 } from "@/lib/api";
 import {
   buildCronJobPayload,
+  cronDeliveryLabel,
   cronJobHasExecutionContent,
   cronJobFormFromJob,
   type CronJobFormState,
@@ -96,7 +98,7 @@ function truncateText(value: string, maxLength: number): string {
 }
 
 function getJobPrompt(job: CronJob): string {
-  return asText(job.prompt);
+  return asText(job.reminder) || asText(job.prompt);
 }
 
 function NameCheckboxPicker({
@@ -415,12 +417,20 @@ function CronJobFormFields({
       </div>
 
       <div className="grid gap-2">
-        <Label htmlFor={`${idPrefix}-prompt`}>{t.cron.prompt}</Label>
+        <Label htmlFor={`${idPrefix}-mode`}>Тип задачи</Label>
+        <Select id={`${idPrefix}-mode`} value={form.mode || "agent"}
+          onValueChange={(value) => update("mode", value === "reminder" ? "reminder" : "agent")}>
+          <SelectOption value="agent">Поручение агенту</SelectOption>
+          <SelectOption value="reminder">Напоминание</SelectOption>
+        </Select>
+      </div>
+      <div className="grid gap-2">
+        <Label htmlFor={`${idPrefix}-prompt`}>{form.mode === "reminder" ? "Текст напоминания" : t.cron.prompt}</Label>
         <textarea
           id={`${idPrefix}-prompt`}
           required
           className="flex min-h-[80px] w-full border border-border bg-background/40 px-3 py-2 text-sm font-courier shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-foreground/30 focus-visible:border-foreground/25"
-          placeholder={t.cron.promptPlaceholder}
+          placeholder={form.mode === "reminder" ? "Например: позвонить поставщику" : t.cron.promptPlaceholder}
           value={form.prompt}
           onChange={(e) => update("prompt", e.target.value)}
         />
@@ -451,7 +461,7 @@ function CronJobFormFields({
         )}
       </div>
 
-      {!ownerMode && <div className="grid gap-2">
+      {!ownerMode && form.mode !== "reminder" && <div className="grid gap-2">
         <Label htmlFor={`${idPrefix}-skills`}>{tr("Skills (optional)")}</Label>
         <NameCheckboxPicker
           id={`${idPrefix}-skills`}
@@ -465,7 +475,7 @@ function CronJobFormFields({
         </p>
       </div>}
 
-      {!ownerMode && (
+      {!ownerMode && form.mode !== "reminder" && (
         <CronAdvancedFields
           idPrefix={`${idPrefix}-advanced`}
           form={form}
@@ -524,6 +534,7 @@ function getRepeatDisplay(job: CronJob): string {
 }
 
 function getJobMode(job: CronJob): string {
+  if (job.reminder) return "Напоминание";
   if (job.no_agent) return "no_agent";
   if (job.script) return "script+agent";
   return "agent";
@@ -1284,6 +1295,9 @@ export default function CronPage() {
                         : `${t.cron.next}: ${formatTime(job.next_run_at)}`}
                     </span>
                   </div>
+                  {cronDeliveryLabel(job) && (
+                    <p className="mt-1 text-xs text-muted-foreground">{cronDeliveryLabel(job)}</p>
+                  )}
                   {job.last_delivery_error && (
                     <p className="text-xs text-destructive mt-1">
                       Доставка: {ownerFacingError(
@@ -1309,6 +1323,7 @@ export default function CronPage() {
                       )}
                     </p>
                   )}
+                  <CronHistory job={job} />
                 </div>
 
                 <div className="flex items-center gap-1 shrink-0 self-end sm:self-start">

@@ -44,7 +44,7 @@ from typing import Any, Callable, List, Optional, Protocol
 # the module) fail with ModuleNotFoundError for korra_time et al.
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from korra_constants import get_hermes_home, korra_env, korra_env_pop
+from korra_constants import get_default_hermes_root, get_hermes_home, korra_env, korra_env_set
 from korra_cli._subprocess_compat import windows_hide_flags
 from korra_cli.config import (
     _expand_env_vars,
@@ -340,7 +340,7 @@ def _summarize_cron_failure_for_delivery(job: dict, error: str | None) -> str:
     #
     # Falling through leaves the generic cleaner below to report what actually
     # happened, naming the script. No new message text is needed.
-    provider_reachable = not job.get("no_agent")
+    provider_reachable = not (job.get("no_agent") or job.get("reminder"))
 
     # Script execution happens outside the LLM/provider path (also for
     # agent-backed jobs that run a context script). Check the script runner's
@@ -2662,9 +2662,10 @@ def _deliver_to_bot_chat(job: dict, content: str, profile: str) -> Optional[str]
     env = os.environ.copy()
     if profile:
         argv += ["-p", profile]
-        # -p owns profile resolution in the child; a leftover HERMES_HOME
-        # from THIS scheduler's profile must not shadow it.
-        korra_env_pop(env, "KORRA_HOME")
+        # -p resolves beneath the installation root. Dropping HOME entirely
+        # loses custom/Docker installations and looks under ~/.hermes instead.
+        # Never carry the scheduler's *profile* home into the child.
+        korra_env_set(env, "KORRA_HOME", str(get_default_hermes_root()))
 
     # The prefix tells the receiving bot this is scheduled output, not the
     # human typing — mirrors the Bot Mode sender-attribution convention.
@@ -3138,13 +3139,11 @@ def _deliver_result(
 
     if wrap_response:
         task_name = job.get("name", job["id"])
-        job_id = job.get("id", "")
+        heading = "Напоминание" if job.get("reminder") else "Результат задачи"
         delivery_content = (
-            f"Cronjob Response: {task_name}\n"
-            f"(job_id: {job_id})\n"
-            f"-------------\n\n"
+            f"{heading}: {task_name}\n\n"
             f"{content}\n\n"
-            f"To stop or manage this job, send me a new message (e.g. \"stop reminder {task_name}\")."
+            "Чтобы изменить расписание или остановить задачу, напишите мне её название."
         )
     else:
         delivery_content = content
@@ -3163,7 +3162,11 @@ def _deliver_result(
 
     apply_media_policy_env(user_cfg)
 
-    media_files, cleaned_delivery_content = BasePlatformAdapter.extract_media(delivery_content)
+    if job.get("reminder"):
+        # Literal text must not become an attachment instruction.
+        media_files, cleaned_delivery_content = [], delivery_content
+    else:
+        media_files, cleaned_delivery_content = BasePlatformAdapter.extract_media(delivery_content)
     requested_media = [(str(p), v) for p, v in media_files]
     media_files = BasePlatformAdapter.filter_media_delivery_paths(media_files)
     # Attachments the policy filter dropped will never be sent on ANY lane —
@@ -3194,7 +3197,10 @@ def _deliver_result(
     # cron.mirror_delivery=false; gating this value on mirror_enabled makes
     # the seed receive an empty string and return False, which is exactly the
     # live failure reproduced three times on Alice (job ef7bd2869d15).
-    _, mirror_text = BasePlatformAdapter.extract_media(content)
+    if job.get("reminder"):
+        mirror_text = content
+    else:
+        _, mirror_text = BasePlatformAdapter.extract_media(content)
     mirror_text = (mirror_text or "").strip()
 
     try:
@@ -5185,6 +5191,8 @@ def _preflight_check_provider_key(job: dict, cfg: dict) -> Optional[str]:
     blocking here would break that contract (and burning zero LLM calls is
     already guaranteed by the fallback resolution being config-local).
     """
+    if job.get("reminder") or job.get("no_agent"):
+        return None
     try:
         if get_fallback_chain(cfg):
             return None
@@ -5591,6 +5599,16 @@ def run_job(
     """
     job_id = job["id"]
     job_name = str(job.get("name") or job.get("prompt") or job_id or "cron job")
+
+    if job.get("reminder") is not None:
+        from cron.reminders import reminder_text
+
+        text = reminder_text(job)
+        if text is not None:
+            from korra_cli.env_loader import load_hermes_dotenv
+
+            load_hermes_dotenv(hermes_home=_get_hermes_home())
+            return True, f"# {job_name}\n\n{text}\n", text, None
 
     # ---------------------------------------------------------------
     # no_agent short-circuit — the script IS the job, no LLM involvement.
@@ -7509,7 +7527,7 @@ def _run_one_job_body(
             # a real report that merely quoted "[SILENT]" mid-sentence (#51438,
             # #46917).  Keeps the intentional bracketed-prefix / trailing-line
             # tolerance the cron contract relies on.
-            if should_deliver and success and _is_cron_silence_response(deliver_content):
+            if should_deliver and success and not job.get("reminder") and _is_cron_silence_response(deliver_content):
                 logger.info("Job '%s': agent returned %s — skipping delivery", job["id"], SILENT_MARKER)
                 should_deliver = False
 
@@ -7656,6 +7674,7 @@ def _run_one_job_body(
             success=success,
             error=error,
             delivery_outcome=delivery_outcome,
+            delivery_error=delivery_error,
         )
         return True
 
@@ -7705,9 +7724,8 @@ def _run_one_job_body(
                     delivery_attempted = True
                     delivery_error = _deliver_result(
                         job,
-                        # A failure notice is not a report the owner asked for:
-                        # it keeps its exact decision even for the owner's jobs.
-                        # Composed exactly like the normal failure delivery above.
+                        # Failure notices use the same authorization as normal
+                        # results, including failures raised outside run_job.
                         # mark_job_run below records THIS run in failure_streak
                         # whichever layer failed, so a job that fails before the
                         # run body every tick builds a streak nobody is ever told
@@ -7717,9 +7735,7 @@ def _run_one_job_body(
                         + _failure_streak_nudge(job),
                         adapters=adapters,
                         loop=loop,
-                        decision_session_id=(
-                            f"cron:{job['id']}:{execution_id}"
-                        ),
+                        decision_session_id=_delivery_decision_session(job, execution_id),
                     )
                     if delivery_error and delivery_error.startswith(
                         _WAITING_DECISION_PREFIX
@@ -7763,6 +7779,7 @@ def _run_one_job_body(
                 success=False,
                 error=_err_text,
                 delivery_outcome=delivery_outcome,
+                delivery_error=delivery_error,
             )
         except Exception as record_err:
             logger.error(

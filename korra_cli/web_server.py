@@ -15043,6 +15043,13 @@ def _normalize_dashboard_cron_script(value: Any, profile_home: Path) -> Optional
 
 
 def _validate_dashboard_cron_effective_job(job: Dict[str, Any]) -> None:
+    from cron.reminders import reminder_text
+
+    try:
+        if reminder_text(job) is not None:
+            return
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     prompt = _cron_optional_text(job.get("prompt"))
     script = _cron_optional_text(job.get("script"))
     skills = _cron_string_list(job.get("skills")) or _cron_string_list(job.get("skill"))
@@ -15373,6 +15380,25 @@ def _get_cron_job_sync(job_id: str, profile: Optional[str] = None):
 
 
 
+def _cron_job_history_sync(job_id: str, profile: Optional[str] = None):
+    """Bounded history, including literal reminders without a chat session."""
+    from cron.executions import list_executions
+    from korra_constants import set_hermes_home_override, reset_hermes_home_override
+
+    selected, home = _cron_profile_home(profile)
+    job = _call_cron_for_profile(selected, "get_job", job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Задача не найдена")
+    canonical = job["id"]
+    token = set_hermes_home_override(str(home))
+    try:
+        executions = list_executions(job_id=canonical, limit=20)
+    finally:
+        reset_hermes_home_override(token)
+    runs = _list_cron_job_runs_sync(canonical, selected)["runs"] if (home / "state.db").is_file() else []
+    return {"executions": executions, "runs": runs}
+
+
 def _list_cron_job_runs_sync(job_id: str, profile: Optional[str] = None, limit: int = 20):
     """Run sessions produced by a cron job, newest first.
 
@@ -15430,6 +15456,7 @@ def _create_cron_job_sync(body: CronJobCreate, profile: Optional[str] = None):
         no_agent = bool(body.no_agent)
         _validate_dashboard_cron_effective_job({
             "prompt": body.prompt,
+            "reminder": body.reminder,
             "skills": skills,
             "script": script,
             "no_agent": no_agent,
@@ -15438,6 +15465,7 @@ def _create_cron_job_sync(body: CronJobCreate, profile: Optional[str] = None):
             profile_name,
             "create_job",
             prompt=body.prompt or "",
+            reminder=body.reminder,
             schedule=body.schedule,
             name=body.name,
             deliver=_cron_optional_text(body.deliver) or "local",

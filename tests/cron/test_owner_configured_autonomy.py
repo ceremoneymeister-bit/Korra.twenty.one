@@ -3,7 +3,7 @@
 Dmitry, 25.09.2026: «любые отчёты, которые пользователь просит отправлять —
 всегда без подтверждения, и любые автономные действия, которые пользователь
 настраивает — всегда без подтверждения». Everything else — jobs created by
-somebody else, one-off sends an agent proposes, failure notices — keeps its
+somebody else, one-off sends an agent proposes — keeps its
 exact decision (K21-114). Review 25.09: a visitor must not be able to make or
 turn a job into the owner's.
 """

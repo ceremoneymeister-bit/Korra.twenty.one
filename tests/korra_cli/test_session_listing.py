@@ -3,9 +3,24 @@
 import pytest
 
 from korra_cli.session_listing import (
+    hide_service_sources,
     parse_session_listing_args,
     query_session_listing,
 )
+
+
+def test_technical_runs_are_filtered_before_pagination_and_stay_accessible(tmp_path):
+    from korra_state import SessionDB
+
+    with SessionDB(tmp_path / "state.db") as db:
+        db.create_session("human", "telegram")
+        for i in range(25):
+            db.create_session(f"run-{i}", "cron")
+        excluded = hide_service_sources(None)
+        assert [r["id"] for r in db.list_sessions_rich(limit=1, exclude_sources=excluded)] == ["human"]
+        assert db.session_count(exclude_sources=excluded) == 1
+        assert db.session_count(source="cron", exclude_sources=hide_service_sources(None, source="cron")) == 25
+        assert db.get_session("run-0") is not None
 
 
 class TestParseSessionListingArgs:

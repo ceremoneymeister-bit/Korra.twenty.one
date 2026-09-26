@@ -144,7 +144,7 @@ def test_deliver_runs_canonical_bot_chat_lane():
     assert not any("the output" in str(a) for a in argv)
 
 
-def test_deliver_named_profile_uses_p_flag_and_clears_home():
+def test_deliver_named_profile_uses_p_flag_and_installation_root():
     calls = {}
 
     def fake_run(argv, **kwargs):
@@ -154,14 +154,42 @@ def test_deliver_named_profile_uses_p_flag_and_clears_home():
 
     with mock.patch.object(sched.subprocess, "run", side_effect=fake_run), \
          mock.patch.object(sched.shutil, "which", return_value="/usr/bin/hermes"), \
-         mock.patch.dict(sched.os.environ, {"HERMES_HOME": "/tmp/other-profile"}):
+         mock.patch.object(sched, "get_default_hermes_root", return_value="/tmp/installation"):
         err = _deliver_to_bot_chat({"id": "j1", "name": "n"}, "out", "research")
 
     assert err is None
     argv = calls["argv"]
     assert argv[1:3] == ["-p", "research"]
-    # -p owns resolution; the scheduler's own HERMES_HOME must not leak in.
-    assert "HERMES_HOME" not in calls["kwargs"]["env"]
+    assert calls["kwargs"]["env"]["HERMES_HOME"] == "/tmp/installation"
+    assert calls["kwargs"]["env"]["KORRA_HOME"] == "/tmp/installation"
+
+
+def test_named_delivery_child_resolves_real_custom_root(monkeypatch, tmp_path):
+    import json
+    import sys
+
+    root = tmp_path / "custom-data"
+    (root / "profiles" / "research").mkdir(parents=True)
+    (root / "profiles" / "scheduler").mkdir()
+    monkeypatch.setenv("KORRA_HOME", str(root / "profiles" / "scheduler"))
+    monkeypatch.setenv("HERMES_HOME", str(root / "profiles" / "scheduler"))
+    real_run = subprocess.run
+    observed = []
+
+    def probe_child(argv, **kwargs):
+        result = real_run(
+            [sys.executable, "-B", "-c",
+             "import json; from korra_cli.profiles import get_profile_dir, profile_exists; "
+             "print(json.dumps([str(get_profile_dir('research')), profile_exists('research'), profile_exists('missing')]))"],
+            env=kwargs["env"], capture_output=True, text=True, check=True,
+        )
+        observed.extend(json.loads(result.stdout))
+        return _completed()
+
+    monkeypatch.setattr(sched.subprocess, "run", probe_child)
+    monkeypatch.setattr(sched.shutil, "which", lambda _: "/usr/bin/hermes")
+    assert _deliver_to_bot_chat({"id": "custom", "name": "Report"}, "result", "research") is None
+    assert observed == [str(root / "profiles" / "research"), True, False]
 
 
 def test_deliver_failure_returns_error_string():

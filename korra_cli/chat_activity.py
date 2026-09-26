@@ -123,6 +123,7 @@ def _session_meta(row: dict[str, Any] | None) -> dict[str, Any]:
 
 def _load_profile_snapshot(profile: str, home: Path, now: float) -> dict[str, Any]:
     from korra_cli.web_server import _open_session_db_at_path
+    from korra_cli.session_listing import SERVICE_SESSION_SOURCES, hide_service_sources
 
     db_path = home / "state.db"
     if not db_path.is_file():
@@ -135,11 +136,27 @@ def _load_profile_snapshot(profile: str, home: Path, now: float) -> dict[str, An
             order_by_last_active=True,
             compact_rows=True,
             include_pinned=True,
+            exclude_sources=hide_service_sources(None),
         )
         leases = db.list_session_turn_leases()
         routing = db.load_gateway_routing_entries(
             scope=str((home / "sessions").resolve())
         )
+        # A lease may outlive the first page of history. Classify by stored
+        # provenance, never by a title/prefix or the absence from that page.
+        leases = [
+            lease for lease in leases
+            if (db.get_session(str(lease.get("conversation_id") or "")) or {}).get("source")
+            not in SERVICE_SESSION_SOURCES
+        ]
+        for key, raw in list(routing.items()):
+            try:
+                entry = json.loads(raw)
+            except (TypeError, json.JSONDecodeError):
+                continue
+            stored = db.get_session(str(entry.get("session_id") or "")) or {}
+            if stored.get("source") in SERVICE_SESSION_SOURCES:
+                del routing[key]
     finally:
         db.close()
 

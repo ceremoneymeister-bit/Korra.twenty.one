@@ -9,6 +9,14 @@ def _metric(snapshot, name):
     return next(metric for metric in snapshot.metrics if metric.name == name)
 
 
+def test_waiting_delivery_is_retained_in_saved_execution_projection():
+    from agent.monitoring.cron_health import project_execution_event
+
+    event = project_execution_event({"job_id": "report", "source": "builtin",
+        "status": "completed", "delivery_outcome": "waiting_decision"}).to_dict()
+    assert event["delivery_outcome"] == "waiting_decision"
+
+
 
 
 

@@ -811,6 +811,8 @@ def _format_job(job: Dict[str, Any]) -> Dict[str, Any]:
     }
     if job.get("script"):
         result["script"] = job["script"]
+    if job.get("reminder"):
+        result["reminder"] = job["reminder"]
     if job.get("reasoning_effort"):
         result["reasoning_effort"] = job["reasoning_effort"]
     if job.get("monitor_script"):
@@ -1510,6 +1512,7 @@ def cronjob(
     enabled_toolsets: Optional[List[str]] = None,
     workdir: Optional[str] = None,
     no_agent: Optional[bool] = None,
+    reminder: Optional[str] = None,
     attach_to_session: Optional[bool] = None,
     monitor_script: Optional[str] = None,
     monitor_url: Optional[str] = None,
@@ -1544,8 +1547,8 @@ def cronjob(
                         "exit or timeout sends an error alert.",
                         success=False,
                     )
-            elif not prompt and not canonical_skills:
-                return tool_error("create requires either prompt or at least one skill", success=False)
+            elif not prompt and not canonical_skills and not reminder:
+                return tool_error("create requires reminder, prompt, or at least one skill", success=False)
             if prompt:
                 scan_error = _scan_cron_prompt(prompt)
                 if scan_error:
@@ -1621,6 +1624,7 @@ def cronjob(
                     enabled_toolsets=enabled_toolsets or None,
                     workdir=_normalize_optional_job_value(workdir),
                     no_agent=_no_agent,
+                    reminder=reminder,
                     attach_to_session=attach_to_session,
                     monitor_script=_normalize_optional_job_value(monitor_script),
                     monitor_url=_normalize_optional_job_value(monitor_url),
@@ -1818,6 +1822,8 @@ def cronjob(
 
         if normalized == "update":
             updates: Dict[str, Any] = {}
+            if reminder is not None:
+                updates["reminder"] = reminder
             if prompt is not None:
                 scan_error = _scan_cron_prompt(prompt)
                 if scan_error:
@@ -1998,7 +2004,7 @@ Jobs run in a fresh session with no current-chat context, so prompts must be sel
         "properties": {
             "action": {
                 "type": "string",
-                "description": "One of: create, list, update, pause, resume, remove, run. When action=create, the 'schedule' and 'prompt' fields are REQUIRED."
+                "description": "One of: create, list, update, pause, resume, remove, run. When action=create, schedule is REQUIRED, together with execution content: reminder for exact text without a model, or prompt/skills for agent work, or script with no_agent=true."
             },
             "job_id": {
                 "type": "string",
@@ -2007,6 +2013,10 @@ Jobs run in a fresh session with no current-chat context, so prompts must be sel
             "prompt": {
                 "type": "string",
                 "description": "For create: the full self-contained prompt (paired with any skills as the task instruction). For run: optional transient context for that single fire (never persisted)."
+            },
+            "reminder": {
+                "type": "string",
+                "description": "For simple reminders, the exact text to deliver without a model call. Use instead of prompt/skills/script. Stored durably with the same schedule and delivery settings. Empty string clears on update."
             },
             "schedule": {
                 "type": "string",
@@ -2111,6 +2121,7 @@ def _cronjob_handler(args, **kw):
         action=args.get("action", ""),
         job_id=args.get("job_id"),
         prompt=args.get("prompt"),
+        reminder=args.get("reminder"),
         schedule=args.get("schedule"),
         name=args.get("name"),
         repeat=args.get("repeat"),

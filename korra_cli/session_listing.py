@@ -7,11 +7,13 @@ from typing import Any, Iterable, Sequence
 from korra_state_common import MAINTENANCE_SESSION_SOURCE
 
 #: Классы разговора, которых нет в пользовательских списках истории: их
-#: создаёт не человек, а обслуживание установки. Список намеренно узкий —
+#: создаёт обслуживание установки или планировщик. Запуски остаются в истории
+#: соответствующей задачи и доступны при явном выборе source=cron.
+#: Список намеренно узкий —
 #: прятать можно только то, что вызывающая сторона сама объявила служебным
 #: (см. ``MAINTENANCE_SESSION_SOURCE``), а не то, что похоже на служебное по
 #: тексту или названию.
-SERVICE_SESSION_SOURCES: tuple[str, ...] = (MAINTENANCE_SESSION_SOURCE,)
+SERVICE_SESSION_SOURCES: tuple[str, ...] = (MAINTENANCE_SESSION_SOURCE, "cron")
 
 
 def hide_service_sources(
@@ -35,10 +37,8 @@ def hide_service_sources(
     """
     requested = {s for s in ([source] if source else []) if s}
     requested.update(s for s in (sources or []) if s)
-    if requested & set(SERVICE_SESSION_SOURCES):
-        return list(exclude_sources) if exclude_sources else None
     merged = list(exclude_sources or [])
-    merged.extend(s for s in SERVICE_SESSION_SOURCES if s not in merged)
+    merged.extend(s for s in SERVICE_SESSION_SOURCES if s not in merged and s not in requested)
     return merged or None
 
 

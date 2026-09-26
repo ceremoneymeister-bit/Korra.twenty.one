@@ -69,6 +69,36 @@ def test_terminal_execution_cannot_be_rewritten(monkeypatch, tmp_path):
     assert executions.latest_execution("immutable")["status"] == "completed"
 
 
+def test_prepared_result_preserves_delivery_failure_separately(monkeypatch, tmp_path):
+    executions = _point_ledger(monkeypatch, tmp_path)
+    row = executions.create_execution("report", source="builtin")
+    executions.finish_execution(row["id"], success=True, delivery_outcome="failed",
+                                delivery_error="Telegram unavailable")
+    saved = executions.list_executions(job_id="report")[0]
+    assert saved["status"] == "completed"
+    assert saved["error"] is None
+    assert saved["delivery_outcome"] == "failed"
+    assert saved["delivery_error"] == "Telegram unavailable"
+    assert executions.finish_execution(row["id"], success=True, delivery_outcome="delivered") is None
+    assert executions.latest_execution("report")["delivery_outcome"] == "failed"
+
+
+def test_old_execution_schema_migrates_without_inventing_delivery(monkeypatch, tmp_path):
+    executions = _point_ledger(monkeypatch, tmp_path)
+    executions.EXECUTIONS_FILE.parent.mkdir(parents=True)
+    with sqlite3.connect(executions.EXECUTIONS_FILE) as conn:
+        conn.execute("""CREATE TABLE executions (id TEXT PRIMARY KEY, job_id TEXT,
+            source TEXT, process_id TEXT, pid INTEGER, process_started_at INTEGER,
+            status TEXT, claimed_at TEXT, started_at TEXT, finished_at TEXT, error TEXT)""")
+        conn.execute("INSERT INTO executions (id,job_id,status,claimed_at) VALUES ('old','old-job','completed','2026-09-25')")
+    saved = executions.list_executions(job_id="old-job")[0]
+    assert saved["delivery_outcome"] is None
+    assert saved["delivery_error"] is None
+    row = executions.create_execution("new-job", source="builtin")
+    executions.finish_execution(row["id"], success=True, delivery_outcome="waiting_decision")
+    assert executions.latest_execution("new-job")["delivery_outcome"] == "waiting_decision"
+
+
 def test_retention_bounds_terminal_history_but_preserves_inflight(monkeypatch, tmp_path):
     executions = _point_ledger(monkeypatch, tmp_path)
     monkeypatch.setattr(executions, "MAX_TERMINAL_EXECUTIONS", 3)

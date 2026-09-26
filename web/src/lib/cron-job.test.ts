@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildCronJobPayload,
+  cronDeliveryLabel,
   cronJobHasExecutionContent,
   cronJobFormFromJob,
   splitCronList,
@@ -40,6 +41,12 @@ describe("splitCronList", () => {
 });
 
 describe("buildCronJobPayload", () => {
+  it("turns reminder text into a literal job without hidden model instructions", () => {
+    const payload = buildCronJobPayload(form({ mode: "reminder", prompt: "Позвонить", skills: ["web"], script: "old.py" }));
+    expect(payload).toMatchObject({ reminder: "Позвонить", prompt: "", skills: [], script: null, no_agent: false });
+    expect(cronJobHasExecutionContent(payload)).toBe(true);
+    expect(cronJobFormFromJob({ id: "remind", enabled: true, reminder: payload.reminder }).mode).toBe("reminder");
+  });
   it("normalizes list fields and base URLs", () => {
     const payload = buildCronJobPayload(
       form({
@@ -87,6 +94,13 @@ describe("buildCronJobPayload", () => {
       workdir: null,
     });
   });
+});
+
+it("does not confuse preparation with delivery or invent receipts for old tasks", () => {
+  const job: CronJob = { id: "r", enabled: true };
+  expect(cronDeliveryLabel(job)).toBeNull();
+  expect(cronDeliveryLabel({ ...job, latest_execution: { id: "e", status: "completed", delivery_outcome: "waiting_decision" } })).toBe("Отправка ожидает решения");
+  expect(cronDeliveryLabel({ ...job, latest_execution: { id: "e", status: "completed", delivery_outcome: "failed" } })).toBe("Результат не доставлен");
 });
 
 describe("cronJobHasExecutionContent", () => {
