@@ -61,8 +61,8 @@ export function ScheduleBuilder({ onChange, value, ownerMode = false }: Schedule
   );
 
   return (
-    <div className="grid gap-3">
-      <div className="grid gap-2">
+    <div className="grid min-w-0 grid-cols-1 gap-3">
+      <div className="grid min-w-0 grid-cols-1 gap-2">
         <Label htmlFor="cron-schedule-mode">
           {cronStrings.scheduleMode ?? tr("Schedule")}
         </Label>
@@ -81,8 +81,8 @@ export function ScheduleBuilder({ onChange, value, ownerMode = false }: Schedule
       </div>
 
       {value.mode === "interval" && (
-        <div className="grid grid-cols-[1fr_1.4fr] gap-3">
-          <div className="grid gap-2">
+        <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-3">
+          <div className="grid min-w-0 grid-cols-1 gap-2">
             <Label htmlFor="cron-interval-value">
               {modeStrings.intervalEvery}
             </Label>
@@ -100,7 +100,7 @@ export function ScheduleBuilder({ onChange, value, ownerMode = false }: Schedule
               }}
             />
           </div>
-          <div className="grid gap-2">
+          <div className="grid min-w-0 grid-cols-1 gap-2">
             <Label htmlFor="cron-interval-unit">{modeStrings.intervalUnit}</Label>
             <Select
               id="cron-interval-unit"
@@ -128,7 +128,7 @@ export function ScheduleBuilder({ onChange, value, ownerMode = false }: Schedule
 
       {value.mode === "weekly" && (
         <>
-          <div className="grid gap-2">
+          <div className="grid min-w-0 grid-cols-1 gap-2">
             <Label>{modeStrings.weekdays}</Label>
             <div
               className="flex flex-wrap gap-1.5"
@@ -163,8 +163,8 @@ export function ScheduleBuilder({ onChange, value, ownerMode = false }: Schedule
       )}
 
       {value.mode === "monthly" && (
-        <div className="grid grid-cols-[1fr_1fr] gap-3">
-          <div className="grid gap-2">
+        <div className="grid grid-cols-2 gap-3">
+          <div className="grid min-w-0 grid-cols-1 gap-2">
             <Label htmlFor="cron-month-day">{modeStrings.dayOfMonth}</Label>
             <Input
               id="cron-month-day"
@@ -191,7 +191,7 @@ export function ScheduleBuilder({ onChange, value, ownerMode = false }: Schedule
       )}
 
       {value.mode === "once" && (
-        <div className="grid gap-2">
+        <div className="grid min-w-0 grid-cols-1 gap-2">
           <Label htmlFor="cron-once-at">{modeStrings.onceAt}</Label>
           {/* Native datetime-local — emits the exact "YYYY-MM-DDTHH:MM"
               shape ``parse_schedule`` accepts on the backend. */}
@@ -206,7 +206,7 @@ export function ScheduleBuilder({ onChange, value, ownerMode = false }: Schedule
       )}
 
       {value.mode === "custom" && (
-        <div className="grid gap-2">
+        <div className="grid min-w-0 grid-cols-1 gap-2">
           <Label htmlFor="cron-custom-expr">{modeStrings.customLabel}</Label>
           <Input
             id="cron-custom-expr"
@@ -241,7 +241,7 @@ function TimeOfDayField({
   value,
 }: TimeOfDayFieldProps) {
   return (
-    <div className="grid gap-2">
+    <div className="grid min-w-0 grid-cols-1 gap-2">
       <Label htmlFor={id}>{label}</Label>
       {/* Native time picker is the right tool for "HH:MM" — saves us
           two separate hour/minute selects, respects user locale's

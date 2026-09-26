@@ -402,7 +402,7 @@ function CronJobFormFields({
 
   return (
     <>
-      <div className="grid gap-2">
+      <div className="grid min-w-0 grid-cols-1 gap-2">
         <Label htmlFor={`${idPrefix}-name`}>
           {ownerMode ? "Название задачи" : t.cron.nameOptional}
         </Label>
@@ -416,7 +416,7 @@ function CronJobFormFields({
         />
       </div>
 
-      <div className="grid gap-2">
+      <div className="grid min-w-0 grid-cols-1 gap-2">
         <Label htmlFor={`${idPrefix}-mode`}>Тип задачи</Label>
         <Select id={`${idPrefix}-mode`} value={form.mode || "agent"}
           onValueChange={(value) => update("mode", value === "reminder" ? "reminder" : "agent")}>
@@ -424,7 +424,7 @@ function CronJobFormFields({
           <SelectOption value="reminder">Напоминание</SelectOption>
         </Select>
       </div>
-      <div className="grid gap-2">
+      <div className="grid min-w-0 grid-cols-1 gap-2">
         <Label htmlFor={`${idPrefix}-prompt`}>{form.mode === "reminder" ? "Текст напоминания" : t.cron.prompt}</Label>
         <textarea
           id={`${idPrefix}-prompt`}
@@ -442,7 +442,7 @@ function CronJobFormFields({
         onChange={(state) => update("scheduleState", state)}
       />
 
-      <div className="grid gap-2">
+      <div className="grid min-w-0 grid-cols-1 gap-2">
         <Label htmlFor={`${idPrefix}-deliver`}>{t.cron.deliverTo}</Label>
         <Select
           id={`${idPrefix}-deliver`}
@@ -466,7 +466,7 @@ function CronJobFormFields({
 
       <details className="rounded-[var(--neo-radius-control)] p-3 shadow-[var(--neo-inset-compact)]">
         <summary className="cursor-pointer text-sm">Актуальность результата</summary>
-        <div className="mt-3 grid gap-2">
+        <div className="mt-3 grid min-w-0 grid-cols-1 gap-2">
           <Label htmlFor={`${idPrefix}-ttl`}>Срок отправки</Label>
           <Select id={`${idPrefix}-ttl`} value={form.delivery_ttl_seconds || "unlimited"}
             onValueChange={(v) => update("delivery_ttl_seconds", v === "unlimited" ? "" : v)}>
@@ -490,7 +490,7 @@ function CronJobFormFields({
         </div>
       </details>
 
-      {!ownerMode && form.mode !== "reminder" && <div className="grid gap-2">
+      {!ownerMode && form.mode !== "reminder" && <div className="grid min-w-0 grid-cols-1 gap-2">
         <Label htmlFor={`${idPrefix}-skills`}>{tr("Skills (optional)")}</Label>
         <NameCheckboxPicker
           id={`${idPrefix}-skills`}
@@ -1103,8 +1103,8 @@ export default function CronPage() {
               </h2>
             </header>
 
-            <div className="min-h-0 overflow-y-auto p-5 grid gap-4">
-              {!clientMode && <div className="grid gap-2">
+            <div className="min-h-0 min-w-0 overflow-y-auto p-5 grid grid-cols-1 gap-4">
+              {!clientMode && <div className="grid min-w-0 grid-cols-1 gap-2">
                 <Label htmlFor="cron-profile">{tr("Profile")}</Label>
                 <Select
                   id="cron-profile"
@@ -1183,7 +1183,7 @@ export default function CronPage() {
               </h2>
             </header>
 
-            <div className="min-h-0 overflow-y-auto p-5 grid gap-4">
+            <div className="min-h-0 min-w-0 overflow-y-auto p-5 grid grid-cols-1 gap-4">
               <CronJobFormFields
                 idPrefix="edit-cron"
                 autoFocus
