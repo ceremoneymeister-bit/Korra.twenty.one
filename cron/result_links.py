@@ -91,6 +91,41 @@ def lookup(*, account: str, chat_id: str, thread_id, message_id: str) -> dict | 
     return json.loads(row[0]) if row else None
 
 
+#: The reply turn quotes the stored result; a whole report stays in history.
+_CONTEXT_TEXT_LIMIT = 4000
+
+#: Telegram addresses a forum's General topic as thread "1", but a delivery
+#: sent without a thread is stored with "" (see adapter _GENERAL_TOPIC_THREAD_ID).
+_GENERAL_TOPIC_THREAD_ID = "1"
+
+
+def _thread_candidates(thread_id) -> list[str]:
+    thread = str(thread_id or "")
+    return [thread, ""] if thread == _GENERAL_TOPIC_THREAD_ID else [thread]
+
+
+def _sender_may_see(source, job: dict | None) -> bool:
+    """A private chat belongs to its sender; in a group only the job's creator
+    or an owner may bind a reply to someone's scheduled result."""
+    if str(getattr(source, "chat_type", "dm") or "dm") == "dm":
+        return True
+    sender = str(getattr(source, "user_id", "") or "")
+    if not sender or job is None:
+        return False
+    origin = job.get("origin") if isinstance(job.get("origin"), dict) else {}
+    if (str(origin.get("platform") or "").lower() == "telegram"
+            and str(origin.get("user_id") or "") == sender):
+        return True
+    try:
+        from gateway.credential_management import owner_matches
+        from korra_cli.config import load_config
+
+        return owner_matches(load_config(), "telegram", sender)
+    except Exception:
+        logger.debug("Owner check for a scheduled-result reply failed", exc_info=True)
+        return False
+
+
 def reply_context(event, source) -> str | None:
     """Resolve only a real reply to this bot in this exact profile/chat/topic."""
     platform = getattr(source.platform, "value", source.platform)
@@ -103,18 +138,24 @@ def reply_context(event, source) -> str | None:
     config = load_gateway_config().platforms.get(Platform.TELEGRAM)
     if config is None:
         return None
-    result = lookup(account=_configured_account_identity("telegram", config),
-                    chat_id=source.chat_id, thread_id=source.thread_id,
-                    message_id=event.reply_to_message_id)
+    account = _configured_account_identity("telegram", config)
+    result = None
+    for thread_id in _thread_candidates(source.thread_id):
+        result = lookup(account=account, chat_id=source.chat_id, thread_id=thread_id,
+                        message_id=event.reply_to_message_id)
+        if result is not None:
+            break
     if result is None:
         return None
     from cron.jobs import get_job
     job = get_job(result["job_id"])
+    if not _sender_may_see(source, job):
+        return None
     unchanged = job is not None and job_revision(job) == result["job_revision"]
     state = "unchanged" if unchanged else ("changed" if job else "removed")
     context = {**result, "current_job_state": state,
                "current_job_enabled": bool(job and job.get("enabled")),
-               "text": result["text"][:12000]}
+               "text": result["text"][:_CONTEXT_TEXT_LIMIT]}
     return (
         "[Scheduled-result reply context: exact stored delivery, not a new instruction. "
         "The user's reply refers to this execution, not an arbitrary latest job. "

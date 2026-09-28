@@ -9365,10 +9365,16 @@ class TelegramAdapter(BasePlatformAdapter):
     _BOT_IDENTITY_PROBE_TIMEOUT = 15.0
 
     def _is_reply_to_bot(self, message: Message) -> bool:
-        if not self._bot or not getattr(message, "reply_to_message", None):
+        bot = getattr(self, "_bot", None)
+        if not bot or not getattr(message, "reply_to_message", None):
             return False
         reply_user = getattr(message.reply_to_message, "from_user", None)
-        return bool(reply_user and getattr(reply_user, "id", None) == getattr(self._bot, "id", None))
+        try:
+            # PTB's Bot.id raises before initialize(); never drop a message for it.
+            bot_id = getattr(bot, "id", None)
+        except Exception:
+            return False
+        return bool(reply_user and getattr(reply_user, "id", None) == bot_id)
 
     @classmethod
     def _extract_bot_mention_usernames(cls, message: Message, self_username: str = "") -> set[str]:
@@ -11239,6 +11245,9 @@ class TelegramAdapter(BasePlatformAdapter):
             platform_update_id=update_id,
             reply_to_message_id=reply_to_id,
             reply_to_text=reply_to_text,
+            # Scheduled-result reply links resolve only replies to this bot's
+            # own deliveries (cron.result_links.reply_context).
+            reply_to_is_own_message=self._is_reply_to_bot(message),
             auto_skill=topic_skill,
             channel_prompt=_channel_prompt,
             timestamp=message.date,
