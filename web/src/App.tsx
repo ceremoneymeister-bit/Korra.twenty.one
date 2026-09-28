@@ -46,6 +46,7 @@ import {
   RotateCw,
   Settings,
   Shield,
+  SlidersHorizontal,
   ShieldCheck,
   Sparkles,
   Star,
@@ -102,6 +103,7 @@ const ChatPage = lazy(() => import("@/pages/ChatPage"));
 const BubbleChatPage = lazy(() => import("@/pages/BubbleChatPage"));
 const AgentWorkbenchPage = lazy(() => import("@/pages/AgentWorkbenchPage"));
 const UpdatesPage = lazy(() => import("@/pages/UpdatesPage"));
+const ViewSettingsPage = lazy(() => import("@/pages/ViewSettingsPage"));
 const UiKitPage = lazy(() => import("@/pages/UiKitPage"));
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { SidebarToggle } from "@/components/SidebarToggle";
@@ -244,6 +246,7 @@ const BUILTIN_ROUTES_CORE: Record<string, ComponentType> = {
   "/help": ClientHelpPage,
   "/help/:article": ClientHelpPage,
   "/updates": UpdatesPage,
+  "/view": ViewSettingsPage,
   "/ui-kit": UiKitPage,
 };
 
@@ -287,6 +290,7 @@ const BUILTIN_NAV_REST: NavItem[] = [
   { path: "/cron", labelKey: "cron", label: "Расписание", icon: Clock },
   { path: "/help", label: "Помощь", icon: BookOpen },
   { path: "/updates", label: "Обновления", icon: Download },
+  { path: "/view", label: "Вид", icon: SlidersHorizontal },
   { path: "/skills", labelKey: "skills", label: "Навыки", icon: Package },
   { path: "/plugins", labelKey: "plugins", label: "Плагины", icon: Puzzle },
   { path: "/mcp", label: "MCP", icon: Plug },

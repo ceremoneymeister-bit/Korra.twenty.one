@@ -1,0 +1,717 @@
+/* Мобильная шапка экрана агентов — вариант «D», принят Дмитрием 28.09.2026.
+   Макет: _work/mobile-header-20260928/d-top-switch. Только ниже `lg`: на
+   десктопе этот файл ничего не рисует, там остаётся полоса вкладок.
+   Цвета — токены темы (`--neo-*`) и состояния агента (`--k-*`,
+   themes/neumorphism.css); светлая и тёмная темы без отдельных правил. */
+
+.k-agents {
+  --k-d1: var(--neo-depth-1);
+  --k-d2: var(--neo-depth-2);
+  --k-d3: var(--neo-depth-3);
+  --k-in: var(--neo-inset);
+  --k-inc: var(--neo-inset-compact);
+  --k-bg: var(--neo-background);
+  --k-surface: var(--neo-surface);
+  --k-text: var(--neo-text-primary);
+  --k-text2: var(--neo-text-secondary);
+  --k-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  color: var(--k-text);
+  font-family: var(--theme-font-sans);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.k-agents button { font: inherit; color: inherit; -webkit-tap-highlight-color: transparent; }
+/* Решение владельца 03.09: фокус выражает глубина, без кромок и рамок. */
+.k-agents button:focus { outline: none; }
+.k-agents button:focus-visible { box-shadow: var(--neo-focus-visible); }
+.k-icon { flex: none; }
+
+/* ── Верхняя зона: строка разговора + полоса агентов ─────────────────── */
+.k-hd {
+  flex: none;
+  position: relative;
+  z-index: 20;
+  /* Край в край: те же отрицательные поля, что у `-mx-3 sm:-mx-6` —
+     шкала отступов панели умножена на плотность, rem не подходит. */
+  margin: 0 calc(var(--spacing) * -3);
+  padding-top: env(safe-area-inset-top, 0px);
+  background: var(--k-bg);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--neo-shadow) 70%, transparent);
+}
+@media (min-width: 640px) { .k-hd { margin: 0 calc(var(--spacing) * -6); } }
+
+.k-hd--plain { box-shadow: none; }
+.k-tb { display: flex; align-items: center; gap: 4px; height: 50px; padding: 0 12px 0 4px; }
+.k-tb--list { gap: 2px; padding-left: 2px; }
+.k-tb--home { gap: 6px; height: 56px; }
+.k-home-title { flex: 1; min-width: 0; margin: 0 0 0 4px; font-size: 24px; font-weight: 700; letter-spacing: -0.01em; line-height: 1.2; }
+.k-home-title .k-sheet__n { margin-left: 7px; font-size: 17px; }
+.k-add.k-ib { background: var(--k-surface); box-shadow: var(--k-d2); color: var(--k-text); }
+.k-add.k-ib:active { box-shadow: var(--k-inc); }
+.k-ib {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--k-text2);
+  cursor: pointer;
+}
+.k-ib:active, .k-ib[aria-expanded="true"] { box-shadow: var(--k-inc); }
+.k-ttl {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  line-height: 1.25;
+  text-align: left;
+  cursor: pointer;
+}
+.k-ttl:active { box-shadow: var(--k-inc); }
+.k-ttl strong, .k-ttl span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.k-ttl strong { font-size: 15px; font-weight: 600; }
+.k-ttl span { margin-top: 1px; color: var(--k-text2); font-size: 13px; }
+.k-chats {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 7px;
+  height: 44px;
+  padding: 0 14px 0 11px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--k-surface);
+  box-shadow: var(--k-d2);
+  color: var(--k-text);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.k-chats:active, .k-chats[aria-expanded="true"] { box-shadow: var(--k-inc); }
+.k-chats__n { color: var(--k-text2); font-weight: 500; font-variant-numeric: tabular-nums; }
+@media (max-width: 360px) { .k-chats__n { display: none; } .k-chats { padding: 0 13px 0 11px; } }
+
+/* Полоса агентов под строкой разговора */
+.k-rail {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 54px;
+  padding: 2px 16px 4px;
+  overflow: hidden;
+  transition: height 220ms var(--k-ease), opacity 150ms ease, padding 220ms var(--k-ease);
+}
+.k-agents[data-typing="true"] .k-rail { height: 0; padding-top: 0; padding-bottom: 0; opacity: 0; pointer-events: none; }
+.k-tray {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  height: 48px;
+  align-items: center;
+  padding: 0 2px;
+  border-radius: 999px;
+  background: var(--k-surface);
+  box-shadow: var(--k-inc);
+  /* Полоса не прокручивается, а жест «потянуть вниз» открывает всех агентов:
+     браузер не должен забирать его себе как прокрутку. */
+  touch-action: none;
+}
+.k-tray__avs { display: flex; flex: 1; min-width: 0; align-items: center; justify-content: space-around; }
+.k-all {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 50px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--k-text2);
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.k-all:active, .k-all[aria-expanded="true"] { background: var(--k-bg); box-shadow: var(--k-d1); color: var(--k-text); }
+
+/* Аватар агента: лицо, кольцо «работает», знак в углу */
+.k-av {
+  position: relative;
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  cursor: pointer;
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+span.k-av { cursor: default; }
+.k-av__face {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--k-surface);
+  box-shadow: var(--k-d1);
+  color: var(--k-text2);
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+.k-av.is-active .k-av__face { background: var(--k-active); box-shadow: var(--k-d2); color: var(--k-text); }
+.k-av[aria-expanded="true"] .k-av__face { box-shadow: var(--k-inc); }
+.k-av__ring { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.k-av__ring circle { fill: none; stroke: var(--k-live); stroke-width: 2.5; stroke-linecap: round; }
+.k-av__ring--run { animation: k-spin 1.4s linear infinite; }
+.k-av__ring--queued circle { stroke: var(--k-text2); stroke-dasharray: 0.1 7.9; stroke-width: 3; }
+.k-av--lg { width: 52px; height: 52px; }
+.k-av--lg .k-av__face { width: 44px; height: 44px; font-size: 15px; }
+@keyframes k-spin { to { transform: rotate(360deg); } }
+
+.k-bdg {
+  position: absolute;
+  top: 1px;
+  right: 0;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 0 0 2px var(--k-bg);
+  pointer-events: none;
+}
+.k-bdg--new { top: 3px; right: 3px; width: 12px; height: 12px; border-radius: 50%; background: var(--k-unread); }
+.k-bdg--dec {
+  top: -2px;
+  right: -3px;
+  min-width: 21px;
+  height: 21px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--k-decision);
+  color: var(--k-decision-fg);
+  font-size: 13px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.k-bdg--err {
+  top: -1px;
+  right: -2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--k-error);
+  color: var(--k-error-fg);
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1;
+}
+.k-bdg--dot { top: 5px; right: 5px; width: 10px; height: 10px; border-radius: 50%; background: var(--k-decision); }
+.k-bdg--dot.is-error { background: var(--k-error); }
+.k-bdg--dot.is-unread { background: var(--k-unread); }
+.k-av--lg .k-bdg--new { top: 4px; right: 4px; }
+.k-av--lg .k-bdg--dec { top: 0; right: -2px; }
+.k-av--lg .k-bdg--err { top: 1px; right: -1px; }
+.k-back .k-bdg--dot { top: 8px; right: 8px; }
+
+/* Индикатор работ: живое кольцо с числом, без текста */
+.k-act {
+  position: relative;
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--k-surface);
+  box-shadow: var(--k-d2);
+  color: var(--k-text);
+  font-size: 13px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.k-act:active, .k-act[aria-expanded="true"] { box-shadow: var(--k-inc); }
+.k-act__svg { position: absolute; inset: 4px; width: 36px; height: 36px; overflow: visible; }
+.k-act__track { fill: none; stroke: color-mix(in srgb, var(--k-text2) 22%, transparent); stroke-width: 3; }
+.k-act__arc { fill: none; stroke: var(--k-live); stroke-width: 3; stroke-linecap: round; }
+.k-act__svg--spin { animation: k-spin 1.6s linear infinite; }
+.k-act__n { position: relative; }
+.k-act.is-idle { box-shadow: var(--k-d1); color: var(--k-text2); }
+
+/* ── Всё ниже шапки ─────────────────────────────────────────────────── */
+.k-body { position: relative; display: flex; flex: 1; min-height: 0; flex-direction: column; }
+
+/* Уведомление о новом ответе — под шапкой, над старыми сообщениями */
+.k-notice {
+  position: absolute;
+  top: 8px;
+  right: 0;
+  left: 0;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 4px 4px 8px;
+  border-radius: 20px;
+  background: var(--k-surface);
+  box-shadow: var(--k-d3);
+  animation: k-drop 240ms var(--k-ease) both;
+}
+.k-notice__open {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 48px;
+  align-items: center;
+  gap: 10px;
+  padding: 4px;
+  border: 0;
+  border-radius: 16px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.k-notice__text { flex: 1; min-width: 0; line-height: 1.3; }
+.k-notice__text small, .k-notice__text b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.k-notice__text small { color: var(--k-text2); font-size: 13px; }
+.k-notice__text b { font-size: 15px; font-weight: 600; }
+@keyframes k-drop { from { opacity: 0; transform: translateY(-12px); } }
+
+/* ── Шторки: раскрываются вниз от шапки, шапка остаётся видна ───────── */
+.k-sheet-layer { position: absolute; inset: 0 calc(var(--spacing) * -3); z-index: 30; }
+@media (min-width: 640px) { .k-sheet-layer { inset: 0 calc(var(--spacing) * -6); } }
+.k-scrim {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: var(--k-scrim);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+}
+.k-sheet {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  display: flex;
+  max-height: 100%;
+  flex-direction: column;
+  border-radius: 0 0 28px 28px;
+  background: var(--k-bg);
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.18);
+  animation: k-panel 240ms var(--k-ease) both;
+  transform-origin: top center;
+}
+@keyframes k-panel { from { opacity: 0.5; transform: translateY(-18px); } }
+.k-sheet__grabber {
+  flex: none;
+  width: 40px;
+  height: 5px;
+  margin: 6px auto 8px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--k-text2) 45%, transparent);
+}
+.k-sheet__head { display: flex; flex: none; align-items: center; gap: 8px; min-height: 56px; padding: 8px 8px 6px 20px; }
+.k-sheet__title { flex: 1; min-width: 0; margin: 0; font-size: 19px; font-weight: 650; line-height: 1.2; }
+.k-sheet__title small {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--k-text2);
+  font-size: 13px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.k-sheet__n { color: var(--k-text2); font-weight: 500; }
+.k-sheet__body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 2px 8px 8px; }
+.k-sheet__foot { display: flex; flex: none; gap: 10px; padding: 10px 16px 4px; box-shadow: 0 -1px 0 color-mix(in srgb, var(--neo-shadow) 60%, transparent); }
+.k-head-btn {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  height: 44px;
+  padding: 0 14px 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--k-surface);
+  box-shadow: var(--k-d2);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.k-search:focus-within { background: color-mix(in srgb, var(--neo-accent) 12%, var(--k-surface)); }
+.k-search {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  margin: 0 16px 8px;
+  padding: 0 14px;
+  border-radius: var(--neo-radius-control);
+  box-shadow: var(--k-in);
+  color: var(--k-text2);
+}
+/* Поле внутри вдавленной рамки само по себе плоское. Селектор сильнее
+   общего `[data-client-ui] input:not(…)`, который рисует полям свою рамку. */
+.k-agents .k-search input.k-search__input:not([type="checkbox"]):not([type="radio"]),
+.k-agents .k-search input.k-search__input:not([type="checkbox"]):not([type="radio"]):focus-visible {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--k-text);
+  font: inherit;
+  /* 16 px — иначе iOS Safari увеличивает страницу при фокусе. */
+  font-size: 16px;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.k-sec { padding: 10px 12px 4px; color: var(--k-text2); font-size: 13px; font-weight: 600; letter-spacing: 0.01em; }
+.k-empty { padding: 8px 12px; color: var(--k-text2); }
+.k-view-hint {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 48px;
+  padding: 0 20px;
+  border: 0;
+  background: transparent;
+  box-shadow: 0 -1px 0 color-mix(in srgb, var(--neo-shadow) 60%, transparent);
+  color: var(--k-text2);
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+.k-view-hint b { color: var(--k-text); font-weight: 600; }
+.k-view-hint__go { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; color: var(--k-text); font-weight: 600; }
+.k-list .k-view-hint { margin: 8px 16px 0; width: calc(100% - 32px); padding: 0 4px; border-radius: 12px; box-shadow: none; }
+
+/* Строки агентов в шторке «Все агенты» */
+.k-row { display: flex; align-items: center; gap: 4px; border-radius: 16px; }
+.k-row.is-current { background: var(--k-surface); box-shadow: var(--k-d1); }
+.k-row__main {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 54px;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 4px 6px 8px;
+  border: 0;
+  border-radius: 16px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.k-row__x { flex: 1; min-width: 0; line-height: 1.3; }
+.k-row__x b { display: block; overflow: hidden; font-size: 15px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.k-row__x small {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 1px;
+  overflow: hidden;
+  color: var(--k-text2);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.k-st { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.k-nm-pre { color: var(--k-text2); font-weight: 450; }
+.k-more {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--k-text2);
+  cursor: pointer;
+}
+.k-more:active { box-shadow: var(--k-inc); }
+.k-tag {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+.k-tag--dec { background: var(--k-decision); color: var(--k-decision-fg); }
+.k-tag--err { background: var(--k-error); color: var(--k-error-fg); }
+.k-tag--new { background: var(--neo-accent); color: var(--neo-accent-foreground); }
+.k-live { color: var(--k-live-text); font-weight: 600; }
+
+/* Меню агента */
+.k-agent-head { display: flex; align-items: center; gap: 12px; padding: 4px 16px 10px; }
+.k-agent-head b { display: block; font-size: 18px; font-weight: 650; }
+.k-agent-head small { display: block; color: var(--k-text2); font-size: 14px; }
+.k-quick { display: flex; gap: 10px; padding: 0 16px 10px; }
+.k-btn {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 48px;
+  border: 0;
+  border-radius: var(--neo-radius-control);
+  background: var(--k-surface);
+  box-shadow: var(--k-d2);
+  color: var(--k-text);
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.k-btn--primary { background: var(--neo-accent); color: var(--neo-accent-foreground); }
+.k-menu { display: flex; flex-direction: column; margin: 0 8px; padding: 4px; border-radius: 20px; box-shadow: var(--k-inc); }
+.k-menu button {
+  display: flex;
+  min-height: 46px;
+  align-items: center;
+  gap: 12px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  font-size: 15px;
+  text-align: left;
+  cursor: pointer;
+}
+.k-menu button:disabled { cursor: not-allowed; opacity: 0.4; }
+.k-menu button .k-icon { color: var(--k-text2); }
+.k-menu .is-danger, .k-menu .is-danger .k-icon { color: var(--destructive); }
+.k-menu hr { height: 1px; margin: 4px 12px; border: 0; background: color-mix(in srgb, var(--neo-shadow) 70%, transparent); }
+.k-rename { display: flex; align-items: center; gap: 6px; padding: 4px; }
+.k-rename input {
+  flex: 1;
+  min-width: 0;
+  height: 44px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--k-surface);
+  box-shadow: var(--k-in);
+  color: var(--k-text);
+  font: inherit;
+  font-size: 16px;
+}
+
+/* Лист «Идут работы» */
+.k-work { display: flex; align-items: flex-start; gap: 12px; padding: 10px 12px; border-radius: 16px; }
+.k-work + .k-work { margin-top: 2px; }
+.k-work__x { flex: 1; min-width: 0; line-height: 1.35; }
+.k-work__x b { display: block; font-size: 15px; font-weight: 600; }
+.k-work__q {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--k-text2);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.k-work__s { display: block; margin-top: 4px; color: var(--k-text2); font-size: 13px; line-height: 1.45; }
+.k-work__s .k-tag { margin-right: 6px; vertical-align: 1px; }
+.k-work__open {
+  flex: none;
+  align-self: center;
+  height: 44px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--k-surface);
+  box-shadow: var(--k-d1);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.k-work__open.is-decision { background: var(--k-decision); box-shadow: none; color: var(--k-decision-fg); }
+
+/* ── Режим «Список агентов» ─────────────────────────────────────────── */
+.k-list { display: flex; flex: 1; min-height: 0; flex-direction: column; margin: 0 calc(var(--spacing) * -3); }
+@media (min-width: 640px) { .k-list { margin: 0 calc(var(--spacing) * -6); } }
+.k-list__scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 4px 0 16px; }
+.k-list__scroll .k-search { margin: 2px 16px 6px; }
+.k-lsec { display: flex; align-items: baseline; gap: 6px; padding: 12px 20px 4px; color: var(--k-text2); font-size: 13px; font-weight: 600; }
+.k-lrows { display: flex; flex-direction: column; padding: 0 8px; }
+.k-lrow {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-height: 66px;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px 6px 8px;
+  border: 0;
+  border-radius: 18px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  -webkit-touch-callout: none;
+}
+.k-lrow:active { background: var(--k-surface); box-shadow: var(--k-d1); }
+.k-lrow + .k-lrow::before {
+  position: absolute;
+  top: 0;
+  right: 12px;
+  left: 72px;
+  height: 1px;
+  background: color-mix(in srgb, var(--neo-shadow) 55%, transparent);
+  content: "";
+}
+.k-lrow__x { flex: 1; min-width: 0; line-height: 1.3; }
+.k-lrow__l1 { display: flex; align-items: baseline; gap: 8px; }
+.k-lrow__nm { flex: 1; min-width: 0; overflow: hidden; font-size: 16px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.k-lrow__tm { flex: none; color: var(--k-text2); font-size: 13px; font-variant-numeric: tabular-nums; }
+.k-lrow__l2 { display: flex; min-width: 0; align-items: center; gap: 6px; margin-top: 3px; color: var(--k-text2); font-size: 14px; }
+
+/* ── Настройки → Вид ────────────────────────────────────────────────── */
+.k-view { max-width: 40rem; }
+.k-view__sec { margin: 6px 0 22px; }
+.k-view__sec h2 { margin: 0 4px 4px; font-size: 15px; font-weight: 650; }
+.k-view__hint { margin: 0 4px 12px; color: var(--k-text2); font-size: 14px; line-height: 1.4; }
+.k-seg {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  background: var(--k-surface);
+  box-shadow: var(--k-inc);
+}
+.k-seg button {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--k-text2);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.k-seg button[aria-checked="true"] { background: var(--k-bg); box-shadow: var(--k-d1); color: var(--k-text); }
+.k-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.k-mode {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 10px 12px;
+  border: 0;
+  border-radius: 22px;
+  background: var(--k-surface);
+  box-shadow: var(--k-d2);
+  text-align: left;
+  cursor: pointer;
+}
+.k-mode[aria-checked="true"] { box-shadow: var(--k-inc), 0 0 0 2px var(--neo-accent-line); }
+.k-mode__t { display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 650; line-height: 1.2; }
+.k-mode__d { color: var(--k-text2); font-size: 13px; line-height: 1.35; }
+.k-radio {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--k-bg);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--k-text2) 60%, transparent);
+}
+.k-mode[aria-checked="true"] .k-radio { background: var(--neo-accent); box-shadow: none; color: var(--neo-accent-foreground); }
+.k-view__saved { display: flex; min-height: 22px; align-items: center; gap: 8px; margin: 12px 4px 0; color: var(--k-text2); font-size: 14px; }
+.k-view__saved b { color: var(--k-live-text); font-weight: 600; }
+.k-view__saved.is-problem { color: var(--destructive); }
+.k-view__note { margin: 8px 4px 0; color: var(--k-text2); font-size: 13px; line-height: 1.45; }
+
+/* Мини-превью режима: схема экрана телефона */
+.k-mini {
+  position: relative;
+  display: flex;
+  height: 148px;
+  flex-direction: column;
+  gap: 4px;
+  overflow: hidden;
+  padding: 6px 7px;
+  border-radius: 14px;
+  background: var(--k-bg);
+  box-shadow: var(--k-inc);
+}
+.k-mini span { display: block; }
+/* Схема не сжимается под узкую карточку: лишнее просто уходит под край. */
+.k-mini > * { flex-shrink: 0; }
+.k-mini__bar { height: 7px; border-radius: 4px; background: color-mix(in srgb, var(--k-text2) 40%, transparent); }
+.k-mini__top { display: flex !important; align-items: center; gap: 4px; }
+.k-mini__top .k-mini__bar { flex: 1; }
+.k-mini__chip { flex: none; width: 20px; height: 9px; border-radius: 5px; background: var(--k-surface); box-shadow: var(--k-d1); }
+.k-mini__tray { display: flex !important; align-items: center; justify-content: space-around; height: 20px; padding: 0 3px; border-radius: 10px; background: var(--k-surface); box-shadow: var(--k-inc); }
+.k-mini__av { position: relative; flex: none; width: 13px; height: 13px; border-radius: 50%; background: var(--k-surface); box-shadow: var(--k-d1); }
+.k-mini__av.is-on { background: var(--k-active); }
+.k-mini__av.is-run { box-shadow: 0 0 0 1.5px var(--k-live); }
+.k-mini__av.is-dec::after { position: absolute; top: -3px; right: -3px; width: 7px; height: 7px; border-radius: 50%; background: var(--k-decision); content: ""; }
+.k-mini__av.is-lg { width: 18px; height: 18px; }
+.k-mini__msg { height: 14px; border-radius: 6px; background: var(--k-surface); box-shadow: var(--k-d1); }
+.k-mini__msg.is-user { width: 62%; align-self: flex-end; }
+.k-mini__msg.is-bot { width: 86%; height: 22px; }
+.k-mini__cmp { height: 18px; margin-top: auto; border-radius: 8px; background: var(--k-surface); box-shadow: var(--k-d1); }
+.k-mini__row { display: flex !important; height: 21px; align-items: center; gap: 5px; }
+.k-mini__lines { display: flex !important; flex: 1; min-width: 0; flex-direction: column; gap: 3px; }
+.k-mini__lines .is-short { width: 70%; height: 5px; opacity: 0.6; }
+.k-mini__sec { width: 36%; height: 4px; margin: 2px 0 0; border-radius: 2px; background: color-mix(in srgb, var(--k-text2) 30%, transparent); }
+.k-mini__h { width: 46%; height: 9px; margin: 1px 0 2px; border-radius: 4px; background: color-mix(in srgb, var(--k-text) 70%, transparent); }
+@media (max-width: 360px) { .k-mini { height: 124px; } .k-mode__d { font-size: 12.5px; } }
+
+/* Движение — только для тех, кто его не отключал */
+@media (prefers-reduced-motion: reduce) {
+  .k-av__ring--run,
+  .k-act__svg--spin,
+  .k-notice,
+  .k-sheet,
+  .k-rail { animation: none !important; transition: none !important; }
+}

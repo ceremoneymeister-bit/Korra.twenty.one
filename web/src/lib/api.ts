@@ -1658,6 +1658,16 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(layout),
     }),
+  getDashboardView: () =>
+    fetchJSON<DashboardViewPreference>("/api/dashboard/view"),
+  setDashboardView: (
+    view: Pick<DashboardViewPreference, "revision" | "agents_mobile" | "pinned">,
+  ) =>
+    fetchJSON<DashboardViewPreference>("/api/dashboard/view", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(view),
+    }),
   getFontPref: () =>
     fetchJSON<DashboardFontResponse>("/api/dashboard/font"),
   setFontPref: (font: string) =>
@@ -3656,6 +3666,26 @@ export interface DashboardLayoutPreference {
   hidden: string[];
   /** S 1×1, M 2×1, L 2×2 — только у плиток; закреплённой полосы здесь нет. */
   sizes: Record<string, string>;
+}
+
+/** Как человек переключает агентов на телефоне. */
+export type AgentsMobileMode = "tabs" | "list";
+
+/**
+ * Личный вид экрана агентов на телефоне (0.21.15).
+ *
+ * Тот же контракт, что у раскладки дашборда: чей это выбор, решает сервер
+ * по проверенной сессии; ревизия серверная; проигравшее устройство получает
+ * 409 с победившей записью.
+ */
+export interface DashboardViewPreference {
+  version: 1;
+  revision: number;
+  agents_mobile: AgentsMobileMode;
+  /** Агенты, которых человек держит в полосе. Главный — `default`. */
+  pinned: string[];
+  /** Непрозрачная метка человека для кэша браузера; с сервера, не из тела. */
+  scope: string;
 }
 
 // ── Dashboard plugin types ─────────────────────────────────────────────
