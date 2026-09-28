@@ -3477,6 +3477,12 @@ def _deliver_result(
                 from cron.result_validity import result_validity
                 from cron.result_links import snapshot as result_snapshot
 
+                validity = result_validity(job, f"{platform_name}:{chat_id}:{thread_id}",
+                                           _configured_account_identity(platform_name, pconfig))
+                if failure_notice:
+                    # A failure note never replaces a real result still waiting
+                    # for its decision (0.21.15 review P2-B).
+                    validity.pop("supersession_key", None)
                 decision = _queue_outbound_decision(
                     platform_name=platform_name,
                     pconfig=pconfig,
@@ -3497,9 +3503,7 @@ def _deliver_result(
                     source_session_key=decision_session_id,
                     source_profile=get_active_profile_name() or "default",
                     source_label="cron",
-                    validity={**result_validity(job, f"{platform_name}:{chat_id}:{thread_id}",
-                                             _configured_account_identity(platform_name, pconfig)),
-                              "result_snapshot": result_snapshot(job, mirror_text)},
+                    validity={**validity, "result_snapshot": result_snapshot(job, mirror_text)},
                 )
                 if decision is None:
                     raise RuntimeError("cron delivery was not classified as external")

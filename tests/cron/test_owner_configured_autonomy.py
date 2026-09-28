@@ -234,6 +234,16 @@ def test_failure_notice_skips_recipients_and_reaches_the_owner():
     queue.assert_not_called()
 
 
+def test_failure_notice_never_replaces_a_waiting_result():
+    # 0.21.15 review P2-B: under «latest» the 10:00 failure must not retire the
+    # 09:00 report that still waits for its decision in the owner's chat.
+    job = {**_employee_job("telegram:42"), "pending_result_policy": "latest"}
+    _, _, report = _deliver(job, "Отчёт", owners=("42",))
+    _, _, failure = _deliver(job, "Сбой", failure_notice=True, owners=("42",))
+    assert "supersession_key" in report.call_args.kwargs["validity"]
+    assert "supersession_key" not in failure.call_args.kwargs["validity"]
+
+
 def test_failure_notice_uses_the_profile_home_channel_when_no_owner_is_recorded():
     job = {"id": "daily", "name": "Отчёт", "deliver": "telegram:920539491,telegram:777",
            "created_by_owner": True}
