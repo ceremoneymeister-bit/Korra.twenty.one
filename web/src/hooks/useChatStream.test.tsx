@@ -1415,7 +1415,7 @@ describe("ход узнаётся по id сообщения, а не по те�
       message_id: "older-run-1234567890", session_id: "paged", profile: "", status: "completed", updated_at: 500, history_count: 2,
       history_row_id: 3, turn_tracked: true, user_message: { role: "user", content: "давний вопрос" },
     }]);
-    const fetcher = vi.fn(async (_url: string) => new Response(JSON.stringify({ approvals: [] })));
+    const fetcher = vi.fn<(url: string) => Promise<Response>>(async () => new Response(JSON.stringify({ approvals: [] })));
     vi.stubGlobal("fetch", fetcher);
     vi.spyOn(api, "getSessionMessages").mockResolvedValue({ session_id: "paged", messages: [
       { id: 40, role: "user", content: "свежий вопрос" }, { id: 41, role: "assistant", content: "свежий ответ" },
@@ -1463,7 +1463,7 @@ describe("зависшее восстановление ответа (чисто
       { id: 1, role: "user", content: "вопрос", display_metadata: { client_message_id: "done-first-open-123" } },
       { id: 2, role: "assistant", content: "готовый ответ" },
     ] as SessionMessage[], pagination: { order: "latest", returned: 2, before_id: 1, has_more: false } });
-    const fetcher = vi.fn(async (_url: string) => new Response(JSON.stringify({ approvals: [] })));
+    const fetcher = vi.fn<(url: string) => Promise<Response>>(async () => new Response(JSON.stringify({ approvals: [] })));
     vi.stubGlobal("fetch", fetcher);
     await act(async () => { await current.loadSession("done"); });
     expect(current.messages.map(m => m.content)).toEqual(["вопрос", "готовый ответ"]);
