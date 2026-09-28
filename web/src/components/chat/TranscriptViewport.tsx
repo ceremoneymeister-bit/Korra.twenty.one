@@ -25,12 +25,41 @@ interface TranscriptViewportProps {
  *  страницу, не упираясь в край. */
 const LOAD_OLDER_WITHIN_PX = 320;
 
+/** Сколько страниц можно догрузить, возвращая человека к месту чтения. */
+const MAX_RESTORE_PAGES = 10;
+
+/**
+ * Место чтения — сообщение и смещение внутри него. Пиксели от начала ленты
+ * после перезагрузки указывали на другое сообщение: загружена уже только
+ * последняя страница (0.21.15, ревью Astra R5). Прежние числовые значения
+ * не восстанавливаются.
+ */
+interface ReadingPlace { id: string; offset: number }
+
+function parsePlace(raw: string): ReadingPlace | null {
+  try {
+    const value = JSON.parse(raw) as Partial<ReadingPlace> | null;
+    return value && typeof value.id === "string" && typeof value.offset === "number"
+      ? { id: value.id, offset: value.offset }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Номер строки истории из id сообщения (`<чат>-h<строка>`), если он есть. */
+function historyRow(id: string | undefined): number | null {
+  const match = id ? /-h(\d+)$/.exec(id) : null;
+  return match ? Number(match[1]) : null;
+}
+
 /** Поток следует вниз, пока человек не начал читать предыдущий текст. */
 export function TranscriptViewport({ children, followKey, awaitingApproval, storageKey, anchorKey, older }: TranscriptViewportProps) {
   const viewport = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
-  const saved = storageKey ? readChatView(storageKey) : "";
-  const restoringTop = useRef<number | null>(saved ? Number(saved) : null);
+  const saved = storageKey ? parsePlace(readChatView(storageKey)) : null;
+  const place = useRef<ReadingPlace | null>(saved);
+  const restorePages = useRef(0);
   const following = useRef(!saved);
   const previousKey = useRef(followKey);
   const [away, setAway] = useState(Boolean(saved));
@@ -38,25 +67,66 @@ export function TranscriptViewport({ children, followKey, awaitingApproval, stor
   const lastHeight = useRef(0);
   const lastTop = useRef(0);
 
+  function messageTop(el: HTMLDivElement, item: Element): number {
+    return item.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop;
+  }
+
+  function messages(): Element[] {
+    return Array.from(content.current?.querySelectorAll("[data-chat-message]") ?? []);
+  }
+
+  /** Первое сообщение, чей низ ниже верха окна, и насколько окно в него ушло. */
+  function currentPlace(el: HTMLDivElement): ReadingPlace | null {
+    const top = el.getBoundingClientRect().top;
+    const item = messages().find(candidate => candidate.getBoundingClientRect().bottom > top);
+    const id = item?.getAttribute("data-chat-message");
+    return item && id ? { id, offset: el.scrollTop - messageTop(el, item) } : null;
+  }
+
+  function stopRestoring(el: HTMLDivElement) {
+    place.current = null;
+    following.current = true;
+    el.scrollTop = el.scrollHeight;
+    if (storageKey) writeChatView(storageKey, "");
+    setAway(false);
+  }
+
   useLayoutEffect(() => {
     if (previousKey.current !== followKey) {
       previousKey.current = followKey;
-      if (followKey && restoringTop.current === null) following.current = true;
+      if (followKey && place.current === null) following.current = true;
     }
     const el = viewport.current;
     if (!el || !el.clientHeight) return;
     const prepended = previousAnchor.current !== undefined && previousAnchor.current !== anchorKey;
     previousAnchor.current = anchorKey;
-    if (restoringTop.current !== null) {
-      el.scrollTop = restoringTop.current;
-      if (el.scrollHeight - el.clientHeight >= restoringTop.current) restoringTop.current = null;
+    if (place.current !== null) {
+      const reading = place.current;
+      const target = messages().find(item => item.getAttribute("data-chat-message") === reading.id);
+      const wanted = historyRow(reading.id);
+      const first = historyRow(anchorKey);
+      if (target) {
+        el.scrollTop = messageTop(el, target) + reading.offset;
+        place.current = null;
+      } else if (wanted !== null && first !== null && wanted < first && older?.hasOlder && !older.failed
+        && restorePages.current < MAX_RESTORE_PAGES) {
+        // Место чтения раньше загруженной страницы: догружаем до него.
+        if (!older.loading) {
+          restorePages.current += 1;
+          older.load();
+        }
+      } else if (!older?.loading) {
+        // Сообщения больше нет или до него слишком далеко: последний ответ
+        // лучше, чем чужое место.
+        stopRestoring(el);
+      }
     } else if (following.current) el.scrollTop = el.scrollHeight;
     // Более ранние сообщения встали над читаемым местом: сдвигаем прокрутку
     // на их высоту, чтобы текст перед глазами остался на месте.
     else if (prepended) el.scrollTop += el.scrollHeight - lastHeight.current;
     lastHeight.current = el.scrollHeight;
     lastTop.current = el.scrollTop;
-  }, [children, followKey, anchorKey]);
+  }, [children, followKey, anchorKey, older?.hasOlder, older?.loading, older?.failed]);
 
   useEffect(() => {
     if (!content.current || typeof ResizeObserver === "undefined") return;
@@ -72,7 +142,7 @@ export function TranscriptViewport({ children, followKey, awaitingApproval, stor
 
   function toLatest() {
     following.current = true;
-    restoringTop.current = null;
+    place.current = null;
     if (storageKey) writeChatView(storageKey, "");
     if (viewport.current) viewport.current.scrollTop = viewport.current.scrollHeight;
     setAway(false);
@@ -84,13 +154,16 @@ export function TranscriptViewport({ children, followKey, awaitingApproval, stor
         ref={viewport}
         className="h-full overflow-y-auto [overflow-anchor:none]"
         aria-label="Переписка"
-        onWheel={() => { restoringTop.current = null; }}
-        onTouchStart={() => { restoringTop.current = null; }}
+        onWheel={() => { place.current = null; }}
+        onTouchStart={() => { place.current = null; }}
         onScroll={event => {
           const el = event.currentTarget;
-          if (!el.clientHeight || restoringTop.current !== null) return;
+          if (!el.clientHeight || place.current !== null) return;
           const nearEnd = el.scrollHeight - el.scrollTop - el.clientHeight < 64;
-          if (storageKey) writeChatView(storageKey, nearEnd ? "" : String(el.scrollTop));
+          if (storageKey) {
+            const reading = nearEnd ? null : currentPlace(el);
+            writeChatView(storageKey, reading ? JSON.stringify(reading) : "");
+          }
           following.current = nearEnd;
           setAway(!nearEnd);
           // Только прокрутка вверх: прилипание к последнему ответу и сдвиг

@@ -179,7 +179,7 @@ function UserBubble({
   const text = parsed.text;
   const attachments = message.attachments ?? parsed.attachments;
   return (
-    <div className="flex flex-col items-end gap-1">
+    <div data-chat-message={message.id} className="flex flex-col items-end gap-1">
       <div
         className={cn(
           "max-w-[75%] rounded-[18px] bg-[var(--neo-surface)] px-3 py-2",
@@ -296,7 +296,7 @@ function AssistantBubble({
   }
 
   return (
-    <div className="flex justify-start">
+    <div data-chat-message={message.id} className="flex justify-start">
       <div
         className={cn(
           // Владелец 03.09: текст агента не должен упираться в правый край.
