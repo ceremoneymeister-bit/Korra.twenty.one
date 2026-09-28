@@ -146,7 +146,7 @@ function AgentsBody({ size = "m" }: DashboardWidgetBodyProps) {
   if (rosterState === "error") {
     return (
       <WidgetNote>
-        <NoteTitle>Не удалось прочитать агентов</NoteTitle>
+        <NoteTitle>Не удалось загрузить агентов</NoteTitle>
         {/* На плитке 1×1 объяснение вытеснило бы повтор — а повторить важнее. */}
         {size === "s" ? null : (
           <FittedText
@@ -358,7 +358,7 @@ function StatusLine({
           className="min-w-0 flex-1 truncate text-xs text-[var(--neo-text-secondary)]"
           data-agents-live
         >
-          {size === "s" ? "Состояние живое" : `Состояние обновляется само${rest}`}
+          {size === "s" ? "Состояние живое" : `Обновляется автоматически${rest}`}
         </p>
       )}
       {/* Повтор нужен, когда первого ответа нет либо данные устарели, и есть место под кнопку. */}

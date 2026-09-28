@@ -23,7 +23,7 @@
  * пустого источника — ни нулей вместо неизвестного, ни примеров вместо фактов.
  */
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useStore } from "@nanostores/react";
 import {
   Check,
@@ -76,8 +76,8 @@ const CATALOG_ID = "dashboard-widget-catalog";
  * доступ, а придуманное обращение читается как подделка. Дата настоящая и
  * остаётся верной, пока вкладка открыта, — в отличие от времени.
  */
-function today(): string {
-  const text = new Date().toLocaleDateString("ru-RU", {
+function today(now: Date = new Date()): string {
+  const text = now.toLocaleDateString("ru-RU", {
     weekday: "long",
     day: "numeric",
     month: "long",
@@ -85,7 +85,34 @@ function today(): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
+/** Приветствие по местному времени человека у экрана. «Хороший день.»
+ *  читалось как оборванная фраза (Дмитрий, 28.09). */
+export function greeting(now: Date = new Date()): string {
+  const hour = now.getHours();
+  if (hour >= 5 && hour < 12) return "Доброе утро";
+  if (hour >= 12 && hour < 18) return "Добрый день";
+  if (hour >= 18 && hour < 23) return "Добрый вечер";
+  return "Доброй ночи";
+}
+
+/** Текущий момент, который обновляется сам: вкладка может висеть открытой
+ *  с утра до вечера, и приветствие не должно отстать от часов. */
+function useNow(): Date {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const tick = () => setNow(new Date());
+    const timer = window.setInterval(tick, 60_000);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, []);
+  return now;
+}
+
 export default function DashboardPage() {
+  const now = useNow();
   const { apply, layout: stored, message, reload, saving, status } =
     useDashboardLayout(DASHBOARD_CATALOG);
   // Общая сводка карточек. Подписка страницы держит её опрос, пока доска
@@ -147,30 +174,37 @@ export default function DashboardPage() {
 
   return (
     <div className="korra-dashboard mx-auto flex w-full max-w-6xl flex-col gap-6 pt-2">
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <header className="flex flex-row items-start justify-between gap-4">
         <div className="min-w-0">
           <p className="flex items-center gap-2 text-sm text-[var(--neo-text-secondary)]">
             <Sun className="size-4 shrink-0" aria-hidden />
-            <span className="min-w-0 truncate">{today()}</span>
+            <span className="min-w-0 truncate">{today(now)}</span>
           </p>
 
           <h2 className="mt-1 text-2xl font-semibold text-[var(--neo-text-primary)]">
-            Хороший день.
+            {greeting(now)}
           </h2>
 
-          <p className="mt-1 max-w-[60ch] text-sm text-[var(--neo-text-secondary)]">
-            Что требует решения, чем заняты агенты и что уже готово.
+          {/* На телефоне карточки сами говорят, что в них: строка пояснения
+              только отодвигала их на пол-экрана. */}
+          <p className="mt-1 hidden max-w-[60ch] text-sm text-[var(--neo-text-secondary)] sm:block">
+            Что ждёт вашего решения, чем заняты агенты и что уже готово.
           </p>
         </div>
 
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          {/* Настройка доски — второстепенное действие: не ярче «Принять» и
+              «Ответить» в карточках. На телефоне — значок с подписью для
+              экранного диктора. */}
           <ProductButton
+            outlined
             onClick={() => setSetupOpen(true)}
             aria-expanded={setupOpen}
             aria-controls={CATALOG_ID}
+            aria-label="Настроить дашборд"
             prefix={<SlidersHorizontal className="size-4 shrink-0" aria-hidden />}
           >
-            Настроить
+            <span className="max-sm:sr-only">Настроить</span>
           </ProductButton>
 
           {setupOpen ? (

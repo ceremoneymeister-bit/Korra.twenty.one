@@ -50,7 +50,7 @@ function UpcomingBody({ size = "m" }: DashboardWidgetBodyProps) {
     return (
       <ErrorNote
         size={size}
-        title="Не удалось прочитать расписание"
+        title="Не удалось загрузить расписание"
         detail="Задачи и их запуски не пришли. Расписание при этом работает как раньше."
         onRetry={view.retry}
       />
@@ -180,7 +180,7 @@ function stateText(event: DashboardEvent, now: number, timeZone: string): string
     case "late":
       return `${who} · не запустилась в ${formatClock(event.at, timeZone)}`;
     case "unknown":
-      return `${who} · исход неизвестен`;
+      return `${who} · результат не подтверждён`;
     default:
       return event.repeats_today
         ? `${who} · ${formatRelative(event.at, now)}, ещё ${event.repeats_today - 1} сегодня`

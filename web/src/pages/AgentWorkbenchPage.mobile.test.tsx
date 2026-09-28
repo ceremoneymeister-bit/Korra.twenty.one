@@ -21,6 +21,8 @@ const TABS = [
   { profile: "lawyer", label: "Нюра | Юрист" },
 ];
 
+const tabsState = vi.hoisted(() => ({ tabs: null as null | Array<{ profile: string; label: string }> }));
+
 const workbenchMocks = vi.hoisted(() => ({
   refresh: vi.fn(async () => undefined),
   hideTab: vi.fn(),
@@ -30,7 +32,7 @@ const workbenchMocks = vi.hoisted(() => ({
 
 vi.mock("@/hooks/useAgentTabs", () => ({
   useAgentTabs: () => ({
-    tabs: TABS,
+    tabs: tabsState.tabs ?? TABS,
     hiddenTabs: [],
     refresh: workbenchMocks.refresh,
     updateDisplayName: vi.fn(),
@@ -217,6 +219,25 @@ describe("«Вкладки» на телефоне", () => {
     // ☰ открывает общее меню приложения — фиксированной шапки здесь нет.
     await click(byLabel("Меню Korra"));
     expect($mobileNavOpen.get()).toBe(true);
+  });
+
+  it("свободное место полосы предлагает нового агента; одному агенту — с подписью", async () => {
+    await render(page());
+    const circle = container.querySelector<HTMLButtonElement>("[data-agent-add]");
+    expect(circle?.getAttribute("aria-label")).toBe("Добавить агента");
+    expect(circle?.textContent).not.toContain("Добавить агента");
+
+    tabsState.tabs = [TABS[0]];
+    try {
+      await act(async () => root.unmount());
+      root = createRoot(container);
+      await render(page());
+      const add = container.querySelector<HTMLButtonElement>("[data-agent-add]");
+      expect(add?.getAttribute("aria-label")).toBe("Добавить агента");
+      expect(add?.textContent).toContain("Добавить агента");
+    } finally {
+      tabsState.tabs = null;
+    }
   });
 
   it("знаки различаются формой, число — только у решений", async () => {

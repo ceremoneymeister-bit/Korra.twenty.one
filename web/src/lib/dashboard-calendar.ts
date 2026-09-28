@@ -254,7 +254,7 @@ export function calendarNotice(feed: DashboardCalendarFeed): CalendarNotice | nu
     default:
       return {
         tone: "warning",
-        title: "Не удалось прочитать календарь",
+        title: "Не удалось загрузить календарь",
         text: scheduleUnread(feed)
           ? "Google не ответил."
           : "Google не ответил. Задачи и запуски агентов показаны.",

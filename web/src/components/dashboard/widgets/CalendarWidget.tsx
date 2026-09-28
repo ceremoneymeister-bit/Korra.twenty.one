@@ -129,7 +129,7 @@ function CalendarBody({ size = "m" }: DashboardWidgetBodyProps) {
   if (!feed) {
     return (
       <Note>
-        <NoteTitle>Не удалось прочитать календарь</NoteTitle>
+        <NoteTitle>Не удалось загрузить календарь</NoteTitle>
         {size === "s" ? null : (
           <FittedText
             text="Панель не ответила на запрос. Ничего не изменилось."
@@ -248,7 +248,7 @@ function ScheduleUnreadText({ short, text }: { short?: boolean; text?: string })
       title={SCHEDULE_UNREAD}
       data-calendar-schedule-error
     >
-      {text ?? (short ? "Запуски не прочитаны" : SCHEDULE_UNREAD)}
+      {text ?? (short ? "Запуски не загрузились" : SCHEDULE_UNREAD)}
     </p>
   );
 }

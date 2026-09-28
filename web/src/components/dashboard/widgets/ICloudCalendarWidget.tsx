@@ -104,7 +104,7 @@ function ICloudCalendarBody({ size = "m" }: DashboardWidgetBodyProps) {
   if (authFailed) return <ConnectionStep size={size} title="Доступ к iCloud истёк"
     text="Проверьте пароль приложения в Apple Account и подключите iCloud Calendar заново."
     action="Переподключить iCloud" />;
-  if (!feed) return <ErrorNote size={size} title="Не удалось прочитать iCloud Calendar" onRetry={() => void load()} />;
+  if (!feed) return <ErrorNote size={size} title="Не удалось загрузить iCloud Calendar" onRetry={() => void load()} />;
   if (feed.state === "not_connected") {
     return <ConnectionStep size={size} title="iCloud Calendar не подключён"
       text="Добавьте Apple ID и пароль приложения в «Ключах и доступах». После проверки встречи появятся здесь и будут доступны агентам."
@@ -127,7 +127,7 @@ function ICloudCalendarBody({ size = "m" }: DashboardWidgetBodyProps) {
         <div>
           <p className="font-semibold text-[var(--neo-text-primary)]">Неделя свободна</p>
           {size !== "s" ? <p className="text-xs text-[var(--neo-text-secondary)]">
-            {isStale ? "В последнем чтении встреч не было" : "На ближайшие семь дней встреч нет"}
+            {isStale ? "При последней проверке встреч не было" : "На ближайшие семь дней встреч нет"}
           </p> : null}
         </div>
       </div>

@@ -33,7 +33,7 @@ const CATALOG_TITLES = [
   "Агенты",
   "Мои показатели",
   "Ближайшие задачи",
-  "Артефакты",
+  "Готовые файлы",
   "Календарь",
   "iCloud Calendar",
 ];
@@ -157,6 +157,14 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
+describe("приветствие по времени суток", () => {
+  it("меняется утром, днём, вечером и ночью по местному времени", async () => {
+    const { greeting } = await import("./DashboardPage");
+    const at = (hour: number) => greeting(new Date(2026, 8, 28, hour, 30));
+    expect([at(8), at(13), at(19), at(2)]).toEqual(["Доброе утро", "Добрый день", "Добрый вечер", "Доброй ночи"]);
+  });
+});
+
 describe("Личный дашборд", () => {
   it("здоровается настоящей датой, без придуманного имени, и даёт настройку", () => {
     const today = new Date().toLocaleDateString("ru-RU", {
@@ -165,7 +173,7 @@ describe("Личный дашборд", () => {
       month: "long",
     });
     expect(container.textContent?.toLowerCase()).toContain(today.toLowerCase());
-    expect(container.textContent).toContain("Хороший день.");
+    expect(container.textContent).toMatch(/Доброе утро|Добрый день|Добрый вечер|Доброй ночи/);
     expect(button("Настроить")).toBeTruthy();
   });
 
@@ -184,8 +192,8 @@ describe("Личный дашборд", () => {
     const failures = {
       attention: "Не удалось проверить",
       metrics: "Не удалось посчитать показатели",
-      "upcoming-tasks": "Не удалось прочитать расписание",
-      "recent-results": "Не удалось прочитать файлы",
+      "upcoming-tasks": "Не удалось загрузить расписание",
+      "recent-results": "Не удалось загрузить файлы",
     };
     for (const [id, text] of Object.entries(failures)) {
       const card = container.querySelector<HTMLElement>(`[data-widget="${id}"]`);
@@ -357,13 +365,13 @@ describe("Раскладка дашборда хранится на сервер
       .toBe("conflict");
     expect(container.textContent).toContain("изменился в другом окне");
     // На экране — сохранённое другим окном состояние, а не наше.
-    expect(cardTitles()).toEqual(CATALOG_TITLES.filter((title) => title !== "Артефакты"));
+    expect(cardTitles()).toEqual(CATALOG_TITLES.filter((title) => title !== "Готовые файлы"));
 
     // Повтор идёт уже от ревизии победителя.
     await click(button("Убрать", catalogRow("agents")));
     expect(api.setDashboardLayout.mock.lastCall?.[0]).toMatchObject({ revision: 9 });
     expect(cardTitles()).toEqual(
-      CATALOG_TITLES.filter((title) => title !== "Артефакты" && title !== "Агенты"),
+      CATALOG_TITLES.filter((title) => title !== "Готовые файлы" && title !== "Агенты"),
     );
   });
 

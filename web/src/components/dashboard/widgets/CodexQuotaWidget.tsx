@@ -65,7 +65,7 @@ function QuotaBody({ size = "m" }: DashboardWidgetBodyProps) {
     return (
       <ErrorNote
         size={size}
-        title="Не удалось прочитать квоту"
+        title="Не удалось загрузить квоту"
         detail="Последнее значение не прочиталось. Повторите запрос."
         onRetry={() => void refreshDashboardState()}
       />

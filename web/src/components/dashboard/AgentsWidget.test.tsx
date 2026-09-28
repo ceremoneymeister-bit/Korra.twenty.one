@@ -186,13 +186,13 @@ describe("Карточка «Агенты» на реальном источни
     api.getProfiles.mockRejectedValueOnce(new Error("offline"));
     await mount();
 
-    expect(container.textContent).toContain("Не удалось прочитать агентов");
+    expect(container.textContent).toContain("Не удалось загрузить агентов");
     expect(container.textContent).not.toContain("Корра");
 
     api.getProfiles.mockResolvedValue({ profiles: PROFILES });
     await click(button("Повторить"));
     expect(container.textContent).toContain("Корра");
-    expect(container.textContent).not.toContain("Не удалось прочитать агентов");
+    expect(container.textContent).not.toContain("Не удалось загрузить агентов");
   });
 
   it("недоступная активность помечается как последнее известное состояние", async () => {

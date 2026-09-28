@@ -28,7 +28,7 @@ import {
 import { cn } from "@/lib/utils";
 
 /**
- * «Артефакты» — что уже готово и можно забрать.
+ * «Готовые файлы» — что уже готово и можно забрать.
  *
  * Источник — рабочая папка установки в новой раскладке K21-146: результаты
  * каждого агента с его именем, общие материалы и прежние файлы корня.
@@ -50,7 +50,7 @@ function ArtifactsBody({ size = "m" }: DashboardWidgetBodyProps) {
     return (
       <ErrorNote
         size={size}
-        title="Не удалось прочитать файлы"
+        title="Не удалось загрузить файлы"
         detail="Список готовых материалов не пришёл. Сами файлы на месте — они есть в разделе «Файлы»."
         onRetry={view.retry}
       />
@@ -164,7 +164,7 @@ function ArtifactTile({
 
 export const RECENT_RESULTS_WIDGET: DashboardWidget = {
   id: "recent-results",
-  title: "Артефакты",
+  title: "Готовые файлы",
   purpose: "Готовые документы, таблицы, презентации и изображения, которые сделали агенты.",
   action: { label: "Открыть файлы", short: "Файлы", to: "/files" },
   Body: ArtifactsBody,

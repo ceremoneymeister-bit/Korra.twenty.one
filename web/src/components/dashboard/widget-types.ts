@@ -36,7 +36,7 @@ export interface DashboardWidgetAction {
  */
 export interface DashboardWidget {
   /** Устойчивый идентификатор: по нему хранится раскладка. Он переживает
-   *  переименование карточки — `recent-results` называется «Артефакты». */
+   *  переименование карточки — `recent-results` называется «Готовые файлы». */
   id: string;
   /** Название карточки — одно и то же в сетке и в каталоге настройки. */
   title: string;

@@ -78,7 +78,7 @@ function MetricsBody({ size = "m" }: DashboardWidgetBodyProps) {
         <FirstStep
           size={size}
           title={`Диалогов ${PERIOD_LABEL[shown].phrase} пока нет`}
-          text="Напишите агенту в чате или в мессенджере — и здесь появится счёт ваших разговоров."
+          text="Напишите агенту в чате или в мессенджере — и здесь появится статистика ваших разговоров."
           action={{ label: "Написать агенту", to: "/agents" }}
         />
       </div>

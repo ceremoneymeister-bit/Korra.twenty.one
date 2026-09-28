@@ -81,7 +81,7 @@ export function ICloudCalendarCard() {
       setProbe("ok");
     } catch (cause) {
       setProbe("error");
-      setError(icloudError(cause, "Не удалось прочитать календарь iCloud."));
+      setError(icloudError(cause, "Не удалось загрузить календарь iCloud."));
     }
   };
 

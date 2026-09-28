@@ -245,7 +245,7 @@ describe("Календарь на дашборде", () => {
   it("если панель не ответила — говорит об этом и даёт повторить", async () => {
     api.getDashboardCalendar.mockRejectedValue(new Error("offline"));
     await mount("m");
-    expect(text()).toContain("Не удалось прочитать календарь");
+    expect(text()).toContain("Не удалось загрузить календарь");
     expect(text()).not.toContain("Неделя свободна");
   });
 
@@ -302,7 +302,7 @@ describe("Календарь на дашборде", () => {
       await mount("s");
       expect(container!.querySelector("[data-calendar-next]")?.textContent).toContain("Созвон с поставщиком");
       expect(container!.querySelector("[data-calendar-schedule-error]")?.textContent).toBe(
-        "Запуски не прочитаны",
+        "Запуски не загрузились",
       );
     });
 
@@ -340,7 +340,7 @@ describe("Календарь на дашборде", () => {
       expect(text()).not.toContain("Неделя свободна");
       expect(text()).toContain("Встреч на неделе нет");
       expect(container!.querySelector("[data-calendar-schedule-error]")?.textContent).toBe(
-        "Запуски не прочитаны",
+        "Запуски не загрузились",
       );
     });
   });

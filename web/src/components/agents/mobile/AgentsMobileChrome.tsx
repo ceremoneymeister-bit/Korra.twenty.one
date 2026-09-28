@@ -415,6 +415,20 @@ export function useAgentsMobileChrome({
                 />
               );
             })}
+            {rail.shown.length < railSlots(width) && (
+              // Free room in the rail offers the next agent instead of empty
+              // space; one agent alone gets the full label (Dmitry, 28.09).
+              <button
+                type="button"
+                className={cn("k-add-agent", allTabs.length <= 1 && "k-add-agent--wide")}
+                aria-label="Добавить агента"
+                onClick={actions.addAgent}
+                data-agent-add
+              >
+                <Plus size={18} aria-hidden className="k-icon" />
+                {allTabs.length <= 1 && <span>Добавить агента</span>}
+              </button>
+            )}
           </div>
           <button
             type="button"

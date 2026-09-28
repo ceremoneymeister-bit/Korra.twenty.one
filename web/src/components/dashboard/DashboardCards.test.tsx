@@ -362,7 +362,7 @@ describe("«Ближайшие задачи» — лента дня", () => {
   });
 });
 
-describe("«Артефакты»", () => {
+describe("«Готовые файлы»", () => {
   it("обложки несут настоящее имя и начало файла и ведут к файлу на его месте", async () => {
     await mount(RECENT_RESULTS_WIDGET, "m");
     const tiles = Array.from(container.querySelectorAll<HTMLElement>(".kdw-artifact"));
@@ -409,7 +409,7 @@ describe("«Артефакты»", () => {
   it("сбой источника — ошибка с повтором", async () => {
     served = dashboardStateFixture({ artifacts: { status: "error" } });
     await mount(RECENT_RESULTS_WIDGET, "m");
-    expect(text()).toContain("Не удалось прочитать файлы");
+    expect(text()).toContain("Не удалось загрузить файлы");
     expect(container.querySelector('[role="alert"]')).not.toBeNull();
   });
 });

@@ -129,7 +129,26 @@
      браузер не должен забирать его себе как прокрутку. */
   touch-action: none;
 }
-.k-tray__avs { display: flex; flex: 1; min-width: 0; align-items: center; justify-content: space-around; }
+/* Left-aligned: a lone agent must not float in the middle of the rail. */
+.k-tray__avs { display: flex; flex: 1; min-width: 0; align-items: center; justify-content: flex-start; gap: 6px; padding-left: 2px; }
+.k-add-agent {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 44px;
+  height: 44px;
+  border: 1px dashed color-mix(in srgb, var(--k-text2) 45%, transparent);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--k-text2);
+  font: inherit;
+  font-size: 14px;
+}
+.k-add-agent--wide { width: auto; padding: 0 14px 0 12px; }
+.k-add-agent:active { box-shadow: var(--k-inc); }
+.k-add-agent:focus-visible { outline: 2px solid var(--k-live); outline-offset: 2px; }
 .k-all {
   position: relative;
   display: inline-flex;
