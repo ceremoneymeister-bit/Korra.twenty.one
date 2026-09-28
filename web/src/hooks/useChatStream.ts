@@ -1,6 +1,6 @@
 import { clearChatAttachmentDraft } from "@/hooks/useChatAttachmentDraft";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { chatViewKey, readChatSelection, writeChatSelection, writeChatView } from "@/lib/chat-view-state";
+import { chatViewKey, forgetChatSelection, readChatSelection, writeChatSelection, writeChatView } from "@/lib/chat-view-state";
 import { $viewedChat, markChatViewed, chatRunHeaders, chatRunUrl, getChatRuns, isRunBusy, refreshChatRuns, type ChatRun } from "@/lib/chat-runs";
 import type { ToolEntry } from "@/components/ToolCall";
 import type {
@@ -599,7 +599,14 @@ export interface LoadSessionOptions {
    *  открытия и перехода в другой чат это делать нельзя — там очистка
    *  обязательна, иначе на мгновение видна чужая переписка. */
   background?: boolean;
+  /** The chat is gone (404): the caller opens something else instead of an
+   *  empty feed that looks like lost history (Birukova, 28.09.2026). */
+  onMissing?: () => void;
 }
+
+/** История, которая не пришла за это время, не держит «Обновляем переписку…»
+ *  и заблокированное поле ввода бесконечно: связь на телефоне рвётся молча. */
+const HISTORY_LOAD_TIMEOUT_MS = 30_000;
 
 /** Строка истории со всем, что реально отдаёт панельный маршрут
  *  `GET /api/sessions/{id}/messages` (он возвращает строку таблицы целиком,
@@ -748,6 +755,9 @@ export function useChatStream(
   const [isLoading, setIsLoading] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
+  /** Каждое явное открытие чата (выбор, «Новый чат», ссылка из уведомления)
+   *  отменяет ещё не завершённый поиск последнего разговора. */
+  const openIntentRef = useRef(0);
   // Synchronous mirror of state.isStreaming so concurrent send() calls
   // can guard against re-entry without waiting for a re-render. React
   // state updates are async — without this ref, two send() calls fired
@@ -827,6 +837,7 @@ export function useChatStream(
 
   const loadSession = useCallback(async (sessionId: string, options?: LoadSessionOptions): Promise<void> => {
     const background = options?.background === true;
+    if (!background) openIntentRef.current += 1;
     setIsLoading(true);
     writeChatSelection(selectionKey, sessionId);
     const generation = crypto.randomUUID();
@@ -888,24 +899,40 @@ export function useChatStream(
     if (!background) {
       dispatch({ type: "LOAD_SESSION", sessionId, messages: pendingMessages() });
     }
+    let timedOut = false;
+    const historyTimer = window.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, HISTORY_LOAD_TIMEOUT_MS);
     try {
       // Read the run AFTER history: completion between these reads is replayed
       // from the same ledger, never from a stale history snapshot.
-      const resp = await api.getSessionMessages(sessionId, profile || "default").catch(error => {
-        if (error instanceof Error && /^404(?:\s|:)/.test(error.message)) return { messages: [] };
+      let missing = false;
+      const resp = await api.getSessionMessages(sessionId, profile || "default", controller.signal).catch(error => {
+        if (error instanceof Error && /^404(?:\s|:)/.test(error.message)) {
+          missing = true;
+          return { messages: [] };
+        }
         throw error;
       });
       if (!current()) return;
+      if (missing && !background && options?.onMissing) {
+        window.clearTimeout(historyTimer);
+        queueMicrotask(options.onMissing);
+        return;
+      }
       const chatMessages = sessionMessagesToChat(sessionId, resp.messages as HistoryMessage[]);
       let runs: ChatRun[];
       try {
-        runs = await getChatRuns(profile ?? "", sessionId);
+        runs = await getChatRuns(profile ?? "", sessionId, controller.signal);
       } catch {
+        if (timedOut) throw new Error("history timeout");
         if (!current()) return;
         showWithPending(chatMessages);
         dispatch({ type: "SET_ERROR", error: "История загружена. Не удалось проверить, работает ли агент; связь будет проверена при возврате." });
         return;
       }
+      window.clearTimeout(historyTimer);
       if (!current()) return;
       const run = runs[0];
       setIsLoading(false);
@@ -1009,9 +1036,15 @@ export function useChatStream(
       if (current()) {
         const pending = loadChatOutboxRecords(profile ?? "", sessionId)[0];
         if (pending) dispatch({ type: "MARK_DELIVERY", messageId: pending.messageId, delivery: "failed", error: outboxFailure(pending) });
-        dispatch({ type: "SET_ERROR", error: `Не удалось обновить переписку. ${ownerFacingError(err, "Проверьте связь и откройте чат ещё раз. Работа агента могла продолжиться.")}` });
+        dispatch({
+          type: "SET_ERROR",
+          error: timedOut
+            ? "Переписка не загрузилась за 30 секунд. Проверьте связь и откройте чат ещё раз — работа агента продолжается."
+            : `Не удалось обновить переписку. ${ownerFacingError(err, "Проверьте связь и откройте чат ещё раз. Работа агента могла продолжиться.")}`,
+        });
       }
     } finally {
+      window.clearTimeout(historyTimer);
       if (current()) {
         setIsLoading(false);
         streamingRef.current = false;
@@ -1021,6 +1054,7 @@ export function useChatStream(
   }, [profile, selectionKey]);
 
   const reset = useCallback(() => {
+    openIntentRef.current += 1;
     writeChatSelection(selectionKey, null);
     // Same triple-guard as loadSession — abort any active stream so its
     // residual APPEND_DELTAs don't leak into the new chat.
@@ -1404,6 +1438,27 @@ export function useChatStream(
   const sessionRef = useRef(state.sessionId);
   const selectionLoadRef = useRef<Promise<void> | null>(null);
   useEffect(() => { sessionRef.current = state.sessionId; }, [state.sessionId]);
+  /** Открыть последний разговор агента — тот же, что первым стоит в «Чатах». */
+  const openLatest = useCallback(async (): Promise<void> => {
+    const intent = ++openIntentRef.current;
+    setIsLoading(true);
+    let latest: string | undefined;
+    try {
+      const response = await api.getSessions(1, 0, profile === undefined ? undefined : profile || "default", "recent");
+      latest = response.sessions[0]?.id;
+    } catch {
+      latest = undefined;
+    }
+    if (!mountedRef.current || openIntentRef.current !== intent) return;
+    if (latest) {
+      sessionRef.current = latest;
+      await loadSession(latest);
+    } else {
+      setIsLoading(false);
+      reset();
+    }
+  }, [loadSession, profile, reset]);
+
   useEffect(() => {
     const selection = readChatSelection(selectionKey);
     const id = selection === undefined ? loadChatOutbox(profile ?? "")?.sessionId : selection;
@@ -1411,13 +1466,23 @@ export function useChatStream(
     // is rendered. Never let it refresh the previous profile's conversation.
     sessionRef.current = id ?? null;
     if (id) {
-      const pending = loadSession(id).finally(() => {
+      const pending = loadSession(id, {
+        // A remembered chat that no longer exists opens the last one instead.
+        onMissing: () => {
+          forgetChatSelection(selectionKey);
+          void openLatest();
+        },
+      }).finally(() => {
         if (selectionLoadRef.current === pending) selectionLoadRef.current = null;
       });
       selectionLoadRef.current = pending;
       void pending;
+    } else if (selection === undefined) {
+      // A fresh visit continues the last conversation; an empty «new chat»
+      // hid the history from the owner on the phone (Birukova, 28.09.2026).
+      void openLatest();
     } else reset();
-  }, [loadSession, profile, selectionKey, reset]);
+  }, [loadSession, openLatest, profile, selectionKey, reset]);
   useEffect(() => {
     if (!active) return;
     // Возврат к вкладке — не повод показывать чат заново. Проверяем в фоне:

@@ -773,12 +773,13 @@ export const api = {
       ),
     );
   },
-  getSessionMessages: (id: string, profile = getManagementProfile()) =>
+  getSessionMessages: (id: string, profile = getManagementProfile(), signal?: AbortSignal) =>
     fetchJSON<SessionMessagesResponse>(
       appendProfileParam(
         `/api/sessions/${encodeURIComponent(id)}/messages?limit=500&order=latest`,
         profile,
       ),
+      signal ? { signal } : undefined,
     ),
   getSessionDetail: (id: string, profile = getManagementProfile()) =>
     fetchJSON<SessionInfo>(

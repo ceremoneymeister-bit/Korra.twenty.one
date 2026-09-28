@@ -20,7 +20,7 @@ it("вкладка и список отражают серверную очер�
   expect(container.textContent).toContain("начнёт автоматически");
   await act(async () => { $chatRuns.set([{ ...run, status: "completed" }]); $unreadChatRuns.set([{ ...run, status: "completed" }]); });
   expect(container.textContent).toContain("Ответ готов");
-  const notification = [...document.querySelectorAll("a")].find(link => link.textContent?.includes("Юрист ответил"));
+  const notification = [...document.querySelectorAll("a")].find(link => link.textContent?.includes("Новый ответ · Юрист"));
   expect(notification?.getAttribute("href")).toBe("/agents?agent=lawyer&resume=session-lawyer");
   await act(async () => root.unmount()); container.remove();
 });

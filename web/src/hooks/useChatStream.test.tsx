@@ -907,7 +907,7 @@ describe("K21-117 activation reconciliation", () => {
     await act(async () => root.render(<Probe active onValue={onValue} />));
 
     expect(refreshChatRuns).toHaveBeenCalled();
-    expect(history).toHaveBeenCalledWith("chosen", "default");
+    expect(history).toHaveBeenCalledWith("chosen", "default", expect.any(AbortSignal));
   });
 });
 
@@ -1090,5 +1090,77 @@ describe("K21-115 multi-message outbox", () => {
       "X-Korra-Client-Message-Id": failed.messageId,
     });
     expect(loadChatOutboxRecords("", current.sessionId!)).toEqual([]);
+  });
+});
+
+describe("opening an agent continues its conversation (Бирюкова, 28.09)", () => {
+  const key = (profile: string) => `${chatViewKey(profile)}:selected`;
+  async function mount(profile: string) {
+    await act(async () => root.render(<Probe profile={profile} onValue={(value) => { current = value; }} />));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+  }
+  function latestIs(id: string | null) {
+    return vi.spyOn(api, "getSessions").mockResolvedValue({
+      sessions: id ? [{ id }] : [], total: id ? 1 : 0, limit: 1, offset: 0,
+    } as never);
+  }
+
+  it("a fresh visit opens the latest conversation, not an empty chat", async () => {
+    latestIs("latest");
+    const history = vi.spyOn(api, "getSessionMessages").mockResolvedValue({
+      session_id: "latest", messages: [{ role: "assistant", content: "Готово" }] as SessionMessage[],
+    });
+    await mount("nyura");
+    expect(history).toHaveBeenCalledWith("latest", "nyura", expect.any(AbortSignal));
+    expect(current.sessionId).toBe("latest");
+  });
+
+  it("a remembered chat that no longer exists opens the latest one and is forgotten", async () => {
+    writeChatSelection(key("designer"), "deleted-chat");
+    latestIs("latest");
+    const history = vi.spyOn(api, "getSessionMessages").mockImplementation(async (id: string) => {
+      if (id === "deleted-chat") throw new Error("404: not found");
+      return { session_id: id, messages: [{ role: "assistant", content: "Макет" }] as SessionMessage[] };
+    });
+    await mount("designer");
+    expect(history).toHaveBeenCalledWith("latest", "designer", expect.any(AbortSignal));
+    expect(current.sessionId).toBe("latest");
+    expect(localStorage.getItem(key("designer"))).toBe("latest");
+  });
+
+  it("a decision's synthetic cron id is never remembered as a chat", async () => {
+    writeChatSelection(key("nyura-bitrix"), "cron:20b0936079de:run");
+    expect(localStorage.getItem(key("nyura-bitrix"))).toBeNull();
+    localStorage.setItem(key("nyura-bitrix"), "cron:20b0936079de:run"); // saved by 0.21.14
+    latestIs("bitrix-chat");
+    const history = vi.spyOn(api, "getSessionMessages").mockResolvedValue({ session_id: "bitrix-chat", messages: [] });
+    await mount("nyura-bitrix");
+    expect(history).not.toHaveBeenCalledWith("cron:20b0936079de:run", expect.anything(), expect.anything());
+    expect(current.sessionId).toBe("bitrix-chat");
+  });
+
+  it("«Новый чат» holds for this tab, the next visit continues the conversation", () => {
+    writeChatSelection(key("nyura"), "chat-1");
+    writeChatSelection(key("nyura"), null);
+    expect(sessionStorage.getItem(key("nyura"))).toBe("");
+    expect(localStorage.getItem(key("nyura"))).toBeNull();
+  });
+
+  it("history that never arrives stops loading after 30 seconds with a clear message", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(api, "getSessionMessages").mockImplementation(
+        (_id: string, _profile?: string, signal?: AbortSignal) => new Promise((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+        }),
+      );
+      await act(async () => { void current.loadSession("slow-chat"); });
+      expect(current.isLoading).toBe(true);
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+      expect(current.isLoading).toBe(false);
+      expect(current.error).toContain("не загрузилась за 30 секунд");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

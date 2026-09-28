@@ -10,6 +10,11 @@ export function writeChatView(key: string, value: string): void {
   try { if (value) sessionStorage.setItem(key, value); else sessionStorage.removeItem(key); } catch { /* Browser storage may be unavailable. */ }
 }
 
+/** Synthetic ids (a decision's `cron:<job>:<run>` source) are not chats. */
+function isChatSessionId(value: string): boolean {
+  return !value.startsWith("cron:");
+}
+
 /** undefined: no saved choice; null: the owner explicitly opened a new chat.
  * A tab keeps its own selection; a newly opened tab resumes the last choice.
  * Existing raw session IDs remain compatible with the previous release. */
@@ -19,13 +24,24 @@ export function readChatSelection(key: string): string | null | undefined {
   if (value === null) {
     try { value = localStorage.getItem(key); } catch { /* Storage unavailable. */ }
   }
-  return value === null ? undefined : value || null;
+  if (value === null || (value && !isChatSessionId(value))) return undefined;
+  return value || null;
 }
 
 export function writeChatSelection(key: string, sessionId: string | null): void {
-  // Keep an explicit empty value: removing the key would let a failed outbox
-  // message select its old conversation on the next page load.
-  const value = sessionId ?? "";
-  try { sessionStorage.setItem(key, value); } catch { /* Storage unavailable. */ }
-  try { localStorage.setItem(key, value); } catch { /* Keep the tab-local choice. */ }
+  if (sessionId && !isChatSessionId(sessionId)) return;
+  // «Новый чат» holds for this browser tab only. A fresh visit — the phone
+  // reopening the page — resumes the last conversation instead of greeting
+  // the owner with an empty chat every time (Birukova, 28.09.2026).
+  try { sessionStorage.setItem(key, sessionId ?? ""); } catch { /* Storage unavailable. */ }
+  try {
+    if (sessionId) localStorage.setItem(key, sessionId);
+    else localStorage.removeItem(key);
+  } catch { /* Keep the tab-local choice. */ }
+}
+
+/** Forget a saved chat that no longer exists (404), in this tab and later ones. */
+export function forgetChatSelection(key: string): void {
+  try { sessionStorage.removeItem(key); } catch { /* Storage unavailable. */ }
+  try { localStorage.removeItem(key); } catch { /* Storage unavailable. */ }
 }

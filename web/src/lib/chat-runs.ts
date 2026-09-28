@@ -63,8 +63,8 @@ export function chatRunHeaders(): Record<string, string> {
   return { Authorization: `Bearer ${window.__HERMES_SESSION_TOKEN__ ?? ""}` };
 }
 
-export async function getChatRuns(profile?: string, sessionId?: string): Promise<ChatRun[]> {
-  const response = await fetch(chatRunUrl("", profile, sessionId), { headers: chatRunHeaders(), cache: "no-store" });
+export async function getChatRuns(profile?: string, sessionId?: string, signal?: AbortSignal): Promise<ChatRun[]> {
+  const response = await fetch(chatRunUrl("", profile, sessionId), { headers: chatRunHeaders(), cache: "no-store", signal });
   if (!response.ok) throw new Error("Не удалось проверить работу агентов");
   return ((await response.json()) as { runs: ChatRun[] }).runs;
 }

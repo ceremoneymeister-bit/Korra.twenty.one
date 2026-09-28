@@ -113,7 +113,8 @@ function RunToast({ runs, name }: { runs: ChatRun[]; name: (profile: string) => 
         className={cn("min-w-0", index >= RUN_TOAST_COMPACT_ITEMS && "hidden lg:block")}>
         <Link className="flex min-h-[44px] items-center gap-2 rounded-lg px-2 text-sm hover:shadow-[var(--neo-inset-compact)]" to={agentChatHref(run.profile, run.session_id)} title={`${name(run.profile)}: ${run.user_message.content}`}>
           <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--neo-accent-line)]" />
-          <span className="min-w-0 flex-1 truncate">{name(run.profile)} ответил</span>
+          {/* Без глагола: у агента нет рода, «Нюра ответил» резало глаз. */}
+          <span className="min-w-0 flex-1 truncate">Новый ответ · {name(run.profile)}</span>
           {/* На телефоне подсказка «Открыть чат» — лишняя ширина: строка и
               так вся целиком ссылка, а место в шапке занято логотипом. */}
           <span className="hidden shrink-0 text-xs text-muted-foreground lg:inline">Открыть чат</span>
