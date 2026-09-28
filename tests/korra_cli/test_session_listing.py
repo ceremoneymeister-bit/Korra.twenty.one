@@ -23,6 +23,34 @@ def test_technical_runs_are_filtered_before_pagination_and_stay_accessible(tmp_p
         assert db.get_session("run-0") is not None
 
 
+def test_kanban_worker_runs_do_not_become_the_latest_conversation(tmp_path):
+    """«Награда», 28.09: у главной Нюры 11 запусков исполнителей на один
+    разговор. Последним разговором открывается разговор, а запуски остаются
+    доступны по явному source и по id."""
+    import time
+
+    from korra_state import SessionDB
+
+    with SessionDB(tmp_path / "state.db") as db:
+        db.create_session("human", "dashboard")
+        db.append_message("human", role="user", content="Как дела с отчётом?")
+        time.sleep(0.01)
+        for i in range(11):
+            db.create_session(f"worker-{i}", "kanban")
+            db.set_session_title(f"worker-{i}", f"Work kanban task t_{i:08x}")
+            db.append_message(f"worker-{i}", role="user", content=f"work kanban task t_{i:08x}")
+        excluded = hide_service_sources(None)
+        latest = db.list_sessions_rich(
+            limit=1, exclude_sources=excluded, order_by_last_active=True
+        )
+        assert [r["id"] for r in latest] == ["human"]
+        assert db.session_count(exclude_sources=excluded) == 1
+        assert db.session_count(
+            source="kanban", exclude_sources=hide_service_sources(None, source="kanban")
+        ) == 11
+        assert db.get_session("worker-10") is not None
+
+
 class TestParseSessionListingArgs:
     def test_plain_listing(self):
         assert parse_session_listing_args("") == (False, False, "", None)

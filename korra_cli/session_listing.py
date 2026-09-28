@@ -15,6 +15,13 @@ from korra_state_common import MAINTENANCE_SESSION_SOURCE
 #: тексту или названию.
 SERVICE_SESSION_SOURCES: tuple[str, ...] = (MAINTENANCE_SESSION_SOURCE, "cron")
 
+#: Запуски исполнителей канбана: разговор с человеком их не начинал, ход работы
+#: читают на карточке задачи, а идущий запуск виден в «В работе». В списке
+#: чатов они вытесняли настоящие разговоры — у главной Нюры «Награды» 28.09
+#: было 11 запусков на один разговор, — и «последний разговор» открывал бы
+#: запуск исполнителя.
+WORKER_SESSION_SOURCES: tuple[str, ...] = ("kanban",)
+
 
 def hide_service_sources(
     exclude_sources: Sequence[str] | None,
@@ -38,7 +45,10 @@ def hide_service_sources(
     requested = {s for s in ([source] if source else []) if s}
     requested.update(s for s in (sources or []) if s)
     merged = list(exclude_sources or [])
-    merged.extend(s for s in SERVICE_SESSION_SOURCES if s not in merged and s not in requested)
+    merged.extend(
+        s for s in (*SERVICE_SESSION_SOURCES, *WORKER_SESSION_SOURCES)
+        if s not in merged and s not in requested
+    )
     return merged or None
 
 

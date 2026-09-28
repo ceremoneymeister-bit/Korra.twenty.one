@@ -123,20 +123,22 @@ def _session_meta(row: dict[str, Any] | None) -> dict[str, Any]:
 
 def _load_profile_snapshot(profile: str, home: Path, now: float) -> dict[str, Any]:
     from korra_cli.web_server import _open_session_db_at_path
-    from korra_cli.session_listing import SERVICE_SESSION_SOURCES, hide_service_sources
+    from korra_cli.session_listing import SERVICE_SESSION_SOURCES, WORKER_SESSION_SOURCES
 
     db_path = home / "state.db"
     if not db_path.is_file():
         return {"metadata": {}, "activity": []}
     db = _open_session_db_at_path(db_path, read_only=True)
     try:
+        # Запуски исполнителей канбана из списка чатов скрыты, но идущий
+        # запуск остаётся в «В работе» со своим названием.
         rows = db.list_sessions_rich(
             limit=100,
             offset=0,
             order_by_last_active=True,
             compact_rows=True,
             include_pinned=True,
-            exclude_sources=hide_service_sources(None),
+            exclude_sources=list(SERVICE_SESSION_SOURCES),
         )
         leases = db.list_session_turn_leases()
         routing = db.load_gateway_routing_entries(
@@ -295,6 +297,10 @@ def _load_profile_snapshot(profile: str, home: Path, now: float) -> dict[str, An
     # replayed as a notification on first rollout.
     for sid, meta in metadata.items():
         if not meta.get("unread"):
+            continue
+        # Завершённый запуск исполнителя — не «новый ответ»: его чата нет в
+        # списке, отметку нечем было бы снять, а результат ждёт на карточке.
+        if meta.get("source") in WORKER_SESSION_SOURCES:
             continue
         activity.append({
             **meta,

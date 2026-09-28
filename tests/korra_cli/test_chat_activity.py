@@ -72,6 +72,25 @@ def test_scheduled_runs_do_not_appear_as_unread_or_running_chats(monkeypatch, tm
     db.close()
 
 
+def test_kanban_worker_is_visible_while_running_but_never_an_unread_answer(
+    monkeypatch, tmp_path
+):
+    # Чата исполнителя нет в списке: «Новый ответ» от него некому было бы
+    # снять. Идущий запуск при этом виден в «В работе» со своим названием.
+    _session(
+        tmp_path, "worker-running", source="kanban", title="Work kanban task t_1",
+        holder=f"pid={os.getpid()}:turn=kanban",
+    )
+    _session(tmp_path, "worker-done", source="kanban", title="Work kanban task t_2")
+    monkeypatch.setattr(chat_activity, "_profile_targets", lambda _: [("default", tmp_path)])
+
+    runs = chat_activity.project_chat_activity([], profile=None, session_id=None)
+
+    assert [(run["session_id"], run["status"], run["title"]) for run in runs] == [
+        ("worker-running", "running", "Work kanban task t_1")
+    ]
+
+
 def test_global_projection_keeps_parallel_channels_and_server_unread(
     monkeypatch, tmp_path
 ):
