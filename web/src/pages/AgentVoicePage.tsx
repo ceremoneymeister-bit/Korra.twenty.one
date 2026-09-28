@@ -8,7 +8,7 @@ import { Label } from "@nous-research/ui/ui/components/label";
 import { Select, SelectOption } from "@nous-research/ui/ui/components/select";
 import { useProfileScope } from "@/contexts/useProfileScope";
 import { usePageHeader } from "@/contexts/usePageHeader";
-import { agentVoiceApi, releaseSpeechClips, type AgentVoiceSettings } from "@/lib/agent-voice";
+import { agentVoiceApi, releaseSpeechClips, type AgentVoiceSettings, type BundledVoice } from "@/lib/agent-voice";
 
 export default function AgentVoicePage() {
   const { profile, profiles } = useProfileScope();
@@ -28,6 +28,8 @@ export function VoiceForm({ profile, name }: { profile: string; name: string }) 
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [voices, setVoices] = useState<{ id: string; name: string }[]>([]);
+  const [bundledVoices, setBundledVoices] = useState<BundledVoice[]>([]);
+  const [catalogError, setCatalogError] = useState(false);
   const [clips, setClips] = useState<string[]>([]);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
@@ -38,9 +40,15 @@ export function VoiceForm({ profile, name }: { profile: string; name: string }) 
       .catch(() => { if (current) setError("Не удалось загрузить настройки голоса. Откройте раздел ещё раз."); });
     return () => { current = false; };
   }, [profile]);
+  useEffect(() => {
+    let current = true;
+    void agentVoiceApi.catalog().then(result => { if (current) setBundledVoices(result.voices); })
+      .catch(() => { if (current) setCatalogError(true); });
+    return () => { current = false; };
+  }, []);
   function change(patch: Partial<AgentVoiceSettings>) {
     setValue(current => current ? { ...current, ...patch } : current);
-    setDirty(true); setNotice(""); setClips([]);
+    setDirty(true); setNotice(""); setError(""); setClips([]);
   }
   async function save() {
     if (!value) return;
@@ -67,6 +75,7 @@ export function VoiceForm({ profile, name }: { profile: string; name: string }) 
     catch { setError("Не удалось создать пробу. Проверьте подключение, модель и голос."); }
     finally { setBusy(false); }
   }
+  const selectedBundledVoice = bundledVoices.find(voice => voice.id === value?.voice);
   return <div data-agent-voice className="mx-auto grid w-full max-w-3xl gap-5 p-4">
     <div className="flex items-center gap-3"><Button ghost size="icon" aria-label="К агентам" onClick={() => navigate(`/agents?agent=${encodeURIComponent(profile || "default")}`)}><ArrowLeft /></Button><div><h2 className="text-xl font-semibold">Голос · {name}</h2><p className="mt-1 text-sm text-muted-foreground">Один голос в кабинете и Telegram.</p></div></div>
     {!value && !error && <p role="status">Загружаю настройки…</p>}
@@ -75,15 +84,25 @@ export function VoiceForm({ profile, name }: { profile: string; name: string }) 
         <label className="flex min-h-[44px] items-center gap-3 text-base font-medium"><input type="checkbox" checked={value.enabled} disabled={busy} onChange={event => change({ enabled: event.target.checked })} />Включить голос агента</label>
         <fieldset disabled={busy} className="grid min-w-0 gap-4">
           <div className="grid gap-2"><Label htmlFor="voice-provider">Сервис озвучки</Label><Select id="voice-provider" value={value.provider} onValueChange={provider => {
-            change({ provider: provider as AgentVoiceSettings["provider"], voice: "", model: provider === "elevenlabs" ? "eleven_multilingual_v2" : "", base_url: "", has_key: false });
+            const first = bundledVoices[0];
+            if (provider === "openrouter_fish" && !first) {
+              setError("Встроенные голоса пока недоступны. Обновите страницу.");
+              return;
+            }
+            change({ provider: provider as AgentVoiceSettings["provider"],
+              voice: provider === "openrouter_fish" ? (first?.id || "") : "",
+              model: provider === "elevenlabs" ? "eleven_multilingual_v2" : provider === "openrouter_fish" ? (first?.model || "") : "",
+              speed: provider === "openrouter_fish" ? (first?.default_speed || 1.05) : 1,
+              base_url: "", has_key: false });
             setKey(""); setClearKey(false); setVoices([]);
-          }}><SelectOption value="elevenlabs">ElevenLabs</SelectOption><SelectOption value="compatible">Свой сервер / совместимый API</SelectOption></Select></div>
-          <p className="text-xs text-muted-foreground">{value.provider === "elevenlabs" ? "Используется ваш аккаунт ElevenLabs. Озвучка и пробы расходуют его лимит." : "Подключите отдельно установленный сервис с API /v1/audio/speech. Модель выбирается на вашем сервере; её условия использования действуют отдельно."}</p>
+          }}><SelectOption value="openrouter_fish">Голоса Korra · Fish Audio</SelectOption><SelectOption value="elevenlabs">ElevenLabs</SelectOption><SelectOption value="compatible">Свой сервер / совместимый API</SelectOption></Select></div>
+          {catalogError && value.provider === "openrouter_fish" && <p role="alert" className="text-sm text-destructive">Не удалось загрузить встроенные голоса. Обновите страницу.</p>}
+          <p className="text-xs text-muted-foreground">{value.provider === "openrouter_fish" ? "Для синтеза нужен ваш OpenRouter API-ключ. Каждый голосовой ответ и проба расходуют средства вашего аккаунта." : value.provider === "elevenlabs" ? "Используется ваш аккаунт ElevenLabs. Озвучка и пробы расходуют его лимит." : "Подключите отдельно установленный сервис с API /v1/audio/speech. Модель выбирается на вашем сервере; её условия использования действуют отдельно."}</p>
           {value.provider === "compatible" && <div className="grid gap-2"><Label htmlFor="voice-url">Адрес API</Label><Input id="voice-url" value={value.base_url} placeholder="http://voice-server:8000/v1" onChange={e => change({ base_url: e.target.value })} /><p className="text-xs text-muted-foreground">Адрес должен быть доступен серверу Korra.</p></div>}
-          <div className="grid gap-2"><Label htmlFor="voice-key">API-ключ {value.provider === "compatible" ? "· если требуется" : ""}</Label><Input id="voice-key" type="password" autoComplete="new-password" value={key} placeholder={value.has_key && !clearKey ? "Ключ сохранён · оставьте пустым, чтобы сохранить" : "Вставьте ключ сервиса"} onChange={e => { setKey(e.target.value); setClearKey(false); setDirty(true); }} />{value.has_key && <label className="flex min-h-[44px] items-center gap-2 text-xs"><input type="checkbox" checked={clearKey} onChange={e => { setClearKey(e.target.checked); setDirty(true); }} />Удалить сохранённый ключ</label>}<p className="text-xs text-muted-foreground">Хранится на сервере только у этого агента.</p></div>
-          <div className="grid gap-2"><Label htmlFor="voice-model">Модель озвучки</Label>{value.provider === "elevenlabs" ? <Select id="voice-model" value={value.model} onValueChange={model => change({ model })}><SelectOption value="eleven_multilingual_v2">Multilingual v2 · выразительность</SelectOption><SelectOption value="eleven_flash_v2_5">Flash v2.5 · скорость</SelectOption>{!["eleven_multilingual_v2", "eleven_flash_v2_5"].includes(value.model) && <SelectOption value={value.model}>{value.model}</SelectOption>}</Select> : <Input id="voice-model" value={value.model} placeholder="Имя модели в вашем сервисе" onChange={e => change({ model: e.target.value })} />}</div>
-          <div className="grid gap-2"><Label htmlFor="voice-id">Голос</Label>{voices.length > 0 ? <Select id="voice-id" value={value.voice} onValueChange={voice => change({ voice })}><SelectOption value="">Выберите голос</SelectOption>{voices.map(voice => <SelectOption key={voice.id} value={voice.id}>{voice.name}</SelectOption>)}</Select> : <Input id="voice-id" value={value.voice} placeholder="ID голоса в выбранном сервисе" onChange={e => change({ voice: e.target.value })} />}{value.provider === "elevenlabs" && <><Button ghost size="sm" className="justify-self-start" disabled={dirty || !value.has_key} onClick={() => void loadVoices()}>Загрузить мои голоса</Button>{dirty && <p className="text-xs text-muted-foreground">Сохраните подключение, чтобы загрузить список голосов. Можно сначала сохранить с выключенным голосом.</p>}</>}</div>
-          <div className="grid gap-2"><Label htmlFor="voice-speed">Скорость речи</Label><Select id="voice-speed" value={String(value.speed)} onValueChange={speed => change({ speed: Number(speed) })}>{[{ value: 0.7, label: "Медленно · 0,7×" }, { value: 0.85, label: "Спокойно · 0,85×" }, { value: 1, label: "Обычная · 1×" }, { value: 1.1, label: "Бодро · 1,1×" }, { value: 1.2, label: "Быстро · 1,2×" }, ...(![0.7, 0.85, 1, 1.1, 1.2].includes(value.speed) ? [{ value: value.speed, label: `${value.speed}×` }] : [])].map(item => <SelectOption key={item.value} value={String(item.value)}>{item.label}</SelectOption>)}</Select></div>
+          <div className="grid gap-2"><Label htmlFor="voice-key">{value.provider === "openrouter_fish" ? "OpenRouter API-ключ" : "API-ключ"} {value.provider === "compatible" ? "· если требуется" : ""}</Label><Input id="voice-key" type="password" autoComplete="new-password" value={key} placeholder={value.has_key && !clearKey ? "Ключ сохранён · оставьте пустым, чтобы сохранить" : "Вставьте ключ сервиса"} onChange={e => { setKey(e.target.value); setClearKey(false); setDirty(true); }} />{value.has_key && <label className="flex min-h-[44px] items-center gap-2 text-xs"><input type="checkbox" checked={clearKey} onChange={e => { setClearKey(e.target.checked); setDirty(true); }} />Удалить сохранённый ключ</label>}<p className="text-xs text-muted-foreground">Хранится на сервере только у этого агента.</p></div>
+          {value.provider !== "openrouter_fish" && <div className="grid gap-2"><Label htmlFor="voice-model">Модель озвучки</Label>{value.provider === "elevenlabs" ? <Select id="voice-model" value={value.model} onValueChange={model => change({ model })}><SelectOption value="eleven_multilingual_v2">Multilingual v2 · выразительность</SelectOption><SelectOption value="eleven_flash_v2_5">Flash v2.5 · скорость</SelectOption>{!["eleven_multilingual_v2", "eleven_flash_v2_5"].includes(value.model) && <SelectOption value={value.model}>{value.model}</SelectOption>}</Select> : <Input id="voice-model" value={value.model} placeholder="Имя модели в вашем сервисе" onChange={e => change({ model: e.target.value })} />}</div>}
+          <div className="grid gap-2"><Label htmlFor="voice-id">Голос</Label>{value.provider === "openrouter_fish" ? <Select id="voice-id" value={value.voice} onValueChange={id => { const selected = bundledVoices.find(voice => voice.id === id); if (selected) change({ voice: id, model: selected.model, speed: selected.default_speed }); }}><SelectOption value="">Выберите голос</SelectOption>{bundledVoices.map(voice => <SelectOption key={voice.id} value={voice.id}>{voice.name}</SelectOption>)}</Select> : voices.length > 0 ? <Select id="voice-id" value={value.voice} onValueChange={voice => change({ voice })}><SelectOption value="">Выберите голос</SelectOption>{voices.map(voice => <SelectOption key={voice.id} value={voice.id}>{voice.name}</SelectOption>)}</Select> : <Input id="voice-id" value={value.voice} placeholder="ID голоса в выбранном сервисе" onChange={e => change({ voice: e.target.value })} />}{value.provider === "elevenlabs" && <><Button ghost size="sm" className="justify-self-start" disabled={dirty || !value.has_key} onClick={() => void loadVoices()}>Загрузить мои голоса</Button>{dirty && <p className="text-xs text-muted-foreground">Сохраните подключение, чтобы загрузить список голосов. Можно сначала сохранить с выключенным голосом.</p>}</>}{value.provider === "openrouter_fish" && selectedBundledVoice && <><p className="text-xs text-muted-foreground">{selectedBundledVoice.description} · Fish Audio S2.1 Pro</p><audio controls preload="none" src={selectedBundledVoice.sample_url} aria-label={`Образец голоса ${selectedBundledVoice.name}`} className="w-full" /><p className="text-xs text-muted-foreground">Образец можно послушать без ключа. «Проба голоса» ниже создаёт новый платный синтез.</p></>}</div>
+          <div className="grid gap-2"><Label htmlFor="voice-speed">Скорость речи</Label><Select id="voice-speed" value={String(value.speed)} onValueChange={speed => change({ speed: Number(speed) })}>{[{ value: 0.7, label: "Медленно · 0,7×" }, { value: 0.85, label: "Спокойно · 0,85×" }, { value: 1, label: "Обычная · 1×" }, { value: 1.05, label: "Разговорно · 1,05×" }, { value: 1.1, label: "Бодро · 1,1×" }, { value: 1.2, label: "Быстро · 1,2×" }, ...(![0.7, 0.85, 1, 1.05, 1.1, 1.2].includes(value.speed) ? [{ value: value.speed, label: `${value.speed}×` }] : [])].map(item => <SelectOption key={item.value} value={String(item.value)}>{item.label}</SelectOption>)}</Select></div>
         </fieldset>
       </CardContent></Card>
       <Card><CardContent className="grid gap-4 p-5">

@@ -5,12 +5,47 @@ read only from this profile's .env; another agent's process env is never used.
 """
 from __future__ import annotations
 
+import base64
+import hashlib
+import json
 from pathlib import Path
 from urllib.parse import quote, urlsplit
 
 from korra_constants import get_hermes_home
 
-VOICE_KEYS = {"elevenlabs": "KORRA_VOICE_ELEVENLABS_KEY", "compatible": "KORRA_VOICE_HTTP_KEY"}
+VOICE_KEYS = {
+    "elevenlabs": "KORRA_VOICE_ELEVENLABS_KEY",
+    "compatible": "KORRA_VOICE_HTTP_KEY",
+    "openrouter_fish": "KORRA_VOICE_OPENROUTER_KEY",
+}
+VOICE_CATALOG_ROOT = Path(__file__).resolve().parent / "data" / "voices"
+
+
+def bundled_voices():
+    """Return only complete bundled profiles; a release must ship every asset."""
+    voices = []
+    for manifest in sorted(VOICE_CATALOG_ROOT.glob("*/manifest.json")):
+        profile = json.loads(manifest.read_text(encoding="utf-8"))
+        if profile.get("id") != manifest.parent.name:
+            raise ValueError("Некорректный ID встроенного голоса")
+        for filename, expected in profile["sha256"].items():
+            if filename not in {"reference.wav", "reference.txt", "sample.mp3"}:
+                raise ValueError("Некорректный файл встроенного голоса")
+            if hashlib.sha256((manifest.parent / filename).read_bytes()).hexdigest() != expected:
+                raise ValueError("Повреждён встроенный голос " + profile["id"])
+        voices.append(profile)
+    return voices
+
+
+def bundled_voice(voice_id):
+    return next((voice for voice in bundled_voices() if voice["id"] == voice_id), None)
+
+
+def bundled_voice_file(voice_id, filename):
+    voice = bundled_voice(voice_id)
+    if voice is None or filename not in voice["sha256"]:
+        raise ValueError("Встроенный голос недоступен")
+    return VOICE_CATALOG_ROOT / voice_id / filename
 
 
 def settings(config=None):
@@ -67,6 +102,40 @@ def generate_compatible(text, output_path, tts_config):
     if speed != 1:
         payload["speed"] = speed
     return _request_audio(endpoint + "/audio/speech", payload, headers, output_path)
+
+
+def generate_openrouter_fish(text, output_path, tts_config):
+    """Synthesize a selected bundled voice using this agent's OpenRouter key."""
+    section = tts_config.get("openrouter_fish") or {}
+    voice = bundled_voice(str(section.get("voice") or ""))
+    if voice is None or section.get("model") != voice["model"]:
+        raise ValueError("Выберите встроенный голос Fish Audio")
+    key = profile_key("openrouter_fish")
+    if not key:
+        raise ValueError("Добавьте свой OpenRouter API-ключ")
+    speed = float(section.get("speed", voice["default_speed"]))
+    if not 0.7 <= speed <= 1.2:
+        raise ValueError("Скорость речи вне допустимого диапазона")
+    reference = bundled_voice_file(voice["id"], voice["reference_file"]).read_bytes()
+    reference_text = bundled_voice_file(voice["id"], voice["reference_text_file"]).read_text(encoding="utf-8").strip()
+    payload = {
+        "model": voice["model"],
+        "input": text,
+        "response_format": "mp3",
+        "input_references": [
+            {"type": "input_audio", "input_audio": {"data": "data:audio/wav;base64," + base64.b64encode(reference).decode("ascii")}},
+            {"type": "text", "text": reference_text},
+        ],
+        "provider": {
+            "only": ["fish-audio"], "allow_fallbacks": False,
+            "max_price": {"prompt": 0.000015, "completion": 0},
+            "options": {"fish-audio": {"prosody": {"speed": speed}}},
+        },
+    }
+    return _request_audio(
+        "https://openrouter.ai/api/v1/audio/speech", payload,
+        {"Authorization": f"Bearer {key}", "Accept": "audio/*"}, output_path,
+    )
 
 
 def generate_elevenlabs(text, output_path, tts_config):

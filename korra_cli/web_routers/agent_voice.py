@@ -9,7 +9,7 @@ from threading import BoundedSemaphore
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from korra_cli import agent_voice
@@ -24,7 +24,7 @@ speech_slots = BoundedSemaphore(2)
 class VoiceUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enabled: bool = False
-    provider: Literal["elevenlabs", "compatible"] = "elevenlabs"
+    provider: Literal["elevenlabs", "compatible", "openrouter_fish"] = "elevenlabs"
     voice: str = Field(default="", max_length=200)
     model: str = Field(default="eleven_multilingual_v2", max_length=200)
     base_url: str = Field(default="", max_length=2000)
@@ -56,6 +56,31 @@ def read_settings():
     }
 
 
+@router.get("/api/voices")
+async def get_bundled_voices():
+    try:
+        return {"voices": [
+            {"id": voice["id"], "name": voice["name"], "description": voice["description"],
+             "model": voice["model"], "default_speed": voice["default_speed"],
+             "sample_url": f"/api/voices/{voice['id']}/sample"}
+            for voice in agent_voice.bundled_voices()
+        ]}
+    except (OSError, ValueError, KeyError, json.JSONDecodeError):
+        raise HTTPException(503, "Каталог голосов недоступен") from None
+
+
+@router.get("/api/voices/{voice_id}/sample")
+async def get_bundled_voice_sample(voice_id: str):
+    try:
+        path = agent_voice.bundled_voice_file(voice_id, "sample.mp3")
+        audio = path.read_bytes()
+    except ValueError:
+        raise HTTPException(404, "Голос не найден") from None
+    except (OSError, KeyError, json.JSONDecodeError):
+        raise HTTPException(503, "Образец голоса недоступен") from None
+    return Response(audio, media_type="audio/mpeg", headers={"Cache-Control": "private, max-age=86400"})
+
+
 @router.get("/api/profiles/{name}/voice")
 async def get_voice(name: str):
     def read():
@@ -75,6 +100,13 @@ async def put_voice(name: str, body: VoiceUpdate):
             data["base_url"] = agent_voice.validate_endpoint(body.base_url)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from None
+    if body.provider == "openrouter_fish" and data["voice"]:
+        try:
+            selected = agent_voice.bundled_voice(data["voice"])
+        except (OSError, ValueError, KeyError, json.JSONDecodeError):
+            raise HTTPException(503, "Каталог голосов недоступен") from None
+        if selected is None or data["model"] != selected["model"]:
+            raise HTTPException(400, "Выберите встроенный голос Fish Audio")
     if body.api_key is not None and (not body.api_key.isascii() or "\n" in body.api_key or "\r" in body.api_key):
         raise HTTPException(400, "Ключ содержит недопустимые символы")
 
@@ -85,6 +117,8 @@ async def put_voice(name: str, body: VoiceUpdate):
                 raise HTTPException(400, "Укажите голос и модель")
             if body.enabled and body.provider == "elevenlabs" and not key:
                 raise HTTPException(400, "Добавьте свой API-ключ ElevenLabs")
+            if body.enabled and body.provider == "openrouter_fish" and not key:
+                raise HTTPException(400, "Добавьте свой OpenRouter API-ключ")
             if body.enabled and body.provider == "compatible" and not data["base_url"]:
                 raise HTTPException(400, "Укажите адрес сервиса озвучки")
             cfg = load_config()

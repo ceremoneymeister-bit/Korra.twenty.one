@@ -8,6 +8,33 @@ from pathlib import Path
 import pytest
 
 
+def test_bundled_fish_voice_becomes_telegram_opus(tmp_path, monkeypatch):
+    if not shutil.which("ffmpeg"):
+        pytest.skip("ffmpeg required for Telegram conversion")
+    import httpx
+    from korra_cli.config import save_config, save_env_value
+    from tools.tts_tool import text_to_speech_tool
+    source = tmp_path / "source.mp3"
+    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi",
+                    "-i", "sine=frequency=440:duration=0.1", "-y", str(source)], check=True)
+    calls = []
+    def service(request):
+        calls.append(request)
+        return httpx.Response(200, content=source.read_bytes(), headers={"content-type": "audio/mpeg"})
+    original_client = httpx.Client
+    monkeypatch.setattr(httpx, "Client", lambda **kw: original_client(transport=httpx.MockTransport(service), **kw))
+    monkeypatch.setattr("gateway.session_context.get_session_env", lambda key, default="": "telegram" if key == "KORRA_SESSION_PLATFORM" else default)
+    save_config({"voice": {"agent_voice": {"enabled": True, "provider": "openrouter_fish"}},
+                 "tts": {"provider": "openrouter_fish", "openrouter_fish": {
+                     "voice": "navigator", "model": "fish-audio/s2.1-pro", "speed": 1.05}}})
+    save_env_value("KORRA_VOICE_OPENROUTER_KEY", "own-key")
+    result = json.loads(text_to_speech_tool("Привет", output_path=str(tmp_path / "reply.ogg")))
+    assert result["success"], result
+    assert result["voice_compatible"] is True
+    assert Path(result["file_path"]).read_bytes().startswith(b"OggS")
+    assert len(calls) == 1 and calls[0].headers["authorization"] == "Bearer own-key"
+
+
 def test_compatible_http_through_real_tts_and_telegram_opus(tmp_path, monkeypatch):
     if not shutil.which("ffmpeg"):
         pytest.skip("ffmpeg required for Telegram conversion")

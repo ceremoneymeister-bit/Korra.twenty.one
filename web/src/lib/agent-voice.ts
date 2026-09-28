@@ -2,7 +2,7 @@ import { fetchJSON } from "@/lib/api";
 
 export interface AgentVoiceSettings {
   enabled: boolean;
-  provider: "elevenlabs" | "compatible";
+  provider: "elevenlabs" | "compatible" | "openrouter_fish";
   voice: string;
   model: string;
   base_url: string;
@@ -12,12 +12,22 @@ export interface AgentVoiceSettings {
   has_key: boolean;
 }
 
+export interface BundledVoice {
+  id: string;
+  name: string;
+  description: string;
+  model: string;
+  default_speed: number;
+  sample_url: string;
+}
+
 const voicePath = (profile: string) => `/api/profiles/${encodeURIComponent(profile || "default")}/voice`;
 export function releaseSpeechClips(clips: string[]) {
   for (const clip of clips) if (clip.startsWith("blob:")) URL.revokeObjectURL(clip);
 }
 
 export const agentVoiceApi = {
+  catalog: () => fetchJSON<{ voices: BundledVoice[] }>("/api/voices"),
   get: (profile: string) => fetchJSON<AgentVoiceSettings>(voicePath(profile)),
   save: (profile: string, settings: AgentVoiceSettings, key: string, clearKey: boolean) => {
     const data: Partial<AgentVoiceSettings> = { ...settings };

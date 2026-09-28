@@ -275,6 +275,7 @@ DEFAULT_OUTPUT_DIR = _get_default_output_dir()
 # ``tts.<provider>.max_text_length`` in config.yaml.
 # ---------------------------------------------------------------------------
 PROVIDER_MAX_TEXT_LENGTH: Dict[str, int] = {
+    "openrouter_fish": 5000,  # bounded like the managed voice API
     "edge": 5000,         # edge-tts practical sync limit
     "openai": 4096,       # https://platform.openai.com/docs/guides/text-to-speech
     "xai": 15000,         # https://docs.x.ai/developers/model-capabilities/audio/text-to-speech
@@ -779,6 +780,7 @@ def _resolve_minimax_tts_runtime(
 # interpreted as a reference to ``tts.providers.<name>``.
 BUILTIN_TTS_PROVIDERS = frozenset({
     "compatible",
+    "openrouter_fish",
     "edge",
     "elevenlabs",
     "openai",
@@ -3294,6 +3296,10 @@ def _text_to_speech_single(
             from korra_cli.agent_voice import generate_compatible
             file_str = generate_compatible(text, file_str, tts_config)
 
+        elif provider == "openrouter_fish":
+            from korra_cli.agent_voice import generate_openrouter_fish
+            file_str = generate_openrouter_fish(text, file_str, tts_config)
+
         elif provider == "elevenlabs":
             try:
                 from korra_cli.agent_voice import settings as agent_voice_settings
@@ -3462,14 +3468,14 @@ def _text_to_speech_single(
                 voice_compatible = file_str.endswith(".ogg")
         elif (
             want_opus
-            and provider in {"edge", "neutts", "minimax", "xai", "kittentts", "piper"}
+            and provider in {"edge", "neutts", "minimax", "xai", "kittentts", "piper", "openrouter_fish"}
             and not file_str.endswith(".ogg")
         ):
             opus_path = _convert_to_opus(file_str)
             if opus_path:
                 file_str = opus_path
                 voice_compatible = True
-        elif provider in {"elevenlabs", "openai", "mistral", "gemini", "compatible"}:
+        elif provider in {"elevenlabs", "openai", "mistral", "gemini", "compatible", "openrouter_fish"}:
             voice_compatible = want_opus and file_str.endswith(".ogg")
 
         file_size = os.path.getsize(file_str)
@@ -3754,6 +3760,11 @@ def check_tts_requirements() -> bool:
         except ValueError:
             return False
         return bool(section.get("model") and section.get("voice"))
+    if provider == "openrouter_fish":
+        from korra_cli.agent_voice import bundled_voice
+        section = tts_config.get("openrouter_fish") or {}
+        voice = bundled_voice(str(section.get("voice") or ""))
+        return bool(voice and section.get("model") == voice["model"] and profile_key("openrouter_fish"))
     command_config = _resolve_command_provider_config(provider, tts_config)
     if command_config is not None:
         return True

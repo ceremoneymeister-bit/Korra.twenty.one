@@ -1,0 +1,15 @@
+{
+  "id": "navigator",
+  "name": "Навигатор",
+  "description": "Мужской голос, живой разговорный темп",
+  "model": "fish-audio/s2.1-pro",
+  "default_speed": 1.05,
+  "reference_file": "reference.wav",
+  "reference_text_file": "reference.txt",
+  "sample_file": "sample.mp3",
+  "sha256": {
+    "reference.wav": "0cae14a9421df33626741420fca6d8eae0ef1a57c138b5bf2e3aa3a1a4b5ea0f",
+    "reference.txt": "65492421da212c2c12ae8823acbe006e2b932eb1fe74223ceb06f2dd1ca83053",
+    "sample.mp3": "154a056f89ac699ecd3f1009f911dd59ad5d2abf23a4ec8d9380c8d7c0745427"
+  }
+}
