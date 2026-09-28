@@ -3146,6 +3146,7 @@ def _deliver_result(
     *,
     decision_session_id: str = "",
     failure_notice: bool = False,
+    execution_id: str = "",
 ) -> Optional[str]:
     """
     Deliver job output to the configured target(s) (origin chat, specific platform, etc.).
@@ -3302,6 +3303,22 @@ def _deliver_result(
             from cron.recipients import mask_outgoing_text
 
             target_content = mask_outgoing_text(cleaned_delivery_content)
+
+        # Тот же текст этому адресату уже ушёл из этого выполнения через
+        # `korra send` (или сервис мог его принять): вторая копия — дубль.
+        # Неопределённый исход не делаем ошибкой доставки: досылка по ошибке
+        # сама отправила бы второй раз; скрипт о нём уже знает.
+        if execution_id and not failure_notice:
+            from cron.recipients import recorded_send
+
+            label = f"{platform_name}:{chat_id}" + (f":{thread_id}" if thread_id not in (None, "") else "")
+            prior = recorded_send(execution_id, label, content)
+            if prior:
+                logger.info(
+                    "Job '%s': result already sent to %s in this execution (%s) — not delivered again",
+                    job["id"], label, prior.get("state"),
+                )
+                continue
 
         # bot-chat targets don't ride a gateway adapter: the output becomes a
         # real inbound turn in the target profile's canonical Bot Chat via the
@@ -7784,6 +7801,9 @@ def _run_one_job_body(
                                 job, execution_id
                             ),
                             failure_notice=not success,
+                            # Журнал отправок выполнения нужен результату, а не
+                            # уведомлению о сбое: оно уходит только владельцу.
+                            **({"execution_id": str(execution_id)} if success and execution_id else {}),
                         )
                         if delivery_error and delivery_error.startswith(
                             _WAITING_DECISION_PREFIX

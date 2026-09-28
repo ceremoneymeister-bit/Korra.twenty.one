@@ -1529,3 +1529,19 @@ it("урезанный сервером результат инструмент�
   expect(turn.toolCalls?.[0]?.summary).toBe("{\"output\": \"не парсить\"}");
   expect(current.older).toEqual({ hasOlder: false, loading: false, failed: false, archivedBefore: true });
 });
+
+it("новый чат с сорвавшимся первым сообщением после F5 открывается с ним, а не уводит в прошлый (четвёртое чистое ревью Astra, P1-2)", async () => {
+  const { getChatRuns } = await import("@/lib/chat-runs");
+  vi.mocked(getChatRuns).mockResolvedValue([]);
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ approvals: [] }))));
+  saveChatOutbox({ messageId: "first-message-1234567", sessionId: "not-created-yet", profile: "", text: "Подготовь договор", attachments: [], createdAt: 500, status: "failed" });
+  vi.spyOn(api, "getSessionMessages").mockImplementation(async (id: string) => {
+    if (id === "not-created-yet") throw new Error("404: Session not found");
+    return { session_id: id, messages: [{ id: 1, role: "user", content: "старый вопрос" }] as SessionMessage[] };
+  });
+  vi.spyOn(api, "getSessions").mockResolvedValue({ sessions: [{ id: "existing-chat" }], total: 1 } as never);
+  await act(async () => { await current.loadSession("not-created-yet"); });
+  expect(current.sessionId).toBe("not-created-yet");
+  expect(current.messages.map(m => m.content)).toEqual(["Подготовь договор"]);
+  expect(current.messages[0]?.delivery).toBe("failed");
+});

@@ -226,12 +226,14 @@ async function renderKeyed(items: Array<[string, string?]>, older: { hasOlder: b
 }
 
 it("после F5 ответ, пришедший живым потоком, находится по ключу хода (третье чистое ревью Astra, P2-1)", async () => {
-  sessionStorage.setItem("chat:scroll", JSON.stringify({ id: "asst-live-uuid", offset: 40, key: "msg-client-1" }));
+  sessionStorage.setItem("chat:scroll", JSON.stringify({ id: "asst-live-uuid", offset: 40, key: "assistant:msg-client-1" }));
   const load = vi.fn();
   const viewport = await renderKeyed([], { hasOlder: false, loading: false, failed: false, load });
   placeMessages(viewport, { "c-h1": 0, "c-h3": 400, "c-h4": 800 });
-  await renderKeyed([["c-h1"], ["c-h3", "msg-client-1"], ["c-h4", "msg-client-1"]], { hasOlder: false, loading: false, failed: false, load });
-  expect(viewport.scrollTop).toBe(440);
+  // Вопрос и ответ одного хода — разные ключи: место встаёт по ответу (800 + 40),
+  // а не по вопросу (четвёртое чистое ревью Astra, P2-1).
+  await renderKeyed([["c-h1"], ["c-h3", "user:msg-client-1"], ["c-h4", "assistant:msg-client-1"]], { hasOlder: false, loading: false, failed: false, load });
+  expect(viewport.scrollTop).toBe(840);
   sessionStorage.clear();
 });
 

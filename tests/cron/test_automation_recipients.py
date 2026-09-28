@@ -871,3 +871,24 @@ def test_a_script_job_sends_through_the_same_boundary_as_an_agent(store, monkeyp
     assert result["local"] == []  # ничего не ушло мимо шлюза
     assert result["decisions"] == 2
     assert recipients._LIVE_RUNS == {}  # секрет отозван вместе с концом скрипта
+
+
+@pytest.mark.parametrize("first", [{"success": True, "message_id": "1"}, TimeoutError("accepted; acknowledgement lost")])
+def test_the_result_is_not_delivered_again_after_the_run_sent_it(live_send, monkeypatch, first):
+    """Четвёртое чистое ревью Astra, P1-1: скрипт отправил отчёт через
+    `korra send` и напечатал его же — автодоставка того же текста тому же
+    адресату не даёт вторую копию, даже если исход первой неопределённый.
+    Другой текст уходит."""
+    from cron.scheduler import _deliver_result
+
+    token, grant, cfg, job = live_send
+    sent = _transport(monkeypatch, first)
+    recipients.send_once_for_live_run(token, grant, "telegram:555", "Отчёт готов")
+    assert len(sent) == 1
+    delivered = AsyncMock(return_value={"success": True})
+    with patch("tools.send_message_tool._send_to_platform", new=delivered):
+        scheduled = {**job, "deliver": "telegram:555"}
+        assert _deliver_result(scheduled, "Отчёт готов", execution_id=grant["execution_id"]) is None
+        assert delivered.await_count == 0
+        assert _deliver_result(scheduled, "Другой отчёт", execution_id=grant["execution_id"]) is None
+        assert delivered.await_count == 1

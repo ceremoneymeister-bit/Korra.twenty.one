@@ -629,7 +629,7 @@ export function BubbleChatTranscript({
               m.role === "user" ? (
                 <UserBubble
                   key={m.id}
-                  chatKey={m.clientMessageId}
+                  chatKey={m.clientMessageId ? `user:${m.clientMessageId}` : undefined}
                   message={m}
                   busy={busy}
                   onRetry={() => { if (sessionId && m.clientMessageId) onRetry?.({ sessionId, messageId: m.clientMessageId }); }}
@@ -639,10 +639,10 @@ export function BubbleChatTranscript({
                 <AssistantBubble
                   voiceSettings={voiceSettings} profile={profile} active={active}
                   key={m.id}
-                  // Живой ответ и он же после F5 имеют разные id; ключ хода —
-                  // id сообщения, на которое агент отвечает (третье чистое
-                  // ревью Astra, P2-1).
-                  chatKey={messages[i - 1]?.role === "user" ? messages[i - 1]?.clientMessageId : undefined}
+                  // Живой ответ и он же после F5 имеют разные id; ключ — роль и
+                  // id сообщения, на которое агент отвечает: у вопроса свой
+                  // (третье и четвёртое чистое ревью Astra, P2-1).
+                  chatKey={messages[i - 1]?.role === "user" && messages[i - 1]?.clientMessageId ? `assistant:${messages[i - 1]?.clientMessageId}` : undefined}
                   message={m}
                   streaming={
                     streaming === true && lastIsAssistant && i === lastIdx

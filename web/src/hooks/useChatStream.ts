@@ -1068,6 +1068,11 @@ export function useChatStream(
         throw error;
       });
       if (!current()) return;
+      // Новый чат, первое сообщение которого не дошло до сервера: сессии ещё
+      // нет, 404 закономерен. Это не пропавший разговор — открываем его с
+      // сохранённым сообщением и повтором, а не уводим в прошлый (четвёртое
+      // чистое ревью Astra, P1-2).
+      if (missing && !background && loadChatOutboxRecords(profile ?? "", sessionId).length > 0) missing = false;
       if (missing && !background) {
         window.clearTimeout(historyTimer);
         // Every way of opening a chat — a pick, a link from the notification,

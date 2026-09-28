@@ -409,6 +409,22 @@ def send_once_for_live_run(token: str, grant: dict, target: str, message: str,
             _RUN_SENDS_CHANGED.notify_all()
 
 
+def recorded_send(execution_id: str, target: str, message: str) -> dict | None:
+    """Отправка этого текста этому адресату, уже сделанная или, возможно,
+    принятая сервисом в этом выполнении, — тем же ключом, что у
+    :func:`send_once_for_live_run`. Автодоставка результата сверяется с ней,
+    чтобы скрипт, отправивший отчёт через `korra send` и напечатавший его же,
+    не дал получателю вторую копию (четвёртое чистое ревью Astra, P1-1)."""
+    if not execution_id:
+        return None
+    key = _send_key(target, mask_outgoing_text(message))
+    with _LIVE_RUNS_LOCK:
+        entry = (_RUN_SENDS.get(str(execution_id)) or {}).get(key)
+    if entry and entry.get("state") in ("sent", "unknown"):
+        return dict(entry)
+    return None
+
+
 def target_label(platform: str, chat_id, thread_id=None) -> str:
     label = f"{str(platform or '').strip().lower()}:{str(chat_id or '').strip()}"
     if thread_id not in (None, ""):
