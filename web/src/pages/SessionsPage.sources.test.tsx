@@ -35,7 +35,7 @@ vi.mock("thinking-orbs", () => ({
   ),
 }));
 
-import { isAutomationSource, sourceLabel } from "./SessionsPage";
+import { isAutomationSource, sessionSourceQuery, sourceLabel } from "./SessionsPage";
 
 describe("таксономия источников истории", () => {
   it("разговор из панели не считается автоматизацией", () => {
@@ -71,5 +71,29 @@ describe("таксономия источников истории", () => {
 
   it("служебный класс подписан по-русски", () => {
     expect(sourceLabel("maintenance")).toBe("Обслуживание");
+  });
+});
+
+describe("фильтр «Истории» по выбранным источникам (0.21.15, ревью Astra §2.2)", () => {
+  const all = ["dashboard", "telegram", "kanban", "cron"];
+
+  it("несколько выбранных источников уходят явным набором, а не исключением остальных", () => {
+    expect(sessionSourceQuery(["dashboard", "kanban"], "all", all)).toEqual({ sources: ["dashboard", "kanban"] });
+  });
+
+  it("один выбранный — своим источником", () => {
+    expect(sessionSourceQuery(["kanban"], "all", all)).toEqual({ source: "kanban" });
+  });
+
+  it("запуски канбана — автоматизация, и раздел автоматизаций просит их явно", () => {
+    expect(isAutomationSource("kanban")).toBe(true);
+    expect(sourceLabel("kanban")).toBe("Канбан");
+    const query = sessionSourceQuery(null, "automation", all);
+    expect(query.sources).toEqual(expect.arrayContaining(["cron", "kanban"]));
+    expect(query.sources).not.toContain("maintenance");
+  });
+
+  it("раздел чатов по-прежнему исключает автоматизации", () => {
+    expect(sessionSourceQuery(null, "chats", all).excludeSources).toEqual(expect.arrayContaining(["cron", "kanban"]));
   });
 });

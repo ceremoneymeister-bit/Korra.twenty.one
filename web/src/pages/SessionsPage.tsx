@@ -118,6 +118,8 @@ const SOURCE_CONFIG: Record<string, { icon: typeof Terminal; color: string }> =
 
 const AUTOMATION_SESSION_SOURCES = [
   "cron",
+  // Запуски исполнителей канбана — работа по карточке, не разговор человека.
+  "kanban",
   "tool",
   "api_server",
   "acp",
@@ -134,6 +136,37 @@ type SourceSelectionsByCategory = Record<SessionFilterCategory, string[] | null>
 
 export function isAutomationSource(source: string): boolean {
   return AUTOMATION_SESSION_SOURCE_SET.has(source);
+}
+
+/**
+ * Параметры списка «Истории» для выбранных источников и раздела.
+ *
+ * Выбранное передаётся явным набором `sources`. Через исключение остальных
+ * его передавать нельзя: сервер сам прячет служебные классы (`cron`,
+ * `kanban`, обслуживание), пока их не запросили явно, и выбранный вместе с
+ * «Панелью» канбан пропадал (0.21.15, ревью Astra §2.2).
+ */
+export function sessionSourceQuery(
+  selectedSources: string[] | null,
+  category: SessionFilterCategory,
+  allSourceNames: string[],
+): { source?: string; sources?: string[]; excludeSources?: string[] } {
+  if (selectedSources !== null) {
+    if (selectedSources.length === 0) {
+      return allSourceNames.length > 0
+        ? { excludeSources: allSourceNames }
+        : { source: NO_MATCHING_SESSION_SOURCE };
+    }
+    if (selectedSources.length === 1) return { source: selectedSources[0] };
+    return { sources: selectedSources };
+  }
+  if (category === "chats") return { excludeSources: AUTOMATION_SESSION_SOURCES };
+  if (category === "automation") {
+    // Раздел автоматизаций сам по себе — явный запрос их запусков. Ходы
+    // обслуживания установки в нём не нужны; их можно выбрать отдельно.
+    return { sources: AUTOMATION_SESSION_SOURCES.filter(source => source !== "maintenance") };
+  }
+  return {};
 }
 
 function sourceBelongsToCategory(
@@ -176,6 +209,8 @@ export function sourceLabel(source: string): string {
       return "Обсуждение задачи";
     case "cron":
       return "Расписание";
+    case "kanban":
+      return "Канбан";
     case "tool":
       return "Инструмент";
     case "maintenance":
@@ -919,35 +954,10 @@ export default function SessionsPage() {
     [allSourceOptions],
   );
 
-  const sessionQueryOptions = useMemo(() => {
-    if (selectedSources !== null) {
-      if (selectedSources.length === 0) {
-        return allSourceNames.length > 0
-          ? { excludeSources: allSourceNames }
-          : { source: NO_MATCHING_SESSION_SOURCE };
-      }
-      if (selectedSources.length === 1) {
-        return { source: selectedSources[0] };
-      }
-      const selected = new Set(selectedSources);
-      const excludedSources = allSourceNames.filter(
-        (source) => !selected.has(source),
-      );
-      return excludedSources.length > 0 ? { excludeSources: excludedSources } : {};
-    }
-    if (sessionCategory === "chats") {
-      return { excludeSources: AUTOMATION_SESSION_SOURCES };
-    }
-    if (sessionCategory === "automation") {
-      const excludedSources = allSourceNames.filter(
-        (source) => !isAutomationSource(source),
-      );
-      return excludedSources.length > 0
-        ? { excludeSources: excludedSources }
-        : { sources: AUTOMATION_SESSION_SOURCES };
-    }
-    return {};
-  }, [selectedSources, sessionCategory, allSourceNames]);
+  const sessionQueryOptions = useMemo(
+    () => sessionSourceQuery(selectedSources, sessionCategory, allSourceNames),
+    [selectedSources, sessionCategory, allSourceNames],
+  );
 
   const categoryDefaultSources = useMemo(() => {
     return allSourceNames.filter((source) =>
