@@ -170,6 +170,28 @@ def _room_turn() -> bool:
         return True
 
 
+def _recorded_owner_private_origin(origin: Any, config: Mapping[str, Any] | None) -> bool:
+    if not isinstance(origin, Mapping):
+        return False
+    user_id = str(origin.get("user_id") or "").strip()
+    if (
+        str(origin.get("platform") or "").strip().lower() != "telegram"
+        or not user_id
+        or str(origin.get("chat_id") or "").strip() != user_id
+    ):
+        return False
+    try:
+        if config is None:
+            from korra_cli.config import load_config
+
+            config = load_config()
+        from gateway.credential_management import owner_matches
+
+        return owner_matches(config, "telegram", user_id)
+    except Exception:
+        return False
+
+
 def cron_job_acts_for_owner(job: Mapping[str, Any], config: Mapping[str, Any] | None = None) -> bool:
     """Whether a scheduled job acts for the owner when it runs unattended.
 
@@ -185,7 +207,11 @@ def cron_job_acts_for_owner(job: Mapping[str, Any], config: Mapping[str, Any] | 
     # An explicit verdict wins over the platform heuristics below: a job with
     # no origin platform is the owner's only when nothing says otherwise.
     if stamped is False or verdict is False:
-        return False
+        # Stamped «not the owner's» only because the owner was not recorded
+        # yet: a job created in that person's own private Telegram chat is
+        # theirs once they are (0.21.15 review P1-B). Rooms of agents and
+        # one-shot runs never carry a Telegram origin and stay excluded.
+        return _recorded_owner_private_origin(origin, config)
     if stamped is True or verdict is True:
         return True
     if not isinstance(origin, Mapping) or not origin.get("platform"):

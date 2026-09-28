@@ -138,6 +138,8 @@ class TestCreateJob:
                 assert call_kwargs["origin"]["chat_id"] == "api"
                 assert call_kwargs["origin"]["forwarded_for"] == "203.0.113.11"
                 assert call_kwargs["origin"]["user_agent"] == "cron-client"
+                # The installation key is the owner's, like the cabinet form.
+                assert call_kwargs["created_by_owner"] is True
 
 
     @pytest.mark.asyncio

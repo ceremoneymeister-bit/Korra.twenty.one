@@ -7366,6 +7366,10 @@ class APIServerAdapter(BasePlatformAdapter):
                 "name": name,
                 "deliver": deliver,
                 "origin": self._cron_origin_from_request(request),
+                # The REST API is reached with the installation's own key, like
+                # the cabinet form: whoever holds it is the owner (0.21.15 review:
+                # the verdict must not depend on what this process served before).
+                "created_by_owner": True,
             }
             for field in ("reminder", "delivery_ttl_seconds", "pending_result_policy"):
                 if field in body:

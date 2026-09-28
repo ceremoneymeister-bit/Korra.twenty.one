@@ -310,3 +310,18 @@ def test_only_the_creator_changes_somebody_elses_job(cron_dir):
     assert stranger["success"] is False and "only its creator or the owner" in stranger["error"]
     mine = _tool(EKATERINA_DM, action="pause", job_id=created["job_id"])
     assert mine.get("success", True) is True
+
+
+def test_a_job_from_the_owners_private_chat_is_theirs_once_they_are_recorded(monkeypatch):
+    from gateway.principal import cron_job_acts_for_owner
+
+    job = {"created_by_owner": False,
+           "origin": {"platform": "telegram", "chat_id": "42", "user_id": "42", "owner": False}}
+    monkeypatch.setattr("gateway.credential_management.owner_matches",
+                        lambda config, platform, user_id, **kw: user_id == "42")
+    assert cron_job_acts_for_owner(job, config={}) is True
+    # A group, somebody else, or a job without the sender's id stay not the owner's.
+    for origin in ({"platform": "telegram", "chat_id": "-100500", "user_id": "42", "owner": False},
+                   {"platform": "telegram", "chat_id": "777", "user_id": "777", "owner": False},
+                   {"platform": "telegram", "chat_id": "42", "owner": False}):
+        assert cron_job_acts_for_owner({"created_by_owner": False, "origin": origin}, config={}) is False
