@@ -240,13 +240,11 @@ def _mark_foreign_execution_unknown(
         try:
             pid = int(owner.split(":", 1)[0])
             if pid > 0 and pid != os.getpid():
-                try:
-                    os.kill(pid, 0)
-                except ProcessLookupError:
-                    pass
-                except PermissionError:
-                    continue  # alive, but owned by another OS principal
-                else:
+                # Not os.kill(pid, 0): on Windows it is a Ctrl+C to the
+                # target's console group (bpo-14484).
+                from gateway.status import _pid_exists
+
+                if _pid_exists(pid):
                     continue  # a live gateway worker is not a crashed executor
         except (ValueError, TypeError):
             pass

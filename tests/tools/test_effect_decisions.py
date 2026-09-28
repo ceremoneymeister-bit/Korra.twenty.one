@@ -556,3 +556,34 @@ def test_approved_scheduled_delivery_keeps_exact_reply_binding(tmp_path, monkeyp
     saved = result_links.lookup(account=outbound._configured_account_identity("telegram", pconfig),
                                 chat_id="2002", thread_id=None, message_id="42")
     assert saved["job_id"] == "report" and saved["execution_id"] == "run-17"
+
+
+@pytest.mark.parametrize("alive", [True, False])
+def test_a_foreign_executor_is_judged_by_its_process_without_signalling_it(tmp_path, alive):
+    # The liveness probe must not be os.kill(pid, 0): on Windows that is a
+    # Ctrl+C to the target's console group (CI footgun gate, 0.21.15).
+    import sqlite3
+    import subprocess
+    import sys
+
+    db_path = tmp_path / "effect-decisions.sqlite3"
+    pending, _ = _create(db_path)
+    decisions.decide(pending["id"], source_session_id="chat-1", choice="once", path=db_path)
+    decisions.claim_execution(
+        pending["id"], expected_payload_sha256=pending["payload_sha256"], path=db_path
+    )
+    other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        if not alive:
+            other.kill()
+            other.wait()
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                "UPDATE effect_decisions SET executor_instance=? WHERE id=?",
+                (f"{other.pid}:other-worker", pending["id"]),
+            )
+        seen = decisions.get_decision(pending["id"], path=db_path)
+    finally:
+        other.kill()
+        other.wait()
+    assert seen["status"] == (decisions.EXECUTING if alive else decisions.UNKNOWN)
