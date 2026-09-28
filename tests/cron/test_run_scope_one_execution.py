@@ -143,3 +143,50 @@ def test_an_employee_run_may_not_message_other_people(run):
         assert not result.get('success')
         assert sent==[]
     finally: recipients.retire_run_token(secret)
+
+
+def test_an_unknown_send_is_not_recorded_as_delivered(tmp_path, monkeypatch):
+    # Fifth clean review P1-1: `korra send` from the run got outcome_unknown,
+    # the run then returns the same report for the same recipient. No second
+    # copy — and the execution must not claim «delivered» either.
+    from cron import executions, jobs, scheduler
+    from gateway.config import Platform
+
+    monkeypatch.setenv('KORRA_HOME', str(tmp_path)); monkeypatch.setenv('HERMES_HOME', str(tmp_path))
+    monkeypatch.setattr('gateway.config.load_gateway_config', lambda: MagicMock(
+        platforms={Platform.TELEGRAM: MagicMock(enabled=True, token='synthetic')},
+        get_home_channel=lambda _: None))
+    monkeypatch.setattr(scheduler, 'load_config', lambda: {'cron': {'wrap_response': False}})
+    attempts = []
+
+    def transport(**kw):
+        attempts.append(kw['cleaned_message'])
+        raise TimeoutError('network outcome unknown')
+
+    async def forbid(*a, **kw):
+        raise AssertionError('no automatic retry of an unknown send')
+
+    monkeypatch.setattr('tools.send_message_tool._dispatch_resolved_send', transport)
+    monkeypatch.setattr('tools.send_message_tool._send_to_platform', forbid)
+    with jobs.use_cron_store(tmp_path):
+        job = jobs.create_job(prompt='report', schedule='every 1h', deliver='telegram:555', created_by_owner=True)
+
+        def run(job, *, execution_id, **kw):
+            with scheduler._job_send_context(job, execution_id):
+                from gateway.session_context import get_session_env
+                token = get_session_env(recipients.RUNNING_JOB_ENV, '')
+                result = recipients.send_once_for_live_run(
+                    token, recipients.lookup_live_run(token), 'telegram:555', 'report')
+                assert result['status'] == 'outcome_unknown'
+            return True, 'report', 'report', None
+
+        monkeypatch.setattr(scheduler, 'run_job', run)
+        assert scheduler.run_one_job(job)
+        with executions._transaction() as conn:
+            row = dict(conn.execute(
+                'SELECT status, delivery_outcome, delivery_error FROM executions WHERE job_id=?',
+                (job['id'],)).fetchone())
+    assert len(attempts) == 1
+    assert row['status'] == 'completed' and row['delivery_outcome'] == 'unknown', row
+    assert 'telegram:555' in row['delivery_error'] and 'не подтверждена' in row['delivery_error']
+    assert jobs.get_job(job['id'])['last_delivery_error'] == row['delivery_error']

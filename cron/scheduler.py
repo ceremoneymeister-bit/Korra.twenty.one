@@ -3068,6 +3068,10 @@ def _is_channel_dm_topic(
 
 
 _WAITING_DECISION_PREFIX = "waiting_decision:"
+# A send of this execution may or may not have reached the recipient; it was
+# not repeated. The run records delivery_outcome="unknown", never "delivered"
+# (fifth clean review, P1-1).
+_DELIVERY_UNKNOWN_PREFIX = "delivery_unknown:"
 
 
 def _delivery_decision_session(job: dict, execution_id: str) -> str:
@@ -3277,6 +3281,7 @@ def _deliver_result(
 
     delivery_errors = []
     pending_decision_ids: list[str] = []
+    unknown_targets: list[str] = []
 
     for target in targets:
         if delivery_expired(job):
@@ -3306,8 +3311,9 @@ def _deliver_result(
 
         # Тот же текст этому адресату уже ушёл из этого выполнения через
         # `korra send` (или сервис мог его принять): вторая копия — дубль.
-        # Неопределённый исход не делаем ошибкой доставки: досылка по ошибке
-        # сама отправила бы второй раз; скрипт о нём уже знает.
+        # Неопределённый исход не повторяем — досылка сама отправила бы второй
+        # раз, — но и не выдаём за доставку: выполнение получает исход
+        # «Отправка не подтверждена» (пятое чистое ревью, P1-1).
         if execution_id and not failure_notice:
             from cron.recipients import recorded_send
 
@@ -3318,6 +3324,8 @@ def _deliver_result(
                     "Job '%s': result already sent to %s in this execution (%s) — not delivered again",
                     job["id"], label, prior.get("state"),
                 )
+                if prior.get("state") == "unknown":
+                    unknown_targets.append(label)
                 continue
 
         # bot-chat targets don't ride a gateway adapter: the output becomes a
@@ -4146,8 +4154,14 @@ def _deliver_result(
     if policy_drop_errors:
         # Filter-time drops apply to every target; report them once.
         delivery_errors.extend(policy_drop_errors)
+    unknown_note = (
+        f"Доставка не подтверждена ({', '.join(unknown_targets)}): сервис мог "
+        "принять сообщение, повтор не выполнялся."
+    ) if unknown_targets else ""
     if delivery_errors:
-        return "; ".join(delivery_errors)
+        return "; ".join(delivery_errors + ([unknown_note] if unknown_note else []))
+    if unknown_note:
+        return _DELIVERY_UNKNOWN_PREFIX + unknown_note
     if pending_decision_ids:
         return _WAITING_DECISION_PREFIX + ",".join(pending_decision_ids)
     return None
@@ -7545,6 +7559,7 @@ def _run_one_job_body(
     delivery_attempted = False
     delivery_error = None
     delivery_waiting_decision = False
+    delivery_unknown = False
     # Durable failure-incident bookkeeping for this run (see cron.incidents):
     # set on the failure paths below; consumed by the delivery_outcome
     # computation and the post-delivery "alerted" transition.
@@ -7814,6 +7829,13 @@ def _run_one_job_body(
                         ):
                             delivery_waiting_decision = True
                             delivery_error = None
+                        elif delivery_error and delivery_error.startswith(
+                            _DELIVERY_UNKNOWN_PREFIX
+                        ):
+                            # The note stays the delivery error the owner sees;
+                            # the outcome is "unknown", not "failed".
+                            delivery_unknown = True
+                            delivery_error = delivery_error[len(_DELIVERY_UNKNOWN_PREFIX):]
                 except Exception as de:
                     if isinstance(de, _FireClaimLostDuringSideEffect):
                         raise
@@ -7903,6 +7925,8 @@ def _run_one_job_body(
         normalized_deliver = _normalize_deliver_value(job.get("deliver", "local"))
         if delivery_waiting_decision:
             delivery_outcome = "waiting_decision"
+        elif delivery_unknown:
+            delivery_outcome = "unknown"
         elif delivery_error:
             from cron.result_validity import EXPIRED_DELIVERY
             delivery_outcome = "expired" if delivery_error == EXPIRED_DELIVERY else "failed"

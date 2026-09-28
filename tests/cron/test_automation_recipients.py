@@ -879,7 +879,7 @@ def test_the_result_is_not_delivered_again_after_the_run_sent_it(live_send, monk
     `korra send` и напечатал его же — автодоставка того же текста тому же
     адресату не даёт вторую копию, даже если исход первой неопределённый.
     Другой текст уходит."""
-    from cron.scheduler import _deliver_result
+    from cron.scheduler import _DELIVERY_UNKNOWN_PREFIX, _deliver_result
 
     token, grant, cfg, job = live_send
     sent = _transport(monkeypatch, first)
@@ -888,7 +888,12 @@ def test_the_result_is_not_delivered_again_after_the_run_sent_it(live_send, monk
     delivered = AsyncMock(return_value={"success": True})
     with patch("tools.send_message_tool._send_to_platform", new=delivered):
         scheduled = {**job, "deliver": "telegram:555"}
-        assert _deliver_result(scheduled, "Отчёт готов", execution_id=grant["execution_id"]) is None
+        outcome = _deliver_result(scheduled, "Отчёт готов", execution_id=grant["execution_id"])
+        if isinstance(first, Exception):
+            # Пятое чистое ревью, P1-1: не повторяем, но и не «доставлено».
+            assert outcome.startswith(_DELIVERY_UNKNOWN_PREFIX) and "telegram:555" in outcome
+        else:
+            assert outcome is None
         assert delivered.await_count == 0
         assert _deliver_result(scheduled, "Другой отчёт", execution_id=grant["execution_id"]) is None
         assert delivered.await_count == 1
