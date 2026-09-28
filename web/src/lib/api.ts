@@ -2940,6 +2940,8 @@ export interface SessionMessage {
   display_kind?: string | null;
   /** Видимая часть составной строки, если сервер её выделил. */
   display_content?: string | null;
+  /** Лента получила превью длинного результата инструмента, а не его целиком. */
+  content_truncated?: boolean;
 }
 
 export interface SessionMessagesResponse {
@@ -2955,6 +2957,8 @@ export interface SessionMessagesResponse {
     /** Курсор следующей, более ранней страницы. */
     before_id?: number | null;
     has_more?: boolean;
+    /** Раньше живой истории есть сжатая часть, которую лента пока не показывает. */
+    archived_before?: boolean;
   };
 }
 

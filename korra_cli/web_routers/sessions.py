@@ -680,6 +680,41 @@ async def get_session_latest_descendant(
     }
 
 
+#: Длиннее этого результат инструмента лента получает превью, а не целиком.
+_TOOL_RESULT_FULL_LIMIT = 4000
+_TOOL_PREVIEW_LIMIT = 1200
+
+
+def _tool_result_preview(text: str) -> str:
+    """То же превью, что строит чат (``previewToolResult`` в web)."""
+    stripped = text.strip()
+    if stripped.startswith("{"):
+        try:
+            parsed = json.loads(stripped)
+        except ValueError:
+            parsed = None
+        if isinstance(parsed, dict):
+            for key in ("output", "error", "message", "result", "content"):
+                value = parsed.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value[:_TOOL_PREVIEW_LIMIT]
+    return stripped[:_TOOL_PREVIEW_LIMIT]
+
+
+def _light_tool_results(rows):
+    """Лента чата показывает из результата инструмента только превью: полный
+    вывод на странице из 30 сообщений весил мегабайты (Дмитрий 28.09: «не
+    надо сразу так много загружать»; второе чистое ревью Astra, P2-2).
+    Полный текст остаётся в базе и в режиме без display_limit."""
+    for row in rows:
+        content = row.get("content")
+        if row.get("role") == "tool" and isinstance(content, str) and len(content) > _TOOL_RESULT_FULL_LIMIT:
+            row["content"] = _tool_result_preview(content)
+            row["content_truncated"] = True
+            row["content_length"] = len(content)
+    return rows
+
+
 @manage_router.get("/api/sessions/{session_id}/messages")
 async def get_session_messages(
     session_id: str,
@@ -718,7 +753,10 @@ async def get_session_messages(
                 rows, cursor, has_more = db.get_display_page(
                     sid, limit=display_limit, before_id=before_id
                 )
-                return sid, display_limit, rows, {"before_id": cursor, "has_more": has_more}
+                page = {"before_id": cursor, "has_more": has_more}
+                if not has_more:
+                    page["archived_before"] = db.has_history_before_live(sid)
+                return sid, display_limit, _light_tool_results(rows), page
             # Always page this endpoint. An omitted limit used to load an
             # entire transcript, which can be hundreds of thousands of rows
             # for a runaway session and exhaust the dashboard process. Keep

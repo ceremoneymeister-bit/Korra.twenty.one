@@ -89,8 +89,13 @@ describe("фильтр «Истории» по выбранным источни
     expect(isAutomationSource("kanban")).toBe(true);
     expect(sourceLabel("kanban")).toBe("Канбан");
     const query = sessionSourceQuery(null, "automation", all);
-    expect(query.sources).toEqual(expect.arrayContaining(["cron", "kanban"]));
-    expect(query.sources).not.toContain("maintenance");
+    expect(query.sources).toEqual(expect.arrayContaining(["cron", "kanban", "maintenance"]));
+  });
+
+  it("«Все» явно запрашивает и разговоры, и автоматизации (второе чистое ревью Astra, P2-3)", () => {
+    const query = sessionSourceQuery(null, "all", all);
+    expect(query.sources).toEqual(expect.arrayContaining(["dashboard", "telegram", "cron", "kanban"]));
+    expect(query.excludeSources).toBeUndefined();
   });
 
   it("раздел чатов по-прежнему исключает автоматизации", () => {

@@ -12750,6 +12750,23 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
         )
         return rows, start_id, has_more
 
+    def has_history_before_live(self, session_id: str) -> bool:
+        """Есть ли у разговора часть до живой истории: строки, сохранённые
+        сжатием на месте, или предок по цепочке сжатия. Лента чата её пока
+        не показывает и честно говорит об этом (решение Дмитрия 28.09)."""
+        with self._read_ctx() as conn:
+            if conn.execute(
+                "SELECT 1 FROM messages WHERE session_id = ? AND active = 0 AND compacted = 1 LIMIT 1",
+                (session_id,),
+            ).fetchone():
+                return True
+            row = conn.execute(
+                "SELECT 1 FROM sessions child JOIN sessions parent ON parent.id = child.parent_session_id "
+                "WHERE child.id = ? AND parent.end_reason = 'compression' LIMIT 1",
+                (session_id,),
+            ).fetchone()
+        return row is not None
+
     def find_client_message_rows(
         self, session_id: str, client_message_ids: List[str]
     ) -> Dict[str, Optional[int]]:

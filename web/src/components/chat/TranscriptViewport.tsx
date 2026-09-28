@@ -6,6 +6,7 @@ interface OlderMessages {
   hasOlder: boolean;
   loading: boolean;
   failed: boolean;
+  archivedBefore?: boolean;
   load: () => void;
 }
 
@@ -191,6 +192,11 @@ export function TranscriptViewport({ children, followKey, awaitingApproval, stor
         }}
       >
         <div ref={content}>
+          {older && !older.hasOlder && older.archivedBefore && (
+            <p className="px-4 pt-4 text-center text-xs text-[var(--neo-text-secondary)]">
+              Более ранняя часть этого разговора сохранена, но пока не показывается в чате.
+            </p>
+          )}
           {older?.hasOlder && (
             <div className="flex justify-center px-4 pt-4">
               {older.loading ? (

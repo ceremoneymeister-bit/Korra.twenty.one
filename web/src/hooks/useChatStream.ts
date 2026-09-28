@@ -65,13 +65,17 @@ export const CHAT_HISTORY_PAGE = 30;
 export interface HistoryWindow {
   cursor: number | null;
   hasOlder: boolean;
+  /** Раньше загруженного есть сжатая часть разговора, лента её пока не
+   *  показывает (решение Дмитрия 28.09, вариант А). */
+  archivedBefore?: boolean;
 }
 
 const NO_OLDER: HistoryWindow = { cursor: null, hasOlder: false };
 
-function historyWindow(resp: { messages?: unknown; pagination?: { before_id?: number | null; has_more?: boolean } }): HistoryWindow {
+function historyWindow(resp: { messages?: unknown; pagination?: { before_id?: number | null; has_more?: boolean; archived_before?: boolean } }): HistoryWindow {
   const cursor = resp.pagination?.before_id ?? null;
-  return { cursor, hasOlder: cursor !== null && resp.pagination?.has_more === true };
+  const hasOlder = cursor !== null && resp.pagination?.has_more === true;
+  return { cursor, hasOlder, ...(!hasOlder && resp.pagination?.archived_before ? { archivedBefore: true } : {}) };
 }
 
 interface StreamState {
@@ -270,7 +274,8 @@ function runBeforePage(messages: ChatMessage[], run: ChatRun): boolean {
 function runAnswered(messages: ChatMessage[], run: ChatRun): boolean {
   const at = runTurnIndex(messages, run);
   if (at < 0) return run.status === "completed" && runBeforePage(messages, run);
-  return messages.slice(at + 1).some(message => message.role === "assistant");
+  // Нужен законченный ход: промежуточный снимок за ответ не считается.
+  return messages.slice(at + 1).some(message => message.role === "assistant" && message.turnComplete !== false);
 }
 
 function mergeMessages(
@@ -703,6 +708,8 @@ export interface OlderHistoryState {
   hasOlder: boolean;
   loading: boolean;
   failed: boolean;
+  /** Раньше загруженного есть сжатая часть, которую лента пока не показывает. */
+  archivedBefore?: boolean;
 }
 
 export interface LoadSessionOptions {
@@ -743,11 +750,15 @@ function sessionMessagesToChat(
   /** Незакрытый ход агента: в него дописываются вызовы и текст. */
   let turn: ChatMessage | null = null;
 
-  const closeTurn = () => {
+  /** `complete` — ход закрыл ответ агента без вызовов. Иначе в истории лишь
+   *  его промежуточный снимок («Сейчас проверю» и вызов инструмента): ход
+   *  мог уже закончиться, но итог в прочитанные строки не попал (второе
+   *  чистое ревью Astra, P1-2). */
+  const closeTurn = (complete = false) => {
     if (!turn) return;
     // Ход без текста и без вызовов показывать нечего (служебные строки).
     if (turn.content || turn.toolCalls?.length || turn.reasoning) {
-      result.push(turn);
+      result.push({ ...turn, turnComplete: complete });
     }
     turn = null;
   };
@@ -781,7 +792,8 @@ function sessionMessagesToChat(
     if (message.role === "tool") {
       // Результат вызова прикрепляем к его же строке в текущем ходе.
       if (!turn?.toolCalls || !message.tool_call_id) return;
-      const summary = previewToolResult(content);
+      // Длинный результат сервер уже свёл к тому же превью.
+      const summary = message.content_truncated ? content : previewToolResult(content);
       if (!summary) return;
       turn.toolCalls = turn.toolCalls.map((entry) =>
         entry.id === message.tool_call_id ? { ...entry, summary } : entry,
@@ -827,7 +839,7 @@ function sessionMessagesToChat(
     }
 
     // Ответ без вызовов завершает ход.
-    closeTurn();
+    closeTurn(true);
   });
 
   closeTurn();
@@ -1919,6 +1931,7 @@ export function useChatStream(
       hasOlder: state.history.hasOlder,
       loading: olderStatus === "loading",
       failed: olderStatus === "failed",
+      archivedBefore: state.history.archivedBefore === true,
     },
     loadOlder,
     send,

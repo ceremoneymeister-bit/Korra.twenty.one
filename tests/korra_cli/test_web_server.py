@@ -2426,10 +2426,45 @@ class TestWebServerEndpoints:
         assert contents[-2:] == ["user 39", "assistant 39"]
         assert contents.count("assistant 39") == 1
         assert after["pagination"]["has_more"] is False
+        # Вариант А (Дмитрий 28.09): лента честно говорит о сжатой части.
+        assert after["pagination"]["archived_before"] is True
 
         chain = self.client.get("/api/sessions/parent-chat/messages?display_limit=30").json()
         assert chain["session_id"] == "child-chat"
         assert [m["content"] for m in chain["messages"]] == ["new question", "new answer"]
+        assert chain["pagination"]["archived_before"] is True
+
+    def test_chat_page_carries_tool_previews_not_whole_outputs(self):
+        """Дмитрий 28.09: «не надо сразу так много загружать». Лента видит из
+        результата инструмента только превью — его и отдаёт сервер; полный
+        текст остаётся в режиме без display_limit."""
+        from korra_state import SessionDB
+
+        big = json.dumps({"output": "строка вывода\n" * 20000})
+        db = SessionDB()
+        try:
+            db.create_session(session_id="heavy-tools", source="dashboard")
+            db.append_messages_batch("heavy-tools", [
+                {"role": "user", "content": "выгрузи CRM"},
+                {"role": "assistant", "content": "", "tool_calls": [
+                    {"id": "c1", "type": "function", "function": {"name": "terminal", "arguments": "{}"}}]},
+                {"role": "tool", "content": big, "tool_call_id": "c1"},
+                {"role": "tool", "content": "коротко", "tool_call_id": "c2"},
+                {"role": "assistant", "content": "готово"},
+            ])
+        finally:
+            db.close()
+
+        page = self.client.get("/api/sessions/heavy-tools/messages?display_limit=30")
+        tools = [m for m in page.json()["messages"] if m["role"] == "tool"]
+        assert tools[0]["content_truncated"] is True
+        assert tools[0]["content_length"] == len(big)
+        assert tools[0]["content"].startswith("строка вывода") and len(tools[0]["content"]) == 1200
+        assert "content_truncated" not in tools[1] and tools[1]["content"] == "коротко"
+        assert page.json()["pagination"]["archived_before"] is False
+        assert len(page.content) < 20_000
+        full = self.client.get("/api/sessions/heavy-tools/messages").json()
+        assert [m for m in full["messages"] if m["role"] == "tool"][0]["content"] == big
 
     def test_export_session_streams_bounded_message_pages(self, monkeypatch):
         from korra_state import SessionDB

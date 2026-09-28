@@ -1304,7 +1304,7 @@ describe("лента грузится страницами по 30 (Дмитри
     expect(history).toHaveBeenLastCalledWith("long", "default", expect.any(AbortSignal), { displayLimit: 30 });
     expect(current.messages).toHaveLength(30);
     expect(current.messages[0]?.content).toBe("вопрос 5");
-    expect(current.older).toEqual({ hasOlder: true, loading: false, failed: false });
+    expect(current.older).toEqual({ hasOlder: true, loading: false, failed: false, archivedBefore: false });
 
     await act(async () => { await current.loadOlder(); });
     expect(history).toHaveBeenLastCalledWith("long", "default", expect.any(AbortSignal), { displayLimit: 30, beforeId: 11 });
@@ -1329,7 +1329,7 @@ describe("лента грузится страницами по 30 (Дмитри
     await act(async () => { await current.loadSession("long"); });
     await act(async () => { await current.loadOlder(); });
     expect(current.messages).toHaveLength(30);
-    expect(current.older).toEqual({ hasOlder: true, loading: false, failed: true });
+    expect(current.older).toEqual({ hasOlder: true, loading: false, failed: true, archivedBefore: false });
   });
 
   it("идущий ход находится по своей реплике, а не по номеру из другой загрузки", async () => {
@@ -1494,4 +1494,38 @@ describe("зависшее восстановление ответа (чисто
       vi.useRealTimers();
     }
   });
+});
+
+it("промежуточный снимок хода не выдаётся за готовый ответ (второе чистое ревью Astra, P1-2)", async () => {
+  const { getChatRuns } = await import("@/lib/chat-runs");
+  vi.mocked(getChatRuns).mockResolvedValue([{
+    message_id: "partial-turn-1234567", session_id: "partial", profile: "", status: "completed", updated_at: 500,
+    history_count: 0, turn_tracked: true, history_row_id: 1, user_message: { role: "user", content: "проверь CRM" },
+  }]);
+  vi.spyOn(api, "getSessionMessages").mockResolvedValue({ session_id: "partial", messages: [
+    { id: 1, role: "user", content: "проверь CRM", display_metadata: { client_message_id: "partial-turn-1234567" } },
+    { id: 2, role: "assistant", content: "Сейчас проверю", tool_calls: [{ id: "c1", function: { name: "terminal", arguments: "{}" } }] },
+    { id: 3, role: "tool", content: "ok", tool_call_id: "c1" },
+  ] as SessionMessage[], pagination: { order: "latest", returned: 3, before_id: 1, has_more: false } });
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => url.includes("/stream")
+    ? sseResponse('data: {"choices":[{"delta":{"content":"FINAL VERIFIED ANSWER"}}]}\n\n', "data: [DONE]\n\n")
+    : new Response(JSON.stringify({ approvals: [] }))));
+  await act(async () => { await current.loadSession("partial"); });
+  expect(current.messages.at(-1)?.content).toContain("FINAL VERIFIED ANSWER");
+});
+
+it("урезанный сервером результат инструмента идёт в превью как есть; сжатая часть отмечается", async () => {
+  const { getChatRuns } = await import("@/lib/chat-runs");
+  vi.mocked(getChatRuns).mockResolvedValue([]);
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ approvals: [] }))));
+  vi.spyOn(api, "getSessionMessages").mockResolvedValue({ session_id: "light", messages: [
+    { id: 1, role: "user", content: "выгрузи" },
+    { id: 2, role: "assistant", content: "", tool_calls: [{ id: "c1", function: { name: "terminal", arguments: "{}" } }] },
+    { id: 3, role: "tool", content: "{\"output\": \"не парсить\"}", tool_call_id: "c1", content_truncated: true },
+    { id: 4, role: "assistant", content: "готово" },
+  ] as SessionMessage[], pagination: { order: "latest", returned: 4, before_id: 1, has_more: false, archived_before: true } });
+  await act(async () => { await current.loadSession("light"); });
+  const turn = current.messages.find(m => m.role === "assistant")!;
+  expect(turn.toolCalls?.[0]?.summary).toBe("{\"output\": \"не парсить\"}");
+  expect(current.older).toEqual({ hasOlder: false, loading: false, failed: false, archivedBefore: true });
 });

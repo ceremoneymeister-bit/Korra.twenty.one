@@ -207,3 +207,11 @@ it("рост содержимого выше читаемого сообщени
   expect(viewport.scrollTop).toBe(750);
   sessionStorage.clear();
 });
+
+it("тихо говорит о сжатой части разговора, только когда раньше страниц нет (решение Дмитрия 28.09)", async () => {
+  const load = vi.fn();
+  await renderPaged("Живая история", "m1", { hasOlder: false, loading: false, failed: false, archivedBefore: true, load } as never);
+  expect(host.textContent).toContain("Более ранняя часть этого разговора сохранена");
+  await renderPaged("Живая история", "m1", { hasOlder: true, loading: false, failed: false, archivedBefore: false, load } as never);
+  expect(host.textContent).not.toContain("Более ранняя часть этого разговора сохранена");
+});

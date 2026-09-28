@@ -161,12 +161,12 @@ export function sessionSourceQuery(
     return { sources: selectedSources };
   }
   if (category === "chats") return { excludeSources: AUTOMATION_SESSION_SOURCES };
-  if (category === "automation") {
-    // Раздел автоматизаций сам по себе — явный запрос их запусков. Ходы
-    // обслуживания установки в нём не нужны; их можно выбрать отдельно.
-    return { sources: AUTOMATION_SESSION_SOURCES.filter(source => source !== "maintenance") };
-  }
-  return {};
+  // Разделы автоматизаций и «Все» — явный запрос: сервер без него прячет
+  // служебные классы, и «Все» показывало меньше, чем «Чаты» вместе с
+  // «Автоматизациями» (второе чистое ревью Astra, P2-3). Набор совпадает с
+  // отмеченными в фильтре источниками, включая «Обслуживание».
+  if (category === "automation") return { sources: AUTOMATION_SESSION_SOURCES };
+  return { sources: Array.from(new Set([...allSourceNames, ...AUTOMATION_SESSION_SOURCES])) };
 }
 
 function sourceBelongsToCategory(
