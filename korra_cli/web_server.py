@@ -15218,6 +15218,10 @@ def _call_cron_for_profile(target_profile: Optional[str], func_name: str, *args,
                 # this thread and would otherwise fail closed.
                 kwargs.setdefault("created_by_owner", True)
                 result = create_job_with_scheduler_registration(*args, **kwargs)
+            elif func_name == "accept_owner_form_edit":
+                from cron.recipients import accept_owner_form_edit
+
+                result = accept_owner_form_edit(*args, **kwargs)
             else:
                 result = getattr(cron_jobs, func_name)(*args, **kwargs)
     finally:
@@ -15518,6 +15522,10 @@ def _update_cron_job_sync(job_id: str, body: CronJobUpdate, profile: Optional[st
                 effective["skill"] = None
             _validate_dashboard_cron_effective_job(effective)
         job = _mutate_cron_for_profile(profile_name, "update_job", job_id, updates)
+        if job and "deliver" in updates:
+            # Recipients the owner picks in the form are confirmed by that
+            # choice (0.21.15 Astra review P2-5; cron.recipients).
+            job = _mutate_cron_for_profile(profile_name, "accept_owner_form_edit", job_id) or job
     except HTTPException:
         raise
     except ValueError as exc:

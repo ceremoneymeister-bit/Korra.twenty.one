@@ -403,64 +403,113 @@ def _refuse_reach_beyond_creator(deliver: Optional[str], audience: Optional[str]
     )
 
 
-def _confirm_recipients(
+def _plan_owner_recipients(
     job: Dict[str, Any],
     *,
-    audience: Optional[str] = None,
-    previous: Optional[Dict[str, Any]] = None,
+    before: Optional[Dict[str, Any]] = None,
+    requested_deliver: Optional[str],
+    deliver_changed: bool,
+    audience: Optional[str],
 ) -> Optional[Dict[str, Any]]:
-    """Ask the owner once to confirm recipients other than themselves.
+    """Fields that keep unconfirmed recipients out of ``deliver`` (cron.recipients).
 
     Dmitry, 28.09.2026: an automation the owner set up sends to other people
     without confirmations only after those recipients were confirmed once, at
-    setup. Returns what now awaits confirmation, or None.
+    setup. Unconfirmed targets wait in ``recipients_pending`` and the job is
+    paused, written together with the change itself, so no tick, failed card
+    or rollback to 0.21.14 can send to them. Returns the fields to write with
+    the change (plus ``_card`` describing the card to show), or None when the
+    caller is not the owner.
     """
     if not _creator_is_owner():
         return None
     import time as _time
 
     from cron import recipients
-    from cron.jobs import update_job
 
-    updates: Dict[str, Any] = {}
-    if job.get(recipients.POLICY_KEY) != 1:
+    before = before or {}
+    confirmed = dict(before.get(recipients.CONFIRMED_KEY) or {})
+    if before and before.get(recipients.POLICY_KEY) != 1:
         # A job from before 0.21.15 or from the cabinet form keeps the
         # recipients it already had; only what this change adds needs a card.
-        grandfathered = recipients.third_party_labels(previous) if previous else []
-        updates[recipients.POLICY_KEY] = 1
-        if grandfathered and not job.get(recipients.CONFIRMED_KEY):
-            updates[recipients.CONFIRMED_KEY] = {
-                "targets": grandfathered, "audience": "", "decision_id": "",
-                "confirmed_at": _time.time(),
-            }
-        job = {**job, **updates}
-    confirmed = job.get(recipients.CONFIRMED_KEY) or {}
-    confirmed_targets = {str(item) for item in confirmed.get("targets") or []}
-    new_targets = [
-        label for label in recipients.third_party_labels(job)
-        if label not in confirmed_targets and label.rsplit(":", 1)[0] not in confirmed_targets
-    ]
-    new_audience = (audience or "").strip()
-    if new_audience and new_audience == recipients.confirmed_audience(job):
-        new_audience = ""
-    if not new_targets and not new_audience:
-        if updates:
-            update_job(job["id"], updates)
-        return None
-    decision = recipients.request_confirmation(job, targets=new_targets, audience=new_audience)
-    updates[recipients.PENDING_KEY] = {
-        "targets": new_targets, "audience": new_audience, "decision_id": decision["id"],
-    }
-    update_job(job["id"], updates)
+        kept = recipients.third_party_labels(before)
+        confirmed = {"targets": kept, "audience": "", "decision_id": "",
+                     "confirmed_at": _time.time()} if kept else {}
+    if audience is not None:
+        # A changed or removed source is not the one the owner confirmed.
+        confirmed = {**confirmed, "audience": ""} if confirmed else {}
+    from gateway.session_context import get_session_env
+
+    if get_session_env("KORRA_CRON_SESSION", "") == "1":
+        # An automation creating a job for the chat it already delivers to adds
+        # no recipient; anybody new waits for the owner in the decision centre.
+        own = (get_session_env("KORRA_CRON_AUTO_DELIVER_PLATFORM", "").strip(),
+               get_session_env("KORRA_CRON_AUTO_DELIVER_CHAT_ID", "").strip(),
+               get_session_env("KORRA_CRON_AUTO_DELIVER_THREAD_ID", "").strip())
+        if own[0] and own[1]:
+            label = recipients.target_label(own[0], own[1], own[2] or None)
+            confirmed = {**confirmed, "targets": list(dict.fromkeys(
+                [*(confirmed.get("targets") or []), label]))}
+    fields: Dict[str, Any] = {recipients.POLICY_KEY: 1, recipients.CONFIRMED_KEY: confirmed or None}
+    probe = {**job, recipients.CONFIRMED_KEY: confirmed, recipients.POLICY_KEY: 1}
+    previous = recipients.pending(before)
+    held: list = []
+    if deliver_changed:
+        safe, held = recipients.split_deliver(probe, requested_deliver)
+        if held:
+            fields["deliver"] = safe
+        waiting_deliver = requested_deliver
+    else:
+        held = list(previous.get("targets") or [])
+        waiting_deliver = previous.get("deliver")
+    new_audience = (audience or "").strip() if audience is not None else str(previous.get("audience") or "")
+    if held or new_audience:
+        fields[recipients.PENDING_KEY] = {
+            "targets": held, "audience": new_audience,
+            "deliver": waiting_deliver if held else None, "decision_id": "",
+        }
+        if before.get("state") != "paused" or before.get("paused_reason") == recipients.PAUSE_REASON:
+            fields.update(recipients.pause_fields())
+        fields["_card"] = {"targets": held, "audience": new_audience}
+    else:
+        fields[recipients.PENDING_KEY] = None
+        if before.get("paused_reason") == recipients.PAUSE_REASON:
+            fields.update(recipients._resume_fields({**job, **fields}))
+    fields["_retire"] = str(previous.get("decision_id") or "")
+    return fields
+
+
+def _show_recipients_card(job: Dict[str, Any], card: Dict[str, Any]) -> Dict[str, Any]:
+    """Create the card for a job saved paused with pending recipients."""
+    from cron import recipients
+    from cron.jobs import update_job
+
+    try:
+        decision = recipients.request_confirmation(job, targets=card["targets"], audience=card["audience"])
+    except Exception as exc:
+        logger.warning("Recipients card for job %s failed: %s", job.get("id"), exc)
+        return {
+            "status": "card_failed",
+            "targets": card["targets"],
+            "audience": card["audience"] or None,
+            "note": (
+                "The automation is saved and paused; its new recipients are not "
+                "confirmed and nothing was sent to them. Repeat the same update "
+                "to show the confirmation card again."
+            ),
+        }
+    waiting = {**recipients.pending(job), "decision_id": decision["id"]}
+    update_job(job["id"], {recipients.PENDING_KEY: waiting})
     return {
         "status": "awaiting_confirmation",
-        "targets": new_targets,
-        "audience": new_audience or None,
+        "targets": card["targets"],
+        "audience": card["audience"] or None,
         "decision_id": decision["id"],
         "note": (
-            "Sends to these recipients start after the user confirms them on the "
-            "card shown in this chat; deliveries to the user's own chat work now. "
-            "Tell the user plainly what to confirm; do not repeat the call."
+            "The automation is paused until the user confirms these recipients on "
+            "the card shown in this chat; then it resumes and sends to them without "
+            "further confirmations. Tell the user plainly what to confirm; do not "
+            "repeat the call."
         ),
     }
 
@@ -1749,15 +1798,22 @@ def cronjob(
                 create_job_with_scheduler_registration,
             )
 
+            _requested_deliver = _resolve_cron_context_deliver(_normalize_deliver_param(deliver))
+            _plan = _plan_owner_recipients(
+                {"origin": _origin_from_env(), "deliver": _requested_deliver},
+                requested_deliver=_requested_deliver,
+                deliver_changed=True,
+                audience=audience,
+            ) or {}
+            _card = _plan.pop("_card", None)
+            _plan.pop("_retire", None)
             try:
                 job = create_job_with_scheduler_registration(
                     prompt=prompt or "",
                     schedule=schedule,
                     name=name,
                     repeat=repeat,
-                    deliver=_resolve_cron_context_deliver(
-                        _normalize_deliver_param(deliver)
-                    ),
+                    deliver=_plan.get("deliver", _requested_deliver),
                     origin=_origin_from_env(),
                     skills=canonical_skills,
                     model=_normalize_optional_job_value(model),
@@ -1771,8 +1827,10 @@ def cronjob(
                     reminder=reminder,
                     delivery_ttl_seconds=delivery_ttl_seconds or None,
                     pending_result_policy=pending_result_policy or "all",
-                    recipients_policy=1 if _creator_is_owner() else None,
+                    recipients_policy=_plan.get("recipients_policy"),
                     audience=audience,
+                    recipients_pending=_plan.get("recipients_pending"),
+                    paused_reason=_plan.get("paused_reason"),
                     attach_to_session=attach_to_session,
                     monitor_script=_normalize_optional_job_value(monitor_script),
                     monitor_url=_normalize_optional_job_value(monitor_url),
@@ -1786,7 +1844,7 @@ def cronjob(
             except CronSchedulerRegistrationError as exc:
                 _partial = exc.to_dict()
                 return tool_error(_partial.pop("error"), success=False, **_partial)
-            _recipients = _confirm_recipients(job, audience=audience)
+            _recipients = _show_recipients_card(job, _card) if _card else None
             _create_message = f"Cron job '{job['name']}' created."
             _local_notice = _local_delivery_notice(job, _normalize_deliver_param(deliver))
             if _local_notice:
@@ -2138,18 +2196,33 @@ def cronjob(
                 if reach_error:
                     return reach_error
                 updates["audience"] = audience.strip() or None
-                if not audience.strip() and job.get("recipients_confirmed"):
-                    updates["recipients_confirmed"] = {
-                        **job["recipients_confirmed"], "audience": "",
-                    }
             if not updates:
                 return tool_error("No updates provided.", success=False)
+            _card = None
+            _retire = ""
+            if deliver is not None or audience is not None:
+                # One write carries the change and its recipients guard.
+                _plan = _plan_owner_recipients(
+                    {**job, **updates},
+                    before=job,
+                    requested_deliver=updates.get("deliver"),
+                    deliver_changed=deliver is not None,
+                    audience=audience,
+                ) or {}
+                _card = _plan.pop("_card", None)
+                _retire = _plan.pop("_retire", "")
+                if "state" in updates and _plan.get("state") == "paused":
+                    updates.pop("enabled", None)
+                    updates.pop("state", None)
+                updates.update(_plan)
             updated = update_job(job_id, updates)
             _upd_recipients = None
-            if deliver is not None or (audience is not None and audience.strip()):
-                _upd_recipients = _confirm_recipients(
-                    updated, audience=audience, previous=job,
-                )
+            if _retire:
+                from cron.recipients import retire_card
+
+                retire_card(_retire)
+            if _card:
+                _upd_recipients = _show_recipients_card(updated, _card)
             _notify_provider_jobs_changed_safe()
             _upd_result: Dict[str, Any] = {"success": True, "job": _format_job(updated)}
             # An update can switch a job into monitor / no_agent mode or

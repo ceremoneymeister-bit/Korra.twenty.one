@@ -8,8 +8,16 @@ form or approves the card the agent shows. A changing audience («clients with
 a birthday today, from Bitrix») is confirmed once as a source; the job then
 messages those people itself and reports whom it wrote to.
 
-Jobs saved before this policy, and jobs from the cabinet form or the REST
-API, carry no ``recipients_policy`` and keep delivering as configured.
+An unconfirmed recipient never sits in ``deliver``. It waits in
+``recipients_pending`` together with the requested ``deliver`` value, and the
+job is paused until the owner answers. So neither a scheduler tick between
+two writes, a failed card, nor rolling the engine back to 0.21.14 (which knows
+nothing of this policy) can send to somebody unconfirmed, and a one-shot
+reminder is not spent before the answer (0.21.15 Astra review P1-2, P1-3,
+P2-6). Approving restores the requested ``deliver`` and resumes the job.
+
+Jobs saved before this policy, and jobs from the cabinet form or the REST API,
+carry no ``recipients_policy`` and keep delivering as configured.
 """
 from __future__ import annotations
 
@@ -24,12 +32,16 @@ logger = logging.getLogger(__name__)
 POLICY_KEY = "recipients_policy"
 #: {"targets": [...], "audience": str, "decision_id": str, "confirmed_at": float}
 CONFIRMED_KEY = "recipients_confirmed"
-#: {"targets": [...], "audience": str, "decision_id": str}
+#: {"targets": [...], "audience": str, "deliver": str|None, "decision_id": str}
 PENDING_KEY = "recipients_pending"
 #: Free-text source of people the job messages itself, as the owner described it.
 AUDIENCE_KEY = "audience"
 
 DECISION_KIND = "automation_recipients"
+PAUSE_REASON = "Ждёт подтверждения получателей"
+DENIED_REASON = "Получатели не подтверждены"
+#: Bridged into the terminal of a running job (gateway.session_context).
+RUNNING_JOB_ENV = "KORRA_CRON_JOB_ID"
 
 _RUNNING_JOB: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
     "korra_running_cron_job", default=None
@@ -45,8 +57,47 @@ def reset_running_job(token: contextvars.Token) -> None:
     _RUNNING_JOB.reset(token)
 
 
+def _job_is_executing(job_id: str) -> bool:
+    """A live scheduler process holds a running execution of this job."""
+    try:
+        from cron.executions import _owner_is_live, _transaction
+
+        with _transaction() as conn:
+            rows = conn.execute(
+                "SELECT pid, process_started_at FROM executions WHERE job_id=? AND status='running'",
+                (job_id,),
+            ).fetchall()
+        return any(_owner_is_live(int(row["pid"]), row["process_started_at"]) for row in rows)
+    except Exception:
+        logger.debug("Execution check for job %s failed", job_id, exc_info=True)
+        return False
+
+
 def running_job() -> dict | None:
-    return _RUNNING_JOB.get()
+    """The scheduled job this code runs for, in the scheduler or its terminal.
+
+    ``korra send`` from an agent's terminal is a child process: the context
+    variable is gone, but the cron session bridge names the job. That name is
+    honoured only while the ledger shows the job executing in a live scheduler
+    process (0.21.15 Astra review P1-1).
+    """
+    job = _RUNNING_JOB.get()
+    if job:
+        return job
+    try:
+        from gateway.session_context import get_session_env
+
+        if get_session_env("KORRA_CRON_SESSION", "") != "1":
+            return None
+        job_id = str(get_session_env(RUNNING_JOB_ENV, "") or "").strip()
+        if not job_id or not _job_is_executing(job_id):
+            return None
+        from cron.jobs import get_job
+
+        return get_job(job_id)
+    except Exception:
+        logger.debug("Running job lookup failed", exc_info=True)
+        return None
 
 
 def target_label(platform: str, chat_id, thread_id=None) -> str:
@@ -58,6 +109,11 @@ def target_label(platform: str, chat_id, thread_id=None) -> str:
 
 def _confirmed(job: dict) -> dict:
     value = job.get(CONFIRMED_KEY)
+    return value if isinstance(value, dict) else {}
+
+
+def pending(job: dict | None) -> dict:
+    value = (job or {}).get(PENDING_KEY)
     return value if isinstance(value, dict) else {}
 
 
@@ -82,6 +138,27 @@ def _label_confirmed(job: dict, label: str) -> bool:
     confirmed = {str(item) for item in (_confirmed(job).get("targets") or [])}
     # A confirmed chat covers its topics; a confirmed topic covers only itself.
     return label in confirmed or label.rsplit(":", 1)[0] in confirmed
+
+
+def split_deliver(job: dict, deliver: str | None) -> tuple[str | None, list[str]]:
+    """Split a requested ``deliver`` into what may go out now and what waits.
+
+    Every comma part that reaches an unconfirmed third party is held back
+    whole; the rest is returned as the value safe to store now.
+    """
+    held: list[str] = []
+    keep: list[str] = []
+    parts = [part.strip() for part in str(deliver or "origin").split(",") if part.strip()]
+    for part in parts:
+        unconfirmed = [label for label in third_party_labels({**job, "deliver": part})
+                       if not _label_confirmed(job, label)]
+        if unconfirmed:
+            held.extend(unconfirmed)
+        else:
+            keep.append(part)
+    if not held:
+        return deliver, []
+    return (",".join(keep) or "local"), list(dict.fromkeys(held))
 
 
 def delivery_allowed(job: dict, platform: str, chat_id, thread_id=None) -> bool:
@@ -128,7 +205,26 @@ def audience_run_note(job: dict) -> str:
     )
 
 
-def request_confirmation(job: dict, *, targets: list[str], audience: str) -> dict | None:
+def pause_fields() -> dict[str, Any]:
+    from cron.jobs import _hermes_now
+
+    return {"enabled": False, "state": "paused", "paused_at": _hermes_now().isoformat(),
+            "paused_reason": PAUSE_REASON}
+
+
+def _resume_fields(job: dict) -> dict[str, Any]:
+    """Resume a job paused for confirmation; a one-shot that is due fires now."""
+    from cron.jobs import _hermes_now, compute_next_run
+
+    next_run = compute_next_run(job["schedule"])
+    if next_run is None and (job.get("schedule") or {}).get("kind") == "once":
+        # The owner just confirmed: the reminder goes out now, not never.
+        next_run = _hermes_now().isoformat()
+    return {"enabled": True, "state": "scheduled", "paused_at": None,
+            "paused_reason": None, "next_run_at": next_run}
+
+
+def request_confirmation(job: dict, *, targets: list[str], audience: str) -> dict:
     """Show the owner one card confirming these recipients for this job."""
     from tools.send_message_tool import _decision_session_identity
     from tools.approval import notify_gateway_request
@@ -141,6 +237,7 @@ def request_confirmation(job: dict, *, targets: list[str], audience: str) -> dic
         "schedule": str(job.get("schedule_display") or ""),
         "targets": list(targets),
         "audience": audience,
+        "requested_at": time.time(),
     }
     decision, created = create_pending(
         kind=DECISION_KIND,
@@ -153,6 +250,42 @@ def request_confirmation(job: dict, *, targets: list[str], audience: str) -> dic
     if created and decision["status"] == "pending":
         notify_gateway_request(session_key, approval_payload(decision))
     return decision
+
+
+def retire_card(decision_id: str) -> None:
+    """Close a card whose setting changed; its answer must not apply any more."""
+    if not decision_id:
+        return
+    try:
+        from tools import effect_decisions as decisions
+
+        decision = decisions.get_decision(decision_id)
+        if decision and decision["status"] == decisions.PENDING:
+            decisions.decide(decision_id, source_session_id=decision["source_session_id"],
+                             choice="deny")
+    except Exception:
+        logger.warning("Could not retire recipients card %s", decision_id, exc_info=True)
+
+
+def accept_owner_form_edit(job_id: str) -> dict | None:
+    """The owner chose recipients in the cabinet form or REST: that choice is
+    the confirmation (0.21.15 Astra review P2-5)."""
+    from cron.jobs import get_job, update_job
+
+    job = get_job(job_id)
+    if not job or job.get(POLICY_KEY) != 1:
+        return job
+    confirmed = _confirmed(job)
+    targets = list(dict.fromkeys([*(confirmed.get("targets") or []), *third_party_labels(job)]))
+    updates: dict[str, Any] = {CONFIRMED_KEY: {**confirmed, "targets": targets,
+                                               "confirmed_at": time.time()}}
+    waiting = pending(job)
+    if waiting:
+        retire_card(str(waiting.get("decision_id") or ""))
+        updates[PENDING_KEY] = None
+        if job.get("paused_reason") == PAUSE_REASON:
+            updates.update(_resume_fields(job))
+    return update_job(job["id"], updates)
 
 
 def resolve_recipient_decision(
@@ -187,10 +320,17 @@ def resolve_recipient_decision(
     )
     payload = decision["payload"]
     job = get_job(str(payload.get("job_id") or ""))
-    pending = job.get(PENDING_KEY) if job else None
+    waiting = pending(job)
+    current = bool(job) and waiting.get("decision_id") == decision_id
     if choice == "deny":
-        if job and isinstance(pending, dict) and pending.get("decision_id") == decision_id:
-            update_job(job["id"], {PENDING_KEY: None})
+        if current:
+            updates: dict[str, Any] = {PENDING_KEY: None}
+            if job.get("paused_reason") == PAUSE_REASON:
+                if _has_delivery(job) and job.get("schedule", {}).get("kind") != "once":
+                    updates.update(_resume_fields(job))
+                else:
+                    updates["paused_reason"] = DENIED_REASON
+            update_job(job["id"], updates)
         return decision
 
     decisions.claim_execution(decision_id, expected_payload_sha256=decision["payload_sha256"])
@@ -198,17 +338,30 @@ def resolve_recipient_decision(
         return decisions.finish_execution(
             decision_id, status=decisions.FAILED, outcome={"reason": "job_removed", "retry": False},
         )
+    if not current:
+        # The automation changed after this card was shown (0.21.15 Astra review P2-4).
+        return decisions.finish_execution(
+            decision_id, status=decisions.FAILED,
+            outcome={"reason": "setting_changed", "retry": False},
+        )
     confirmed = _confirmed(job)
-    targets = list(dict.fromkeys([*(confirmed.get("targets") or []), *(payload.get("targets") or [])]))
-    audience = str(payload.get("audience") or "").strip() or str(confirmed.get("audience") or "")
-    updates: dict[str, Any] = {
+    targets = list(dict.fromkeys([*(confirmed.get("targets") or []), *(waiting.get("targets") or [])]))
+    audience = str(waiting.get("audience") or "").strip() or str(confirmed.get("audience") or "")
+    updates = {
         CONFIRMED_KEY: {"targets": targets, "audience": audience,
                         "decision_id": decision_id, "confirmed_at": time.time()},
+        PENDING_KEY: None,
     }
-    if isinstance(pending, dict) and pending.get("decision_id") == decision_id:
-        updates[PENDING_KEY] = None
+    if waiting.get("targets") and "deliver" in waiting:
+        updates["deliver"] = waiting["deliver"]
+    if job.get("paused_reason") == PAUSE_REASON:
+        updates.update(_resume_fields(job))
     update_job(job["id"], updates)
     return decisions.finish_execution(
         decision_id, status=decisions.SUCCEEDED,
         outcome={"job_id": job["id"], "targets": targets, "audience": audience},
     )
+
+
+def _has_delivery(job: dict) -> bool:
+    return str(job.get("deliver") or "origin").strip().lower() not in {"", "local"}

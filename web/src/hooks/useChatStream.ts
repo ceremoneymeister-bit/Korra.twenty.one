@@ -758,6 +758,7 @@ export function useChatStream(
   /** Каждое явное открытие чата (выбор, «Новый чат», ссылка из уведомления)
    *  отменяет ещё не завершённый поиск последнего разговора. */
   const openIntentRef = useRef(0);
+  const openLatestRef = useRef<(() => Promise<void>) | null>(null);
   // Synchronous mirror of state.isStreaming so concurrent send() calls
   // can guard against re-entry without waiting for a re-render. React
   // state updates are async — without this ref, two send() calls fired
@@ -916,9 +917,19 @@ export function useChatStream(
         throw error;
       });
       if (!current()) return;
-      if (missing && !background && options?.onMissing) {
+      if (missing && !background) {
         window.clearTimeout(historyTimer);
-        queueMicrotask(options.onMissing);
+        // Every way of opening a chat — a pick, a link from the notification,
+        // a remembered choice — lands on something real (Astra review P2-8).
+        const onMissing = options?.onMissing ?? (() => {
+          forgetChatSelection(selectionKey);
+          void openLatestRef.current?.().then(() => {
+            if (mountedRef.current) {
+              dispatch({ type: "SET_ERROR", error: "Этот разговор больше недоступен — открыт последний." });
+            }
+          });
+        });
+        queueMicrotask(onMissing);
         return;
       }
       const chatMessages = sessionMessagesToChat(sessionId, resp.messages as HistoryMessage[]);
@@ -1441,14 +1452,31 @@ export function useChatStream(
   /** Открыть последний разговор агента — тот же, что первым стоит в «Чатах». */
   const openLatest = useCallback(async (): Promise<void> => {
     const intent = ++openIntentRef.current;
+    // Never keep another agent's or a deleted conversation on screen while
+    // the latest one is looked up; nothing is saved as a choice here.
+    activeStreamIdRef.current = null;
+    abortControllerRef.current?.abort();
+    streamingRef.current = false;
+    dispatch({ type: "RESET" });
     setIsLoading(true);
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), HISTORY_LOAD_TIMEOUT_MS);
     let latest: string | undefined;
     try {
-      const response = await api.getSessions(1, 0, profile === undefined ? undefined : profile || "default", "recent");
+      const response = await api.getSessions(
+        1, 0, profile === undefined ? undefined : profile || "default", "recent", controller.signal,
+      );
       latest = response.sessions[0]?.id;
     } catch {
-      latest = undefined;
+      window.clearTimeout(timer);
+      if (!mountedRef.current || openIntentRef.current !== intent) return;
+      // A failed lookup is not «no conversations»: say so, keep nothing saved
+      // (Astra review P2-7).
+      setIsLoading(false);
+      dispatch({ type: "SET_ERROR", error: "Не удалось открыть последний разговор. Откройте «Чаты» или обновите страницу." });
+      return;
     }
+    window.clearTimeout(timer);
     if (!mountedRef.current || openIntentRef.current !== intent) return;
     if (latest) {
       sessionRef.current = latest;
@@ -1458,6 +1486,7 @@ export function useChatStream(
       reset();
     }
   }, [loadSession, profile, reset]);
+  useEffect(() => { openLatestRef.current = openLatest; }, [openLatest]);
 
   useEffect(() => {
     const selection = readChatSelection(selectionKey);

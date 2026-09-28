@@ -21,11 +21,16 @@ function isChatSessionId(value: string): boolean {
 export function readChatSelection(key: string): string | null | undefined {
   let value: string | null = null;
   try { value = sessionStorage.getItem(key); } catch { /* Try persistent storage. */ }
-  if (value === null) {
-    try { value = localStorage.getItem(key); } catch { /* Storage unavailable. */ }
+  if (value !== null) {
+    // «Новый чат» chosen in this very tab.
+    if (value === "") return null;
+    return isChatSessionId(value) ? value : undefined;
   }
-  if (value === null || (value && !isChatSessionId(value))) return undefined;
-  return value || null;
+  try { value = localStorage.getItem(key); } catch { /* Storage unavailable. */ }
+  // An empty value here was saved by 0.21.14 for every «Новый чат»: on a new
+  // visit it is not a choice any more, the conversation continues.
+  if (!value || !isChatSessionId(value)) return undefined;
+  return value;
 }
 
 export function writeChatSelection(key: string, sessionId: string | null): void {

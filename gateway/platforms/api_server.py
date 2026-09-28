@@ -7440,6 +7440,12 @@ class APIServerAdapter(BasePlatformAdapter):
             job = _cron_update(job_id, sanitized)
             if not job:
                 return web.json_response({"error": "Job not found"}, status=404)
+            if "deliver" in sanitized:
+                # The installation key is the owner's: recipients set here are
+                # confirmed by that choice (cron.recipients).
+                from cron.recipients import accept_owner_form_edit
+
+                job = accept_owner_form_edit(job["id"]) or job
             _notify_cron_provider_jobs_changed()
             return web.json_response({"job": job})
         except ValueError as e:

@@ -136,6 +136,9 @@ _BACKGROUND_OWNER: ContextVar = ContextVar("korra_background_owner", default=Non
 # fallback for CLI/tests; "1" marks cron; "" explicitly marks non-cron and
 # masks any leaked process env value.
 _CRON_SESSION: ContextVar = ContextVar("KORRA_CRON_SESSION", default=_UNSET)
+#: The scheduled job a cron run executes; bridged to its terminal so
+#: ``korra send`` there can use recipients the owner confirmed for it.
+_CRON_JOB_ID: ContextVar = ContextVar("KORRA_CRON_JOB_ID", default=_UNSET)
 
 # Whether the current session's delivery channel can route an ASYNC completion
 # back to the agent AFTER the current turn ends (i.e. wake a fresh turn).
@@ -184,6 +187,7 @@ _VAR_MAP = {
     "KORRA_BROWSER_CONTROL_PRINCIPAL": _BROWSER_CONTROL_PRINCIPAL,
     "KORRA_BROWSER_CONTROL_TRANSPORT_FAMILY": _BROWSER_CONTROL_TRANSPORT_FAMILY,
     "KORRA_CRON_SESSION": _CRON_SESSION,
+    "KORRA_CRON_JOB_ID": _CRON_JOB_ID,
     "KORRA_CRON_AUTO_DELIVER_PLATFORM": _CRON_AUTO_DELIVER_PLATFORM,
     "KORRA_CRON_AUTO_DELIVER_CHAT_ID": _CRON_AUTO_DELIVER_CHAT_ID,
     "KORRA_CRON_AUTO_DELIVER_THREAD_ID": _CRON_AUTO_DELIVER_THREAD_ID,

@@ -66,15 +66,19 @@ def test_agent_created_recipient_waits_for_one_confirmation(store):
                     schedule="every day at 9am", deliver="telegram:999,origin")
     assert created["recipients"]["targets"] == ["telegram:999"]
     job = _job(created["job_id"])
+    # The unconfirmed recipient is not in deliver and nothing runs before the answer.
     assert job["recipients_policy"] == 1
-    assert recipients.delivery_allowed(job, "telegram", "42") is True        # the owner's own chat
+    assert job["deliver"] == "origin"
+    assert job["enabled"] is False and job["paused_reason"] == recipients.PAUSE_REASON
     assert recipients.delivery_allowed(job, "telegram", "999") is False
 
     decision = _resolve(created["recipients"]["decision_id"], "once")
     assert decision["status"] == "succeeded"
     job = _job(created["job_id"])
+    assert job["deliver"] == "telegram:999,origin"
     assert job["recipients_confirmed"]["targets"] == ["telegram:999"]
     assert not job.get("recipients_pending")
+    assert job["enabled"] is True and job["state"] == "scheduled"
     assert recipients.delivery_allowed(job, "telegram", "999") is True
 
 
@@ -84,23 +88,27 @@ def test_a_denied_recipient_stays_unsent(store):
     _resolve(created["recipients"]["decision_id"], "deny")
     job = _job(created["job_id"])
     assert not job.get("recipients_pending")
-    assert recipients.delivery_allowed(job, "telegram", "999") is False
+    assert "999" not in job["deliver"]
+    assert job["enabled"] is False and job["paused_reason"] == recipients.DENIED_REASON
 
 
-def test_scheduled_delivery_holds_an_unconfirmed_recipient(store):
+def test_scheduled_delivery_never_reaches_an_unconfirmed_recipient(store):
     from cron.scheduler import _deliver_result
     from gateway.config import Platform
 
     created = _tool(OWNER_DM, action="create", prompt="Отчёт", schedule="every 1h",
                     deliver="telegram:999,telegram:42")
+    job = _job(created["job_id"])
     cfg = MagicMock()
     cfg.platforms = {Platform.TELEGRAM: MagicMock(enabled=True)}
     send = AsyncMock(return_value={"success": True})
     with (patch("gateway.config.load_gateway_config", return_value=cfg),
           patch("tools.send_message_tool._send_to_platform", new=send)):
-        error = _deliver_result(_job(created["job_id"]), "Отчёт")
-    assert "Получатель ещё не подтверждён: telegram:999" in (error or "")
-    assert send.await_count == 1  # only the owner's own chat
+        error = _deliver_result(job, "Отчёт")
+        # Even a hand-edited deliver is held back by the delivery guard.
+        guarded = _deliver_result({**job, "deliver": "telegram:999"}, "Отчёт")
+    assert error is None and send.await_count == 1  # only the owner's own chat
+    assert "Получатель ещё не подтверждён: telegram:999" in (guarded or "")
 
 
 def test_jobs_before_the_policy_keep_their_recipients_and_confirm_only_additions(store):
@@ -167,3 +175,135 @@ def test_the_card_names_the_automation_and_its_recipients(store):
     assert card["decision_kind"] == "automation_recipients"
     assert "Отчёт бухгалтеру" in card["command"] and "telegram:999" in card["command"]
     assert card["choices"] == ["once", "deny"]
+
+
+# --- 0.21.15 Astra review of candidate ce8046b8e1 ----------------------------
+
+
+def test_a_failed_card_leaves_a_changed_job_safe(store, monkeypatch):
+    """P1-2: the new recipient and its guard are written together."""
+    from cron.jobs import create_job
+
+    legacy = create_job(prompt="Отчёт", schedule="every 1h", deliver="telegram:111",
+                        created_by_owner=True)
+    monkeypatch.setattr(recipients, "request_confirmation",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("store unavailable")))
+    changed = _tool(OWNER_DM, action="update", job_id=legacy["id"], deliver="telegram:222")
+    assert changed["recipients"]["status"] == "card_failed"
+    job = _job(legacy["id"])
+    assert "222" not in job["deliver"]
+    assert job["enabled"] is False and job["recipients_pending"]["targets"] == ["telegram:222"]
+    assert recipients.delivery_allowed(job, "telegram", "222") is False
+
+
+def test_stored_jobs_are_safe_for_the_0_21_14_scheduler(store):
+    """P1-3: an engine that ignores recipients_policy still finds nothing to send."""
+    created = _tool(OWNER_DM, action="create", prompt="Отчёт", schedule="every 1h",
+                    deliver="telegram:999")
+    job = _job(created["job_id"])
+    assert "telegram:999" not in str(job["deliver"])
+    assert job["enabled"] is False and job["state"] == "paused"
+
+
+def test_a_changed_audience_revokes_the_old_one_and_old_cards_do_not_apply(store):
+    """P2-4: confirmation belongs to the version of the setting it was shown for."""
+    created = _tool(OWNER_DM, action="create", prompt="Поздравления", schedule="every day at 10am",
+                    audience="клиенты A")
+    first = created["recipients"]["decision_id"]
+    _resolve(first, "once")
+    assert recipients.confirmed_audience(_job(created["job_id"])) == "клиенты A"
+
+    changed = _tool(OWNER_DM, action="update", job_id=created["job_id"], audience="клиенты B")
+    job = _job(created["job_id"])
+    assert recipients.confirmed_audience(job) == ""       # A no longer authorises anything
+    token = recipients.bind_running_job(job)
+    try:
+        assert recipients.send_allowed_in_run("telegram", "555") is False
+    finally:
+        recipients.reset_running_job(token)
+
+    removed = _tool(OWNER_DM, action="update", job_id=created["job_id"], audience="")
+    assert "recipients" not in removed
+    from tools.effect_decisions import get_decision
+    assert get_decision(changed["recipients"]["decision_id"])["status"] == "denied"
+    job = _job(created["job_id"])
+    assert not job.get("recipients_pending") and recipients.confirmed_audience(job) == ""
+
+
+def test_an_old_card_approved_after_a_change_does_not_confirm_anything(store, monkeypatch):
+    created = _tool(OWNER_DM, action="create", prompt="Отчёт", schedule="every 1h",
+                    deliver="telegram:999")
+    stale = created["recipients"]["decision_id"]
+    # Keep the stale card pending to prove the version check, not the retirement.
+    monkeypatch.setattr(recipients, "retire_card", lambda decision_id: None)
+    _tool(OWNER_DM, action="update", job_id=created["job_id"], deliver="telegram:777")
+    decision = _resolve(stale, "once")
+    assert decision["status"] == "failed"
+    job = _job(created["job_id"])
+    assert recipients.delivery_allowed(job, "telegram", "999") is False
+    assert "999" not in str(job["deliver"])
+
+
+def test_choosing_recipients_in_the_cabinet_form_confirms_them(store):
+    """P2-5: the owner's explicit choice in the form is the confirmation."""
+    from cron.jobs import update_job
+
+    created = _tool(OWNER_DM, action="create", prompt="Отчёт", schedule="every 1h",
+                    deliver="telegram:999")
+    update_job(created["job_id"], {"deliver": "telegram:555"})
+    job = recipients.accept_owner_form_edit(created["job_id"])
+    assert recipients.delivery_allowed(job, "telegram", "555") is True
+    assert not job.get("recipients_pending")
+    assert job["enabled"] is True
+
+
+def test_a_one_shot_reminder_is_not_spent_before_the_answer(store):
+    """P2-6: confirmed after its time, it goes out now instead of being lost."""
+    from datetime import timedelta
+
+    from cron.jobs import _hermes_now, update_job
+
+    created = _tool(OWNER_DM, action="create", reminder="Позвонить поставщику", schedule="in 5m",
+                    deliver="telegram:999")
+    job = _job(created["job_id"])
+    assert job["enabled"] is False
+    past = (_hermes_now() - timedelta(hours=1)).isoformat()
+    update_job(job["id"], {"schedule": {**job["schedule"], "run_at": past}, "next_run_at": None})
+    _resolve(created["recipients"]["decision_id"], "once")
+    job = _job(created["job_id"])
+    assert job["enabled"] is True and job["deliver"] == "telegram:999"
+    assert job["next_run_at"] is not None
+
+
+def test_korra_send_in_a_running_jobs_terminal_uses_its_confirmation(store):
+    """P1-1: a child process (``korra send`` in the job's terminal) finds the
+    job through the bridge — only while the ledger shows it executing in a
+    live scheduler process."""
+    import os
+    import subprocess
+    import sys
+
+    from cron import executions
+
+    created = _tool(OWNER_DM, action="create", prompt="Поздравления", schedule="every day at 10am",
+                    audience="клиенты с ДР")
+    _resolve(created["recipients"]["decision_id"], "once")
+    child = (
+        "from cron import recipients;"
+        "job = recipients.running_job();"
+        "print(job['id'] if job else '-', recipients.send_allowed_in_run('telegram', '555'))"
+    )
+    env = {**os.environ, "KORRA_HOME": str(store), "HERMES_HOME": str(store),
+           "KORRA_CRON_SESSION": "1", "KORRA_CRON_JOB_ID": created["job_id"],
+           "PYTHONDONTWRITEBYTECODE": "1"}
+
+    def ask() -> str:
+        return subprocess.run([sys.executable, "-c", child], env=env, capture_output=True,
+                              text=True, check=True, timeout=120).stdout.split()[-2:]
+
+    assert ask() == ["-", "False"]                                  # not executing: no authority
+    attempt = executions.create_execution(created["job_id"], source="scheduled")
+    executions.mark_execution_running(attempt["id"])
+    assert ask() == [created["job_id"], "True"]
+    executions.finish_execution(attempt["id"], success=True)
+    assert ask() == ["-", "False"]

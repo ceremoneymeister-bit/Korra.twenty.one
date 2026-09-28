@@ -127,13 +127,17 @@ class TestCronContextDeliveryResolution:
             _exit_cron_context(tokens, extra)
         assert result["deliver"] == "telegram:-100123456:17,all"
 
-    def test_explicit_target_passes_through_verbatim(self, temp_cron_home):
+    def test_explicit_new_target_waits_for_the_owner(self, temp_cron_home, monkeypatch):
+        # Dmitry, 28.09.2026: a recipient the owner never confirmed does not get
+        # messages from an automation; the owner confirms it once (cron.recipients).
+        monkeypatch.setattr("tools.approval.notify_gateway_request", lambda *a, **k: True)
         tokens, extra = _enter_cron_context("telegram", "-100999", "3")
         try:
             result = _create(deliver="discord:#engineering")
         finally:
             _exit_cron_context(tokens, extra)
-        assert result["deliver"] == "discord:#engineering"
+        assert result["deliver"] == "local"
+        assert result["recipients"]["targets"] == ["discord:#engineering"]
 
     def test_local_passes_through(self, temp_cron_home):
         tokens, extra = _enter_cron_context("telegram", "-100999")

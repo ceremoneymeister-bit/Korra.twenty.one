@@ -764,6 +764,7 @@ export const api = {
     offset = 0,
     profileOrOptions: string | SessionQueryOptions = getManagementProfile(),
     order: "created" | "recent" = "created",
+    signal?: AbortSignal,
   ) => {
     const options = normalizeSessionQueryOptions(profileOrOptions, order);
     return fetchJSON<PaginatedSessions>(
@@ -771,6 +772,7 @@ export const api = {
         `/api/sessions?limit=${limit}&offset=${offset}&order=${options.order ?? order}`,
         options,
       ),
+      signal ? { signal } : undefined,
     );
   },
   getSessionMessages: (id: string, profile = getManagementProfile(), signal?: AbortSignal) =>

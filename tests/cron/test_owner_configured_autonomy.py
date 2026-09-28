@@ -299,7 +299,9 @@ def test_a_group_member_cannot_automate_sends_into_the_group(cron_dir):
 def test_the_owner_still_sets_up_other_recipients(cron_dir):
     owner = {**EKATERINA_DM, "owner_principal": "live"}
     result = _tool(owner, action="create", prompt="Отчёт", schedule="every 1h", deliver="telegram:999")
-    assert result.get("success", True) is True and result["deliver"] == "telegram:999"
+    # Allowed, and held until the owner confirms the recipient once (cron.recipients).
+    assert result.get("success", True) is True
+    assert result["recipients"]["targets"] == ["telegram:999"]
 
 
 def test_only_the_creator_changes_somebody_elses_job(cron_dir):

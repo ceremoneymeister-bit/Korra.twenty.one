@@ -1164,3 +1164,58 @@ describe("opening an agent continues its conversation (Бирюкова, 28.09)"
     }
   });
 });
+
+describe("opening an agent — Astra review of candidate ce8046b8e1", () => {
+  const key = (profile: string) => `${chatViewKey(profile)}:selected`;
+  async function mount(profile: string) {
+    await act(async () => root.render(<Probe profile={profile} onValue={(value) => { current = value; }} />));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+  }
+
+  it("an empty choice saved by 0.21.14 does not keep the phone on an empty chat", async () => {
+    localStorage.setItem(key("nyura"), "");
+    vi.spyOn(api, "getSessions").mockResolvedValue({ sessions: [{ id: "latest" }], total: 1, limit: 1, offset: 0 } as never);
+    vi.spyOn(api, "getSessionMessages").mockResolvedValue({ session_id: "latest", messages: [] });
+    await mount("nyura");
+    expect(current.sessionId).toBe("latest");
+  });
+
+  it("a deleted chat opened from a link falls back to the latest one and says so", async () => {
+    vi.spyOn(api, "getSessions").mockResolvedValue({ sessions: [{ id: "latest" }], total: 1, limit: 1, offset: 0 } as never);
+    vi.spyOn(api, "getSessionMessages").mockImplementation(async (id: string) => {
+      if (id === "gone") throw new Error("404: not found");
+      return { session_id: id, messages: [] };
+    });
+    await mount("nyura");
+    await act(async () => { await current.loadSession("gone"); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(current.sessionId).toBe("latest");
+    expect(current.error).toContain("больше недоступен");
+  });
+
+  it("a failed lookup of the latest conversation is an error, not an empty history", async () => {
+    vi.spyOn(api, "getSessions").mockRejectedValue(new Error("503: unavailable"));
+    await mount("nyura");
+    expect(current.isLoading).toBe(false);
+    expect(current.error).toContain("Не удалось открыть последний разговор");
+    expect(sessionStorage.getItem(key("nyura"))).toBeNull();
+  });
+
+  it("a lookup that never answers stops after 30 seconds", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(api, "getSessions").mockImplementation(
+        (_limit, _offset, _profile, _order, signal?: AbortSignal) => new Promise((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+        }),
+      );
+      await act(async () => root.render(<Probe profile="nyura" onValue={(value) => { current = value; }} />));
+      expect(current.isLoading).toBe(true);
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+      expect(current.isLoading).toBe(false);
+      expect(current.error).toContain("Не удалось открыть последний разговор");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

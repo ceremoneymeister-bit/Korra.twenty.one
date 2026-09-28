@@ -2242,6 +2242,8 @@ def create_job(
     pending_result_policy: str = "all",
     recipients_policy: Optional[int] = None,
     audience: Optional[str] = None,
+    recipients_pending: Optional[Dict[str, Any]] = None,
+    paused_reason: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Create a new cron job.
@@ -2481,6 +2483,13 @@ def create_job(
         job["recipients_policy"] = 1
     if isinstance(audience, str) and audience.strip():
         job["audience"] = audience.strip()
+    if isinstance(recipients_pending, dict):
+        job["recipients_pending"] = recipients_pending
+    if paused_reason:
+        # Created paused in the same write: nothing can fire before the owner
+        # answers (cron.recipients).
+        job.update(enabled=False, state="paused", paused_at=_hermes_now().isoformat(),
+                   paused_reason=paused_reason)
 
     with _jobs_lock():
         jobs = load_jobs()
