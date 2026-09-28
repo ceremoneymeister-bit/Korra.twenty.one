@@ -169,6 +169,54 @@ def test_pending_decision_replaces_same_turn_lease_instead_of_counting_twice(
     assert active[0]["status"] == "waiting_decision"
 
 
+def test_several_decisions_in_one_chat_are_one_row_that_carries_their_number(
+    monkeypatch, tmp_path
+):
+    # Four birthday greetings waiting in one conversation are four answers
+    # the owner owes, not one; the row stays single so «работ» is not inflated.
+    home = tmp_path / "bitrix"
+    home.mkdir()
+    _session(home, "greetings", source="browser", title="Поздравления")
+    for index in range(4):
+        create_pending(
+            kind="outbound_message",
+            owner_id="owner",
+            profile="bitrix",
+            source_session_id="greetings",
+            source_session_key="browser:greetings",
+            payload={"channel": "telegram", "recipient": f"client-{index}", "text": "Поздравление"},
+            path=home / "effect_decisions.sqlite3",
+        )
+    create_pending(
+        kind="outbound_message",
+        owner_id="owner",
+        profile="bitrix",
+        source_session_id="invoice",
+        source_session_key="browser:invoice",
+        payload={"channel": "telegram", "recipient": "owner", "text": "Счёт"},
+        path=home / "effect_decisions.sqlite3",
+    )
+    monkeypatch.setattr(chat_activity, "_profile_targets", lambda _profile: [("bitrix", home)])
+
+    browser = [{
+        "message_id": "browser-greetings",
+        "session_id": "greetings",
+        "profile": "bitrix",
+        "status": "running",
+        "updated_at": 1,
+        "history_count": 0,
+        "user_message": {"role": "user", "content": "Поздравь"},
+    }]
+    runs = chat_activity.project_chat_activity(browser, profile=None, session_id=None)
+    waiting = {item["session_id"]: item for item in runs if item["status"] == "waiting_decision"}
+
+    assert set(waiting) == {"greetings", "invoice"}
+    assert waiting["greetings"]["message_id"] == "browser-greetings"
+    assert waiting["greetings"]["pending_decisions"] == 4
+    assert waiting["invoice"]["pending_decisions"] == 1
+    assert sum(item["pending_decisions"] for item in waiting.values()) == 5
+
+
 def test_corrupt_effect_store_is_not_hidden_as_an_empty_activity_list(
     monkeypatch, tmp_path
 ):
