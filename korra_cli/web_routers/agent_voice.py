@@ -28,7 +28,7 @@ class VoiceUpdate(BaseModel):
     voice: str = Field(default="", max_length=200)
     model: str = Field(default="eleven_multilingual_v2", max_length=200)
     base_url: str = Field(default="", max_length=2000)
-    speed: float = Field(default=1, ge=0.7, le=1.2)
+    speed: float = Field(default=1, ge=0.7, le=1.5)
     web_mode: Literal["manual", "auto"] = "manual"
     telegram_mode: Literal["off", "voice_only", "all"] = "off"
     api_key: str | None = Field(default=None, max_length=4096, repr=False)
@@ -100,6 +100,8 @@ async def put_voice(name: str, body: VoiceUpdate):
             data["base_url"] = agent_voice.validate_endpoint(body.base_url)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from None
+    if body.provider == "elevenlabs" and body.speed > 1.2:
+        raise HTTPException(400, "ElevenLabs поддерживает скорость не выше 1,2")
     if body.provider == "openrouter_fish" and data["voice"]:
         try:
             selected = agent_voice.bundled_voice(data["voice"])

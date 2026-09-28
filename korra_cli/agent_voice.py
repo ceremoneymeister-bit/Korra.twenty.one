@@ -114,7 +114,7 @@ def generate_openrouter_fish(text, output_path, tts_config):
     if not key:
         raise ValueError("Добавьте свой OpenRouter API-ключ")
     speed = float(section.get("speed", voice["default_speed"]))
-    if not 0.7 <= speed <= 1.2:
+    if not 0.7 <= speed <= 1.5:
         raise ValueError("Скорость речи вне допустимого диапазона")
     reference = bundled_voice_file(voice["id"], voice["reference_file"]).read_bytes()
     reference_text = bundled_voice_file(voice["id"], voice["reference_text_file"]).read_text(encoding="utf-8").strip()

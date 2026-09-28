@@ -39,7 +39,7 @@ def test_bundled_voices_can_be_previewed_without_a_key(client):
     voices = {voice["id"]: voice for voice in catalog.json()["voices"]}
     assert {"navigator", "boss"} <= set(voices)
     for voice_id, expected_hash in {
-        "navigator": "ecde8fc560f7f46cf434c59ea0e13a2770e79bafde8ea6a395ad56fe9a5155aa",
+        "navigator": "82c793bfdc87532b0a90efad2315e83ab9bd0c887ead12702eb6ac145dd994a2",
         "boss": "d974072da8562d5384013c359edc16eec65895fdbf5425ba43ede1f09aca97a5",
     }.items():
         sample = http.get(voices[voice_id]["sample_url"])
@@ -47,11 +47,11 @@ def test_bundled_voices_can_be_previewed_without_a_key(client):
         assert hashlib.sha256(sample.content).hexdigest() == expected_hash
     navigator = voices["navigator"]
     assert navigator["model"] == "fish-audio/s2.1-pro"
-    assert navigator["default_speed"] == 1.05
+    assert navigator["default_speed"] == 1.5
     assert voices["boss"]["default_speed"] == 1.0
     assert http.get("/api/voices/unknown/sample").status_code == 404
     selected = draft(provider="openrouter_fish", voice="navigator", model=navigator["model"],
-                     base_url="", speed=1.05)
+                     base_url="", speed=1.5)
     assert http.put("/api/profiles/default/voice", json=selected).status_code == 400
     assert http.put("/api/profiles/default/voice", json={**selected, "api_key": "my-openrouter-key"}).status_code == 200
     assert http.get("/api/profiles/default/voice").json() == {
@@ -61,13 +61,17 @@ def test_bundled_voices_can_be_previewed_without_a_key(client):
     assert http.post("/api/profiles", json={"name": "listener", "no_skills": True}).status_code == 200
     assert http.get("/api/profiles/listener/voice").json()["has_key"] is False
     assert http.put("/api/profiles/listener/voice", json={**selected, "voice": "unknown"}).status_code == 400
+    assert http.put("/api/profiles/default/voice", json=draft(
+        provider="elevenlabs", voice="test-voice", model="eleven_multilingual_v2",
+        base_url="", speed=1.5,
+    )).status_code == 400
 
 
 def test_bundled_navigator_synthesis_sends_reference_and_selected_speed(client, monkeypatch):
     import httpx
     http, root = client
     selected = draft(provider="openrouter_fish", voice="navigator", model="fish-audio/s2.1-pro",
-                     base_url="", speed=1.05, api_key="profile-openrouter-key")
+                     base_url="", speed=1.5, api_key="profile-openrouter-key")
     assert http.put("/api/profiles/default/voice", json=selected).status_code == 200
     captured = []
     def service(request):
@@ -86,7 +90,7 @@ def test_bundled_navigator_synthesis_sends_reference_and_selected_speed(client, 
     assert payload["model"] == "fish-audio/s2.1-pro" and payload["input"] == "Привет, Дима"
     assert payload["provider"] == {"only": ["fish-audio"], "allow_fallbacks": False,
                                     "max_price": {"prompt": 0.000015, "completion": 0},
-                                    "options": {"fish-audio": {"prosody": {"speed": 1.05}}}}
+                                    "options": {"fish-audio": {"prosody": {"speed": 1.5}}}}
     assert hashlib.sha256(base64.b64decode(payload["input_references"][0]["input_audio"]["data"].split(",", 1)[1])).hexdigest() == "0cae14a9421df33626741420fca6d8eae0ef1a57c138b5bf2e3aa3a1a4b5ea0f"
     assert payload["input_references"][1]["text"].startswith("Внешне это пока")
     assert not list(root.rglob("korra-voice-*"))
