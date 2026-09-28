@@ -199,3 +199,28 @@ def test_failed_run_projects_reset_metadata_for_browser_recovery(isolated):
         "reason": "rate_limit",
         "resets_at": "2026-09-19T10:30:00Z",
     }
+
+
+def test_opened_chat_learns_where_the_turn_lies_in_history(isolated, monkeypatch, tmp_path):
+    """0.21.15, ревью Astra R2: для открытого чата журнал говорит, в какой
+    строке истории лежит реплика хода, — клиент не угадывает по тексту."""
+    from korra_state import SessionDB
+
+    written = remember(isolated, message="written-1234567890123456")
+    waiting = remember(isolated, message="waiting-1234567890123456")
+    db_path = tmp_path / "state-runs.db"
+    db = SessionDB(db_path)
+    db.create_session("session-a", source="dashboard")
+    db.append_message("session-a", role="user", content="Проверка",
+                      display_metadata={"client_message_id": written})
+    row_id = db.get_messages("session-a")[-1]["id"]
+    db.close()
+    monkeypatch.setattr(web_server, "_open_session_db_for_profile",
+                        lambda profile, read_only=True: SessionDB(db_path))
+
+    runs = {run["message_id"]: run for run in asyncio.run(chat_runs("lawyer", "session-a"))["runs"]}
+    assert runs[written]["history_row_id"] == row_id
+    assert runs[waiting]["history_row_id"] is None
+    assert runs[written]["turn_tracked"] is True
+    # Опрос оболочки без открытого чата базу не читает.
+    assert all("history_row_id" not in run for run in asyncio.run(chat_runs("lawyer"))["runs"])

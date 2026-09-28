@@ -802,8 +802,10 @@ def build_turn_context(
     # build strips both fields from every outgoing copy.
     if persist_user_display_kind:
         user_msg["display_kind"] = persist_user_display_kind
-        if persist_user_display_metadata:
-            user_msg["display_metadata"] = persist_user_display_metadata
+    # Метаданные показа бывают и у обычной реплики: id сообщения браузера
+    # связывает её строку с ходом, который она начала (0.21.15, ревью Astra R2).
+    if persist_user_display_metadata:
+        user_msg["display_metadata"] = persist_user_display_metadata
 
     append_message(messages, user_msg)
     current_turn_user_idx = len(messages) - 1

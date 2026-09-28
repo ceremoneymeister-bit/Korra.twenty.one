@@ -2383,6 +2383,31 @@ class TestSessionIdHeader:
             assert call_kwargs["conversation_history"] == db_history
             assert call_kwargs["user_message"] == "new question"
 
+    @pytest.mark.asyncio
+    async def test_browser_message_id_is_kept_on_the_user_row(self, auth_adapter):
+        """0.21.15, ревью Astra R2: id сообщения браузера уходит агенту в
+        метаданные показа реплики — по нему чат находит свой ход. Мусорный
+        заголовок не записывается."""
+        mock_result = {"final_response": "ok", "messages": [], "api_calls": 1}
+        auth_adapter._session_db = MagicMock()
+        auth_adapter._session_db.get_messages_as_conversation.return_value = []
+        app = _create_app(auth_adapter)
+        async with TestClient(TestServer(app)) as cli:
+            with patch.object(auth_adapter, "_run_agent", new_callable=AsyncMock) as mock_run:
+                mock_run.return_value = (mock_result, {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0})
+                for header, expected in (
+                    ("browser-msg-1234567890", {"client_message_id": "browser-msg-1234567890"}),
+                    ("../bad", None),
+                ):
+                    resp = await cli.post(
+                        "/v1/chat/completions",
+                        headers={"X-Hermes-Session-Id": "existing-session", "Authorization": "Bearer sk-secret",
+                                 "X-Korra-Client-Message-Id": header},
+                        json={"model": "hermes-agent", "messages": [{"role": "user", "content": "вопрос"}]},
+                    )
+                    assert resp.status == 200
+                    assert mock_run.call_args.kwargs["persist_user_display_metadata"] == expected
+
 
 # ---------------------------------------------------------------------------
 # X-Hermes-Session-Key header (long-term memory scoping)

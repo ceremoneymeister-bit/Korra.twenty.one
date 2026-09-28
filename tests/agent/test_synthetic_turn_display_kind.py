@@ -104,3 +104,17 @@ def test_a_real_user_turn_stays_untyped(agent_db):
 
     row, = [r for r in db.get_messages_as_conversation(sid) if r["role"] == "user"]
     assert row.get("display_kind") is None
+
+
+def test_a_browser_turn_keeps_its_message_id_without_becoming_typed(agent_db):
+    """0.21.15, ревью Astra R2: обычная реплика хранит id сообщения браузера,
+    но остаётся обычной репликой — без вида служебного события."""
+    agent, db, sid = agent_db
+
+    _build(agent, user_message="да", persist_user_display_metadata={"client_message_id": "browser-msg-1234567890"})
+
+    row, = [r for r in db.get_messages_as_conversation(sid) if r["role"] == "user"]
+    assert row.get("display_kind") is None
+    assert row["display_metadata"] == {"client_message_id": "browser-msg-1234567890"}
+    assert db.find_client_message_row(sid, "browser-msg-1234567890") is not None
+    assert db.find_client_message_row(sid, "other-msg-1234567890") is None

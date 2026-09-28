@@ -10,6 +10,11 @@ export interface ChatRun {
   updated_at: number;
   started_at?: number;
   history_count: number;
+  /** Открытый чат: id строки истории с репликой хода; null — ещё не записана
+   *  (или записана до того, как движок стал хранить id сообщения). */
+  history_row_id?: number | null;
+  /** Движок хранит id сообщения в строке реплики этого хода. */
+  turn_tracked?: boolean;
   user_message: { role: "user"; content: string };
   source?: string | null;
   channel?: string | null;

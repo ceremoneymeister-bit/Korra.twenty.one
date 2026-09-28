@@ -12771,6 +12771,30 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
             ).fetchall()
         return self._decode_message_rows(rows), start_id, has_more
 
+    def find_client_message_row(self, session_id: str, client_message_id: str) -> Optional[int]:
+        """id строки реплики, начатой сообщением браузера ``client_message_id``.
+
+        Ищет по всей цепочке продолжений, как лента чата; из копий, перенесённых
+        сжатием, — новейшую, ту же, что оставляет ``get_display_page``. None —
+        реплика ещё не записана (или записана версией, которая id не хранила).
+        """
+        if not session_id or not client_message_id:
+            return None
+        if self._is_explicit_branch_session(session_id):
+            lineage = [session_id]
+        else:
+            lineage = [sid for sid in self._session_lineage_root_to_tip(session_id) if sid] or [session_id]
+        placeholders = ",".join("?" for _ in lineage)
+        with self._read_ctx() as conn:
+            row = conn.execute(
+                f"SELECT MAX(id) AS id FROM messages WHERE session_id IN ({placeholders}) "
+                "AND role = 'user' AND (active = 1 OR compacted = 1) "
+                "AND json_valid(display_metadata) "
+                "AND json_extract(display_metadata, '$.client_message_id') = ?",
+                (*lineage, client_message_id),
+            ).fetchone()
+        return int(row["id"]) if row and row["id"] is not None else None
+
     def find_pr_url_messages(self, session_ids: List[str]) -> List[Dict[str, Any]]:
         """Tool results in these sessions that mention a GitHub PR url.
 

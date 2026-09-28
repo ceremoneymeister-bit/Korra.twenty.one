@@ -1354,3 +1354,86 @@ describe("лента грузится страницами по 30 (Дмитри
     ]);
   });
 });
+
+describe("ход узнаётся по id сообщения, а не по тексту (ревью Astra R2, R3)", () => {
+  beforeEach(async () => {
+    const { getChatRuns } = await import("@/lib/chat-runs");
+    vi.mocked(getChatRuns).mockReset().mockResolvedValue([]);
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.includes("/stream")
+      ? sseResponse('data: {"choices":[{"delta":{"content":"NEW ANSWER"}}]}\n\n', "data: [DONE]\n\n")
+      : new Response(JSON.stringify({ approvals: [] }))));
+  });
+
+  it.each(["queued", "running", "completed"] as const)("повторное «да» (%s), ещё не записанное в историю, не заменяет прежний ход", async status => {
+    const { getChatRuns } = await import("@/lib/chat-runs");
+    vi.mocked(getChatRuns).mockResolvedValue([{
+      message_id: "new-yes-1234567890", session_id: "repeated", profile: "", status, updated_at: 500, history_count: 2,
+      history_row_id: null, turn_tracked: true, user_message: { role: "user", content: "да" },
+    }]);
+    vi.spyOn(api, "getSessionMessages").mockResolvedValue({ session_id: "repeated", messages: [
+      { id: 1, role: "user", content: "да", timestamp: 100, display_metadata: { client_message_id: "old-yes-1234567890" } },
+      { id: 2, role: "assistant", content: "OLD ANSWER", timestamp: 101 },
+    ] as SessionMessage[], pagination: { order: "latest", returned: 2, before_id: 1, has_more: false } });
+    await act(async () => { await current.loadSession("repeated", { background: status === "completed" }); });
+    expect(current.messages.map(m => m.content)).toEqual(["да", "OLD ANSWER", "да", "NEW ANSWER"]);
+  });
+
+  it("законченный ход новее прочитанной истории восстанавливается из журнала, outbox не стирается раньше", async () => {
+    const { getChatRuns } = await import("@/lib/chat-runs");
+    vi.mocked(getChatRuns).mockResolvedValue([{
+      message_id: "unique-1234567890ab", session_id: "race", profile: "", status: "completed", updated_at: 500, history_count: 2,
+      history_row_id: 3, turn_tracked: true, user_message: { role: "user", content: "NEW QUESTION" },
+    }]);
+    saveChatOutbox({ messageId: "unique-1234567890ab", sessionId: "race", profile: "", text: "NEW QUESTION", attachments: [], createdAt: 500000, status: "sending" });
+    vi.spyOn(api, "getSessionMessages").mockResolvedValue({ session_id: "race", messages: [
+      { id: 1, role: "user", content: "OLD QUESTION", timestamp: 100 },
+      { id: 2, role: "assistant", content: "OLD ANSWER", timestamp: 101 },
+    ] as SessionMessage[], pagination: { order: "latest", returned: 2, before_id: 1, has_more: false } });
+    await act(async () => { await current.loadSession("race"); });
+    expect(current.messages.map(m => m.content)).toEqual(["OLD QUESTION", "OLD ANSWER", "NEW QUESTION", "NEW ANSWER"]);
+  });
+
+  it("сообщения из одних вложений различаются по id, а не по пустому тексту", async () => {
+    const { getChatRuns } = await import("@/lib/chat-runs");
+    const file = (name: string) => `[вложения]\n1. ${name}.md · md · 197 Б · читать: read_file\n   /workspace/${name}.md`;
+    vi.mocked(getChatRuns).mockResolvedValue([{
+      message_id: "file-b-1234567890ab", session_id: "files", profile: "", status: "queued", updated_at: 500, history_count: 2,
+      history_row_id: null, turn_tracked: true, user_message: { role: "user", content: file("b") },
+    }]);
+    vi.spyOn(api, "getSessionMessages").mockResolvedValue({ session_id: "files", messages: [
+      { id: 1, role: "user", content: file("a"), display_metadata: { client_message_id: "file-a-1234567890ab" } },
+      { id: 2, role: "assistant", content: "OLD FILE ANSWER" },
+    ] as SessionMessage[], pagination: { order: "latest", returned: 2, before_id: 1, has_more: false } });
+    await act(async () => { await current.loadSession("files"); });
+    expect(current.messages.map(m => m.content)).toContain("OLD FILE ANSWER");
+  });
+
+  it("ход, найденный сервером раньше страницы, считается показанным и не переигрывается", async () => {
+    const { getChatRuns } = await import("@/lib/chat-runs");
+    vi.mocked(getChatRuns).mockResolvedValue([{
+      message_id: "older-run-1234567890", session_id: "paged", profile: "", status: "completed", updated_at: 500, history_count: 2,
+      history_row_id: 3, turn_tracked: true, user_message: { role: "user", content: "давний вопрос" },
+    }]);
+    const fetcher = vi.fn(async (_url: string) => new Response(JSON.stringify({ approvals: [] })));
+    vi.stubGlobal("fetch", fetcher);
+    vi.spyOn(api, "getSessionMessages").mockResolvedValue({ session_id: "paged", messages: [
+      { id: 40, role: "user", content: "свежий вопрос" }, { id: 41, role: "assistant", content: "свежий ответ" },
+    ] as SessionMessage[], pagination: { order: "latest", returned: 2, before_id: 40, has_more: true } });
+    await act(async () => { await current.loadSession("paged"); });
+    expect(current.messages.map(m => m.content)).toEqual(["свежий вопрос", "свежий ответ"]);
+    expect(fetcher.mock.calls.some(([url]) => String(url).includes("/stream"))).toBe(false);
+  });
+
+  it("фоновое обновление без пересечения с лентой не оставляет незаметной дыры", async () => {
+    const page = (first: number, last: number) => Array.from({ length: last - first + 1 }, (_, i) => ({
+      id: first + i, role: ((first + i) % 2 ? "user" : "assistant") as "user" | "assistant", content: `message ${first + i}`,
+    })) as SessionMessage[];
+    vi.spyOn(api, "getSessionMessages")
+      .mockResolvedValueOnce({ session_id: "gap", messages: page(1, 30), pagination: { order: "latest", returned: 30, before_id: 1, has_more: false } })
+      .mockResolvedValueOnce({ session_id: "gap", messages: page(71, 100), pagination: { order: "latest", returned: 30, before_id: 71, has_more: true } });
+    await act(async () => { await current.loadSession("gap"); });
+    await act(async () => { await current.loadSession("gap", { background: true }); });
+    expect(current.messages[0]?.historyId).toBe(71);
+    expect(current.older.hasOlder).toBe(true);
+  });
+});

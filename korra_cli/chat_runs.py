@@ -86,14 +86,41 @@ def _browser_sse(status_code: int, body: bytes, content_type: str) -> bytes:
     ) + b"data: [DONE]\n\n")
 
 
+def _history_rows(profile: str | None, items: list[dict]) -> dict[str, int | None]:
+    try:
+        db = _server()._open_session_db_for_profile(profile, read_only=True)
+    except Exception:
+        return {}
+    try:
+        found = {}
+        for item in items:
+            sid = str(item.get("session_id") or "")
+            try:
+                found[item["message_id"]] = db.find_client_message_row(
+                    db.resolve_resume_session_id(sid) if sid else sid, item["message_id"]
+                )
+            except Exception:
+                found[item["message_id"]] = None
+        return found
+    finally:
+        db.close()
+
+
 @router.get("/api/chat/runs")
 async def chat_runs(profile: str | None = None, session_id: str | None = None):
     server = _server()
     ledger = server._chat_delivery_ledger()
     items = await server.run_in_threadpool(ledger.runs, profile, session_id)
+    rows = {}
+    if session_id is not None and items:
+        # Где в истории лежит реплика каждого хода: по ней чат отличает ход
+        # раньше загруженной страницы от ещё не записанного (ревью Astra R2).
+        rows = await server.run_in_threadpool(_history_rows, profile, items)
     result = []
     for item in items:
         summary = {**item, "status": _status(item, ledger)}
+        if session_id is not None:
+            summary["history_row_id"] = rows.get(item["message_id"])
         if session_id is not None and summary["status"] == "failed":
             record = await server.run_in_threadpool(
                 ledger.response,

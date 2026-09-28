@@ -2934,6 +2934,8 @@ export interface SessionMessage {
   tool_name?: string;
   tool_call_id?: string;
   timestamp?: number;
+  /** Показ реплики: например, id сообщения браузера, начавшего ход. */
+  display_metadata?: Record<string, unknown> | null;
 }
 
 export interface SessionMessagesResponse {

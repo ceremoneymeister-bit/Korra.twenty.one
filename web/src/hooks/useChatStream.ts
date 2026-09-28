@@ -229,14 +229,21 @@ function sameRendered(previous: ChatMessage, next: ChatMessage): boolean {
  * не изменилось, возвращается прежний массив, и лента вообще не перерисуется.
  */
 /**
- * Где в загруженной ленте реплика хода. `history_count` — её позиция среди
- * сообщений, которые вкладка прислала вместе с ней, а лента грузится
- * страницами: после обновления та же позиция указывает на другое сообщение.
- * Поэтому реплику ищем по тексту, с конца — ход всегда последний со своей
- * репликой. -1 — в загруженной ленте её нет: ход ещё не записан или он
- * раньше загруженной страницы.
+ * Где в загруженной ленте реплика хода. Ход узнаётся по id сообщения
+ * браузера, который движок хранит в строке реплики, или по строке, которую
+ * нашёл сервер. Текст — только для ходов, принятых до того, как движок стал
+ * хранить id: одинаковое «да» или сообщения из одних вложений по тексту не
+ * различить (0.21.15, ревью Astra R2). -1 — на загруженной странице хода нет.
  */
 function runTurnIndex(messages: ChatMessage[], run: ChatRun): number {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]!;
+    if (message.role === "user" && message.clientMessageId === run.message_id) return index;
+  }
+  if (run.history_row_id != null) {
+    return messages.findIndex(message => message.role === "user" && message.historyId === run.history_row_id);
+  }
+  if (run.turn_tracked) return -1;
   const text = splitAttachments(run.user_message.content ?? "").text;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]!;
@@ -245,11 +252,24 @@ function runTurnIndex(messages: ChatMessage[], run: ChatRun): number {
   return -1;
 }
 
-/** Ответ на ход уже лежит в истории. Законченный ход, которого нет на
- *  загруженной странице, раньше неё — значит, тоже отвечен. */
+/**
+ * Хода нет на странице: он раньше неё или ещё не записан в прочитанный
+ * снимок. «Раньше» — только когда сервер нашёл его строку до начала
+ * страницы; иначе ход считается новее снимка, и его ответ восстанавливается
+ * из журнала, а не объявляется показанным.
+ */
+function runBeforePage(messages: ChatMessage[], run: ChatRun): boolean {
+  const first = messages.find(message => message.historyId !== undefined)?.historyId;
+  if (first === undefined) return false;
+  if (run.history_row_id != null) return run.history_row_id < first;
+  // Ход, принятый до хранения id, строки не имеет: прежнее правило.
+  return !run.turn_tracked && run.status === "completed";
+}
+
+/** Ответ на ход уже лежит в истории — в загруженной части или раньше неё. */
 function runAnswered(messages: ChatMessage[], run: ChatRun): boolean {
   const at = runTurnIndex(messages, run);
-  if (at < 0) return run.status === "completed" && messages.some(message => message.historyId !== undefined);
+  if (at < 0) return run.status === "completed" && runBeforePage(messages, run);
   return messages.slice(at + 1).some(message => message.role === "assistant");
 }
 
@@ -406,6 +426,20 @@ function reducer(state: StreamState, action: StreamAction): StreamState {
       // Освежение приносит только последнюю страницу. Догруженные раньше
       // более ранние сообщения остаются над ней: человек их листал.
       const firstId = action.messages.find(message => message.historyId !== undefined)?.historyId;
+      const shownIds = state.messages.flatMap(message => message.historyId === undefined ? [] : [message.historyId]);
+      if (firstId !== undefined && shownIds.length > 0 && firstId > Math.max(...shownIds)) {
+        // Новая страница не пересекается с показанной: пока вкладка была в
+        // фоне, пришло больше, чем страница. Склеить их — значит молча
+        // потерять середину (ревью Astra R3). Лента начинается с новой
+        // страницы, более ранние снова догружаются прокруткой.
+        return {
+          ...state,
+          messages: mergeMessages(state.messages, action.messages, action.replay !== true),
+          history: action.history ?? NO_OLDER,
+          isStreaming: action.streaming ?? false,
+          error: null,
+        };
+      }
       let kept = 0;
       if (firstId !== undefined) {
         while (kept < state.messages.length && (state.messages[kept]!.historyId ?? Infinity) < firstId) kept += 1;
@@ -728,12 +762,14 @@ function sessionMessagesToChat(
 
     if (message.role === "user") {
       closeTurn();
+      const clientMessageId = message.display_metadata?.client_message_id;
       result.push({
         id,
         role: "user",
         content,
         timestamp,
         ...(message.id !== undefined ? { historyId: message.id } : {}),
+        ...(typeof clientMessageId === "string" && clientMessageId ? { clientMessageId } : {}),
       });
       return;
     }
@@ -1050,7 +1086,7 @@ export function useChatStream(
       }
       const runAt = run ? runTurnIndex(chatMessages, run) : -1;
       const newerHistory = run?.status === "completed" &&
-        (runAt < 0 ? chatMessages.some(message => message.historyId !== undefined) : chatMessages.length > runAt + 2);
+        (runAt < 0 ? runBeforePage(chatMessages, run) : chatMessages.length > runAt + 2);
       if (!run || newerHistory || (!isRunBusy(run) && run.status !== "completed")) {
         showWithPending(chatMessages, runs);
         if (run?.status === "interrupted") dispatch({ type: "SET_ERROR", error: "Связь с ходом потеряна. Проверьте историю перед повторной отправкой." });

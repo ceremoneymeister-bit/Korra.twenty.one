@@ -3477,6 +3477,9 @@ async def chat_completions_proxy(
 
     client_message_id = request.headers.get("X-Korra-Client-Message-Id", "").strip()
     if client_message_id:
+        # Движок записывает id в строку реплики: по нему чат находит ход
+        # после перезагрузки, а не по тексту (0.21.15, ревью Astra R2).
+        upstream_headers["X-Korra-Client-Message-Id"] = client_message_id
         return await _durable_browser_chat_response(
             message_id_raw=client_message_id,
             session_id=request.headers.get("X-Hermes-Session-Id", "").strip(),

@@ -270,6 +270,9 @@ def _get_scoped_secret(name, default=None):
 
 logger = logging.getLogger(__name__)
 
+#: Id сообщения браузера, связывающий строку реплики с ходом (как в журнале доставки).
+_CLIENT_MESSAGE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{15,79}")
+
 
 def _browser_controller_ws_sender(ws, loop, *, wait_timeout: float = 10.0):
     """Return a loop-aware broker sender for one aiohttp controller socket.
@@ -5709,6 +5712,15 @@ class APIServerAdapter(BasePlatformAdapter):
             )
             # history already set from request body above
 
+        # Id сообщения браузера: панель передаёт его вместе с ходом. Строка
+        # реплики хранит его, и восстановление чата находит свой ход по нему,
+        # а не по тексту (0.21.15, ревью Astra R2). Формат — как у журнала
+        # доставки (korra_cli.chat_delivery.CLIENT_MESSAGE_ID_RE).
+        browser_turn_metadata = None
+        client_message_id = request.headers.get("X-Korra-Client-Message-Id", "").strip()
+        if _CLIENT_MESSAGE_ID_RE.fullmatch(client_message_id):
+            browser_turn_metadata = {"client_message_id": client_message_id}
+
         completion_id = f"chatcmpl-{uuid.uuid4().hex[:29]}"
         model_name = body.get("model", self._model_name)
         created = int(time.time())
@@ -5910,6 +5922,7 @@ class APIServerAdapter(BasePlatformAdapter):
                     gateway_session_key=gateway_session_key,
                     **agent_overrides,
                     route=route,
+                    persist_user_display_metadata=browser_turn_metadata,
                 ))
                 agent_task.add_done_callback(_on_turn_finished)
             except BaseException:
@@ -5937,6 +5950,7 @@ class APIServerAdapter(BasePlatformAdapter):
                 gateway_session_key=gateway_session_key,
                 **agent_overrides,
                 route=route,
+                persist_user_display_metadata=browser_turn_metadata,
             )
 
         idempotency_key = request.headers.get("Idempotency-Key")
@@ -8032,6 +8046,7 @@ class APIServerAdapter(BasePlatformAdapter):
         requested_runtime: Optional[Dict[str, Any]] = None,
         route_source: str = "global",
         confirmed_runtime_lock: bool = False,
+        persist_user_display_metadata: Optional[Dict[str, Any]] = None,
     ) -> tuple:
         """
         Create an agent and run a conversation in a thread executor.
@@ -8128,6 +8143,8 @@ class APIServerAdapter(BasePlatformAdapter):
                         user_message=user_message,
                         conversation_history=conversation_history,
                         task_id=effective_task_id,
+                        **({"persist_user_display_metadata": persist_user_display_metadata}
+                           if persist_user_display_metadata else {}),
                     )
                     usage = {
                         "input_tokens": getattr(agent, "session_prompt_tokens", 0) or 0,

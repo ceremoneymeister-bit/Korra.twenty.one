@@ -161,7 +161,10 @@ class DeliveryLedger:
         """Store only the current intent and its transcript boundary, never credentials."""
         messages = body.get("messages") or []
         user = next((m for m in reversed(messages) if m.get("role") == "user"), {})
-        meta = json.dumps({"user_message": user, "history_count": max(0, len(messages) - 1)}, ensure_ascii=False)
+        # turn_tracked: движок этой версии записывает id сообщения в строку
+        # реплики, и чат ищет ход по нему; у ходов, принятых раньше, id нет.
+        meta = json.dumps({"user_message": user, "history_count": max(0, len(messages) - 1),
+                           "turn_tracked": True}, ensure_ascii=False)
         with self._connect() as connection:
             connection.execute(
                 "UPDATE browser_chat_delivery SET profile=?, request_meta=? WHERE message_id=? AND request_meta IS NULL",
