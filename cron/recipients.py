@@ -66,6 +66,13 @@ def reset_running_job(token: contextvars.Token) -> None:
 #: Kept in memory only — nothing on disk to forge (0.21.15 Astra review A).
 _LIVE_RUNS: dict[str, dict[str, str]] = {}
 _LIVE_RUNS_LOCK = threading.Lock()
+#: Sends the gateway made for a live run: secret digest → send key → state.
+#: A repeat of the same send — a retried request or `korra send` run again
+#: after a lost answer — gets the stored result instead of a second delivery
+#: (0.21.15 Astra review R1). Same lock as the secrets: retiring a run drops
+#: both at once.
+_RUN_SENDS: dict[str, dict[str, dict]] = {}
+_RUN_SENDS_CHANGED = threading.Condition(_LIVE_RUNS_LOCK)
 #: The gateway sends for a live run here (gateway.platforms.api_server).
 SEND_ROUTE = "/api/cron/run-send"
 #: A send with attachments may take a while; the terminal waits for the answer.
@@ -100,8 +107,10 @@ def issue_run_token(job: dict) -> str:
 def retire_run_token(token: str) -> None:
     if not token:
         return
-    with _LIVE_RUNS_LOCK:
+    with _RUN_SENDS_CHANGED:
         _LIVE_RUNS.pop(_digest(token), None)
+        _RUN_SENDS.pop(_digest(token), None)
+        _RUN_SENDS_CHANGED.notify_all()
 
 
 def lookup_live_run(token: str, profile: str | None = None) -> dict | None:
@@ -255,6 +264,58 @@ def send_for_live_run(grant: dict, target: str, message: str) -> dict | None:
                                                 "message": message}))
     finally:
         reset_running_job(bound)
+
+
+def _send_key(target: str, message: str) -> str:
+    return hashlib.sha256(json.dumps([target, message], ensure_ascii=False).encode()).hexdigest()
+
+
+def _sent(result) -> bool:
+    return isinstance(result, dict) and result.get("success") is True
+
+
+def send_once_for_live_run(token: str, grant: dict, target: str, message: str,
+                           *, wait_seconds: float = SEND_TIMEOUT_SECONDS) -> dict | None:
+    """:func:`send_for_live_run`, at most once per run for the same send.
+
+    The same recipient and content within one run is one send: a repeat
+    returns the stored result marked ``repeat``, and a repeat that arrives
+    while the first is still sending waits for it rather than sending in
+    parallel. Different content or another recipient is another send. Only a
+    delivered send is remembered — after a failure the next attempt tries
+    again. Nothing outlives the run: retiring its secret drops the record.
+    """
+    digest, key = _digest(token), _send_key(target, message)
+    deadline = time.monotonic() + wait_seconds
+    with _RUN_SENDS_CHANGED:
+        while True:
+            if digest not in _LIVE_RUNS:
+                return None
+            entry = _RUN_SENDS.setdefault(digest, {}).get(key)
+            if entry is None:
+                _RUN_SENDS[digest][key] = {"state": "sending"}
+                break
+            if entry["state"] == "sent":
+                return {**entry["result"], "repeat": True,
+                        "note": "Это сообщение уже отправлено в этом запуске; повторно не отправлялось."}
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return {"success": False, "status": "in_progress",
+                        "error": "Это сообщение ещё отправляется в этом запуске. Повторять не нужно."}
+            _RUN_SENDS_CHANGED.wait(remaining)
+    result = None
+    try:
+        result = send_for_live_run(grant, target, message)
+        return result
+    finally:
+        with _RUN_SENDS_CHANGED:
+            sends = _RUN_SENDS.get(digest)
+            if sends is not None:
+                if _sent(result):
+                    sends[key] = {"state": "sent", "result": dict(result)}
+                else:
+                    sends.pop(key, None)
+            _RUN_SENDS_CHANGED.notify_all()
 
 
 def target_label(platform: str, chat_id, thread_id=None) -> str:

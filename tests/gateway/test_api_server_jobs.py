@@ -639,3 +639,99 @@ class TestCronRunSend:
             secret_scope.set_multiplex_active(False)
             for token in tokens.values():
                 recipients.retire_run_token(token)
+
+    @pytest.mark.asyncio
+    async def test_the_same_send_in_one_run_is_delivered_once(self, tmp_path, monkeypatch):
+        """A retry after a lost answer or a repeated request must not greet
+        the same person twice; another text or recipient is another send
+        (0.21.15 Astra review R1)."""
+        import asyncio
+        import threading
+        import time as _time
+        from types import SimpleNamespace
+
+        from agent import secret_scope
+        from cron import executions, jobs, recipients
+        from gateway.config import GatewayConfig, Platform
+        from gateway.run import _profile_runtime_scope
+
+        monkeypatch.setenv("KORRA_HOME", str(tmp_path))
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        key = "default-api-test-key-123456"
+        (tmp_path / ".env").write_text("API_SERVER_KEY=" + key + "\n")
+        with _profile_runtime_scope(tmp_path):
+            jobs.ensure_dirs()
+            job = jobs.create_job(prompt="Поздравления", schedule="every 1h", deliver="local",
+                                  name="run-send-once", recipients_policy=1,
+                                  recipients_confirmed={"targets": ["telegram:555", "telegram:556"]})
+            execution = executions.create_execution(job["id"], source="scheduled")
+            executions.mark_execution_running(execution["id"])
+            token = recipients.issue_run_token({**job, "execution_id": execution["id"]})
+        adapter = APIServerAdapter(PlatformConfig(enabled=True, extra={"key": key}))
+        adapter.gateway_runner = SimpleNamespace(config=GatewayConfig(multiplex_profiles=True))
+        monkeypatch.setattr("korra_cli.profiles.profiles_to_serve", lambda **kw: [("default", tmp_path)])
+        monkeypatch.setattr("korra_cli.profiles.get_profile_dir", lambda name: tmp_path)
+        secret_scope.set_multiplex_active(True)
+        app = web.Application(middlewares=[adapter._make_profile_prefix_middleware()])
+        app.router.add_post(recipients.SEND_ROUTE, adapter._handle_cron_run_send)
+        sent = []
+        failures = {"telegram:556 / Второе": 1}
+        slow = threading.Event()
+
+        def transport(**kw):
+            if slow.is_set():
+                _time.sleep(0.4)
+            label = f"telegram:{kw['chat_id']} / {kw['cleaned_message']}"
+            sent.append(label)
+            if failures.get(label):
+                failures[label] -= 1
+                return {"success": False, "error": "Telegram недоступен"}
+            return {"success": True, "message_id": str(len(sent))}
+
+        cfg = MagicMock(platforms={Platform.TELEGRAM: MagicMock(enabled=True, token="fake")})
+        headers = {"Authorization": "Bearer " + key}
+        try:
+            with patch("gateway.config.load_gateway_config", return_value=cfg), \
+                 patch("tools.send_message_tool._dispatch_resolved_send", side_effect=transport):
+                async with TestClient(TestServer(app)) as cli:
+                    async def post(target, message):
+                        response = await cli.post(recipients.SEND_ROUTE, headers=headers,
+                                                  json={"token": token, "target": target, "message": message})
+                        return response.status, await response.json()
+
+                    first = await post("telegram:555", "С днём рождения")
+                    repeat = await post("telegram:555", "С днём рождения")
+                    assert first[0] == repeat[0] == 200
+                    assert first[1]["success"] is True and "repeat" not in first[1]
+                    assert repeat[1]["success"] is True and repeat[1]["repeat"] is True
+                    assert repeat[1]["message_id"] == first[1]["message_id"]
+                    assert sent == ["telegram:555 / С днём рождения"]
+
+                    # Another text and another recipient are other sends.
+                    assert (await post("telegram:555", "Второе"))[1]["success"] is True
+                    # A failed attempt is not remembered: the retry sends.
+                    failed = await post("telegram:556", "Второе")
+                    assert failed[1].get("success") is not True
+                    assert (await post("telegram:556", "Второе"))[1]["success"] is True
+                    assert (await post("telegram:556", "Второе"))[1]["repeat"] is True
+                    assert sent == ["telegram:555 / С днём рождения", "telegram:555 / Второе",
+                                    "telegram:556 / Второе", "telegram:556 / Второе"]
+
+                    # Two identical requests at once: one delivery, both see it.
+                    slow.set()
+                    both = await asyncio.gather(post("telegram:555", "Третье"), post("telegram:555", "Третье"))
+                    slow.clear()
+                    assert [status for status, _ in both] == [200, 200]
+                    assert sorted(bool(body.get("repeat")) for _, body in both) == [False, True]
+                    assert sent.count("telegram:555 / Третье") == 1
+
+                    # The run ends: its record goes with its secret.
+                    digest = recipients._digest(token)
+                    assert recipients._RUN_SENDS.get(digest)
+                    recipients.retire_run_token(token)
+                    assert digest not in recipients._RUN_SENDS
+                    assert (await post("telegram:555", "С днём рождения"))[0] == 404
+            assert len(sent) == 5
+        finally:
+            secret_scope.set_multiplex_active(False)
+            recipients.retire_run_token(token)

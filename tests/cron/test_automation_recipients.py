@@ -387,6 +387,65 @@ def test_korra_send_in_a_running_jobs_terminal_is_sent_by_the_gateway(store):
     assert recipients.lookup_live_run(token) is None
 
 
+def test_korra_send_run_again_after_a_lost_answer_does_not_send_twice(store):
+    """Astra round 5 R1: the gateway sent and the answer never came back
+    (``outcome_unknown``); running ``korra send`` again in the same run gets
+    the stored result — the recipient is not greeted twice."""
+    import http.server
+    import threading
+
+    from cron import executions
+    from gateway.config import Platform
+
+    created = _tool(OWNER_DM, action="create", prompt="Поздравления", schedule="every day at 10am",
+                    audience="клиенты с ДР")
+    _resolve(created["recipients"]["decision_id"], "once")
+    job = _job(created["job_id"])
+    sent: list[dict] = []
+    calls = {"n": 0}
+
+    class Gateway(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            grant = recipients.lookup_live_run(body.get("token", ""), profile="default")
+            result = recipients.send_once_for_live_run(body["token"], grant, body["target"], body["message"])
+            calls["n"] += 1
+            if calls["n"] == 1:
+                self.close_connection = True  # sent, then the answer is lost
+                return
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+
+        def log_message(self, *args):
+            pass
+
+    cfg = MagicMock(platforms={Platform.TELEGRAM: MagicMock(enabled=True, token="fake")})
+
+    def gateway_dispatch(**kw):
+        sent.append(kw)
+        return {"success": True, "message_id": "7"}
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Gateway)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    at = {"API_SERVER_PROXY_TARGET": f"http://127.0.0.1:{server.server_port}"}
+    attempt = executions.create_execution(job["id"], source="scheduled")
+    executions.mark_execution_running(attempt["id"])
+    token = recipients.issue_run_token({**job, "execution_id": attempt["id"]})
+    try:
+        with patch("gateway.config.load_gateway_config", return_value=cfg), \
+             patch("tools.send_message_tool._dispatch_resolved_send", side_effect=gateway_dispatch):
+            lost = _run_child(store, {**at, "KORRA_CRON_RUN_TOKEN": token})
+            assert lost == {"exit": 1, "local": 0, "decisions": 0}  # outcome unknown, no card
+            again = _run_child(store, {**at, "KORRA_CRON_RUN_TOKEN": token})
+            assert again == {"exit": 0, "local": 0, "decisions": 0}
+        assert calls["n"] == 2
+        assert [(item["chat_id"], item["cleaned_message"]) for item in sent] == [("555", "С днём рождения")]
+    finally:
+        recipients.retire_run_token(token)
+        server.shutdown()
+
+
 @pytest.mark.parametrize("answer", ["live_run", "send_result"])
 def test_a_server_the_terminal_started_cannot_send_for_a_run(store, answer):
     """Astra round 3 §2.1: a process without the secret starts its own server

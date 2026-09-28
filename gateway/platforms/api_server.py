@@ -7485,12 +7485,14 @@ class APIServerAdapter(BasePlatformAdapter):
         if (not token or not target or len(target) > 512 or not isinstance(message, str)
                 or not message.strip() or len(message) > self._RUN_SEND_MAX_CHARS):
             return web.json_response({"error": "invalid send"}, status=400)
-        from cron.recipients import lookup_live_run, send_for_live_run
+        from cron.recipients import lookup_live_run, send_once_for_live_run
 
         grant = lookup_live_run(token, profile=_api_request_profile.get() or "default")
         if not grant:
             return web.json_response({"error": "not a live run"}, status=404)
-        result = await asyncio.to_thread(send_for_live_run, grant, target, message)
+        # A repeat of the same send in this run — a retry after a lost answer —
+        # returns the stored result instead of delivering twice (review R1).
+        result = await asyncio.to_thread(send_once_for_live_run, token, grant, target, message)
         if result is None:
             return web.json_response({"error": "not a live run"}, status=404)
         if result.get("status") == "not_confirmed":
