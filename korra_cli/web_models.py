@@ -862,6 +862,19 @@ class DashboardLayoutSetBody(BaseModel):
     sizes: Dict[str, str] = {}
 
 
+class DashboardViewSetBody(BaseModel):
+    """One person's agents-screen view on a phone.
+
+    Like the dashboard board, it names no person: the owner of the record is
+    the verified session. ``pinned`` is capped here so a broken browser cannot
+    post an unbounded list; normalization drops unknown names anyway.
+    """
+
+    revision: int = Field(ge=0)
+    agents_mobile: Literal["tabs", "list"]
+    pinned: List[str] = Field(default_factory=list, max_length=64)
+
+
 # --- from web_server.py (originally lines 19449-19450) ---
 
 class FontSetBody(BaseModel):
