@@ -249,3 +249,20 @@ def test_a_turn_admitted_before_compression_is_seen_from_the_continuation(isolat
     assert [run["message_id"] for run in runs] == [mid]
     assert runs[0]["session_id"] == "parent-s"
     assert runs[0]["history_row_id"] is not None
+
+
+def test_an_opened_long_chat_does_not_pull_every_old_prompt(isolated):
+    """Третье чистое ревью Astra, P2-3: открытие чата не тянет сотни старых
+    ходов с полными запросами — только последние, и полный текст лишь у тех,
+    что могут понадобиться для восстановления."""
+    long_text = "длинное письмо " * 700
+    for index in range(120):
+        mid = f"old-run-{index:04d}-1234567890ab"
+        isolated.claim(mid, mid, "session-a", "old-boot")
+        isolated.remember_request(mid, "lawyer", {"messages": [{"role": "user", "content": long_text}]})
+        isolated.complete(mid, response_body=b"data: [DONE]\n\n", status_code=200, content_type="text/event-stream")
+    runs = asyncio.run(chat_runs("lawyer", "session-a"))["runs"]
+    assert len(runs) == 50
+    assert all(len(run["user_message"]["content"]) == len(long_text) for run in runs[:10])
+    assert all(len(run["user_message"]["content"]) <= 160 for run in runs[10:])
+    assert len(json.dumps(runs, ensure_ascii=False)) < 200_000

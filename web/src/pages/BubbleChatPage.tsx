@@ -165,8 +165,11 @@ function UserBubble({
   onRetry,
   onDiscard,
   busy,
+  chatKey,
 }: {
   busy?: boolean;
+  /** Ключ хода, общий у живого пузыря и того же хода из истории. */
+  chatKey?: string;
   message: ChatMessage;
   onRetry?: () => void;
   onDiscard?: () => void;
@@ -179,7 +182,7 @@ function UserBubble({
   const text = parsed.text;
   const attachments = message.attachments ?? parsed.attachments;
   return (
-    <div data-chat-message={message.id} className="flex flex-col items-end gap-1">
+    <div data-chat-message={message.id} data-chat-key={chatKey} className="flex flex-col items-end gap-1">
       <div
         className={cn(
           "max-w-[75%] rounded-[18px] bg-[var(--neo-surface)] px-3 py-2",
@@ -265,10 +268,13 @@ function AssistantBubble({
   onDecision,
   decisionsBusy,
   decided,
+  chatKey,
 }: {
   voiceSettings?: AgentVoiceSettings | null;
   profile?: string;
   active?: boolean;
+  /** Ключ хода, общий у живого пузыря и того же хода из истории. */
+  chatKey?: string;
   message: ChatMessage;
   streaming?: boolean;
   /** Что агент делает прямо сейчас — ровно настолько, насколько мы это знаем. */
@@ -296,7 +302,7 @@ function AssistantBubble({
   }
 
   return (
-    <div data-chat-message={message.id} className="flex justify-start">
+    <div data-chat-message={message.id} data-chat-key={chatKey} className="flex justify-start">
       <div
         className={cn(
           // Владелец 03.09: текст агента не должен упираться в правый край.
@@ -623,6 +629,7 @@ export function BubbleChatTranscript({
               m.role === "user" ? (
                 <UserBubble
                   key={m.id}
+                  chatKey={m.clientMessageId}
                   message={m}
                   busy={busy}
                   onRetry={() => { if (sessionId && m.clientMessageId) onRetry?.({ sessionId, messageId: m.clientMessageId }); }}
@@ -632,6 +639,10 @@ export function BubbleChatTranscript({
                 <AssistantBubble
                   voiceSettings={voiceSettings} profile={profile} active={active}
                   key={m.id}
+                  // Живой ответ и он же после F5 имеют разные id; ключ хода —
+                  // id сообщения, на которое агент отвечает (третье чистое
+                  // ревью Astra, P2-1).
+                  chatKey={messages[i - 1]?.role === "user" ? messages[i - 1]?.clientMessageId : undefined}
                   message={m}
                   streaming={
                     streaming === true && lastIsAssistant && i === lastIdx

@@ -215,3 +215,35 @@ it("тихо говорит о сжатой части разговора, то�
   await renderPaged("Живая история", "m1", { hasOlder: true, loading: false, failed: false, archivedBefore: false, load } as never);
   expect(host.textContent).not.toContain("Более ранняя часть этого разговора сохранена");
 });
+
+async function renderKeyed(items: Array<[string, string?]>, older: { hasOlder: boolean; loading: boolean; failed: boolean; load: () => void }) {
+  await act(async () => root.render(
+    <TranscriptViewport storageKey="chat:scroll" anchorKey={items[0]?.[0]} older={older}>
+      {items.map(([id, key]) => <div key={id} data-chat-message={id} data-chat-key={key}>{id}</div>)}
+    </TranscriptViewport>,
+  ));
+  return host.querySelector<HTMLDivElement>('[aria-label="Переписка"]')!;
+}
+
+it("после F5 ответ, пришедший живым потоком, находится по ключу хода (третье чистое ревью Astra, P2-1)", async () => {
+  sessionStorage.setItem("chat:scroll", JSON.stringify({ id: "asst-live-uuid", offset: 40, key: "msg-client-1" }));
+  const load = vi.fn();
+  const viewport = await renderKeyed([], { hasOlder: false, loading: false, failed: false, load });
+  placeMessages(viewport, { "c-h1": 0, "c-h3": 400, "c-h4": 800 });
+  await renderKeyed([["c-h1"], ["c-h3", "msg-client-1"], ["c-h4", "msg-client-1"]], { hasOlder: false, loading: false, failed: false, load });
+  expect(viewport.scrollTop).toBe(440);
+  sessionStorage.clear();
+});
+
+it("замена окна фоновым обновлением возвращает к читаемому сообщению, а не бросает его (P2-2)", async () => {
+  const load = vi.fn();
+  const idle = { hasOlder: true, loading: false, failed: false, load };
+  const viewport = await renderKeyed([["c-h61"], ["c-h70"], ["c-h80"]], idle);
+  placeMessages(viewport, { "c-h61": 0, "c-h70": 300, "c-h80": 600, "c-h151": 0, "c-h152": 300 });
+  await scroll(viewport, 320);
+  expect(load).not.toHaveBeenCalled();
+  // Пока вкладка была в фоне, пришло больше страницы: окно заменилось.
+  await renderKeyed([["c-h151"], ["c-h152"]], idle);
+  expect(load).toHaveBeenCalledTimes(1);
+  sessionStorage.clear();
+});

@@ -86,6 +86,11 @@ def _browser_sse(status_code: int, body: bytes, content_type: str) -> bytes:
     ) + b"data: [DONE]\n\n")
 
 
+#: Сколько последних ходов открытого чата отдаётся и у скольких — полный текст.
+_OPENED_CHAT_RUNS = 50
+_OPENED_CHAT_FULL_TEXTS = 10
+
+
 def _conversation_aliases(profile: str | None, session_id: str) -> list[str]:
     """Сессии одного разговора: открытая, её вершина и предки по сжатию.
 
@@ -139,16 +144,24 @@ async def chat_runs(profile: str | None = None, session_id: str | None = None):
             # Порядок журнала — порядок приёма внутри одной сессии; ходы
             # разных поколений одного разговора сводятся по времени.
             items.sort(key=lambda item: float(item.get("updated_at") or 0), reverse=True)
+        # Открытие чата не должно тянуть журнал сотен старых ходов с полными
+        # текстами запросов: страница по 30 теряла смысл (третье чистое ревью
+        # Astra, P2-3). Для восстановления нужны последние ходы.
+        items = items[:_OPENED_CHAT_RUNS]
     rows = {}
     if session_id is not None and items:
         # Где в истории лежит реплика каждого хода: по ней чат отличает ход
         # раньше загруженной страницы от ещё не записанного (ревью Astra R2).
         rows = await server.run_in_threadpool(_history_rows, profile, session_id, items)
     result = []
-    for item in items:
+    for index, item in enumerate(items):
         summary = {**item, "status": _status(item, ledger)}
         if session_id is not None:
             summary["history_row_id"] = rows.get(item["message_id"])
+            if index >= _OPENED_CHAT_FULL_TEXTS and summary["status"] == "completed":
+                # Давний завершённый ход ищется по id; полный текст запроса
+                # нужен лишь тому, что ещё восстанавливают.
+                summary["user_message"] = {"role": "user", "content": str(item["user_message"].get("content", ""))[:160]}
         if session_id is not None and summary["status"] == "failed":
             record = await server.run_in_threadpool(
                 ledger.response,
