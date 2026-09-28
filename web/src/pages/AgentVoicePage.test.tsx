@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { VoiceForm } from "./AgentVoicePage";
-const api = vi.hoisted(() => ({ get: vi.fn(), save: vi.fn(), voices: vi.fn(), speak: vi.fn(), catalog: vi.fn() }));
+const api = vi.hoisted(() => ({ get: vi.fn(), save: vi.fn(), voices: vi.fn(), speak: vi.fn(), catalog: vi.fn(), sample: vi.fn() }));
 vi.mock("@/lib/agent-voice", async (original) => ({ ...await original<typeof import("@/lib/agent-voice")>(), agentVoiceApi: api }));
 const settings = { enabled: false, provider: "elevenlabs", voice: "warm", model: "eleven_multilingual_v2", base_url: "", speed: 1, web_mode: "manual", telegram_mode: "off", has_key: false };
 let host: HTMLDivElement, root: Root;
@@ -21,6 +21,7 @@ beforeEach(() => {
   ] });
   api.save.mockImplementation(async (_profile, value) => ({ ...value, has_key: true }));
   api.speak.mockResolvedValue({ clips: ["data:audio/mpeg;base64,c2FtcGxl"] });
+  api.sample.mockImplementation(async (url: string) => `blob:${url}`);
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
 
@@ -29,7 +30,9 @@ it.each([["navigator", "Навигатор", 1.5], ["boss", "Босс", 1]])("п
   await act(async () => root.render(<MemoryRouter><VoiceForm profile={id} name={name} /></MemoryRouter>));
   expect(host.textContent).toContain("OpenRouter API-ключ");
   expect(host.textContent).toContain("Образец можно послушать без ключа");
-  expect((host.querySelector(`audio[aria-label="Образец голоса ${name}"]`) as HTMLAudioElement).getAttribute("src")).toBe(`/api/voices/${id}/sample`);
+  // Образец — авторизованный Blob, а не путь от корня мимо кабинета (ревью Astra §2.4).
+  expect(api.sample).toHaveBeenCalledWith(`/api/voices/${id}/sample`, expect.any(AbortSignal));
+  expect((host.querySelector(`audio[aria-label="Образец голоса ${name}"]`) as HTMLAudioElement).getAttribute("src")).toBe(`blob:/api/voices/${id}/sample`);
   expect(api.speak).not.toHaveBeenCalled();
 });
 it.each([["navigator", "Навигатор", 1.5], ["boss", "Босс", 1]])("предлагает выбрать %s и сохраняет его темп", async (id, name, speed) => {
@@ -39,7 +42,7 @@ it.each([["navigator", "Навигатор", 1.5], ["boss", "Босс", 1]])("п
   expect((host.querySelector("#voice-id") as HTMLButtonElement).textContent).toContain("Выберите голос");
   await act(async () => (host.querySelector("#voice-id") as HTMLButtonElement).click());
   await act(async () => Array.from(document.body.querySelectorAll('[role="option"]')).find(option => option.textContent?.includes(name))?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
-  expect((host.querySelector(`audio[aria-label="Образец голоса ${name}"]`) as HTMLAudioElement).getAttribute("src")).toBe(`/api/voices/${id}/sample`);
+  expect((host.querySelector(`audio[aria-label="Образец голоса ${name}"]`) as HTMLAudioElement).getAttribute("src")).toBe(`blob:/api/voices/${id}/sample`);
   await act(async () => button("Сохранить").click());
   expect(api.save).toHaveBeenCalledWith("assistant", expect.objectContaining({ provider: "openrouter_fish", voice: id, speed }), "", false);
 });
@@ -62,4 +65,12 @@ it("сохраняет ключ только указанному агенту; 
   await act(async () => button("Проба голоса").click());
   expect(api.speak).toHaveBeenCalledWith("psychologist", expect.any(String));
   expect(host.querySelector("audio")).not.toBeNull();
+});
+
+it("сбой загрузки образца объясняется, а не оставляет пустой плеер", async () => {
+  api.sample.mockRejectedValue(new Error("Образец голоса недоступен: 404"));
+  api.get.mockResolvedValue({ ...settings, provider: "openrouter_fish", voice: "boss", model: "fish-audio/s2.1-pro", speed: 1 });
+  await act(async () => root.render(<MemoryRouter><VoiceForm profile="boss" name="Босс" /></MemoryRouter>));
+  expect(host.querySelector('audio[aria-label="Образец голоса Босс"]')).toBeNull();
+  expect(host.textContent).toContain("Не удалось загрузить образец. Обновите страницу.");
 });

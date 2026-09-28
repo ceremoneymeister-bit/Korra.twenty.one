@@ -1,4 +1,4 @@
-import { fetchJSON } from "@/lib/api";
+import { authedFetch, fetchJSON } from "@/lib/api";
 
 export interface AgentVoiceSettings {
   enabled: boolean;
@@ -28,6 +28,14 @@ export function releaseSpeechClips(clips: string[]) {
 
 export const agentVoiceApi = {
   catalog: () => fetchJSON<{ voices: BundledVoice[] }>("/api/voices"),
+  /** Записанный образец встроенного голоса как Blob URL. Путь от корня в
+   *  `<audio src>` шёл мимо кабинета и без токена панели (0.21.15, ревью
+   *  Astra §2.4). URL освобождает вызывающий. */
+  sample: async (sampleUrl: string, signal?: AbortSignal) => {
+    const response = await authedFetch(sampleUrl, signal ? { signal } : undefined);
+    if (!response.ok) throw new Error(`Образец голоса недоступен: ${response.status}`);
+    return URL.createObjectURL(await response.blob());
+  },
   get: (profile: string) => fetchJSON<AgentVoiceSettings>(voicePath(profile)),
   save: (profile: string, settings: AgentVoiceSettings, key: string, clearKey: boolean) => {
     const data: Partial<AgentVoiceSettings> = { ...settings };
