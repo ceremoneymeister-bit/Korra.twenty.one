@@ -561,25 +561,81 @@ class TestCronPromptScanParity:
 
 
 
-class TestCronRunGrant:
-    """A cron run's terminal asks the gateway whether its secret is genuine."""
+class TestCronRunSend:
+    """A cron run's terminal hands its send to the gateway that runs the job;
+    the gateway checks the secret and the confirmed recipients and sends
+    itself (0.21.15 Astra review A, round 3)."""
 
     @pytest.mark.asyncio
-    async def test_only_a_live_run_of_this_profile_is_vouched_for(self, adapter, monkeypatch):
-        from cron import recipients
+    async def test_only_a_live_run_of_this_profile_sends_and_only_to_confirmed(self, tmp_path, monkeypatch):
+        from types import SimpleNamespace
 
-        app = _create_app(adapter)
-        app.router.add_post(recipients.GRANT_ROUTE, adapter._handle_cron_run_grant)
-        monkeypatch.setattr(recipients, "_execution_is_running", lambda execution_id: execution_id == "run-1")
-        live = recipients.issue_run_token({"id": "job-a", "execution_id": "run-1"})
-        ended = recipients.issue_run_token({"id": "job-b", "execution_id": "run-2"})
+        from agent import secret_scope
+        from cron import executions, jobs, recipients
+        from gateway.config import GatewayConfig, Platform
+        from gateway.run import _profile_runtime_scope
+
+        monkeypatch.setenv("KORRA_HOME", str(tmp_path))
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        homes = {"default": tmp_path, "worker": tmp_path / "profiles" / "worker"}
+        keys = {"default": "default-api-test-key-123456", "worker": "worker-api-test-key-123456"}
+        tokens = {}
+        for name, home in homes.items():
+            home.mkdir(parents=True, exist_ok=True)
+            (home / ".env").write_text("API_SERVER_KEY=" + keys[name] + "\n")
+            with _profile_runtime_scope(home):
+                jobs.ensure_dirs()
+                job = jobs.create_job(prompt="Поздравления", schedule="every 1h", deliver="local",
+                                      name="run-send-" + name, recipients_policy=1,
+                                      recipients_confirmed={"targets": ["telegram:555"]})
+                execution = executions.create_execution(job["id"], source="scheduled")
+                executions.mark_execution_running(execution["id"])
+                tokens[name] = recipients.issue_run_token({**job, "execution_id": execution["id"]})
+        adapter = APIServerAdapter(PlatformConfig(enabled=True, extra={"key": keys["default"]}))
+        adapter.gateway_runner = SimpleNamespace(config=GatewayConfig(multiplex_profiles=True))
+        monkeypatch.setattr("korra_cli.profiles.profiles_to_serve", lambda **kw: list(homes.items()))
+        monkeypatch.setattr("korra_cli.profiles.get_profile_dir", lambda name: homes[name])
+        secret_scope.set_multiplex_active(True)
+        app = web.Application(middlewares=[adapter._make_profile_prefix_middleware()])
+        app.router.add_post(recipients.SEND_ROUTE, adapter._handle_cron_run_send)
+        app.router.add_post("/p/{profile}" + recipients.SEND_ROUTE, adapter._handle_cron_run_send)
+        sent = []
+
+        def transport(**kw):
+            sent.append((kw["chat_id"], kw["cleaned_message"]))
+            return {"success": True, "message_id": "1"}
+
+        cfg = MagicMock(platforms={Platform.TELEGRAM: MagicMock(enabled=True, token="fake")})
         try:
-            async with TestClient(TestServer(app)) as cli:
-                ok = await cli.post(recipients.GRANT_ROUTE, json={"token": live})
-                assert ok.status == 200 and (await ok.json())["job_id"] == "job-a"
-                for token in (ended, "made-up", ""):
-                    refused = await cli.post(recipients.GRANT_ROUTE, json={"token": token})
-                    assert refused.status == 404
+            with patch("gateway.config.load_gateway_config", return_value=cfg), \
+                 patch("tools.send_message_tool._dispatch_resolved_send", side_effect=transport):
+                async with TestClient(TestServer(app)) as cli:
+                    for name in homes:
+                        other = "worker" if name == "default" else "default"
+                        path = ("" if name == "default" else "/p/" + name) + recipients.SEND_ROUTE
+                        for key, token, target, expected in [
+                            (keys[name], tokens[name], "telegram:555", 200),
+                            (keys[name], tokens[name], "telegram:777", 409),
+                            ("", tokens[name], "telegram:555", 401),
+                            (keys[other], tokens[name], "telegram:555", 401),
+                            (keys[name], "invented", "telegram:555", 404),
+                            (keys[name], tokens[other], "telegram:555", 404),
+                        ]:
+                            response = await cli.post(
+                                path, json={"token": token, "target": target, "message": "С днём рождения"},
+                                headers={"Authorization": "Bearer " + key} if key else {})
+                            assert response.status == expected, (name, target, expected)
+                            if expected == 200:
+                                assert (await response.json())["success"] is True
+                    # A restarted gateway has forgotten every secret it issued.
+                    recipients._LIVE_RUNS.clear()
+                    response = await cli.post(
+                        recipients.SEND_ROUTE,
+                        json={"token": tokens["default"], "target": "telegram:555", "message": "Ещё раз"},
+                        headers={"Authorization": "Bearer " + keys["default"]})
+                    assert response.status == 404
+            assert sent == [("555", "С днём рождения"), ("555", "С днём рождения")]
         finally:
-            recipients.retire_run_token(live)
-            recipients.retire_run_token(ended)
+            secret_scope.set_multiplex_active(False)
+            for token in tokens.values():
+                recipients.retire_run_token(token)

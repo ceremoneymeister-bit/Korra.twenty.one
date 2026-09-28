@@ -2463,9 +2463,10 @@ class APIServerAdapter(BasePlatformAdapter):
             ("POST", "/api/jobs/{job_id}/pause", self._handle_pause_job),
             ("POST", "/api/jobs/{job_id}/resume", self._handle_resume_job),
             ("POST", "/api/jobs/{job_id}/run", self._handle_run_job),
-            # A cron run's terminal asks whether its run secret is genuine
-            # (cron.recipients.running_job); nothing is granted by a file.
-            ("POST", "/api/cron/run-grant", self._handle_cron_run_grant),
+            # A cron run's terminal hands a send to the gateway that runs the
+            # job: the secret and the confirmed recipients are checked here
+            # and the gateway sends itself (cron.recipients).
+            ("POST", "/api/cron/run-send", self._handle_cron_run_send),
         ]
         routes.extend(_room_grants._http_routes(self))
         routes.extend(_api_runs._http_routes(self))
@@ -7457,11 +7458,18 @@ class APIServerAdapter(BasePlatformAdapter):
         except Exception as e:
             return web.json_response({"error": _redact_api_error_text(e)}, status=500)
 
-    async def _handle_cron_run_grant(self, request: "web.Request") -> "web.Response":
-        """POST /api/cron/run-grant — vouch for a live cron run's secret.
+    #: Longest message a run's terminal may hand over, in characters.
+    _RUN_SEND_MAX_CHARS = 200_000
 
-        Answers only for runs this process issued and still executes, in the
-        requesting profile; the token itself never leaves the caller's env.
+    async def _handle_cron_run_send(self, request: "web.Request") -> "web.Response":
+        """POST /api/cron/run-send — send for a live cron run, here, by its secret.
+
+        ``korra send`` in a run's terminal cannot tell this gateway from a
+        server its own terminal started, so it does not send on an answer
+        about its right: it hands the send over. Only this process knows the
+        secrets it issued and holds the job, so the check against the job's
+        confirmed recipients and the delivery both happen here (0.21.15 Astra
+        review A). A refusal sends nothing; the terminal then asks the owner.
         """
         auth_err = self._check_auth(request)
         if auth_err:
@@ -7470,13 +7478,24 @@ class APIServerAdapter(BasePlatformAdapter):
             body = await request.json()
         except Exception:
             return web.json_response({"error": "invalid body"}, status=400)
-        token = str((body or {}).get("token") or "")
-        from cron.recipients import lookup_live_run
+        body = body if isinstance(body, dict) else {}
+        token = str(body.get("token") or "")
+        target = str(body.get("target") or "")
+        message = body.get("message")
+        if (not token or not target or len(target) > 512 or not isinstance(message, str)
+                or not message.strip() or len(message) > self._RUN_SEND_MAX_CHARS):
+            return web.json_response({"error": "invalid send"}, status=400)
+        from cron.recipients import lookup_live_run, send_for_live_run
 
         grant = lookup_live_run(token, profile=_api_request_profile.get() or "default")
         if not grant:
             return web.json_response({"error": "not a live run"}, status=404)
-        return web.json_response({"job_id": grant["job_id"], "execution_id": grant["execution_id"]})
+        result = await asyncio.to_thread(send_for_live_run, grant, target, message)
+        if result is None:
+            return web.json_response({"error": "not a live run"}, status=404)
+        if result.get("status") == "not_confirmed":
+            return web.json_response({"error": "recipient not confirmed"}, status=409)
+        return web.json_response(result)
 
     async def _handle_delete_job(self, request: "web.Request") -> "web.Response":
         """DELETE /api/jobs/{job_id} — delete a cron job."""

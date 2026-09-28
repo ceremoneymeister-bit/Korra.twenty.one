@@ -271,6 +271,16 @@ def send_message_tool(args, **kw):
     return _handle_send(args, owner_initiated=bool(kw.get("owner_initiated")))
 
 
+def send_for_running_job(args):
+    """Send for the cron run bound in this process (cron.recipients.send_for_live_run).
+
+    Used by the gateway on behalf of a run's terminal: a recipient the job has
+    not confirmed is refused with ``not_confirmed`` instead of a decision card,
+    because the card belongs to the terminal's session, which asks for it.
+    """
+    return _handle_send(args, for_running_job=True)
+
+
 def _handle_list():
     """Return formatted list of available messaging targets."""
     try:
@@ -836,7 +846,7 @@ def resolve_outbound_message_decision(
     )
 
 
-def _handle_send(args, *, owner_initiated: bool = False):
+def _handle_send(args, *, owner_initiated: bool = False, for_running_job: bool = False):
     """Send a message to a platform target."""
     target = args.get("target", "")
     message = args.get("message", "")
@@ -959,6 +969,13 @@ def _handle_send(args, *, owner_initiated: bool = False):
     try:
         decision = None
         if not owner_initiated and not _confirmed_by_running_job(platform_name, chat_id, thread_id):
+            if for_running_job:
+                return json.dumps({"success": False, "status": "not_confirmed"})
+            # In a cron run's terminal the gateway that runs the job decides and
+            # sends; this process never sends on its own reading of the right.
+            delegated = _send_through_running_job(args)
+            if delegated is not None:
+                return json.dumps(delegated, ensure_ascii=False)
             decision = _queue_outbound_decision(
                 platform_name=platform_name,
                 pconfig=pconfig,
@@ -1285,6 +1302,18 @@ def _confirmed_by_running_job(platform_name: str, chat_id, thread_id) -> bool:
     except Exception:
         logger.debug("Confirmed-recipient check failed", exc_info=True)
         return False
+
+
+def _send_through_running_job(args) -> dict | None:
+    """The gateway's result for a send handed over from a cron run's terminal,
+    or None when there is no run to hand it to (cron.recipients)."""
+    try:
+        from cron.recipients import send_through_scheduler
+
+        return send_through_scheduler(str(args.get("target") or ""), str(args.get("message") or ""))
+    except Exception:
+        logger.debug("Handing the send to the scheduler failed", exc_info=True)
+        return None
 
 
 def _maybe_skip_cron_duplicate_send(platform_name: str, chat_id: str, thread_id: str | None):

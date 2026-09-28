@@ -66,7 +66,10 @@ def reset_running_job(token: contextvars.Token) -> None:
 #: Kept in memory only — nothing on disk to forge (0.21.15 Astra review A).
 _LIVE_RUNS: dict[str, dict[str, str]] = {}
 _LIVE_RUNS_LOCK = threading.Lock()
-GRANT_ROUTE = "/api/cron/run-grant"
+#: The gateway sends for a live run here (gateway.platforms.api_server).
+SEND_ROUTE = "/api/cron/run-send"
+#: A send with attachments may take a while; the terminal waits for the answer.
+SEND_TIMEOUT_SECONDS = 120
 
 
 def _digest(token: str) -> str:
@@ -130,12 +133,73 @@ def _execution_is_running(execution_id: str) -> bool:
         return False
 
 
-def _ask_scheduler(token: str) -> dict | None:
-    """Ask the gateway that runs the scheduler whether it issued this secret.
+def running_job() -> dict | None:
+    """The scheduled job this code runs for, in the process that runs it.
 
-    The answer comes from the scheduler's memory over its own authenticated
-    local API; a file or an id the terminal could write proves nothing.
+    ``korra send`` from an agent's terminal is a child process: it has this
+    run's secret, but no way to tell the gateway from a server its own
+    terminal started, so no answer about the secret is a right to send here.
+    It hands the send to the gateway instead (:func:`send_through_scheduler`;
+    0.21.15 Astra review P1-1 and re-checks A).
     """
+    job = _RUNNING_JOB.get()
+    if job:
+        return job
+    try:
+        from gateway.session_context import get_session_env
+
+        if get_session_env("KORRA_CRON_SESSION", "") != "1":
+            return None
+        token = str(get_session_env(RUNNING_JOB_ENV, "") or "").strip()
+        grant = lookup_live_run(token)
+        if not grant:
+            return None
+        from cron.jobs import get_job
+
+        job = get_job(str(grant.get("job_id") or ""))
+        return job if job and job.get("id") == grant.get("job_id") else None
+    except Exception:
+        logger.debug("Running job lookup failed", exc_info=True)
+        return None
+
+
+def _outcome_unknown() -> dict:
+    return {
+        "success": False,
+        "status": "outcome_unknown",
+        "error": ("Шлюз принял отправку, но не подтвердил результат. Проверьте, "
+                  "дошло ли сообщение, прежде чем повторять."),
+    }
+
+
+def send_through_scheduler(target: str, message: str) -> dict | None:
+    """Hand a send from a cron run's terminal to the gateway that runs the job.
+
+    The gateway checks the secret against its own memory and the job's
+    confirmed recipients, and sends itself. Nothing is sent from here: a
+    server that answers in the gateway's place receives the message but no
+    way to deliver it (0.21.15 Astra review A).
+
+    Returns the gateway's send result; ``outcome_unknown`` when the request
+    left but no answer came back, so no second copy goes out through a
+    decision; or None when this is not a run's terminal or the gateway
+    refused or could not be reached — the caller then asks the owner, as for
+    any send an agent proposes.
+    """
+    if _RUNNING_JOB.get():
+        return None
+    try:
+        from gateway.session_context import get_session_env
+
+        if get_session_env("KORRA_CRON_SESSION", "") != "1":
+            return None
+        token = str(get_session_env(RUNNING_JOB_ENV, "") or "").strip()
+    except Exception:
+        return None
+    if not token:
+        return None
+    import socket
+    import urllib.error
     import urllib.request
 
     from agent.secret_scope import get_secret
@@ -148,49 +212,49 @@ def _ask_scheduler(token: str) -> dict | None:
     profile = _current_profile()
     prefix = "" if profile == "default" else f"/p/{profile}"
     request = urllib.request.Request(
-        base + prefix + GRANT_ROUTE,
-        data=json.dumps({"token": token}).encode(),
+        base + prefix + SEND_ROUTE,
+        data=json.dumps({"token": token, "target": target, "message": message}).encode(),
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=5) as response:
-            grant = json.loads(response.read() or b"{}")
-    except Exception:
-        logger.debug("Run grant lookup failed", exc_info=True)
+        with urllib.request.urlopen(request, timeout=SEND_TIMEOUT_SECONDS) as response:
+            result = json.loads(response.read() or b"{}")
+    except urllib.error.HTTPError as exc:
+        # 4xx: not this gateway's live run, another profile, or a recipient the
+        # job has not confirmed — nothing was sent. 5xx: it may have been.
+        return _outcome_unknown() if exc.code >= 500 else None
+    except urllib.error.URLError as exc:
+        if isinstance(exc.reason, (TimeoutError, socket.timeout)):
+            return _outcome_unknown()
         return None
-    return grant if isinstance(grant, dict) and grant.get("job_id") else None
+    except (TimeoutError, socket.timeout):
+        return _outcome_unknown()
+    except Exception:
+        logger.debug("Run send through the scheduler failed", exc_info=True)
+        return _outcome_unknown()
+    return result if isinstance(result, dict) and "success" in result else _outcome_unknown()
 
 
-def running_job() -> dict | None:
-    """The scheduled job this code runs for, in the scheduler or its terminal.
+def send_for_live_run(grant: dict, target: str, message: str) -> dict | None:
+    """Send in the gateway for the live run ``grant`` belongs to.
 
-    ``korra send`` from an agent's terminal is a child process: the context
-    variable is gone, but the cron bridge carries this run's secret. Only the
-    scheduler process that issued it can vouch for it, and only while its exact
-    execution runs (0.21.15 Astra review P1-1 and re-checks A).
+    Returns the send result, ``{"status": "not_confirmed"}`` when the job has
+    not confirmed that recipient, or None when the job is gone.
     """
-    job = _RUNNING_JOB.get()
-    if job:
-        return job
-    try:
-        from gateway.session_context import get_session_env
+    from cron.jobs import get_job
 
-        if get_session_env("KORRA_CRON_SESSION", "") != "1":
-            return None
-        token = str(get_session_env(RUNNING_JOB_ENV, "") or "").strip()
-        if not token:
-            return None
-        grant = lookup_live_run(token) or _ask_scheduler(token)
-        if not grant or not _execution_is_running(str(grant.get("execution_id") or "")):
-            return None
-        from cron.jobs import get_job
-
-        job = get_job(str(grant.get("job_id") or ""))
-        return job if job and job.get("id") == grant.get("job_id") else None
-    except Exception:
-        logger.debug("Running job lookup failed", exc_info=True)
+    job = get_job(str(grant.get("job_id") or ""))
+    if not job or job.get("id") != grant.get("job_id"):
         return None
+    bound = bind_running_job({**job, "execution_id": grant.get("execution_id")})
+    try:
+        from tools.send_message_tool import send_for_running_job
+
+        return json.loads(send_for_running_job({"action": "send", "target": target,
+                                                "message": message}))
+    finally:
+        reset_running_job(bound)
 
 
 def target_label(platform: str, chat_id, thread_id=None) -> str:

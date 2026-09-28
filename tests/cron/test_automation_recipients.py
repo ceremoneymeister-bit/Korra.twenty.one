@@ -276,71 +276,216 @@ def test_a_one_shot_reminder_is_not_spent_before_the_answer(store):
     assert job["next_run_at"] is not None
 
 
-def test_korra_send_in_a_running_jobs_terminal_uses_its_confirmation(store):
-    """P1-1 / re-checks A: a child process (``korra send`` in the job's
-    terminal) holds this run's secret, and only the scheduler that issued it
-    can vouch for it. A public id, a forged grant file, a made-up secret or a
-    finished run grant nothing."""
-    import http.server
+#: ``korra send`` in a child process, as an agent's terminal runs it. Nothing
+#: may leave from here: the local transport and the decision queue only count.
+_CHILD_SEND = r"""
+import argparse, json, sys
+from unittest.mock import MagicMock, patch
+from gateway.config import Platform
+from korra_cli.send_cmd import cmd_send
+
+cfg = MagicMock(platforms={Platform.TELEGRAM: MagicMock(enabled=True, token="fake")})
+local, decisions = [], []
+def dispatch(**kw):
+    local.append(kw)
+    return {"success": True}
+def decide(**kw):
+    decisions.append(kw)
+    return {"id": "decision-in-terminal", "status": "pending"}
+code = None
+with patch("gateway.config.load_gateway_config", return_value=cfg), \
+     patch("tools.send_message_tool._dispatch_resolved_send", side_effect=dispatch), \
+     patch("tools.send_message_tool._queue_outbound_decision", side_effect=decide):
+    try:
+        cmd_send(argparse.Namespace(to="telegram:555", message="С днём рождения", file=None,
+                                    subject=None, json=True, quiet=False, list=False))
+    except SystemExit as exc:
+        code = exc.code
+print("RESULT " + json.dumps({"exit": code, "local": len(local), "decisions": len(decisions)}))
+"""
+
+
+def _run_child(store, extra_env: dict, script: str = _CHILD_SEND) -> dict:
     import os
     import subprocess
     import sys
+
+    env = {**os.environ, "KORRA_HOME": str(store), "HERMES_HOME": str(store),
+           "KORRA_CRON_SESSION": "1", "PYTHONDONTWRITEBYTECODE": "1", "API_SERVER_KEY": "k",
+           **extra_env}
+    for name in ("KORRA_CRON_RUN_TOKEN", "HERMES_CRON_RUN_TOKEN"):
+        if name not in extra_env:
+            env.pop(name, None)
+    out = subprocess.run([sys.executable, "-c", script], env=env, capture_output=True,
+                         text=True, timeout=120)
+    lines = [line for line in out.stdout.splitlines() if line.startswith("RESULT ")]
+    assert lines, out.stdout + out.stderr
+    return json.loads(lines[-1][len("RESULT "):])
+
+
+def test_korra_send_in_a_running_jobs_terminal_is_sent_by_the_gateway(store):
+    """Re-check A (round 3): the terminal hands the send to the gateway that
+    issued the run's secret; the gateway checks it and the confirmed audience
+    and sends itself — exactly once. A made-up secret, a public id or a
+    finished run send nothing and the terminal asks the owner instead."""
+    import http.server
     import threading
 
     from cron import executions
+    from gateway.config import Platform
 
     created = _tool(OWNER_DM, action="create", prompt="Поздравления", schedule="every day at 10am",
                     audience="клиенты с ДР")
     _resolve(created["recipients"]["decision_id"], "once")
     job = _job(created["job_id"])
+    sent: list[dict] = []
 
-    class Scheduler(http.server.BaseHTTPRequestHandler):
-        """Stands in for the gateway: answers from this process's registry."""
+    class Gateway(http.server.BaseHTTPRequestHandler):
+        """The gateway's /api/cron/run-send, answered from this process."""
 
         def do_POST(self):  # noqa: N802
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-            ok = self.path == recipients.GRANT_ROUTE and self.headers.get("Authorization") == "Bearer k"
+            ok = self.path == recipients.SEND_ROUTE and self.headers.get("Authorization") == "Bearer k"
             grant = recipients.lookup_live_run(body.get("token", ""), profile="default") if ok else None
-            self.send_response(200 if grant else 404)
+            result = recipients.send_for_live_run(grant, body["target"], body["message"]) if grant else None
+            status = 404 if result is None else 409 if result.get("status") == "not_confirmed" else 200
+            self.send_response(status)
             self.end_headers()
-            self.wfile.write(json.dumps(grant or {}).encode())
+            self.wfile.write(json.dumps(result or {}).encode())
 
         def log_message(self, *args):
             pass
 
-    server = http.server.HTTPServer(("127.0.0.1", 0), Scheduler)
+    cfg = MagicMock(platforms={Platform.TELEGRAM: MagicMock(enabled=True, token="fake")})
+
+    def gateway_dispatch(**kw):
+        sent.append(kw)
+        return {"success": True, "message_id": "7"}
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Gateway)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    child = (
-        "from cron import recipients;"
-        "job = recipients.running_job();"
-        "print(job['id'] if job else '-', recipients.send_allowed_in_run('telegram', '555'))"
-    )
-    base_env = {**os.environ, "KORRA_HOME": str(store), "HERMES_HOME": str(store),
-                "KORRA_CRON_SESSION": "1", "PYTHONDONTWRITEBYTECODE": "1", "API_SERVER_KEY": "k",
-                "API_SERVER_PROXY_TARGET": f"http://127.0.0.1:{server.server_port}"}
-
-    def ask(**extra) -> list:
-        return subprocess.run([sys.executable, "-c", child], env={**base_env, **extra},
-                              capture_output=True, text=True, check=True, timeout=120).stdout.split()[-2:]
-
+    at = {"API_SERVER_PROXY_TARGET": f"http://127.0.0.1:{server.server_port}"}
     attempt = executions.create_execution(job["id"], source="scheduled")
     executions.mark_execution_running(attempt["id"])
     token = recipients.issue_run_token({**job, "execution_id": attempt["id"]})
     try:
-        forged = store / "cron" / "run-tokens"
-        forged.mkdir(parents=True, exist_ok=True)
-        import hashlib
-        (forged / (hashlib.sha256(b"forged").hexdigest() + ".json")).write_text(
-            json.dumps({"job_id": job["id"], "execution_id": attempt["id"]}))
-        assert ask(KORRA_CRON_RUN_TOKEN="forged") == ["-", "False"]   # a file proves nothing
-        assert ask(KORRA_CRON_JOB_ID=job["id"]) == ["-", "False"]      # an id is public
-        assert ask(KORRA_CRON_RUN_TOKEN=token) == [job["id"], "True"]
-        executions.finish_execution(attempt["id"], success=True)
-        assert ask(KORRA_CRON_RUN_TOKEN=token) == ["-", "False"]       # that run is over
+        with patch("gateway.config.load_gateway_config", return_value=cfg), \
+             patch("tools.send_message_tool._dispatch_resolved_send", side_effect=gateway_dispatch):
+            assert _run_child(store, {**at, "KORRA_CRON_RUN_TOKEN": token}) == \
+                {"exit": 0, "local": 0, "decisions": 0}
+            assert [(item["chat_id"], item["cleaned_message"]) for item in sent] == \
+                [("555", "С днём рождения")]
+            for extra in ({"KORRA_CRON_RUN_TOKEN": "made-up"}, {"KORRA_CRON_JOB_ID": job["id"]}):
+                assert _run_child(store, {**at, **extra}) == {"exit": 1, "local": 0, "decisions": 1}
+            executions.finish_execution(attempt["id"], success=True)
+            assert _run_child(store, {**at, "KORRA_CRON_RUN_TOKEN": token}) == \
+                {"exit": 1, "local": 0, "decisions": 1}
+        assert len(sent) == 1
     finally:
         recipients.retire_run_token(token)
         server.shutdown()
     assert recipients.lookup_live_run(token) is None
+
+
+@pytest.mark.parametrize("answer", ["live_run", "send_result"])
+def test_a_server_the_terminal_started_cannot_send_for_a_run(store, answer):
+    """Astra round 3 §2.1: a process without the secret starts its own server
+    and points ``korra send`` at it — here answering with the ids of a real
+    live run whose audience the owner confirmed. Whatever it answers, the
+    terminal sends nothing itself; the stand-in only receives the request."""
+    from cron import executions
+
+    created = _tool(OWNER_DM, action="create", prompt="Поздравления", schedule="every day at 10am",
+                    audience="клиенты с ДР")
+    _resolve(created["recipients"]["decision_id"], "once")
+    attempt = executions.create_execution(created["job_id"], source="scheduled")
+    executions.mark_execution_running(attempt["id"])
+    fake = ({"job_id": created["job_id"], "execution_id": attempt["id"]} if answer == "live_run"
+            else {"success": True})
+    script = r"""
+import http.server, json, os, threading
+hits = []
+class Fake(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        hits.append(self.path)
+        self.send_response(200); self.end_headers()
+        self.wfile.write(os.environ["FAKE_ANSWER"].encode())
+    def log_message(self, *a): pass
+server = http.server.HTTPServer(("127.0.0.1", 0), Fake)
+threading.Thread(target=server.serve_forever, daemon=True).start()
+os.environ["API_SERVER_PROXY_TARGET"] = f"http://127.0.0.1:{server.server_port}"
+os.environ["API_SERVER_KEY"] = "invented-key-not-the-gateways"
+""" + _CHILD_SEND + r"""
+print("HITS " + str(len(hits)))
+"""
+    try:
+        result = _run_child(store, {"KORRA_CRON_RUN_TOKEN": "review-forged",
+                                    "FAKE_ANSWER": json.dumps(fake)}, script)
+    finally:
+        executions.finish_execution(attempt["id"], success=True)
+    assert result["local"] == 0
+    assert result["decisions"] == 0  # the request left: no second copy through a card
+    # An answer without a send result is not taken for one.
+    assert result["exit"] == (0 if answer == "send_result" else 1)
+
+
+def test_an_unreachable_gateway_leaves_the_send_to_the_owner(store, monkeypatch, capsys):
+    """Re-check A: after a gateway restart the secret is gone and nobody
+    listens — ``korra send`` saves a real decision and exits 1, nothing is lost."""
+    import argparse
+
+    from gateway.config import Platform
+    from gateway.session_context import clear_session_vars, set_session_vars
+    from korra_cli.send_cmd import cmd_send
+    from tools.effect_decisions import get_decision
+
+    monkeypatch.setenv("API_SERVER_KEY", "local-test-key")
+    monkeypatch.setenv("API_SERVER_PROXY_TARGET", "http://127.0.0.1:1")
+    monkeypatch.setenv("KORRA_CRON_RUN_TOKEN", "unrecoverable-after-restart")
+    monkeypatch.setenv("KORRA_CRON_SESSION", "1")
+    cfg = MagicMock(platforms={Platform.TELEGRAM: MagicMock(enabled=True, token="fake")})
+    tokens = set_session_vars(cron_session="1", **OWNER_DM)
+    try:
+        with patch("gateway.config.load_gateway_config", return_value=cfg), \
+             patch("tools.send_message_tool._dispatch_resolved_send",
+                   side_effect=AssertionError("nothing is sent from the terminal")):
+            with pytest.raises(SystemExit) as exit_info:
+                cmd_send(argparse.Namespace(to="telegram:555", message="local diagnostic",
+                                            file=None, subject=None, json=True, quiet=False))
+        assert exit_info.value.code == 1
+        output = json.loads(capsys.readouterr().out)
+        assert output["status"] == "pending_decision", output
+        assert get_decision(output["decision_id"])["status"] == "pending"
+    finally:
+        clear_session_vars(tokens)
+
+
+@pytest.mark.parametrize("status,expected", [(409, None), (404, None), (401, None),
+                                             (500, "outcome_unknown")])
+def test_what_the_terminal_does_with_each_gateway_answer(monkeypatch, status, expected):
+    """4xx: refused, nothing was sent — ask the owner. 5xx: it may have been
+    sent — report it, never queue a second copy."""
+    import io
+    import urllib.error
+
+    from gateway.session_context import clear_session_vars, set_session_vars
+
+    monkeypatch.setenv("API_SERVER_KEY", "k")
+
+    def refuse(request, timeout):
+        raise urllib.error.HTTPError(request.full_url, status, "x", {}, io.BytesIO(b"{}"))
+
+    monkeypatch.setattr("urllib.request.urlopen", refuse)
+    from gateway.session_context import _VAR_MAP
+
+    tokens = set_session_vars(cron_session="1", **OWNER_DM)
+    secret = _VAR_MAP[recipients.RUNNING_JOB_ENV].set("secret")
+    try:
+        result = recipients.send_through_scheduler("telegram:555", "Привет")
+    finally:
+        _VAR_MAP[recipients.RUNNING_JOB_ENV].reset(secret)
+        clear_session_vars(tokens)
+    assert (result or {}).get("status") == expected
 
 
 def test_resume_run_now_and_forced_fire_wait_for_the_answer(store):
