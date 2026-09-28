@@ -734,11 +734,12 @@ class TestCronRunSend:
                     assert sorted(bool(body.get("repeat")) for _, body in both) == [False, True]
                     assert sent.count("telegram:555 / Третье") == 1
 
-                    # The run ends: its record goes with its secret.
-                    digest = recipients._digest(token)
-                    assert recipients._RUN_SENDS.get(digest)
+                    # The secret ends: nothing more goes out under it. The record
+                    # of sends belongs to the execution and lives as long as it
+                    # (third clean review P1-1).
+                    run_id = recipients.lookup_live_run(token)["execution_id"]
+                    assert recipients._RUN_SENDS.get(run_id)
                     recipients.retire_run_token(token)
-                    assert digest not in recipients._RUN_SENDS
                     assert (await post("telegram:555", "С днём рождения"))[0] == 404
             assert len(sent) == 5
         finally:

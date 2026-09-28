@@ -66,11 +66,13 @@ def reset_running_job(token: contextvars.Token) -> None:
 #: Kept in memory only — nothing on disk to forge (0.21.15 Astra review A).
 _LIVE_RUNS: dict[str, dict[str, str]] = {}
 _LIVE_RUNS_LOCK = threading.Lock()
-#: Sends the gateway made for a live run: secret digest → send key → state.
+#: Sends the gateway made for a live run: execution id → send key → state.
 #: A repeat of the same send — a retried request or `korra send` run again
 #: after a lost answer — gets the stored result instead of a second delivery
-#: (0.21.15 Astra review R1). Same lock as the secrets: retiring a run drops
-#: both at once.
+#: (0.21.15 Astra review R1). The record belongs to the execution, not to one
+#: stage's secret: a pre-check script and the agent turn after it are one run,
+#: and a repeat across them must not deliver twice (third clean review P1-1).
+#: It is dropped once the execution has finished.
 _RUN_SENDS: dict[str, dict[str, dict]] = {}
 _RUN_SENDS_CHANGED = threading.Condition(_LIVE_RUNS_LOCK)
 #: The gateway sends for a live run here (gateway.platforms.api_server).
@@ -99,9 +101,18 @@ def issue_run_token(job: dict) -> str:
         return ""
     token = secrets.token_urlsafe(32)
     with _LIVE_RUNS_LOCK:
+        _drop_finished_sends_locked()
         _LIVE_RUNS[_digest(token)] = {"job_id": str(job["id"]), "execution_id": execution_id,
                                       "profile": _current_profile()}
     return token
+
+
+def _drop_finished_sends_locked() -> None:
+    """Forget the sends of executions that no secret holds and that have ended."""
+    live = {grant.get("execution_id") for grant in _LIVE_RUNS.values()}
+    for execution_id in list(_RUN_SENDS):
+        if execution_id not in live and not _execution_is_running(execution_id):
+            _RUN_SENDS.pop(execution_id, None)
 
 
 def retire_run_token(token: str) -> None:
@@ -109,8 +120,17 @@ def retire_run_token(token: str) -> None:
         return
     with _RUN_SENDS_CHANGED:
         _LIVE_RUNS.pop(_digest(token), None)
-        _RUN_SENDS.pop(_digest(token), None)
+        _drop_finished_sends_locked()
         _RUN_SENDS_CHANGED.notify_all()
+
+
+def run_token_execution(token: str) -> str | None:
+    """Выполнение, которому этот процесс выдал секрет, — без проверки живости."""
+    if not token:
+        return None
+    with _LIVE_RUNS_LOCK:
+        grant = _LIVE_RUNS.get(_digest(token))
+    return str(grant.get("execution_id")) if grant else None
 
 
 def lookup_live_run(token: str, profile: str | None = None) -> dict | None:
@@ -344,7 +364,7 @@ def send_once_for_live_run(token: str, grant: dict, target: str, message: str,
     outcome instead of sending (clean Astra review P1-2). A refusal before
     anything was sent — an unconfirmed recipient, a bad target, a platform
     that is not set up — is forgotten, and the next attempt tries again.
-    Nothing outlives the run: retiring its secret drops the record.
+    Nothing outlives the execution: its record goes once it has finished.
 
     The text is masked before anything else, so the key and the send both see
     what actually goes out (P1-3).
@@ -354,11 +374,13 @@ def send_once_for_live_run(token: str, grant: dict, target: str, message: str,
     deadline = time.monotonic() + wait_seconds
     with _RUN_SENDS_CHANGED:
         while True:
-            if digest not in _LIVE_RUNS:
+            live = _LIVE_RUNS.get(digest)
+            if live is None:
                 return None
-            entry = _RUN_SENDS.setdefault(digest, {}).get(key)
+            run = str(live.get("execution_id") or digest)
+            entry = _RUN_SENDS.setdefault(run, {}).get(key)
             if entry is None:
-                _RUN_SENDS[digest][key] = {"state": "sending"}
+                _RUN_SENDS[run][key] = {"state": "sending"}
                 break
             if entry["state"] == "sent":
                 return {**entry["result"], "repeat": True,
@@ -376,7 +398,7 @@ def send_once_for_live_run(token: str, grant: dict, target: str, message: str,
         return result
     finally:
         with _RUN_SENDS_CHANGED:
-            sends = _RUN_SENDS.get(digest)
+            sends = _RUN_SENDS.get(run)
             if sends is not None:
                 if _sent(result):
                     sends[key] = {"state": "sent", "result": dict(result)}
@@ -460,12 +482,27 @@ def delivery_allowed(job: dict, platform: str, chat_id, thread_id=None) -> bool:
 
 
 def send_allowed_in_run(platform: str, chat_id, thread_id=None) -> bool:
-    """A ``send_message`` inside a running job the owner set up needs no decision
-    for recipients confirmed with the job, or for anyone when the owner
-    confirmed the job's audience as a source."""
+    """Может ли отправка изнутри запуска задания обойтись без решения.
+
+    Тот же договор, что у автодоставки результата (``delivery_allowed``), чтобы
+    `korra send` и результат не расходились (третье чистое ревью Astra, P1-2):
+
+    1. собственный личный чат создателя — у любого задания: человек
+       автоматизирует для себя (решение Дмитрия 28.09);
+    2. задание владельца — его каналы, подтверждённая аудитория и цели;
+    3. задание, созданное формой или до правил получателей, — ровно
+       настроенные цели ``deliver``: получателя выбрал владелец, но
+       произвольный адрес из `korra send` этим не разрешён.
+    """
     job = running_job()
     if not job:
         return False
+    try:
+        from cron.scheduler import _is_creator_private_chat, _is_owner_side_chat, _resolve_delivery_targets
+    except Exception:
+        return False
+    if _is_creator_private_chat(job, platform, chat_id):
+        return True
     try:
         from gateway.principal import cron_job_acts_for_owner
 
@@ -473,20 +510,26 @@ def send_allowed_in_run(platform: str, chat_id, thread_id=None) -> bool:
             return False
     except Exception:
         return False
+    try:
+        if _is_owner_side_chat(job, platform, chat_id):
+            return True
+    except Exception:
+        pass
     if confirmed_audience(job):
         return True
-    if _label_confirmed(job, target_label(platform, chat_id, thread_id)):
+    label = target_label(platform, chat_id, thread_id)
+    if _label_confirmed(job, label):
         return True
-    # Собственный личный чат владельца или создателя — не посторонний
-    # получатель (решение Дмитрия 28.09): так же, как автодоставка результата.
-    # Без этого скрипт-сторож, который шлёт владельцу, после P1-1 упёрся бы в
-    # карточку подтверждения.
-    try:
-        from cron.scheduler import _is_owner_side_chat
-
-        return bool(_is_owner_side_chat(job, platform, chat_id))
-    except Exception:
-        return False
+    if job.get(POLICY_KEY) != 1:
+        try:
+            targets = _resolve_delivery_targets(job)
+        except Exception:
+            targets = []
+        return any(
+            target_label(t.get("platform"), t.get("chat_id"), t.get("thread_id")) == label
+            for t in targets
+        )
+    return False
 
 
 def audience_run_note(job: dict) -> str:

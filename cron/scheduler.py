@@ -4694,6 +4694,14 @@ def _job_send_context(job: dict, execution_id: Optional[str] = None):
     from gateway.session_context import _VAR_MAP
     from cron.recipients import RUNNING_JOB_ENV, issue_run_token, retire_run_token
 
+    # Один секрет и один журнал отправок на всё выполнение: внутри уже
+    # открытого контекста того же выполнения (``run_job``) стадия берёт его,
+    # а не выпускает свой. Иначе журнал повторов пропадал между скриптом и
+    # ходом агента, и агент мог повторить уже принятую отправку (третье
+    # чистое ревью Astra, P1-1).
+    if _bound_run_token(job, execution_id):
+        yield
+        return
     session_token = _VAR_MAP["KORRA_CRON_SESSION"].set("1")
     run_token = issue_run_token({**job, "execution_id": execution_id or job.get("execution_id")})
     job_token = _VAR_MAP[RUNNING_JOB_ENV].set(run_token)
@@ -4703,6 +4711,18 @@ def _job_send_context(job: dict, execution_id: Optional[str] = None):
         _VAR_MAP[RUNNING_JOB_ENV].reset(job_token)
         _VAR_MAP["KORRA_CRON_SESSION"].reset(session_token)
         retire_run_token(run_token)
+
+
+def _bound_run_token(job: dict, execution_id: Optional[str] = None) -> str:
+    """Секрет, уже привязанный к этому выполнению в текущем контексте, или «»."""
+    from gateway.session_context import get_session_env
+    from cron.recipients import RUNNING_JOB_ENV, run_token_execution
+
+    token = str(get_session_env(RUNNING_JOB_ENV, "") or "")
+    wanted = str(execution_id or job.get("execution_id") or "")
+    if token and wanted and run_token_execution(token) == wanted:
+        return token
+    return ""
 
 
 def _run_job_script_with_claim_heartbeat(
@@ -5730,6 +5750,31 @@ def run_job(
     cancel_event: Optional[_CancelEventLike] = None,
     execution_id: Optional[str] = None,
 ) -> tuple[bool, str, str, Optional[str]]:
+    """Execute a single cron job inside one send context for its execution.
+
+    Скрипт задания, проверочный скрипт и ход агента — одно выполнение: у них
+    один секрет запуска и один журнал отправок, выданные здесь и отозванные
+    один раз по окончании (третье чистое ревью Astra, P1-1). Подробности —
+    ``_run_job_inner``.
+    """
+    with _job_send_context(job, execution_id):
+        return _run_job_inner(
+            job,
+            defer_agent_teardown=defer_agent_teardown,
+            extra_prompt=extra_prompt,
+            cancel_event=cancel_event,
+            execution_id=execution_id,
+        )
+
+
+def _run_job_inner(
+    job: dict,
+    *,
+    defer_agent_teardown: Optional[list] = None,
+    extra_prompt: Optional[str] = None,
+    cancel_event: Optional[_CancelEventLike] = None,
+    execution_id: Optional[str] = None,
+) -> tuple[bool, str, str, Optional[str]]:
     """
     Execute a single cron job.
 
@@ -6122,6 +6167,7 @@ def run_job(
     _cron_session_token = None
     _cron_job_id_token = None
     _run_token = ""
+    _owns_run_token = False
     _non_dispatcher_token = None
     _background_owner_token = None
     _running_job_token = None
@@ -6135,7 +6181,12 @@ def run_job(
         _cron_session_token = _cron_session_var.set("1")
         from cron.recipients import RUNNING_JOB_ENV, issue_run_token
 
-        _run_token = issue_run_token(job)
+        # Ход агента — та же стадия выполнения, что и его скрипт: секрет уже
+        # выдан ``run_job``. Свой — только при прямом вызове без него.
+        _run_token = _bound_run_token(job, execution_id)
+        _owns_run_token = not _run_token
+        if _owns_run_token:
+            _run_token = issue_run_token({**job, "execution_id": execution_id or job.get("execution_id")})
         _cron_job_id_token = _VAR_MAP[RUNNING_JOB_ENV].set(_run_token)
 
         # Whose job is this? A job acts for the owner only when it was created
@@ -7082,7 +7133,8 @@ def run_job(
             from cron.recipients import RUNNING_JOB_ENV, retire_run_token
 
             _VAR_MAP[RUNNING_JOB_ENV].reset(_cron_job_id_token)
-            retire_run_token(_run_token)
+            if _owns_run_token:
+                retire_run_token(_run_token)
         if _background_owner_token is not None:
             from gateway.session_context import reset_background_owner
 
