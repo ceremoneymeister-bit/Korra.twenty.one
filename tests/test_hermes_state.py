@@ -4566,6 +4566,38 @@ class TestGetMessagesPagination:
         with pytest.raises(ValueError):
             db.get_messages("s1", limit=4, after_id=0, offset=2)
 
+    def test_display_page_edges(self, db):
+        """Лента чата с начала разговора без реплики, пустая и с ходом из
+        тысяч вызовов: страница не теряет строк и не зависает."""
+        assert db.get_display_page("absent", limit=30) == ([], None, False)
+
+        db.create_session(session_id="cron-like", source="cron")
+        db.append_messages_batch("cron-like", [
+            {"role": "assistant", "content": "отчёт"},
+            {"role": "user", "content": "спасибо"},
+            {"role": "assistant", "content": "пожалуйста"},
+        ])
+        rows, cursor, has_more = db.get_display_page("cron-like", limit=30)
+        assert [m["content"] for m in rows] == ["отчёт", "спасибо", "пожалуйста"]
+        assert (cursor, has_more) == (rows[0]["id"], False)
+
+        rows, cursor, has_more = db.get_display_page("cron-like", limit=2)
+        assert [m["content"] for m in rows] == ["спасибо", "пожалуйста"]
+        assert has_more is True
+        older, _, more = db.get_display_page("cron-like", limit=2, before_id=cursor)
+        assert [m["content"] for m in older] == ["отчёт"] and more is False
+
+        db.create_session(session_id="huge-turn", source="dashboard")
+        db.append_messages_batch("huge-turn", [{"role": "user", "content": "сделай"}] + [
+            {"role": "tool", "content": f"шаг {i}", "tool_call_id": f"c{i}"} for i in range(30)
+        ])
+        rows, cursor, has_more = db.get_display_page("huge-turn", limit=30, max_rows=10)
+        assert [m["content"] for m in rows] == [f"шаг {i}" for i in range(20, 30)]
+        assert has_more is True and cursor == rows[0]["id"]
+
+        with pytest.raises(ValueError):
+            db.get_messages("s1", before_id=5, latest=True)
+
     def test_resume_safety_counts_active_rows_across_lineage(self, db):
         db.create_session(session_id="root", source="cli")
         db.append_messages_batch(

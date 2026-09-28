@@ -688,11 +688,19 @@ async def get_session_messages(
     offset: int = Query(0, ge=0),
     order: Optional[str] = Query(None),
     include_compacted: bool = Query(False),
+    display_limit: Optional[int] = Query(None, ge=1, le=100),
+    before_id: Optional[int] = Query(None, ge=1),
 ):
     if order not in (None, "oldest", "latest"):
         raise HTTPException(
             status_code=400,
             detail="order must be one of: oldest, latest",
+        )
+    if before_id is not None and display_limit is None:
+        raise HTTPException(status_code=400, detail="before_id requires display_limit")
+    if display_limit is not None and include_compacted:
+        raise HTTPException(
+            status_code=400, detail="display_limit is incompatible with include_compacted"
         )
 
     def _read():
@@ -702,6 +710,13 @@ async def get_session_messages(
             if not sid:
                 return None
             sid = db.resolve_resume_session_id(sid)
+            if display_limit is not None:
+                # Лента чата: последние N сообщений (реплика или целый ход
+                # агента), более ранние — следующей страницей до before_id.
+                rows, cursor, has_more = db.get_display_page(
+                    sid, limit=display_limit, before_id=before_id
+                )
+                return sid, display_limit, rows, {"before_id": cursor, "has_more": has_more}
             # Always page this endpoint. An omitted limit used to load an
             # entire transcript, which can be hundreds of thousands of rows
             # for a runaway session and exhaust the dashboard process. Keep
@@ -716,14 +731,14 @@ async def get_session_messages(
                 offset=offset,
                 latest=latest_page,
                 include_compacted=include_compacted,
-            )
+            ), None
         finally:
             db.close()
 
     result = await asyncio.to_thread(_read)
     if result is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    sid, _limit, messages = result
+    sid, _limit, messages, display_page = result
     from agent.compaction_display import project_compaction_message_for_display
     from agent.context_compressor import is_compaction_summary_message
 
@@ -744,6 +759,17 @@ async def get_session_messages(
             projected["display_content"] = display_view.get("content")
             projected.pop("display_kind", None)
         projected_messages.append(projected)
+    if display_page is not None:
+        return {
+            "session_id": sid,
+            "messages": projected_messages,
+            "pagination": {
+                "display_limit": _limit,
+                "order": "latest",
+                "returned": len(projected_messages),
+                **display_page,
+            },
+        }
     return {
         "session_id": sid,
         "messages": projected_messages,

@@ -92,7 +92,7 @@ import { ownerFacingError } from "@/lib/owner-facing-error";
 import { cn } from "@/lib/utils";
 import type { ApprovalChoiceValue, ChatMessage } from "@/lib/chat-types";
 import { api, type SessionInfo } from "@/lib/api";
-import { useChatStream, type PendingMessageTarget, type ChatApprovalEntry } from "@/hooks/useChatStream";
+import { useChatStream, type PendingMessageTarget, type ChatApprovalEntry, type OlderHistoryState } from "@/hooks/useChatStream";
 import { formatDictationClock, useDictation, type DictationState } from "@/hooks/useDictation";
 import { useSessionList } from "@/hooks/useSessionList";
 import { useSessionSearch } from "@/hooks/useSessionSearch";
@@ -550,7 +550,12 @@ export function BubbleChatTranscript({
   agentLabel,
   approvals,
   onApprovalDecision,
+  older,
+  onLoadOlder,
 }: {
+  /** Более ранние сообщения этого чата, догружаемые к началу ленты. */
+  older?: OlderHistoryState;
+  onLoadOlder?: () => void;
   voiceSettings?: AgentVoiceSettings | null;
   profile?: string;
   active?: boolean;
@@ -585,6 +590,8 @@ export function BubbleChatTranscript({
       storageKey={scrollKey}
       followKey={lastUser?.delivery === "sending" ? lastUser.id : undefined}
       awaitingApproval={approvals?.some(entry => entry.status === "pending")}
+      anchorKey={messages[0]?.id}
+      older={older && onLoadOlder ? { ...older, load: onLoadOlder } : undefined}
     >
       <div className="px-4">
         <div className="korra-chat-transcript__content mx-auto w-full max-w-[880px] space-y-5 pt-6">
@@ -1434,6 +1441,8 @@ export default function BubbleChatPage({
     abort,
     loadSession,
     reset,
+    older,
+    loadOlder,
   } = useChatStream({ profile: agentProfile, active });
   const serverRun = useSessionRun(agentProfile ?? "", sessionId);
   const queued = isStreaming && serverRun?.status === "queued";
@@ -1823,6 +1832,8 @@ export default function BubbleChatPage({
           voiceSettings={voiceSettings} profile={agentProfile || "default"} active={active !== false}
           scrollKey={`${chatViewKey(agentProfile, sessionId)}:scroll`}
           messages={messages}
+          older={older}
+          onLoadOlder={() => void loadOlder()}
           streaming={isStreaming && !queued}
           error={error}
           onDecision={handleDecision}

@@ -775,10 +775,20 @@ export const api = {
       signal ? { signal } : undefined,
     );
   },
-  getSessionMessages: (id: string, profile = getManagementProfile(), signal?: AbortSignal) =>
+  /** Без `page` — последние 500 строк базы, как раньше. С `page` — лента чата:
+   *  последние `displayLimit` сообщений (реплика или целый ход агента) до
+   *  строки `beforeId`. */
+  getSessionMessages: (
+    id: string,
+    profile = getManagementProfile(),
+    signal?: AbortSignal,
+    page?: { displayLimit: number; beforeId?: number | null },
+  ) =>
     fetchJSON<SessionMessagesResponse>(
       appendProfileParam(
-        `/api/sessions/${encodeURIComponent(id)}/messages?limit=500&order=latest`,
+        page
+          ? `/api/sessions/${encodeURIComponent(id)}/messages?display_limit=${page.displayLimit}${page.beforeId ? `&before_id=${page.beforeId}` : ""}`
+          : `/api/sessions/${encodeURIComponent(id)}/messages?limit=500&order=latest`,
         profile,
       ),
       signal ? { signal } : undefined,
@@ -2913,6 +2923,8 @@ export interface WhatsAppOnboardingApplyResponse {
 }
 
 export interface SessionMessage {
+  /** id строки в базе сессии: курсор страниц ленты. */
+  id?: number;
   role: "user" | "assistant" | "system" | "tool";
   content: string | null;
   tool_calls?: Array<{
@@ -2928,10 +2940,15 @@ export interface SessionMessagesResponse {
   session_id: string;
   messages: SessionMessage[];
   pagination?: {
-    limit: number;
-    offset: number;
+    limit?: number;
+    offset?: number;
     order: "latest" | "oldest";
     returned: number;
+    /** Постраничная лента чата (`display_limit`). */
+    display_limit?: number;
+    /** Курсор следующей, более ранней страницы. */
+    before_id?: number | null;
+    has_more?: boolean;
   };
 }
 

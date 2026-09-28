@@ -31,6 +31,9 @@ export interface ChatMessage {
   failureConfirmed?: boolean;
   /** Понятная причина именно этой неудачной отправки; переживает F5 в outbox. */
   failureReason?: string;
+  /** id первой строки базы, из которой собрано сообщение истории. Есть только
+   *  у загруженной истории: по нему страницы ленты стыкуются друг с другом. */
+  historyId?: number;
 }
 
 export interface ChatSession {

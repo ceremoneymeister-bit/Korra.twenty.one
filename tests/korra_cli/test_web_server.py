@@ -2338,6 +2338,54 @@ class TestWebServerEndpoints:
             "msg 499",
         ]
 
+    def test_chat_history_pages_count_displayed_messages(self):
+        """Лента чата: 30 сообщений — это реплики и целые ходы агента, а не
+        30 строк базы; страница начинается с реплики, следующая — до курсора
+        (Дмитрий 28.09: сразу последние 30, раньше — по 30 при прокрутке)."""
+        from korra_state import SessionDB
+
+        rows = []
+        for turn in range(20):
+            call = {"id": f"call-{turn}", "type": "function",
+                    "function": {"name": "terminal", "arguments": "{}"}}
+            rows += [
+                {"role": "user", "content": f"вопрос {turn}"},
+                {"role": "assistant", "content": "", "tool_calls": [call]},
+                {"role": "tool", "content": "вывод " * 50, "tool_call_id": f"call-{turn}"},
+                {"role": "assistant", "content": f"ответ {turn}"},
+            ]
+        db = SessionDB()
+        try:
+            db.create_session(session_id="paged-chat", source="dashboard")
+            db.append_messages_batch("paged-chat", rows)
+        finally:
+            db.close()
+
+        first = self.client.get("/api/sessions/paged-chat/messages?display_limit=30").json()
+        users = [m["content"] for m in first["messages"] if m["role"] == "user"]
+        assert users == [f"вопрос {turn}" for turn in range(5, 20)]
+        assert first["messages"][0]["role"] == "user"
+        assert len(first["messages"]) == 15 * 4
+        page = first["pagination"]
+        assert page["has_more"] is True
+        assert page["before_id"] == first["messages"][0]["id"]
+
+        second = self.client.get(
+            f"/api/sessions/paged-chat/messages?display_limit=30&before_id={page['before_id']}"
+        ).json()
+        assert [m["content"] for m in second["messages"] if m["role"] == "user"] == [
+            f"вопрос {turn}" for turn in range(5)
+        ]
+        assert second["pagination"]["has_more"] is False
+        assert max(m["id"] for m in second["messages"]) < page["before_id"]
+
+        assert self.client.get(
+            "/api/sessions/paged-chat/messages?before_id=5"
+        ).status_code == 400
+        assert self.client.get(
+            "/api/sessions/paged-chat/messages?display_limit=30&include_compacted=true"
+        ).status_code == 400
+
     def test_export_session_streams_bounded_message_pages(self, monkeypatch):
         from korra_state import SessionDB
 

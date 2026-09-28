@@ -91,3 +91,45 @@ it("показывает ожидающий вопрос агента в кно�
   expect(viewport.scrollTop).toBe(100);
   expect(host.querySelector("button")?.textContent).toContain("Корра ждёт вашего решения");
 });
+
+async function renderPaged(text: string, anchorKey: string, older: { hasOlder: boolean; loading: boolean; failed: boolean; load: () => void }) {
+  await act(async () => root.render(
+    <TranscriptViewport anchorKey={anchorKey} older={older}>{text}</TranscriptViewport>,
+  ));
+  return host.querySelector<HTMLDivElement>('[aria-label="Переписка"]')!;
+}
+
+it("догружает начало, когда человек листает вверх, и держит место чтения", async () => {
+  const load = vi.fn();
+  const idle = { hasOlder: true, loading: false, failed: false, load };
+  const viewport = await renderPaged("Последние 30", "m30", idle);
+  expect(viewport.scrollTop).toBe(1000);
+  // Прилипание к концу — прокрутка вниз, страницу она не просит.
+  await scroll(viewport, 1000);
+  expect(load).not.toHaveBeenCalled();
+  await scroll(viewport, 600);
+  expect(load).not.toHaveBeenCalled();
+  await scroll(viewport, 200);
+  expect(load).toHaveBeenCalledTimes(1);
+
+  await renderPaged("Последние 30", "m30", { ...idle, loading: true });
+  expect(host.querySelector('[role="status"]')?.textContent).toContain("Загружаем более ранние сообщения");
+  await scroll(viewport, 150);
+  expect(load).toHaveBeenCalledTimes(1);
+
+  // Над читаемым местом встали 800 px ранних сообщений.
+  height = 1800;
+  await renderPaged("Ранние 30 и последние 30", "m0", { ...idle, hasOlder: false });
+  expect(viewport.scrollTop).toBe(950);
+  expect(host.querySelector("button")?.textContent).not.toContain("более ранние");
+});
+
+it("кнопка догружает начало, если листать нечего, и предлагает повтор после сбоя", async () => {
+  const load = vi.fn();
+  await renderPaged("Короткая переписка", "m1", { hasOlder: true, loading: false, failed: false, load });
+  const more = [...host.querySelectorAll("button")].find(button => button.textContent?.includes("Показать более ранние сообщения"))!;
+  await act(async () => more.click());
+  expect(load).toHaveBeenCalledTimes(1);
+  await renderPaged("Короткая переписка", "m1", { hasOlder: true, loading: false, failed: true, load });
+  expect(host.textContent).toContain("Не удалось загрузить более ранние сообщения — повторить");
+});

@@ -907,7 +907,7 @@ describe("K21-117 activation reconciliation", () => {
     await act(async () => root.render(<Probe active onValue={onValue} />));
 
     expect(refreshChatRuns).toHaveBeenCalled();
-    expect(history).toHaveBeenCalledWith("chosen", "default", expect.any(AbortSignal));
+    expect(history).toHaveBeenCalledWith("chosen", "default", expect.any(AbortSignal), { displayLimit: 30 });
   });
 });
 
@@ -1116,7 +1116,7 @@ describe("opening an agent continues its conversation (Бирюкова, 28.09)"
       session_id: "latest", messages: [{ role: "assistant", content: "Готово" }] as SessionMessage[],
     });
     await mount("nyura");
-    expect(history).toHaveBeenCalledWith("latest", "nyura", expect.any(AbortSignal));
+    expect(history).toHaveBeenCalledWith("latest", "nyura", expect.any(AbortSignal), { displayLimit: 30 });
     expect(current.sessionId).toBe("latest");
   });
 
@@ -1128,7 +1128,7 @@ describe("opening an agent continues its conversation (Бирюкова, 28.09)"
       return { session_id: id, messages: [{ role: "assistant", content: "Макет" }] as SessionMessage[] };
     });
     await mount("designer");
-    expect(history).toHaveBeenCalledWith("latest", "designer", expect.any(AbortSignal));
+    expect(history).toHaveBeenCalledWith("latest", "designer", expect.any(AbortSignal), { displayLimit: 30 });
     expect(current.sessionId).toBe("latest");
     expect(localStorage.getItem(key("designer"))).toBe("latest");
   });
@@ -1275,7 +1275,82 @@ describe("фоновые вкладки агентов (0.21.15 Astra review)", 
 
     await act(async () => root.render(<Probe profile="rop" active onValue={onValue} />));
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
-    expect(history).toHaveBeenCalledWith("latest", "rop", expect.any(AbortSignal));
+    expect(history).toHaveBeenCalledWith("latest", "rop", expect.any(AbortSignal), { displayLimit: 30 });
     expect(current.sessionId).toBe("latest");
+  });
+});
+
+describe("лента грузится страницами по 30 (Дмитрий, 28.09)", () => {
+  const row = (id: number, role: "user" | "assistant", content: string) => ({ id, role, content }) as SessionMessage;
+  const page = (from: number, to: number) => {
+    const rows: SessionMessage[] = [];
+    for (let turn = from; turn < to; turn += 1) rows.push(row(turn * 2 + 1, "user", `вопрос ${turn}`), row(turn * 2 + 2, "assistant", `ответ ${turn}`));
+    return rows;
+  };
+
+  beforeEach(async () => {
+    const { getChatRuns } = await import("@/lib/chat-runs");
+    vi.mocked(getChatRuns).mockReset().mockResolvedValue([]);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ approvals: [] }))));
+  });
+
+  it("открывает последние сообщения, а более ранние догружает к началу", async () => {
+    const history = vi.spyOn(api, "getSessionMessages").mockImplementation(async (_id, _profile, _signal, requested) =>
+      requested?.beforeId
+        ? { session_id: "long", messages: page(0, 5), pagination: { order: "latest", returned: 10, before_id: 1, has_more: false } }
+        : { session_id: "long", messages: page(5, 20), pagination: { order: "latest", returned: 30, before_id: 11, has_more: true } });
+    await act(async () => { await current.loadSession("long"); });
+    expect(history).toHaveBeenLastCalledWith("long", "default", expect.any(AbortSignal), { displayLimit: 30 });
+    expect(current.messages).toHaveLength(30);
+    expect(current.messages[0]?.content).toBe("вопрос 5");
+    expect(current.older).toEqual({ hasOlder: true, loading: false, failed: false });
+
+    await act(async () => { await current.loadOlder(); });
+    expect(history).toHaveBeenLastCalledWith("long", "default", expect.any(AbortSignal), { displayLimit: 30, beforeId: 11 });
+    expect(current.messages).toHaveLength(40);
+    expect(current.messages[0]?.content).toBe("вопрос 0");
+    expect(current.messages.at(-1)?.content).toBe("ответ 19");
+    expect(new Set(current.messages.map(message => message.id)).size).toBe(40);
+    expect(current.older.hasOlder).toBe(false);
+
+    // Возврат к чату освежает только последнюю страницу: догруженное остаётся.
+    await act(async () => { await current.loadSession("long", { background: true }); });
+    expect(current.messages).toHaveLength(40);
+    expect(current.messages[0]?.content).toBe("вопрос 0");
+    expect(current.older.hasOlder).toBe(false);
+  });
+
+  it("сбой догрузки не трогает ленту и даёт повторить", async () => {
+    vi.spyOn(api, "getSessionMessages").mockImplementation(async (_id, _profile, _signal, requested) => {
+      if (requested?.beforeId) throw new Error("503: Service Unavailable");
+      return { session_id: "long", messages: page(5, 20), pagination: { order: "latest", returned: 30, before_id: 11, has_more: true } };
+    });
+    await act(async () => { await current.loadSession("long"); });
+    await act(async () => { await current.loadOlder(); });
+    expect(current.messages).toHaveLength(30);
+    expect(current.older).toEqual({ hasOlder: true, loading: false, failed: true });
+  });
+
+  it("идущий ход находится по своей реплике, а не по номеру из другой загрузки", async () => {
+    const { getChatRuns } = await import("@/lib/chat-runs");
+    // history_count считала вкладка, у которой была загружена вся переписка;
+    // здесь загружена только последняя страница.
+    vi.mocked(getChatRuns).mockResolvedValueOnce([{
+      message_id: "server-live-paged-1234", session_id: "long", profile: "",
+      status: "running", updated_at: 123, history_count: 94,
+      user_message: { role: "user", content: "Новый вопрос" },
+    }]);
+    vi.spyOn(api, "getSessionMessages").mockResolvedValue({
+      session_id: "long",
+      messages: [...page(18, 20), row(41, "user", "Новый вопрос"), row(42, "assistant", "Начало ответа")],
+      pagination: { order: "latest", returned: 6, before_id: 37, has_more: true },
+    });
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.includes("/stream")
+      ? sseResponse('data: {"choices":[{"delta":{"content":"Полный ответ"}}]}\n\n', "data: [DONE]\n\n")
+      : new Response(JSON.stringify({ approvals: [] }))));
+    await act(async () => { await current.loadSession("long"); });
+    expect(current.messages.map(message => message.content)).toEqual([
+      "вопрос 18", "ответ 18", "вопрос 19", "ответ 19", "Новый вопрос", "Полный ответ",
+    ]);
   });
 });

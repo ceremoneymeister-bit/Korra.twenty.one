@@ -12532,6 +12532,7 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
         offset: int = 0,
         latest: bool = False,
         after_id: Optional[int] = None,
+        before_id: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """Load messages for a session in insertion order.
 
@@ -12563,11 +12564,13 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
         ``after_id`` enables keyset pagination (``id > after_id``): O(1)
         page seeks on huge transcripts where OFFSET degrades to O(n) per
         page. Ascending order only (incompatible with ``latest``/``offset``).
+        ``before_id`` is the matching upper bound (``id < before_id``) and
+        combines with ``after_id`` into a closed id window.
         """
-        if after_id is not None and (latest or offset):
-            raise ValueError("after_id is incompatible with latest/offset paging")
-        if after_id is not None and include_compacted:
-            raise ValueError("after_id is incompatible with include_compacted (deduped display reads use offset paging)")
+        if (after_id is not None or before_id is not None) and (latest or offset):
+            raise ValueError("after_id/before_id are incompatible with latest/offset paging")
+        if (after_id is not None or before_id is not None) and include_compacted:
+            raise ValueError("after_id/before_id are incompatible with include_compacted (deduped display reads use offset paging)")
         if include_inactive:
             # Audit / debug reads: every row, including soft-deleted.
             active_clause = ""
@@ -12579,6 +12582,8 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
         else:
             active_clause = " AND active = 1"
         keyset_clause = " AND id > ?" if after_id is not None else ""
+        if before_id is not None:
+            keyset_clause += " AND id < ?"
         sql = (
             "SELECT * FROM messages WHERE session_id = ?"
             f"{active_clause}{keyset_clause} ORDER BY id {'DESC' if latest else 'ASC'}"
@@ -12586,6 +12591,8 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
         params: list = [session_id]
         if after_id is not None:
             params.append(after_id)
+        if before_id is not None:
+            params.append(before_id)
         if include_compacted:
             # Compaction epochs copy the protected tail into each new
             # generation, so the same logical message can exist as several
@@ -12671,6 +12678,64 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                 msg["display_metadata"] = self._decode_display_metadata(msg["display_metadata"])
             result.append(msg)
         return result
+
+    def get_display_page(
+        self,
+        session_id: str,
+        *,
+        limit: int,
+        before_id: Optional[int] = None,
+        max_rows: int = 1000,
+    ) -> Tuple[List[Dict[str, Any]], Optional[int], bool]:
+        """Последние ``limit`` сообщений ленты чата до строки ``before_id``.
+
+        Сообщение ленты — реплика человека или весь ход агента: ответы с
+        вызовами инструментов и их результаты чат сворачивает в один пузырь,
+        поэтому 30 строк базы могли оказаться одним ответом. Страница
+        начинается с реплики человека, чтобы ход агента не делился между
+        страницами. Возвращает строки по возрастанию id, id первой строки —
+        курсор ``before_id`` для следующей, более ранней страницы — и есть ли
+        строки раньше. ``max_rows`` страхует от хода из тысяч вызовов: тогда
+        страница начинается внутри него.
+        """
+        bound = " AND id < ?" if before_id is not None else ""
+        params: list = [session_id] + ([before_id] if before_id is not None else [])
+        start_id: Optional[int] = None
+        shown = 0
+        agent_turn_counted = False
+        stopped_at_user = False
+        with self._read_ctx() as conn:
+            cursor = conn.execute(
+                "SELECT id, role FROM messages WHERE session_id = ? AND active = 1"
+                + bound + " ORDER BY id DESC",
+                params,
+            )
+            for row in cursor:
+                start_id = row["id"]
+                if row["role"] == "user":
+                    shown += 1
+                    agent_turn_counted = False
+                    if shown >= limit:
+                        stopped_at_user = True
+                        break
+                elif row["role"] == "assistant" and not agent_turn_counted:
+                    shown += 1
+                    agent_turn_counted = True
+        if start_id is None:
+            return [], None, False
+        rows = self.get_messages(session_id, after_id=start_id - 1, before_id=before_id)
+        if len(rows) > max_rows:
+            rows = rows[-max_rows:]
+            start_id = rows[0]["id"]
+            stopped_at_user = True
+        has_more = False
+        if stopped_at_user:
+            with self._read_ctx() as conn:
+                has_more = conn.execute(
+                    "SELECT 1 FROM messages WHERE session_id = ? AND active = 1 AND id < ? LIMIT 1",
+                    (session_id, start_id),
+                ).fetchone() is not None
+        return rows, (rows[0]["id"] if rows else None), has_more
 
     def find_pr_url_messages(self, session_ids: List[str]) -> List[Dict[str, Any]]:
         """Tool results in these sessions that mention a GitHub PR url.

@@ -56,8 +56,27 @@ export interface ChatApprovalEntry {
 /** Как часто перепроверять нерешённые вопросы, когда живого потока нет. */
 const APPROVAL_POLL_MS = 5000;
 
+/** Сколько сообщений ленты открывается сразу и догружается за раз при
+ *  прокрутке к началу. 500 строк за раз на телефоне весили до 1,3 МБ и
+ *  держали «Обновляем переписку…» (Бирюкова, 28.09; решение Дмитрия). */
+export const CHAT_HISTORY_PAGE = 30;
+
+/** Какая часть переписки загружена: курсор следующей, более ранней страницы. */
+export interface HistoryWindow {
+  cursor: number | null;
+  hasOlder: boolean;
+}
+
+const NO_OLDER: HistoryWindow = { cursor: null, hasOlder: false };
+
+function historyWindow(resp: { messages?: unknown; pagination?: { before_id?: number | null; has_more?: boolean } }): HistoryWindow {
+  const cursor = resp.pagination?.before_id ?? null;
+  return { cursor, hasOlder: cursor !== null && resp.pagination?.has_more === true };
+}
+
 interface StreamState {
   messages: ChatMessage[];
+  history: HistoryWindow;
   sessionId: string | null;
   isStreaming: boolean;
   error: string | null;
@@ -71,11 +90,13 @@ type StreamAction =
   | { type: "MARK_DELIVERY"; messageId: string; delivery: "sending" | "failed" | "delivered"; terminal?: boolean; error?: string }
   | { type: "DISCARD_PENDING"; messageId: string }
   | { type: "SET_SESSION_ID"; sessionId: string | null }
-  | { type: "LOAD_SESSION"; sessionId: string; messages: ChatMessage[] }
+  | { type: "LOAD_SESSION"; sessionId: string; messages: ChatMessage[]; history?: HistoryWindow }
+  | { type: "PREPEND_OLDER"; sessionId: string; cursor: number; messages: ChatMessage[]; history: HistoryWindow }
   | {
       type: "SYNC_SESSION";
       sessionId: string;
       messages: ChatMessage[];
+      history?: HistoryWindow;
       streaming?: boolean;
       /** Хвост списка — ход, который сейчас будет переигран из журнала.
        *  Дописывать после него нечего: поток пишет в последнее сообщение. */
@@ -96,6 +117,7 @@ type StreamAction =
 
 const initialState: StreamState = {
   messages: [],
+  history: NO_OLDER,
   sessionId: null,
   isStreaming: false,
   error: null,
@@ -206,6 +228,31 @@ function sameRendered(previous: ChatMessage, next: ChatMessage): boolean {
  * заново — не перепроверяет файл и не качает превью второй раз. Если ничего
  * не изменилось, возвращается прежний массив, и лента вообще не перерисуется.
  */
+/**
+ * Где в загруженной ленте реплика хода. `history_count` — её позиция среди
+ * сообщений, которые вкладка прислала вместе с ней, а лента грузится
+ * страницами: после обновления та же позиция указывает на другое сообщение.
+ * Поэтому реплику ищем по тексту, с конца — ход всегда последний со своей
+ * репликой. -1 — в загруженной ленте её нет: ход ещё не записан или он
+ * раньше загруженной страницы.
+ */
+function runTurnIndex(messages: ChatMessage[], run: ChatRun): number {
+  const text = splitAttachments(run.user_message.content ?? "").text;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]!;
+    if (message.role === "user" && visibleText(message) === text) return index;
+  }
+  return -1;
+}
+
+/** Ответ на ход уже лежит в истории. Законченный ход, которого нет на
+ *  загруженной странице, раньше неё — значит, тоже отвечен. */
+function runAnswered(messages: ChatMessage[], run: ChatRun): boolean {
+  const at = runTurnIndex(messages, run);
+  if (at < 0) return run.status === "completed" && messages.some(message => message.historyId !== undefined);
+  return messages.slice(at + 1).some(message => message.role === "assistant");
+}
+
 function mergeMessages(
   previous: ChatMessage[],
   next: ChatMessage[],
@@ -333,6 +380,7 @@ function reducer(state: StreamState, action: StreamAction): StreamState {
         ...state,
         sessionId: action.sessionId,
         messages: action.messages,
+        history: action.history ?? NO_OLDER,
         isStreaming: false,
         error: null,
         // Карточки принадлежат конкретному ходу конкретного чата; в другой
@@ -349,19 +397,38 @@ function reducer(state: StreamState, action: StreamAction): StreamState {
           ...state,
           sessionId: action.sessionId,
           messages: action.messages,
+          history: action.history ?? NO_OLDER,
           isStreaming: action.streaming ?? false,
           error: null,
           approvals: [],
         };
       }
-      const messages = mergeMessages(state.messages, action.messages, action.replay !== true);
+      // Освежение приносит только последнюю страницу. Догруженные раньше
+      // более ранние сообщения остаются над ней: человек их листал.
+      const firstId = action.messages.find(message => message.historyId !== undefined)?.historyId;
+      let kept = 0;
+      if (firstId !== undefined) {
+        while (kept < state.messages.length && (state.messages[kept]!.historyId ?? Infinity) < firstId) kept += 1;
+      }
+      const tail = kept > 0 ? state.messages.slice(kept) : state.messages;
+      const mergedTail = mergeMessages(tail, action.messages, action.replay !== true);
+      const messages = mergedTail === tail ? state.messages : [...state.messages.slice(0, kept), ...mergedTail];
+      const history = kept > 0 ? state.history : action.history ?? state.history;
       const isStreaming = action.streaming ?? false;
       // Ничего не изменилось — нечего и перерисовывать. Живые карточки
       // одобрения остаются на месте: их хозяин — сервер, а не эта проверка.
-      if (messages === state.messages && state.isStreaming === isStreaming && state.error === null) {
+      if (messages === state.messages && history === state.history && state.isStreaming === isStreaming && state.error === null) {
         return state;
       }
-      return { ...state, messages, isStreaming, error: null };
+      return { ...state, messages, history, isStreaming, error: null };
+    }
+
+    case "PREPEND_OLDER": {
+      // Страница годится, только если продолжает именно загруженную ленту:
+      // за время запроса могли открыть другой чат или уже догрузить её.
+      if (state.sessionId !== action.sessionId || state.history.cursor !== action.cursor) return state;
+      const older = action.messages.filter(message => message.historyId === undefined || message.historyId < action.cursor);
+      return { ...state, messages: [...older, ...state.messages], history: action.history };
     }
 
     case "APPEND_DELTA": {
@@ -542,6 +609,7 @@ function reducer(state: StreamState, action: StreamAction): StreamState {
     case "RESET": {
       return {
         messages: [],
+        history: NO_OLDER,
         sessionId: null,
         isStreaming: false,
         error: null,
@@ -589,8 +657,18 @@ export interface UseChatStreamReturn {
   retryPending: (target?: PendingMessageTarget) => Promise<boolean>;
   discardPending: (target?: PendingMessageTarget) => void;
   loadSession: (sessionId: string, options?: LoadSessionOptions) => Promise<void>;
+  /** Есть ли в переписке сообщения раньше загруженных и как идёт их догрузка. */
+  older: OlderHistoryState;
+  /** Догрузить предыдущие `CHAT_HISTORY_PAGE` сообщений к началу ленты. */
+  loadOlder: () => Promise<void>;
   reset: () => void;
   abort: () => void;
+}
+
+export interface OlderHistoryState {
+  hasOlder: boolean;
+  loading: boolean;
+  failed: boolean;
 }
 
 export interface LoadSessionOptions {
@@ -644,13 +722,18 @@ function sessionMessagesToChat(
     const timestamp = message.timestamp ?? Date.now();
     const content = typeof message.content === "string" ? message.content : "";
 
+    // id строки базы делает id сообщения устойчивым: страницы, догруженные
+    // к началу, не повторяют id уже показанных.
+    const id = message.id !== undefined ? `${sessionId}-h${message.id}` : `${sessionId}-${index}`;
+
     if (message.role === "user") {
       closeTurn();
       result.push({
-        id: `${sessionId}-${index}`,
+        id,
         role: "user",
         content,
         timestamp,
+        ...(message.id !== undefined ? { historyId: message.id } : {}),
       });
       return;
     }
@@ -670,10 +753,11 @@ function sessionMessagesToChat(
 
     if (!turn) {
       turn = {
-        id: `${sessionId}-${index}`,
+        id,
         role: "assistant",
         content: "",
         timestamp,
+        ...(message.id !== undefined ? { historyId: message.id } : {}),
       };
     }
     if (content) {
@@ -759,6 +843,9 @@ export function useChatStream(
    *  отменяет ещё не завершённый поиск последнего разговора. */
   const openIntentRef = useRef(0);
   const openLatestRef = useRef<(() => Promise<void>) | null>(null);
+  /** Догрузка более ранней страницы: одна за раз, отменяется открытием чата. */
+  const olderRequestRef = useRef<AbortController | null>(null);
+  const [olderStatus, setOlderStatus] = useState<"idle" | "loading" | "failed">("idle");
   // Synchronous mirror of state.isStreaming so concurrent send() calls
   // can guard against re-entry without waiting for a re-render. React
   // state updates are async — without this ref, two send() calls fired
@@ -848,13 +935,20 @@ export function useChatStream(
     abortControllerRef.current = controller;
     streamingRef.current = true; // Loading also excludes a concurrent send.
     const current = () => mountedRef.current && activeStreamIdRef.current === generation;
+    if (!background) {
+      olderRequestRef.current?.abort();
+      olderRequestRef.current = null;
+      setOlderStatus("idle");
+    }
+    /** Какая часть переписки пришла этой загрузкой. */
+    let loadedWindow: HistoryWindow = NO_OLDER;
     /** Первое открытие и переход в другой чат ленту очищают — показывать чужую
      *  историю нельзя. Освежение текущего чата её не трогает: новое доезжает
      *  поверх показанного, а неизменившееся остаётся тем же самым. */
     const show = (messages: ChatMessage[], replay?: { streaming: boolean }) =>
       dispatch(background
-        ? { type: "SYNC_SESSION", sessionId, messages, ...(replay ? { streaming: replay.streaming, replay: true } : {}) }
-        : { type: "LOAD_SESSION", sessionId, messages });
+        ? { type: "SYNC_SESSION", sessionId, messages, history: loadedWindow, ...(replay ? { streaming: replay.streaming, replay: true } : {}) }
+        : { type: "LOAD_SESSION", sessionId, messages, history: loadedWindow });
     // Пустая лента на время проверки — это и есть «всё загружается заново»:
     // пузыри монтируются с нуля, карточки вложений заново проверяют файл и
     // заново качают превью, а место чтения теряется.
@@ -884,13 +978,13 @@ export function useChatStream(
       const runsById = new Map(runs.map((run) => [run.message_id, run]));
       for (const pending of pendingMessages(runs)) {
         const run = runsById.get(pending.clientMessageId ?? "");
-        if (run?.status === "completed" && restored.length >= run.history_count + 2) {
+        if (run?.status === "completed" && runAnswered(restored, run)) {
           clearChatOutbox(run.message_id, profile ?? "");
           continue;
         }
-        if (run && restored[run.history_count]?.role === "user" &&
-            sameChatTurn(restored[run.history_count], pending)) {
-          restored[run.history_count] = pending;
+        const at = run ? runTurnIndex(restored, run) : -1;
+        if (at >= 0 && sameChatTurn(restored[at]!, pending)) {
+          restored[at] = pending;
         } else if (!restored.some((message) => message.clientMessageId === pending.clientMessageId)) {
           restored.push(pending);
         }
@@ -909,7 +1003,9 @@ export function useChatStream(
       // Read the run AFTER history: completion between these reads is replayed
       // from the same ledger, never from a stale history snapshot.
       let missing = false;
-      const resp = await api.getSessionMessages(sessionId, profile || "default", controller.signal).catch(error => {
+      const resp = await api.getSessionMessages(
+        sessionId, profile || "default", controller.signal, { displayLimit: CHAT_HISTORY_PAGE },
+      ).catch(error => {
         if (error instanceof Error && /^404(?:\s|:)/.test(error.message)) {
           missing = true;
           return { messages: [] };
@@ -931,6 +1027,7 @@ export function useChatStream(
         return;
       }
       const chatMessages = sessionMessagesToChat(sessionId, resp.messages as HistoryMessage[]);
+      loadedWindow = historyWindow(resp);
       let runs: ChatRun[];
       try {
         runs = await getChatRuns(profile ?? "", sessionId, controller.signal);
@@ -947,11 +1044,13 @@ export function useChatStream(
       setIsLoading(false);
       const savedIntents = loadChatOutboxRecords(profile ?? "", sessionId);
       for (const item of runs) {
-        if (item.status === "completed" && chatMessages.length >= item.history_count + 2) {
+        if (item.status === "completed" && runAnswered(chatMessages, item)) {
           clearChatOutbox(item.message_id, profile ?? "");
         }
       }
-      const newerHistory = run?.status === "completed" && chatMessages.length > run.history_count + 2;
+      const runAt = run ? runTurnIndex(chatMessages, run) : -1;
+      const newerHistory = run?.status === "completed" &&
+        (runAt < 0 ? chatMessages.some(message => message.historyId !== undefined) : chatMessages.length > runAt + 2);
       if (!run || newerHistory || (!isRunBusy(run) && run.status !== "completed")) {
         showWithPending(chatMessages, runs);
         if (run?.status === "interrupted") dispatch({ type: "SET_ERROR", error: "Связь с ходом потеряна. Проверьте историю перед повторной отправкой." });
@@ -969,7 +1068,7 @@ export function useChatStream(
       // журнал на каждом возврате незачем: replay нужен, когда снимок истории
       // мог отстать от журнала, а не чтобы заново нарисовать то же самое.
       const hasOtherIntent = savedIntents.some((record) => record.messageId !== run.message_id);
-      if ((background || hasOtherIntent) && run.status === "completed" && chatMessages.length >= run.history_count + 2) {
+      if ((background || hasOtherIntent) && run.status === "completed" && runAnswered(chatMessages, run)) {
         clearChatOutbox(run.message_id, profile ?? "");
         showWithPending(chatMessages, runs);
         return;
@@ -987,10 +1086,11 @@ export function useChatStream(
       };
       // The durable stream replays from byte zero. Remove this turn's saved
       // copy before replay, including tool messages, so it appears exactly once.
+      const beforeRun = runAt < 0 ? chatMessages : chatMessages.slice(0, runAt);
       if (background) {
-        show([...chatMessages.slice(0, run.history_count), userMsg, assistantMsg], { streaming: isRunBusy(run) });
+        show([...beforeRun, userMsg, assistantMsg], { streaming: isRunBusy(run) });
       } else {
-        dispatch({ type: "LOAD_SESSION", sessionId, messages: chatMessages.slice(0, run.history_count) });
+        dispatch({ type: "LOAD_SESSION", sessionId, messages: beforeRun, history: loadedWindow });
         dispatch({ type: "SEND_USER", streaming: isRunBusy(run), userMsg, assistantMsg });
       }
       const response = await fetch(chatRunUrl(`/${encodeURIComponent(run.message_id)}/stream`, profile ?? "", sessionId), {
@@ -1071,9 +1171,44 @@ export function useChatStream(
     abortControllerRef.current?.abort();
     streamingRef.current = false;
 
+    olderRequestRef.current?.abort();
+    olderRequestRef.current = null;
+    setOlderStatus("idle");
+
     setIsLoading(false);
     dispatch({ type: "RESET" });
   }, [selectionKey]);
+
+  const historySessionId = state.sessionId;
+  const historyCursor = state.history.hasOlder ? state.history.cursor : null;
+  const loadOlder = useCallback(async (): Promise<void> => {
+    if (!historySessionId || historyCursor === null || olderRequestRef.current) return;
+    const controller = new AbortController();
+    olderRequestRef.current = controller;
+    setOlderStatus("loading");
+    const timer = window.setTimeout(() => controller.abort(), HISTORY_LOAD_TIMEOUT_MS);
+    try {
+      const resp = await api.getSessionMessages(
+        historySessionId, profile || "default", controller.signal,
+        { displayLimit: CHAT_HISTORY_PAGE, beforeId: historyCursor },
+      );
+      if (!mountedRef.current || olderRequestRef.current !== controller) return;
+      dispatch({
+        type: "PREPEND_OLDER",
+        sessionId: historySessionId,
+        cursor: historyCursor,
+        messages: sessionMessagesToChat(historySessionId, resp.messages as HistoryMessage[]),
+        history: historyWindow(resp),
+      });
+      setOlderStatus("idle");
+    } catch {
+      if (!mountedRef.current || olderRequestRef.current !== controller) return;
+      setOlderStatus("failed");
+    } finally {
+      window.clearTimeout(timer);
+      if (olderRequestRef.current === controller) olderRequestRef.current = null;
+    }
+  }, [historyCursor, historySessionId, profile]);
 
   const send = useCallback(
     async (
@@ -1716,6 +1851,12 @@ export function useChatStream(
     isStreaming: state.isStreaming,
     error: state.error,
     approvals: state.approvals,
+    older: {
+      hasOlder: state.history.hasOlder,
+      loading: olderStatus === "loading",
+      failed: olderStatus === "failed",
+    },
+    loadOlder,
     send,
     resolveApproval,
     retryPending,
