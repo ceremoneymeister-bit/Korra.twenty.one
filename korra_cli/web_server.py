@@ -15524,8 +15524,11 @@ def _update_cron_job_sync(job_id: str, body: CronJobUpdate, profile: Optional[st
         job = _mutate_cron_for_profile(profile_name, "update_job", job_id, updates)
         if job and "deliver" in updates:
             # Recipients the owner picks in the form are confirmed by that
-            # choice (0.21.15 Astra review P2-5; cron.recipients).
-            job = _mutate_cron_for_profile(profile_name, "accept_owner_form_edit", job_id) or job
+            # choice (0.21.15 Astra review P2-5; cron.recipients). The form
+            # re-sends deliver on every save; only a real change counts.
+            job = _mutate_cron_for_profile(
+                profile_name, "accept_owner_form_edit", job_id, existing.get("deliver"),
+            ) or job
     except HTTPException:
         raise
     except ValueError as exc:

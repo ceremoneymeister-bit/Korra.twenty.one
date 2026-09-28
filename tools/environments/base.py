@@ -544,7 +544,7 @@ def _cwd_marker(session_id: str) -> str:
 # name/prefix instead of grepping declare lines (see below / issue #71296).
 _SNAPSHOT_EXCLUDED_ENV_REGEX = (
     "^declare -x ((HERMES|KORRA)_SESSION_|(HERMES|KORRA)_UI_SESSION_ID|"
-    "(HERMES|KORRA)_CRON_AUTO_DELIVER_|(HERMES|KORRA)_CRON_SESSION|(HERMES|KORRA)_CRON_JOB_ID|"
+    "(HERMES|KORRA)_CRON_AUTO_DELIVER_|(HERMES|KORRA)_CRON_SESSION|(HERMES|KORRA)_CRON_RUN_TOKEN|"
     "(HERMES|KORRA)_CREDENTIAL_MANAGEMENT_|(HERMES|KORRA)_BROWSER_CONTROL_)"
 )
 _SHELL_ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -608,9 +608,9 @@ def _export_dump_excluding_session_vars(
         # harness value arriving via the process env, exactly like the
         # session-var leak this dump already guards against.
         "AI_AGENT HERMES_AGENT KORRA_AGENT "
-        # The running job's id authorises its confirmed recipients only for
-        # that run (cron.recipients.running_job); never persist it.
-        "HERMES_CRON_JOB_ID KORRA_CRON_JOB_ID "
+        # A cron run's secret authorises its job's confirmed recipients only
+        # for that run (cron.recipients.running_job); never persist it.
+        "HERMES_CRON_RUN_TOKEN KORRA_CRON_RUN_TOKEN "
         f"HERMES_UI_SESSION_ID KORRA_UI_SESSION_ID{extra_unset} 2>/dev/null; "
         "export -p; "
         ") || true; } "

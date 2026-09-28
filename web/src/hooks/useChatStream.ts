@@ -921,13 +921,11 @@ export function useChatStream(
         window.clearTimeout(historyTimer);
         // Every way of opening a chat — a pick, a link from the notification,
         // a remembered choice — lands on something real (Astra review P2-8).
+        // openLatest owns its outcome: it shows an error only when the lookup
+        // itself failed, and never touches a chat opened meanwhile.
         const onMissing = options?.onMissing ?? (() => {
           forgetChatSelection(selectionKey);
-          void openLatestRef.current?.().then(() => {
-            if (mountedRef.current) {
-              dispatch({ type: "SET_ERROR", error: "Этот разговор больше недоступен — открыт последний." });
-            }
-          });
+          void openLatestRef.current?.();
         });
         queueMicrotask(onMissing);
         return;
@@ -1480,12 +1478,22 @@ export function useChatStream(
     if (!mountedRef.current || openIntentRef.current !== intent) return;
     if (latest) {
       sessionRef.current = latest;
-      await loadSession(latest);
+      // One attempt: if the listed chat is gone too, say so instead of
+      // looking up again and again (Astra re-check F).
+      await loadSession(latest, {
+        onMissing: () => {
+          if (!mountedRef.current) return;
+          forgetChatSelection(selectionKey);
+          setIsLoading(false);
+          dispatch({ type: "RESET" });
+          dispatch({ type: "SET_ERROR", error: "Не удалось открыть последний разговор. Откройте «Чаты» или обновите страницу." });
+        },
+      });
     } else {
       setIsLoading(false);
       reset();
     }
-  }, [loadSession, profile, reset]);
+  }, [loadSession, profile, reset, selectionKey]);
   useEffect(() => { openLatestRef.current = openLatest; }, [openLatest]);
 
   useEffect(() => {

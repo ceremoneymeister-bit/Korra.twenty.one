@@ -6084,6 +6084,7 @@ def run_job(
     _cron_session_var = _VAR_MAP["KORRA_CRON_SESSION"]
     _cron_session_token = None
     _cron_job_id_token = None
+    _run_token = ""
     _non_dispatcher_token = None
     _background_owner_token = None
     _running_job_token = None
@@ -6095,7 +6096,10 @@ def run_job(
         # which would suppress the legacy os.environ fallback used by standalone
         # cron entrypoints and tests.
         _cron_session_token = _cron_session_var.set("1")
-        _cron_job_id_token = _VAR_MAP["KORRA_CRON_JOB_ID"].set(str(job_id))
+        from cron.recipients import RUNNING_JOB_ENV, issue_run_token
+
+        _run_token = issue_run_token(job)
+        _cron_job_id_token = _VAR_MAP[RUNNING_JOB_ENV].set(_run_token)
 
         # Whose job is this? A job acts for the owner only when it was created
         # from an owner surface; the owner's connected services (calendar,
@@ -7038,7 +7042,10 @@ def run_job(
         if _cron_session_token is not None:
             _cron_session_var.reset(_cron_session_token)
         if _cron_job_id_token is not None:
-            _VAR_MAP["KORRA_CRON_JOB_ID"].reset(_cron_job_id_token)
+            from cron.recipients import RUNNING_JOB_ENV, retire_run_token
+
+            _VAR_MAP[RUNNING_JOB_ENV].reset(_cron_job_id_token)
+            retire_run_token(_run_token)
         if _background_owner_token is not None:
             from gateway.session_context import reset_background_owner
 

@@ -22,8 +22,13 @@ carry no ``recipients_policy`` and keep delivering as configured.
 from __future__ import annotations
 
 import contextvars
+import hashlib
+import json
 import logging
+import os
+import secrets
 import time
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -40,8 +45,8 @@ AUDIENCE_KEY = "audience"
 DECISION_KIND = "automation_recipients"
 PAUSE_REASON = "Ждёт подтверждения получателей"
 DENIED_REASON = "Получатели не подтверждены"
-#: Bridged into the terminal of a running job (gateway.session_context).
-RUNNING_JOB_ENV = "KORRA_CRON_JOB_ID"
+#: Bridged into the terminal of one running job (gateway.session_context).
+RUNNING_JOB_ENV = "KORRA_CRON_RUN_TOKEN"
 
 _RUNNING_JOB: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
     "korra_running_cron_job", default=None
@@ -57,19 +62,58 @@ def reset_running_job(token: contextvars.Token) -> None:
     _RUNNING_JOB.reset(token)
 
 
-def _job_is_executing(job_id: str) -> bool:
-    """A live scheduler process holds a running execution of this job."""
+def _run_tokens_dir() -> Path:
+    from cron.jobs import _current_cron_store
+
+    return _current_cron_store().cron_dir / "run-tokens"
+
+
+def _token_path(token: str) -> Path:
+    # Only the digest is on disk: listing the directory reveals no token.
+    return _run_tokens_dir() / (hashlib.sha256(token.encode()).hexdigest() + ".json")
+
+
+def issue_run_token(job: dict) -> str:
+    """A secret for this run of ``job``; its terminal gets it through the bridge."""
+    execution_id = str(job.get("execution_id") or "")
+    if not execution_id:
+        return ""
+    token = secrets.token_urlsafe(32)
+    try:
+        directory = _run_tokens_dir()
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        path = _token_path(token)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump({"job_id": str(job["id"]), "execution_id": execution_id}, handle)
+    except Exception:
+        logger.warning("Could not issue a run token for job %s", job.get("id"), exc_info=True)
+        return ""
+    return token
+
+
+def retire_run_token(token: str) -> None:
+    if not token:
+        return
+    try:
+        _token_path(token).unlink(missing_ok=True)
+    except Exception:
+        logger.debug("Could not retire a run token", exc_info=True)
+
+
+def _execution_is_running(execution_id: str) -> bool:
+    """A live scheduler process holds this exact execution as running."""
     try:
         from cron.executions import _owner_is_live, _transaction
 
         with _transaction() as conn:
-            rows = conn.execute(
-                "SELECT pid, process_started_at FROM executions WHERE job_id=? AND status='running'",
-                (job_id,),
-            ).fetchall()
-        return any(_owner_is_live(int(row["pid"]), row["process_started_at"]) for row in rows)
+            row = conn.execute(
+                "SELECT pid, process_started_at FROM executions WHERE id=? AND status='running'",
+                (execution_id,),
+            ).fetchone()
+        return bool(row) and _owner_is_live(int(row["pid"]), row["process_started_at"])
     except Exception:
-        logger.debug("Execution check for job %s failed", job_id, exc_info=True)
+        logger.debug("Execution check for %s failed", execution_id, exc_info=True)
         return False
 
 
@@ -77,9 +121,9 @@ def running_job() -> dict | None:
     """The scheduled job this code runs for, in the scheduler or its terminal.
 
     ``korra send`` from an agent's terminal is a child process: the context
-    variable is gone, but the cron session bridge names the job. That name is
-    honoured only while the ledger shows the job executing in a live scheduler
-    process (0.21.15 Astra review P1-1).
+    variable is gone, but the cron bridge carries this run's secret. The secret
+    counts only while its exact execution runs in a live scheduler process
+    (0.21.15 Astra review P1-1 and re-check A: a job id alone is public).
     """
     job = _RUNNING_JOB.get()
     if job:
@@ -89,12 +133,18 @@ def running_job() -> dict | None:
 
         if get_session_env("KORRA_CRON_SESSION", "") != "1":
             return None
-        job_id = str(get_session_env(RUNNING_JOB_ENV, "") or "").strip()
-        if not job_id or not _job_is_executing(job_id):
+        token = str(get_session_env(RUNNING_JOB_ENV, "") or "").strip()
+        if not token:
+            return None
+        path = _token_path(token)
+        if not path.is_file():
+            return None
+        grant = json.loads(path.read_text(encoding="utf-8"))
+        if not _execution_is_running(str(grant.get("execution_id") or "")):
             return None
         from cron.jobs import get_job
 
-        return get_job(job_id)
+        return get_job(str(grant.get("job_id") or ""))
     except Exception:
         logger.debug("Running job lookup failed", exc_info=True)
         return None
@@ -267,25 +317,35 @@ def retire_card(decision_id: str) -> None:
         logger.warning("Could not retire recipients card %s", decision_id, exc_info=True)
 
 
-def accept_owner_form_edit(job_id: str) -> dict | None:
+def accept_owner_form_edit(job_id: str, previous_deliver: Any = None) -> dict | None:
     """The owner chose recipients in the cabinet form or REST: that choice is
-    the confirmation (0.21.15 Astra review P2-5)."""
-    from cron.jobs import get_job, update_job
+    the confirmation (0.21.15 Astra review P2-5).
 
-    job = get_job(job_id)
-    if not job or job.get(POLICY_KEY) != 1:
-        return job
-    confirmed = _confirmed(job)
-    targets = list(dict.fromkeys([*(confirmed.get("targets") or []), *third_party_labels(job)]))
-    updates: dict[str, Any] = {CONFIRMED_KEY: {**confirmed, "targets": targets,
-                                               "confirmed_at": time.time()}}
-    waiting = pending(job)
-    if waiting:
-        retire_card(str(waiting.get("decision_id") or ""))
-        updates[PENDING_KEY] = None
-        if job.get("paused_reason") == PAUSE_REASON:
-            updates.update(_resume_fields(job))
-    return update_job(job["id"], updates)
+    Only an actual change of ``deliver`` counts — the form re-sends the field
+    on every save — and it answers only the recipients part of a wait: a
+    pending audience keeps its card (re-check E).
+    """
+    from cron.jobs import mutate_job
+
+    def compute(job: dict) -> dict | None:
+        if job.get(POLICY_KEY) != 1 or job.get("deliver") == previous_deliver:
+            return None
+        confirmed = _confirmed(job)
+        targets = list(dict.fromkeys([*(confirmed.get("targets") or []), *third_party_labels(job)]))
+        updates: dict[str, Any] = {CONFIRMED_KEY: {**confirmed, "targets": targets,
+                                                   "confirmed_at": time.time()}}
+        waiting = pending(job)
+        if waiting.get("targets"):
+            if str(waiting.get("audience") or "").strip():
+                updates[PENDING_KEY] = {**waiting, "targets": [], "deliver": None}
+            else:
+                retire_card(str(waiting.get("decision_id") or ""))
+                updates[PENDING_KEY] = None
+                if job.get("paused_reason") == PAUSE_REASON:
+                    updates.update(_resume_fields(job))
+        return updates
+
+    return mutate_job(job_id, compute)
 
 
 def resolve_recipient_decision(
@@ -297,7 +357,7 @@ def resolve_recipient_decision(
     profile: str = "",
 ) -> dict:
     """Record the owner's answer; an approval confirms the recipients on the job."""
-    from cron.jobs import get_job, update_job
+    from cron.jobs import get_job, mutate_job
     from tools import effect_decisions as decisions
 
     decision = decisions.get_decision(decision_id)
@@ -319,47 +379,62 @@ def resolve_recipient_decision(
         choice=choice,
     )
     payload = decision["payload"]
-    job = get_job(str(payload.get("job_id") or ""))
-    waiting = pending(job)
-    current = bool(job) and waiting.get("decision_id") == decision_id
+    job_id = str(payload.get("job_id") or "")
+
+    def current(job: dict) -> bool:
+        return pending(job).get("decision_id") == decision_id
+
     if choice == "deny":
-        if current:
+        def compute_deny(job: dict) -> dict | None:
+            if not current(job):
+                return None
             updates: dict[str, Any] = {PENDING_KEY: None}
             if job.get("paused_reason") == PAUSE_REASON:
                 if _has_delivery(job) and job.get("schedule", {}).get("kind") != "once":
                     updates.update(_resume_fields(job))
                 else:
                     updates["paused_reason"] = DENIED_REASON
-            update_job(job["id"], updates)
+            return updates
+
+        mutate_job(job_id, compute_deny)
         return decision
 
     decisions.claim_execution(decision_id, expected_payload_sha256=decision["payload_sha256"])
-    if job is None:
+    applied: dict[str, Any] = {}
+
+    def compute_approve(job: dict) -> dict | None:
+        # Checked and written under the store lock: a change that lands
+        # between reading the job and saving the answer wins (re-check C).
+        if not current(job):
+            return None
+        waiting = pending(job)
+        confirmed = _confirmed(job)
+        targets = list(dict.fromkeys([*(confirmed.get("targets") or []), *(waiting.get("targets") or [])]))
+        audience = str(waiting.get("audience") or "").strip() or str(confirmed.get("audience") or "")
+        updates = {
+            CONFIRMED_KEY: {"targets": targets, "audience": audience,
+                            "decision_id": decision_id, "confirmed_at": time.time()},
+            PENDING_KEY: None,
+        }
+        if waiting.get("targets") and waiting.get("deliver") is not None:
+            updates["deliver"] = waiting["deliver"]
+        if job.get("paused_reason") == PAUSE_REASON:
+            updates.update(_resume_fields(job))
+        applied.update(targets=targets, audience=audience)
+        return updates
+
+    if get_job(job_id) is None:
         return decisions.finish_execution(
             decision_id, status=decisions.FAILED, outcome={"reason": "job_removed", "retry": False},
         )
-    if not current:
+    if mutate_job(job_id, compute_approve) is None:
         # The automation changed after this card was shown (0.21.15 Astra review P2-4).
         return decisions.finish_execution(
             decision_id, status=decisions.FAILED,
             outcome={"reason": "setting_changed", "retry": False},
         )
-    confirmed = _confirmed(job)
-    targets = list(dict.fromkeys([*(confirmed.get("targets") or []), *(waiting.get("targets") or [])]))
-    audience = str(waiting.get("audience") or "").strip() or str(confirmed.get("audience") or "")
-    updates = {
-        CONFIRMED_KEY: {"targets": targets, "audience": audience,
-                        "decision_id": decision_id, "confirmed_at": time.time()},
-        PENDING_KEY: None,
-    }
-    if waiting.get("targets") and "deliver" in waiting:
-        updates["deliver"] = waiting["deliver"]
-    if job.get("paused_reason") == PAUSE_REASON:
-        updates.update(_resume_fields(job))
-    update_job(job["id"], updates)
     return decisions.finish_execution(
-        decision_id, status=decisions.SUCCEEDED,
-        outcome={"job_id": job["id"], "targets": targets, "audience": audience},
+        decision_id, status=decisions.SUCCEEDED, outcome={"job_id": job_id, **applied},
     )
 
 

@@ -250,8 +250,9 @@ def test_choosing_recipients_in_the_cabinet_form_confirms_them(store):
 
     created = _tool(OWNER_DM, action="create", prompt="Отчёт", schedule="every 1h",
                     deliver="telegram:999")
+    before = _job(created["job_id"])["deliver"]
     update_job(created["job_id"], {"deliver": "telegram:555"})
-    job = recipients.accept_owner_form_edit(created["job_id"])
+    job = recipients.accept_owner_form_edit(created["job_id"], before)
     assert recipients.delivery_allowed(job, "telegram", "555") is True
     assert not job.get("recipients_pending")
     assert job["enabled"] is True
@@ -276,9 +277,9 @@ def test_a_one_shot_reminder_is_not_spent_before_the_answer(store):
 
 
 def test_korra_send_in_a_running_jobs_terminal_uses_its_confirmation(store):
-    """P1-1: a child process (``korra send`` in the job's terminal) finds the
-    job through the bridge — only while the ledger shows it executing in a
-    live scheduler process."""
+    """P1-1 / re-check A: a child process (``korra send`` in the job's
+    terminal) holds this run's secret; a public job id grants nothing, and the
+    secret works only while its exact execution runs."""
     import os
     import subprocess
     import sys
@@ -288,22 +289,108 @@ def test_korra_send_in_a_running_jobs_terminal_uses_its_confirmation(store):
     created = _tool(OWNER_DM, action="create", prompt="Поздравления", schedule="every day at 10am",
                     audience="клиенты с ДР")
     _resolve(created["recipients"]["decision_id"], "once")
+    job = _job(created["job_id"])
     child = (
         "from cron import recipients;"
         "job = recipients.running_job();"
         "print(job['id'] if job else '-', recipients.send_allowed_in_run('telegram', '555'))"
     )
-    env = {**os.environ, "KORRA_HOME": str(store), "HERMES_HOME": str(store),
-           "KORRA_CRON_SESSION": "1", "KORRA_CRON_JOB_ID": created["job_id"],
-           "PYTHONDONTWRITEBYTECODE": "1"}
+    base_env = {**os.environ, "KORRA_HOME": str(store), "HERMES_HOME": str(store),
+                "KORRA_CRON_SESSION": "1", "PYTHONDONTWRITEBYTECODE": "1"}
 
-    def ask() -> str:
-        return subprocess.run([sys.executable, "-c", child], env=env, capture_output=True,
-                              text=True, check=True, timeout=120).stdout.split()[-2:]
+    def ask(**extra) -> list:
+        return subprocess.run([sys.executable, "-c", child], env={**base_env, **extra},
+                              capture_output=True, text=True, check=True, timeout=120).stdout.split()[-2:]
 
-    assert ask() == ["-", "False"]                                  # not executing: no authority
-    attempt = executions.create_execution(created["job_id"], source="scheduled")
+    attempt = executions.create_execution(job["id"], source="scheduled")
     executions.mark_execution_running(attempt["id"])
-    assert ask() == [created["job_id"], "True"]
-    executions.finish_execution(attempt["id"], success=True)
-    assert ask() == ["-", "False"]
+    token = recipients.issue_run_token({**job, "execution_id": attempt["id"]})
+    try:
+        assert ask(KORRA_CRON_JOB_ID=job["id"]) == ["-", "False"]      # an id is public
+        assert ask(KORRA_CRON_RUN_TOKEN="forged") == ["-", "False"]
+        assert ask(KORRA_CRON_RUN_TOKEN=token) == [job["id"], "True"]
+        executions.finish_execution(attempt["id"], success=True)
+        assert ask(KORRA_CRON_RUN_TOKEN=token) == ["-", "False"]       # that run is over
+    finally:
+        recipients.retire_run_token(token)
+    assert not list((store / "cron" / "run-tokens").glob("*.json"))
+
+
+def test_resume_run_now_and_forced_fire_wait_for_the_answer(store):
+    """Re-check B: nothing spends the run before the owner answers."""
+    from cron.jobs import claim_job_for_fire, resume_job, trigger_job
+
+    created = _tool(OWNER_DM, action="create", reminder="Позвонить поставщику", schedule="in 30m",
+                    deliver="telegram:999")
+    job_id = created["job_id"]
+    for attempt in (lambda: resume_job(job_id), lambda: trigger_job(job_id)):
+        with pytest.raises(ValueError, match="ждёт подтверждения получателей"):
+            attempt()
+    assert claim_job_for_fire(job_id, force=True) is False
+    job = _job(job_id)
+    assert job["enabled"] is False and job["recipients_pending"]["targets"] == ["telegram:999"]
+
+
+def test_an_answer_racing_a_change_does_not_restore_the_old_setting(store, monkeypatch):
+    """Re-check C: the version check and the write happen under one lock."""
+    from tools import effect_decisions
+
+    created = _tool(OWNER_DM, action="create", prompt="Поздравления", schedule="every day at 10am",
+                    audience="source A")
+    real_claim = effect_decisions.claim_execution
+
+    def claim_then_change(decision_id, **kw):
+        result = real_claim(decision_id, **kw)
+        _tool(OWNER_DM, action="update", job_id=created["job_id"], audience="")
+        return result
+
+    monkeypatch.setattr(effect_decisions, "claim_execution", claim_then_change)
+    decision = _resolve(created["recipients"]["decision_id"], "once")
+    assert decision["status"] == "failed"
+    assert recipients.confirmed_audience(_job(created["job_id"])) == ""
+
+
+def test_a_job_created_by_an_automation_for_its_own_chat_keeps_delivering(store):
+    """Re-check D: the inherited confirmation is stored with the new job."""
+    from gateway.session_context import _VAR_MAP, set_background_owner, reset_background_owner
+
+    owner_token = set_background_owner(True)
+    auto = [(_VAR_MAP[name], _VAR_MAP[name].set(value)) for name, value in (
+        ("KORRA_CRON_AUTO_DELIVER_PLATFORM", "telegram"), ("KORRA_CRON_AUTO_DELIVER_CHAT_ID", "999"))]
+    try:
+        from gateway.session_context import clear_session_vars, set_session_vars
+        from tools.cronjob_tools import cronjob
+
+        tokens = set_session_vars(platform="", chat_id="", cron_session="1")
+        try:
+            created = json.loads(cronjob(action="create", prompt="Дочерняя проверка", schedule="every 1h"))
+        finally:
+            clear_session_vars(tokens)
+    finally:
+        for var, token in reversed(auto):
+            var.reset(token)
+        reset_background_owner(owner_token)
+    job = _job(created["job_id"])
+    assert job["deliver"] == "telegram:999" and job["enabled"] is True
+    assert recipients.delivery_allowed(job, "telegram", "999") is True
+
+
+def test_saving_the_form_without_changing_recipients_keeps_the_wait(store):
+    """Re-check E: the form re-sends deliver; only a real change counts, and it
+    never cancels a pending audience."""
+    from cron.jobs import update_job
+
+    created = _tool(OWNER_DM, action="create", prompt="Поздравления", schedule="every day at 10am",
+                    deliver="telegram:999", audience="клиенты с ДР")
+    job = _job(created["job_id"])
+    update_job(job["id"], {"name": "Поздравления клиентов", "deliver": job["deliver"]})
+    after = recipients.accept_owner_form_edit(job["id"], job["deliver"])
+    assert after is None
+    assert _job(job["id"])["recipients_pending"]["targets"] == ["telegram:999"]
+
+    update_job(job["id"], {"deliver": "telegram:555"})
+    changed = recipients.accept_owner_form_edit(job["id"], job["deliver"])
+    assert recipients.delivery_allowed(changed, "telegram", "555") is True
+    assert changed["recipients_pending"]["audience"] == "клиенты с ДР"
+    assert changed["recipients_pending"]["targets"] == []
+    assert changed["enabled"] is False

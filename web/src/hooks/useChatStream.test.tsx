@@ -1094,6 +1094,11 @@ describe("K21-115 multi-message outbox", () => {
 });
 
 describe("opening an agent continues its conversation (Бирюкова, 28.09)", () => {
+  beforeEach(async () => {
+    // The module-level mock keeps whatever a neighbouring test returned.
+    const { getChatRuns } = await import("@/lib/chat-runs");
+    vi.mocked(getChatRuns).mockResolvedValue([]);
+  });
   const key = (profile: string) => `${chatViewKey(profile)}:selected`;
   async function mount(profile: string) {
     await act(async () => root.render(<Probe profile={profile} onValue={(value) => { current = value; }} />));
@@ -1166,6 +1171,11 @@ describe("opening an agent continues its conversation (Бирюкова, 28.09)"
 });
 
 describe("opening an agent — Astra review of candidate ce8046b8e1", () => {
+  beforeEach(async () => {
+    // The module-level mock keeps whatever a neighbouring test returned.
+    const { getChatRuns } = await import("@/lib/chat-runs");
+    vi.mocked(getChatRuns).mockResolvedValue([]);
+  });
   const key = (profile: string) => `${chatViewKey(profile)}:selected`;
   async function mount(profile: string) {
     await act(async () => root.render(<Probe profile={profile} onValue={(value) => { current = value; }} />));
@@ -1180,7 +1190,7 @@ describe("opening an agent — Astra review of candidate ce8046b8e1", () => {
     expect(current.sessionId).toBe("latest");
   });
 
-  it("a deleted chat opened from a link falls back to the latest one and says so", async () => {
+  it("a deleted chat opened from a link falls back to the latest one", async () => {
     vi.spyOn(api, "getSessions").mockResolvedValue({ sessions: [{ id: "latest" }], total: 1, limit: 1, offset: 0 } as never);
     vi.spyOn(api, "getSessionMessages").mockImplementation(async (id: string) => {
       if (id === "gone") throw new Error("404: not found");
@@ -1190,7 +1200,35 @@ describe("opening an agent — Astra review of candidate ce8046b8e1", () => {
     await act(async () => { await current.loadSession("gone"); });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     expect(current.sessionId).toBe("latest");
-    expect(current.error).toContain("больше недоступен");
+    expect(current.error).toBeNull();
+  });
+
+  it("if the latest conversation is gone too, it says so once instead of looping", async () => {
+    const lookups = vi.spyOn(api, "getSessions").mockResolvedValue({ sessions: [{ id: "also-gone" }], total: 1, limit: 1, offset: 0 } as never);
+    vi.spyOn(api, "getSessionMessages").mockRejectedValue(new Error("404: not found"));
+    await mount("nyura");
+    lookups.mockClear();
+    await act(async () => { await current.loadSession("gone"); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(lookups).toHaveBeenCalledTimes(1);
+    expect(current.isLoading).toBe(false);
+    expect(current.error).toContain("Не удалось открыть последний разговор");
+  });
+
+  it("a late fallback never disturbs a chat the owner opened meanwhile", async () => {
+    let answerLookup: (value: unknown) => void = () => {};
+    vi.spyOn(api, "getSessions").mockImplementation(() => new Promise((resolve) => { answerLookup = resolve; }) as never);
+    vi.spyOn(api, "getSessionMessages").mockImplementation(async (id: string) => {
+      if (id === "gone") throw new Error("404: not found");
+      return { session_id: id, messages: [{ role: "assistant", content: "Ответ" }] as SessionMessage[] };
+    });
+    await act(async () => root.render(<Probe profile="nyura" onValue={(value) => { current = value; }} />));
+    await act(async () => { await current.loadSession("gone"); });
+    await act(async () => { await current.loadSession("chosen"); });
+    await act(async () => { answerLookup({ sessions: [{ id: "latest" }], total: 1, limit: 1, offset: 0 }); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(current.sessionId).toBe("chosen");
+    expect(current.error).toBeNull();
   });
 
   it("a failed lookup of the latest conversation is an error, not an empty history", async () => {

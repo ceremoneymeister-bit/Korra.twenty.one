@@ -7437,15 +7437,16 @@ class APIServerAdapter(BasePlatformAdapter):
                 scan_error = _scan_cron_prompt(sanitized["prompt"])
                 if scan_error:
                     return web.json_response({"error": scan_error}, status=400)
+            previous = _cron_get(job_id) if "deliver" in sanitized else None
             job = _cron_update(job_id, sanitized)
             if not job:
                 return web.json_response({"error": "Job not found"}, status=404)
-            if "deliver" in sanitized:
+            if previous is not None:
                 # The installation key is the owner's: recipients set here are
                 # confirmed by that choice (cron.recipients).
                 from cron.recipients import accept_owner_form_edit
 
-                job = accept_owner_form_edit(job["id"]) or job
+                job = accept_owner_form_edit(job["id"], previous.get("deliver")) or job
             _notify_cron_provider_jobs_changed()
             return web.json_response({"job": job})
         except ValueError as e:

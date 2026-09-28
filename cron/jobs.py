@@ -118,6 +118,16 @@ _JOBS_LOCK_TIMEOUT_SECONDS = 30.0
 OUTPUT_DIR = CRON_DIR / "output"
 ONESHOT_GRACE_SECONDS = 120
 
+AWAITING_RECIPIENTS_ERROR = (
+    "Автоматизация ждёт подтверждения получателей. Ответьте на карточку "
+    "в чате или в центре решений — после подтверждения она запустится сама."
+)
+
+
+def _awaits_recipients(job: Dict[str, Any]) -> bool:
+    """Recipients of this job wait for the owner's card (cron.recipients)."""
+    return bool(job.get("recipients_pending"))
+
 
 @dataclass(frozen=True)
 class _CronStorePaths:
@@ -634,6 +644,8 @@ def is_job_runnable(job: Dict[str, Any]) -> bool:
     if not job.get("enabled", True):
         return False
     if _has_pause_marker(job):
+        return False
+    if _awaits_recipients(job):
         return False
     return True
 
@@ -2244,6 +2256,7 @@ def create_job(
     audience: Optional[str] = None,
     recipients_pending: Optional[Dict[str, Any]] = None,
     paused_reason: Optional[str] = None,
+    recipients_confirmed: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Create a new cron job.
@@ -2485,6 +2498,8 @@ def create_job(
         job["audience"] = audience.strip()
     if isinstance(recipients_pending, dict):
         job["recipients_pending"] = recipients_pending
+    if isinstance(recipients_confirmed, dict) and recipients_confirmed:
+        job["recipients_confirmed"] = recipients_confirmed
     if paused_reason:
         # Created paused in the same write: nothing can fire before the owner
         # answers (cron.recipients).
@@ -2749,10 +2764,32 @@ def update_job(job_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]
                     "through update_job; use cron resume --run-now or --at."
                 )
 
+            if _awaits_recipients(updated) and updated.get("enabled", True):
+                # Resume, run-now, REST or a form save must not spend a run
+                # before the owner answers the recipients card (cron.recipients).
+                raise ValueError(AWAITING_RECIPIENTS_ERROR)
+
             jobs[i] = updated
             save_jobs(jobs)
             return _normalize_job_record(jobs[i])
     return None
+
+
+def mutate_job(job_id: str, compute) -> Optional[Dict[str, Any]]:
+    """Read, decide and write one job under the store lock (compare-and-set).
+
+    ``compute(job)`` returns the updates to apply, or None to leave the job
+    unchanged; the caller sees None in that case. Nobody can change the job
+    between the check and the write.
+    """
+    with _jobs_lock():
+        job = get_job(job_id)
+        if job is None:
+            return None
+        updates = compute(job)
+        if updates is None:
+            return None
+        return update_job(job_id, updates)
 
 
 def pause_job(job_id: str, reason: Optional[str] = None) -> Optional[Dict[str, Any]]:
@@ -3545,6 +3582,10 @@ def _claim_job_for_fire_locked(
             if job["id"] != job_id:
                 continue
             if is_terminal_job(job) and not _is_recoverable_error_job(job):
+                return False
+            if _awaits_recipients(job):
+                # Not even a forced manual fire: the run would be spent before
+                # the owner confirms its recipients (cron.recipients).
                 return False
             # enabled + pause markers must both clear — a half-paused record
             # (enabled=true, state=paused/paused_at set) must not claim. An

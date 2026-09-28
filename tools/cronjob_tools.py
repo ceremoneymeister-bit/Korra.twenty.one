@@ -482,7 +482,6 @@ def _plan_owner_recipients(
 def _show_recipients_card(job: Dict[str, Any], card: Dict[str, Any]) -> Dict[str, Any]:
     """Create the card for a job saved paused with pending recipients."""
     from cron import recipients
-    from cron.jobs import update_job
 
     try:
         decision = recipients.request_confirmation(job, targets=card["targets"], audience=card["audience"])
@@ -498,8 +497,19 @@ def _show_recipients_card(job: Dict[str, Any], card: Dict[str, Any]) -> Dict[str
                 "to show the confirmation card again."
             ),
         }
-    waiting = {**recipients.pending(job), "decision_id": decision["id"]}
-    update_job(job["id"], {recipients.PENDING_KEY: waiting})
+    from cron.jobs import mutate_job
+
+    def attach(current: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        waiting = recipients.pending(current)
+        # Attach only to the very wait this card was made for (re-check C).
+        if (waiting.get("decision_id") or waiting.get("targets") != card["targets"]
+                or str(waiting.get("audience") or "") != card["audience"]):
+            return None
+        return {recipients.PENDING_KEY: {**waiting, "decision_id": decision["id"]}}
+
+    if mutate_job(job["id"], attach) is None:
+        recipients.retire_card(decision["id"])
+        return {"status": "superseded", "note": "The automation changed meanwhile; nothing to confirm on this card."}
     return {
         "status": "awaiting_confirmation",
         "targets": card["targets"],
@@ -1831,6 +1841,9 @@ def cronjob(
                     audience=audience,
                     recipients_pending=_plan.get("recipients_pending"),
                     paused_reason=_plan.get("paused_reason"),
+                    # Inherited from the cron run creating this job (its own
+                    # chat), stored with the job itself (re-check D).
+                    recipients_confirmed=_plan.get("recipients_confirmed"),
                     attach_to_session=attach_to_session,
                     monitor_script=_normalize_optional_job_value(monitor_script),
                     monitor_url=_normalize_optional_job_value(monitor_url),
