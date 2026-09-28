@@ -123,11 +123,15 @@ function effectOutcomeNote(request: SSEApprovalRequestData): string | undefined 
     case "denied":
       return request.decision_kind === "payment"
         ? "Оплата отклонена."
-        : "Сообщение не отправлено.";
+        : request.decision_kind === "automation_recipients"
+          ? "Получатели не подтверждены: автоматизация им не пишет."
+          : "Сообщение не отправлено.";
     case "succeeded":
       return request.decision_kind === "payment"
         ? "Оплата выполнена один раз."
-        : "Сообщение отправлено один раз.";
+        : request.decision_kind === "automation_recipients"
+          ? "Получатели подтверждены: дальше автоматизация пишет им сама."
+          : "Сообщение отправлено один раз.";
     case "failed":
       return "Действие не выполнено: точный payload или аккаунт изменился.";
     case "unknown":

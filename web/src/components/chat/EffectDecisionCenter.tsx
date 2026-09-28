@@ -40,7 +40,13 @@ interface EffectDecisionCenterProps {
 
 function shortTarget(item: SSEApprovalRequestData): string {
   const first = (item.command ?? "").split("\n", 1)[0]?.trim();
-  return first || (item.decision_kind === "payment" ? "Оплата" : "Внешняя отправка");
+  return first || (
+    item.decision_kind === "payment"
+      ? "Оплата"
+      : item.decision_kind === "automation_recipients"
+        ? "Получатели автоматизации"
+        : "Внешняя отправка"
+  );
 }
 
 /** Profile-wide durable decisions, intentionally outside one chat transcript. */

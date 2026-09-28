@@ -3313,6 +3313,18 @@ def _deliver_result(
                 delivery_errors.append(bot_chat_error)
             continue
 
+        if not failure_notice:
+            from cron.recipients import delivery_allowed, target_label
+
+            if not delivery_allowed(job, platform_name, chat_id, thread_id):
+                # Recipients other than the owner are confirmed once, when the
+                # automation is set up (Dmitry, 28.09.2026; cron.recipients).
+                delivery_errors.append(
+                    "Получатель ещё не подтверждён: "
+                    f"{target_label(platform_name, chat_id, thread_id)}"
+                )
+                continue
+
         # Diagnostic: log thread_id for topic-aware delivery debugging
         origin = _resolve_origin(job) or {}
         origin_thread = origin.get("thread_id")
@@ -4774,6 +4786,9 @@ def _build_job_prompt(
     user_prompt = str(job.get("prompt") or "")
     if extra_prompt:
         user_prompt = f"{user_prompt}\n\n## Run Context\n{extra_prompt}"
+    from cron.recipients import audience_run_note
+
+    user_prompt += audience_run_note(job)
     prompt = user_prompt
     skills = job.get("skills")
     # True when runtime-collected DATA (script stdout, upstream-job output)
@@ -6070,6 +6085,7 @@ def run_job(
     _cron_session_token = None
     _non_dispatcher_token = None
     _background_owner_token = None
+    _running_job_token = None
     _session_db = None
     try:
 
@@ -6089,6 +6105,9 @@ def run_job(
             _background_owner_token = set_background_owner(cron_job_acts_for_owner(job))
         except Exception:
             logger.warning("Job '%s': owner verdict unavailable; treating as not the owner's", job_id)
+        from cron.recipients import bind_running_job
+
+        _running_job_token = bind_running_job(job)
 
         # Mark this job as NOT the dispatcher-owned kanban worker.
         #
@@ -7020,6 +7039,10 @@ def run_job(
             from gateway.session_context import reset_background_owner
 
             reset_background_owner(_background_owner_token)
+        if _running_job_token is not None:
+            from cron.recipients import reset_running_job
+
+            reset_running_job(_running_job_token)
         if _non_dispatcher_token is not None:
             exit_non_dispatcher_owned_context(_non_dispatcher_token)
         for _var_name in _cron_delivery_vars:

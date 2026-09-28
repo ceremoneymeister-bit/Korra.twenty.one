@@ -269,8 +269,17 @@ def create_pending(
     path: str | os.PathLike[str] | None = None,
 ) -> tuple[dict[str, Any], bool]:
     """Create one pending exact-payload decision, or return its live duplicate."""
-    if kind not in {"outbound_message", "payment"}:
+    if kind not in {"outbound_message", "payment", "automation_recipients"}:
         raise ValueError(f"unsupported effect decision kind: {kind}")
+    if kind == "automation_recipients":
+        targets = payload.get("targets")
+        audience = payload.get("audience")
+        if not isinstance(payload.get("job_id"), str) or not payload["job_id"].strip():
+            raise ValueError("automation recipients need a job id")
+        if not isinstance(targets, list) or not all(isinstance(item, str) for item in targets):
+            raise ValueError("automation recipients must be a list of targets")
+        if not targets and not (isinstance(audience, str) and audience.strip()):
+            raise ValueError("automation recipients need targets or an audience")
     if kind == "payment":
         recipient = payload.get("recipient")
         currency = payload.get("currency")
@@ -640,6 +649,16 @@ def resolve_effect_decision(
             source_session_key=source_session_key,
             profile=profile,
         )
+    if decision["kind"] == "automation_recipients":
+        from cron.recipients import resolve_recipient_decision
+
+        return resolve_recipient_decision(
+            decision_id,
+            choice,
+            source_session_id=source_session_id,
+            source_session_key=source_session_key,
+            profile=profile,
+        )
     if decision["kind"] == "payment":
         if choice == "deny":
             return decide(
@@ -660,7 +679,21 @@ def resolve_effect_decision(
 def approval_payload(decision: Mapping[str, Any]) -> dict[str, Any]:
     """Project a durable effect into the existing chat approval wire shape."""
     payload = decision.get("payload") or {}
-    if decision.get("kind") == "payment":
+    if decision.get("kind") == "automation_recipients":
+        lines = [f"Автоматизация: {payload.get('job_name') or payload.get('job_id')}"]
+        if payload.get("schedule"):
+            lines.append(f"Расписание: {payload.get('schedule')}")
+        targets = [str(item) for item in payload.get("targets") or []]
+        if targets:
+            lines.append("Получатели: " + ", ".join(targets))
+        if str(payload.get("audience") or "").strip():
+            lines.append(f"Кому ещё может писать: {payload.get('audience')}")
+        command = "\n".join(lines)
+        description = (
+            "Подтвердите получателей один раз: дальше автоматизация будет "
+            "отправлять им сама, без подтверждения каждого сообщения."
+        )
+    elif decision.get("kind") == "payment":
         command = (
             f"Получатель: {payload.get('recipient') or 'не указан'}\n"
             f"Сумма: {payload.get('amount')} "

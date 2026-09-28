@@ -358,7 +358,7 @@ def _refuse_change_of_owner_job(job: Dict[str, Any]) -> Optional[str]:
     )
 
 
-def _refuse_reach_beyond_creator(deliver: Optional[str]) -> Optional[str]:
+def _refuse_reach_beyond_creator(deliver: Optional[str], audience: Optional[str] = None) -> Optional[str]:
     """Somebody other than the owner automates only for themselves.
 
     Dmitry, 28.09.2026: a user of their own agent (or a visitor) may set up a
@@ -369,6 +369,11 @@ def _refuse_reach_beyond_creator(deliver: Optional[str]) -> Optional[str]:
     """
     if _creator_is_owner():
         return None
+    if isinstance(audience, str) and audience.strip():
+        return tool_error(
+            "Only the owner can let an automation message other people.",
+            success=False,
+        )
     try:
         from cron.scheduler import BOT_CHAT_PLATFORM, _is_creator_private_chat
 
@@ -396,6 +401,68 @@ def _refuse_reach_beyond_creator(deliver: Optional[str]) -> Optional[str]:
         "(deliver='origin' there) or stay local; ask the owner to set up other recipients.",
         success=False,
     )
+
+
+def _confirm_recipients(
+    job: Dict[str, Any],
+    *,
+    audience: Optional[str] = None,
+    previous: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Ask the owner once to confirm recipients other than themselves.
+
+    Dmitry, 28.09.2026: an automation the owner set up sends to other people
+    without confirmations only after those recipients were confirmed once, at
+    setup. Returns what now awaits confirmation, or None.
+    """
+    if not _creator_is_owner():
+        return None
+    import time as _time
+
+    from cron import recipients
+    from cron.jobs import update_job
+
+    updates: Dict[str, Any] = {}
+    if job.get(recipients.POLICY_KEY) != 1:
+        # A job from before 0.21.15 or from the cabinet form keeps the
+        # recipients it already had; only what this change adds needs a card.
+        grandfathered = recipients.third_party_labels(previous) if previous else []
+        updates[recipients.POLICY_KEY] = 1
+        if grandfathered and not job.get(recipients.CONFIRMED_KEY):
+            updates[recipients.CONFIRMED_KEY] = {
+                "targets": grandfathered, "audience": "", "decision_id": "",
+                "confirmed_at": _time.time(),
+            }
+        job = {**job, **updates}
+    confirmed = job.get(recipients.CONFIRMED_KEY) or {}
+    confirmed_targets = {str(item) for item in confirmed.get("targets") or []}
+    new_targets = [
+        label for label in recipients.third_party_labels(job)
+        if label not in confirmed_targets and label.rsplit(":", 1)[0] not in confirmed_targets
+    ]
+    new_audience = (audience or "").strip()
+    if new_audience and new_audience == recipients.confirmed_audience(job):
+        new_audience = ""
+    if not new_targets and not new_audience:
+        if updates:
+            update_job(job["id"], updates)
+        return None
+    decision = recipients.request_confirmation(job, targets=new_targets, audience=new_audience)
+    updates[recipients.PENDING_KEY] = {
+        "targets": new_targets, "audience": new_audience, "decision_id": decision["id"],
+    }
+    update_job(job["id"], updates)
+    return {
+        "status": "awaiting_confirmation",
+        "targets": new_targets,
+        "audience": new_audience or None,
+        "decision_id": decision["id"],
+        "note": (
+            "Sends to these recipients start after the user confirms them on the "
+            "card shown in this chat; deliveries to the user's own chat work now. "
+            "Tell the user plainly what to confirm; do not repeat the call."
+        ),
+    }
 
 
 def _origin_from_env() -> Optional[Dict[str, str]]:
@@ -871,6 +938,17 @@ def _format_job(job: Dict[str, Any]) -> Dict[str, Any]:
     result["pending_result_policy"] = job.get("pending_result_policy", "all")
     if job.get("reminder"):
         result["reminder"] = job["reminder"]
+    if job.get("audience"):
+        result["audience"] = job["audience"]
+    if job.get("recipients_policy") == 1:
+        confirmed = job.get("recipients_confirmed") or {}
+        pending = job.get("recipients_pending") or {}
+        result["recipients"] = {
+            "confirmed": confirmed.get("targets") or [],
+            "confirmed_audience": confirmed.get("audience") or None,
+            "awaiting_confirmation": pending.get("targets") or [],
+            "awaiting_audience": pending.get("audience") or None,
+        }
     if job.get("reasoning_effort"):
         result["reasoning_effort"] = job["reasoning_effort"]
     if job.get("monitor_script"):
@@ -1571,6 +1649,7 @@ def cronjob(
     workdir: Optional[str] = None,
     no_agent: Optional[bool] = None,
     reminder: Optional[str] = None,
+    audience: Optional[str] = None,
     delivery_ttl_seconds: Optional[int] = None,
     pending_result_policy: Optional[str] = None,
     attach_to_session: Optional[bool] = None,
@@ -1638,7 +1717,7 @@ def cronjob(
             if bot_chat_error:
                 return tool_error(bot_chat_error, success=False)
             reach_error = _refuse_reach_beyond_creator(
-                _resolve_cron_context_deliver(_normalize_deliver_param(deliver))
+                _resolve_cron_context_deliver(_normalize_deliver_param(deliver)), audience
             )
             if reach_error:
                 return reach_error
@@ -1692,6 +1771,8 @@ def cronjob(
                     reminder=reminder,
                     delivery_ttl_seconds=delivery_ttl_seconds or None,
                     pending_result_policy=pending_result_policy or "all",
+                    recipients_policy=1 if _creator_is_owner() else None,
+                    audience=audience,
                     attach_to_session=attach_to_session,
                     monitor_script=_normalize_optional_job_value(monitor_script),
                     monitor_url=_normalize_optional_job_value(monitor_url),
@@ -1705,6 +1786,7 @@ def cronjob(
             except CronSchedulerRegistrationError as exc:
                 _partial = exc.to_dict()
                 return tool_error(_partial.pop("error"), success=False, **_partial)
+            _recipients = _confirm_recipients(job, audience=audience)
             _create_message = f"Cron job '{job['name']}' created."
             _local_notice = _local_delivery_notice(job, _normalize_deliver_param(deliver))
             if _local_notice:
@@ -1734,6 +1816,8 @@ def cronjob(
             _notes = _mode_guidance_notes(job, _normalize_deliver_param(deliver))
             if _notes:
                 _result["guidance"] = _notes
+            if _recipients:
+                _result["recipients"] = _recipients
             return json.dumps(_result, indent=2)
 
         if normalized == "list":
@@ -2049,9 +2133,23 @@ def cronjob(
                 if job.get("state") != "paused":
                     updates["state"] = "scheduled"
                     updates["enabled"] = True
+            if audience is not None:
+                reach_error = _refuse_reach_beyond_creator(None, audience)
+                if reach_error:
+                    return reach_error
+                updates["audience"] = audience.strip() or None
+                if not audience.strip() and job.get("recipients_confirmed"):
+                    updates["recipients_confirmed"] = {
+                        **job["recipients_confirmed"], "audience": "",
+                    }
             if not updates:
                 return tool_error("No updates provided.", success=False)
             updated = update_job(job_id, updates)
+            _upd_recipients = None
+            if deliver is not None or (audience is not None and audience.strip()):
+                _upd_recipients = _confirm_recipients(
+                    updated, audience=audience, previous=job,
+                )
             _notify_provider_jobs_changed_safe()
             _upd_result: Dict[str, Any] = {"success": True, "job": _format_job(updated)}
             # An update can switch a job into monitor / no_agent mode or
@@ -2059,6 +2157,8 @@ def cronjob(
             _upd_notes = _mode_guidance_notes(updated, _normalize_deliver_param(deliver))
             if _upd_notes:
                 _upd_result["guidance"] = _upd_notes
+            if _upd_recipients:
+                _upd_result["recipients"] = _upd_recipients
             return json.dumps(_upd_result, indent=2)
 
         return tool_error(f"Unknown cron action '{action}'", success=False)
@@ -2095,6 +2195,10 @@ Jobs run in a fresh session with no current-chat context, so prompts must be sel
             "pending_result_policy": {
                 "type": "string", "enum": ["all", "latest"],
                 "description": "all preserves every pending result (default). latest replaces older unsent approvals for this job/recipient with a newer result. Use only for replaceable reports, never independent obligations."
+            },
+            "audience": {
+                "type": "string",
+                "description": "Only when the job itself must message people chosen at run time (e.g. 'clients with a birthday today, from Bitrix'): describe that source in the user's words. The user confirms the source once; then the job messages those people without per-message approval and lists whom it wrote to. Fixed recipients go in deliver instead."
             },
             "reminder": {
                 "type": "string",
@@ -2204,6 +2308,7 @@ def _cronjob_handler(args, **kw):
         job_id=args.get("job_id"),
         prompt=args.get("prompt"),
         reminder=args.get("reminder"),
+        audience=args.get("audience"),
         delivery_ttl_seconds=args.get("delivery_ttl_seconds"),
         pending_result_policy=args.get("pending_result_policy"),
         schedule=args.get("schedule"),

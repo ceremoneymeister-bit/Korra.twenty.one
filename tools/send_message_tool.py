@@ -477,6 +477,43 @@ def _is_originating_chat(platform_name: str, chat_id: str, thread_id) -> bool:
     return source_thread_id == str(thread_id or "")
 
 
+def _decision_session_identity(
+    *,
+    source_session_id: str = "",
+    source_session_key: str = "",
+    source_profile: str = "",
+    source_owner_id: str = "",
+) -> tuple[str, str, str, str]:
+    """Session id, session key, profile and owner id a durable decision belongs to."""
+    from gateway.session_context import get_session_env
+    from tools.approval import get_current_session_key
+
+    session_key = source_session_key.strip() or get_current_session_key(default="")
+    session_id = (
+        source_session_id.strip()
+        or get_session_env("KORRA_SESSION_ID", "").strip()
+        or session_key
+    )
+    profile = source_profile.strip() or get_session_env("KORRA_SESSION_PROFILE", "").strip()
+    if not profile:
+        try:
+            from korra_cli.profiles import get_active_profile_name
+
+            profile = get_active_profile_name() or "default"
+        except Exception:
+            profile = "default"
+    owner_id = (
+        source_owner_id.strip()
+        or get_session_env("KORRA_SESSION_USER_ID", "").strip()
+        or f"profile:{profile}"
+    )
+    if not session_key:
+        session_key = f"session:{session_id or 'local'}"
+    if not session_id:
+        session_id = session_key
+    return session_id, session_key, profile, owner_id
+
+
 def _queue_outbound_decision(
     *,
     platform_name,
@@ -504,32 +541,15 @@ def _queue_outbound_decision(
         return None
 
     from gateway.session_context import get_session_env
-    from tools.approval import get_current_session_key, notify_gateway_request
+    from tools.approval import notify_gateway_request
     from tools.effect_decisions import approval_payload, create_pending
 
-    session_key = source_session_key.strip() or get_current_session_key(default="")
-    session_id = (
-        source_session_id.strip()
-        or get_session_env("KORRA_SESSION_ID", "").strip()
-        or session_key
+    session_id, session_key, profile, owner_id = _decision_session_identity(
+        source_session_id=source_session_id,
+        source_session_key=source_session_key,
+        source_profile=source_profile,
+        source_owner_id=source_owner_id,
     )
-    profile = source_profile.strip() or get_session_env("KORRA_SESSION_PROFILE", "").strip()
-    if not profile:
-        try:
-            from korra_cli.profiles import get_active_profile_name
-
-            profile = get_active_profile_name() or "default"
-        except Exception:
-            profile = "default"
-    owner_id = (
-        source_owner_id.strip()
-        or get_session_env("KORRA_SESSION_USER_ID", "").strip()
-        or f"profile:{profile}"
-    )
-    if not session_key:
-        session_key = f"session:{session_id or 'local'}"
-    if not session_id:
-        session_id = session_key
 
     attachments = _attachment_snapshot(media_files, durable=True)
     execution_args = dict(args)
@@ -938,7 +958,7 @@ def _handle_send(args, *, owner_initiated: bool = False):
 
     try:
         decision = None
-        if not owner_initiated:
+        if not owner_initiated and not _confirmed_by_running_job(platform_name, chat_id, thread_id):
             decision = _queue_outbound_decision(
                 platform_name=platform_name,
                 pconfig=pconfig,
@@ -1252,6 +1272,19 @@ def _get_cron_auto_delivery_target():
         "chat_id": chat_id,
         "thread_id": thread_id,
     }
+
+
+def _confirmed_by_running_job(platform_name: str, chat_id, thread_id) -> bool:
+    """Inside a job the owner set up, recipients confirmed with the job (or its
+    confirmed audience) are messaged without a per-message decision
+    (Dmitry, 28.09.2026; cron.recipients)."""
+    try:
+        from cron.recipients import send_allowed_in_run
+
+        return send_allowed_in_run(platform_name, chat_id, thread_id)
+    except Exception:
+        logger.debug("Confirmed-recipient check failed", exc_info=True)
+        return False
 
 
 def _maybe_skip_cron_duplicate_send(platform_name: str, chat_id: str, thread_id: str | None):

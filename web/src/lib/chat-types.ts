@@ -113,12 +113,15 @@ export type EffectDecisionStatus =
  *    • ответом `GET /api/chat/decisions` для всех чатов профиля.
  *  Собирает его `_chat_approval_event` в gateway/platforms/api_server.py:
  *  команда там уже отредактирована от секретов. */
+/** Durable exact-payload decisions the owner answers once. */
+export type EffectDecisionKind = "outbound_message" | "payment" | "automation_recipients";
+
 export interface SSEApprovalRequestData {
   /** Адрес конкретного запроса в очереди одобрений. */
   request_id: string;
   session_id?: string;
   /** Durable exact-payload decision. Missing means a legacy command prompt. */
-  decision_kind?: "outbound_message" | "payment";
+  decision_kind?: EffectDecisionKind;
   /** Durable state; command approvals do not have this field. */
   effect_status?: EffectDecisionStatus;
   /** Origin chat stays authoritative even when shown in the profile center. */

@@ -24,7 +24,7 @@ import { Ban, Check, Clock, Infinity as InfinityIcon, ShieldCheck } from "lucide
 import type { ComponentType } from "react";
 
 import { translateApprovalDescription } from "@/lib/approval-descriptions";
-import type { ApprovalChoiceValue } from "@/lib/chat-types";
+import type { ApprovalChoiceValue, EffectDecisionKind } from "@/lib/chat-types";
 import { cn } from "@/lib/utils";
 // Переходы элементов чата живут в одном файле — там же единственный на всю
 // папку блок prefers-reduced-motion.
@@ -75,7 +75,7 @@ const SETTLED_LABEL: Record<ApprovalChoiceValue, string> = {
 
 export interface CommandApprovalCardProps {
   /** Exact external effect; missing means a dangerous-command approval. */
-  decisionKind?: "outbound_message" | "payment";
+  decisionKind?: EffectDecisionKind;
   /** Команда как её показывает движок: секреты уже вырезаны на сервере. */
   command?: string;
   /** Чем именно опасна команда. */
@@ -118,22 +118,26 @@ export function CommandApprovalCard({
   const trimmedDescription = translateApprovalDescription(description);
   const outbound = decisionKind === "outbound_message";
   const payment = decisionKind === "payment";
-  const exactEffect = outbound || payment;
+  // Recipients of an automation are confirmed once; then it writes to them itself.
+  const recipients = decisionKind === "automation_recipients";
+  const exactEffect = outbound || payment || recipients;
 
   const choiceMeta = (choice: ApprovalChoiceValue): ChoiceMeta => {
     if (!exactEffect) return CHOICE_META[choice];
     if (choice === "once") {
       return {
-        label: payment ? "Оплатить" : "Отправить",
+        label: payment ? "Оплатить" : recipients ? "Подтвердить" : "Отправить",
         hint: payment
           ? "Только этому получателю, в этой сумме и валюте"
-          : "Только этот точный текст, адресат и вложения",
+          : recipients
+            ? "Дальше автоматизация будет писать им сама"
+            : "Только этот точный текст, адресат и вложения",
         icon: Check,
       };
     }
     if (choice === "deny") {
       return {
-        label: payment ? "Не оплачивать" : "Не отправлять",
+        label: payment ? "Не оплачивать" : recipients ? "Не подтверждать" : "Не отправлять",
         hint: "Точное действие останется в истории решений",
         icon: Ban,
         danger: true,
@@ -144,8 +148,10 @@ export function CommandApprovalCard({
 
   const settledLabel = exactEffect
     ? decision === "deny"
-      ? payment ? "Не оплачено" : "Не отправлено"
-      : payment ? "Разрешена одна точная оплата" : "Разрешена одна точная отправка"
+      ? payment ? "Не оплачено" : recipients ? "Получатели не подтверждены" : "Не отправлено"
+      : payment
+        ? "Разрешена одна точная оплата"
+        : recipients ? "Получатели подтверждены" : "Разрешена одна точная отправка"
     : decision
       ? SETTLED_LABEL[decision]
       : "";
@@ -158,7 +164,13 @@ export function CommandApprovalCard({
         "font-sans normal-case tracking-normal",
       )}
       role="group"
-      aria-label={payment ? "Решение по оплате" : outbound ? "Решение по внешней отправке" : "Решение по команде агента"}
+      aria-label={
+        payment
+          ? "Решение по оплате"
+          : recipients
+            ? "Решение о получателях автоматизации"
+            : outbound ? "Решение по внешней отправке" : "Решение по команде агента"
+      }
     >
       <div className="mb-2 flex items-start gap-2">
         <ShieldCheck
@@ -168,7 +180,11 @@ export function CommandApprovalCard({
         />
         <div className="min-w-0">
           <p className="text-xs leading-snug font-medium text-[var(--neo-text-primary)]">
-            {payment ? "Проверьте оплату" : outbound ? "Проверьте внешнюю отправку" : "Агент просит разрешение на команду"}
+            {payment
+              ? "Проверьте оплату"
+              : recipients
+                ? "Подтвердите получателей автоматизации"
+                : outbound ? "Проверьте внешнюю отправку" : "Агент просит разрешение на команду"}
           </p>
           {trimmedDescription && (
             <p className="mt-0.5 text-[11px] leading-snug text-[var(--neo-text-secondary)]">

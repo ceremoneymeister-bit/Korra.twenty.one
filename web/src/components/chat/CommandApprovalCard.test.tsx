@@ -63,6 +63,27 @@ describe("CommandApprovalCard — что видно человеку", () => {
     expect(container.textContent).not.toContain("Разрешить всегда");
   });
 
+  it("для получателей автоматизации просит подтвердить их один раз", async () => {
+    const onDecide = vi.fn();
+    await render(
+      <CommandApprovalCard
+        decisionKind="automation_recipients"
+        command={"Автоматизация: Поздравления клиентов\nКому ещё может писать: клиенты с ДР из Bitrix"}
+        description="Подтвердите получателей один раз: дальше автоматизация будет отправлять им сама, без подтверждения каждого сообщения."
+        choices={["once", "deny"]}
+        onDecide={onDecide}
+      />,
+    );
+
+    expect(container.textContent).toContain("Подтвердите получателей автоматизации");
+    expect(container.textContent).toContain("клиенты с ДР из Bitrix");
+    expect(container.textContent).toContain("Не подтверждать");
+    expect(container.textContent).not.toContain("Агент просит разрешение на команду");
+    expect(container.textContent).not.toContain("Разрешить всегда");
+    await click(buttonByText("Подтвердить"));
+    expect(onDecide).toHaveBeenCalledWith("once");
+  });
+
   it("показывает команду и причину, а варианты берёт от сервера", async () => {
     await render(
       <CommandApprovalCard

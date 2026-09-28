@@ -64,7 +64,9 @@ export function normalizeApprovalRequest(
     ? APPROVAL_CHOICE_ORDER.filter((choice) => item.choices?.includes(choice))
     : [];
   const decisionKind =
-    item.decision_kind === "outbound_message" || item.decision_kind === "payment"
+    item.decision_kind === "outbound_message" ||
+    item.decision_kind === "payment" ||
+    item.decision_kind === "automation_recipients"
       ? item.decision_kind
       : undefined;
   const effectStatus = EFFECT_STATUSES.includes(item.effect_status as EffectDecisionStatus)

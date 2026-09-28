@@ -2240,6 +2240,8 @@ def create_job(
     reminder: Optional[str] = None,
     delivery_ttl_seconds: Optional[int] = None,
     pending_result_policy: str = "all",
+    recipients_policy: Optional[int] = None,
+    audience: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Create a new cron job.
@@ -2473,6 +2475,12 @@ def create_job(
     # absent key = job follows config resolution (pre-feature behavior).
     if normalized_reasoning_effort is not None:
         job["reasoning_effort"] = normalized_reasoning_effort
+    # Recipients other than the owner deliver once confirmed (cron.recipients).
+    # Absent on jobs from the cabinet form, the REST API and before 0.21.15.
+    if recipients_policy == 1:
+        job["recipients_policy"] = 1
+    if isinstance(audience, str) and audience.strip():
+        job["audience"] = audience.strip()
 
     with _jobs_lock():
         jobs = load_jobs()
