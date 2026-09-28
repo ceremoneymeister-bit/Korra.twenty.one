@@ -7,6 +7,8 @@ const DEFAULT_OFFSET = 0;
 
 export interface UseSessionListReturn {
   sessions: SessionInfo[];
+  /** Сколько разговоров всего на сервере (список отдаёт первую страницу). */
+  total: number | null;
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
@@ -38,8 +40,8 @@ export function useSessionList(
   const previousPollIntervalRef = useRef(pollIntervalMs);
   const mountedRef = useRef(false);
   const requestRef = useRef(0);
-  const [result, setResult] = useState<{ profile: string | undefined; sessions: SessionInfo[] }>(
-    { profile, sessions: [] },
+  const [result, setResult] = useState<{ profile: string | undefined; sessions: SessionInfo[]; total: number | null }>(
+    { profile, sessions: [], total: null },
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -72,7 +74,11 @@ export function useSessionList(
       );
       if (!current()) return;
 
-      setResult({ profile, sessions: sortByLastActiveDesc(response.sessions) });
+      setResult({
+        profile,
+        sessions: sortByLastActiveDesc(response.sessions),
+        total: typeof response.total === "number" ? response.total : response.sessions.length,
+      });
     } catch (err) {
       if (!current()) return;
 
@@ -111,6 +117,7 @@ export function useSessionList(
     // A different profile's rows must never appear even during its first
     // render before the new request's effect has run.
     sessions: result.profile === profile ? result.sessions : [],
+    total: result.profile === profile ? result.total : null,
     loading,
     error,
     refresh,

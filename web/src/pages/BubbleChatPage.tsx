@@ -55,6 +55,8 @@ import { TranscriptViewport } from "@/components/chat/TranscriptViewport";
 import { AgentTrace } from "@/components/chat/AgentTrace";
 import { CommandApprovalCard } from "@/components/chat/CommandApprovalCard";
 import { EffectDecisionCenter } from "@/components/chat/EffectDecisionCenter";
+import { AgentSheet } from "@/components/agents/mobile/AgentSheet";
+import { publishAgentConversation } from "@/lib/agent-conversations";
 import { ChatWorking, type BusyKind } from "@/components/ChatWorking";
 import { loadChatOutbox, loadChatOutboxRecords, type ChatOutboxRecord } from "@/lib/chat-outbox";
 import { useProfileScope } from "@/contexts/useProfileScope";
@@ -1385,6 +1387,19 @@ export interface BubbleChatPageProps {
    *  сбрасывает только этот постоянно смонтированный экземпляр чата. */
   newChatRequest?: number;
   resumeSession?: ChatResumeRequest;
+  /** Экран агентов на телефоне рисует свою шапку («Чаты N» и название
+   *  разговора): строка «Чаты» здесь не нужна, а список чатов открывается
+   *  шторкой под шапкой — в `host`, который даёт хозяин экрана. Состояние
+   *  открытия тоже у него: другие шторки шапки закрывают эту. */
+  mobileHistory?: MobileHistoryControl;
+  /** Счётчик «раскрыть решения» — от листа «Идут работы». */
+  decisionsRequest?: number;
+}
+
+export interface MobileHistoryControl {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  host: HTMLElement | null;
 }
 
 export interface ChatResumeRequest { sessionId: string }
@@ -1397,6 +1412,8 @@ export default function BubbleChatPage({
   newChatRequest = 0,
   resumeSession,
   active,
+  mobileHistory,
+  decisionsRequest = 0,
 }: BubbleChatPageProps = {}) {
   const { t } = useI18n();
   const voiceSettings = useAgentVoice(agentProfile || "default", active !== false);
@@ -1429,6 +1446,10 @@ export default function BubbleChatPage({
   const agentLabel = agentProfile
     ? (scopeProfiles.find((item) => item.name === agentProfile)?.display_name?.trim() || agentProfile)
     : undefined;
+  // Подпись в шторке «Чаты»: у главного агента своё имя тоже есть
+  // (display_name профиля `default`), «Корра» — только по умолчанию.
+  const historyAgentLabel = agentLabel
+    ?? (scopeProfiles.find((item) => item.name === "default")?.display_name?.trim() || "Корра");
   const pendingElsewhere = useMemo(() => {
     const currentPending = sessionId ? loadChatOutbox(agentProfile ?? "", sessionId) : null;
     if (currentPending && !messages.some(message => message.clientMessageId === currentPending.messageId)) return currentPending;
@@ -1444,7 +1465,13 @@ export default function BubbleChatPage({
   // остальным, переживая перезагрузку.
   const [prefill, setPrefill] = useState<string | null>(null);
   const [historyRevision, setHistoryRevision] = useState(0);
-  const [mobileHistoryOpen, setMobileHistoryOpen] = useState(false);
+  const [ownMobileHistoryOpen, setOwnMobileHistoryOpen] = useState(false);
+  const mobileHistoryOpen = mobileHistory ? mobileHistory.open : ownMobileHistoryOpen;
+  const onMobileHistoryChange = mobileHistory?.onOpenChange;
+  const setMobileHistoryOpen = useCallback((open: boolean) => {
+    if (onMobileHistoryChange) onMobileHistoryChange(open);
+    else setOwnMobileHistoryOpen(open);
+  }, [onMobileHistoryChange]);
   const mobileHistoryTitleId = useId();
   const recoveryKey = chatViewKey(agentProfile, sessionId);
   const [recovery, setRecovery] = useState<{ key: string; text: string } | null>(null);
@@ -1594,16 +1621,34 @@ export default function BubbleChatPage({
       void loadSession(id);
       setMobileHistoryOpen(false);
     },
-    [loadSession],
+    [loadSession, setMobileHistoryOpen],
   );
 
   const handleNewChat = useCallback(() => {
     reset();
     setMobileHistoryOpen(false);
-  }, [reset]);
+  }, [reset, setMobileHistoryOpen]);
+
+  // Сводка для мобильной шапки и экрана-списка агентов: название открытого
+  // разговора, сколько всего чатов и когда агент был активен. Берётся из
+  // уже загруженного списка — новых запросов нет.
+  const sessionTotal = sessionList.total;
+  const sessionRows = sessionList.sessions;
+  useEffect(() => {
+    if (agentProfile === undefined) return;
+    const current = sessionId ? sessionRows.find((item) => item.id === sessionId) : undefined;
+    const latest = sessionRows[0];
+    publishAgentConversation(agentProfile, {
+      sessionId,
+      title: current ? titleFor(current) : sessionId || isLoading ? "Разговор" : "Новый чат",
+      chatCount: sessionTotal,
+      latestTitle: latest ? titleFor(latest) : null,
+      lastActive: latest ? latest.last_active : null,
+    });
+  }, [agentProfile, sessionId, sessionRows, sessionTotal, isLoading]);
 
   useEffect(() => {
-    if (!mobileHistoryOpen) return;
+    if (!mobileHistoryOpen || mobileHistory) return;
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") setMobileHistoryOpen(false);
     };
@@ -1616,7 +1661,7 @@ export default function BubbleChatPage({
       window.removeEventListener("keydown", closeOnEscape);
       document.body.style.overflow = previousOverflow;
     };
-  }, [mobileHistoryOpen]);
+  }, [mobileHistoryOpen, mobileHistory, setMobileHistoryOpen]);
 
   useEffect(() => {
     if (typeof window.matchMedia !== "function") return;
@@ -1626,7 +1671,7 @@ export default function BubbleChatPage({
     };
     desktop.addEventListener("change", closeOnDesktop);
     return () => desktop.removeEventListener("change", closeOnDesktop);
-  }, []);
+  }, [setMobileHistoryOpen]);
 
   // Решение по опасной команде уходит отдельным маршрутом, а не сообщением в
   // чат: ход агента заблокирован внутри вызова инструмента и новую реплику
@@ -1682,7 +1727,31 @@ export default function BubbleChatPage({
        *  снаружи, и шапка рисовалась ПОВЕРХ панели: логотип наезжал на
        *  заголовок, а крестик оказывался под шапкой и не нажимался
        *  (скриншоты владельца, 21.09). */}
-      {mobileHistoryOpen && createPortal(
+      {mobileHistory && mobileHistoryOpen && mobileHistory.host && createPortal(
+        <AgentSheet
+          titleId={mobileHistoryTitleId}
+          title={<>Чаты {sessionTotal !== null && <span className="k-sheet__n">{sessionTotal}</span>}<small>{historyAgentLabel}</small></>}
+          onClose={() => setMobileHistoryOpen(false)}
+        >
+          <div data-chat-history-panel className="flex min-h-0 flex-col">
+            <BubbleChatSidebar
+              sessions={sessionList.sessions}
+              profile={agentProfile || "default"}
+              activeId={sessionId}
+              loading={sessionList.loading}
+              error={sessionList.error}
+              onSelect={handleSelect}
+              onNewChat={handleNewChat}
+              onRequestDelete={(id) => { setMobileHistoryOpen(false); sessionDelete.requestDelete(id); }}
+              onRenamed={() => void sessionList.refresh()}
+              historyRevision={historyRevision}
+              layout="mobile"
+            />
+          </div>
+        </AgentSheet>,
+        mobileHistory.host,
+      )}
+      {!mobileHistory && mobileHistoryOpen && createPortal(
         <div className="fixed inset-0 z-[70] flex lg:hidden" role="dialog" aria-modal="true" aria-labelledby={mobileHistoryTitleId}>
           <button type="button" className="absolute inset-0 bg-black/35" aria-label="Закрыть историю чатов" onClick={() => setMobileHistoryOpen(false)} />
           <div
@@ -1737,16 +1806,18 @@ export default function BubbleChatPage({
         description={t.sessions.confirmDeleteMessage}
       />
       <section className="flex-1 flex flex-col min-w-0 min-h-0" aria-label="Разговор с Коррой">
-        <div className="flex min-h-12 items-center border-b border-border/60 px-3 lg:hidden">
+        {!mobileHistory && <div className="flex min-h-12 items-center border-b border-border/60 px-3 lg:hidden">
           <Button type="button" ghost size="sm" onClick={() => setMobileHistoryOpen(true)} prefix={<MessageSquare aria-hidden />} aria-label="Открыть историю чатов">
             Чаты
           </Button>
-        </div>
+        </div>}
         <EffectDecisionCenter
           profile={agentProfile}
           active={active !== false}
           currentSessionId={sessionId}
           onCurrentDecision={resolveApproval}
+          hideWhenSettledOnPhone={Boolean(mobileHistory)}
+          expandRequest={decisionsRequest}
         />
         <BubbleChatTranscript
           voiceSettings={voiceSettings} profile={agentProfile || "default"} active={active !== false}

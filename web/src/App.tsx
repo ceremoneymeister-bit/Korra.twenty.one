@@ -68,6 +68,7 @@ import { useBelowBreakpoint } from "@nous-research/ui/hooks/use-below-breakpoint
 import { useSidebarStatus } from "@/hooks/useSidebarStatus";
 import { useStore } from "@nanostores/react";
 import { $activeAgentProfile } from "@/lib/active-agent";
+import { $mobileNavOpen } from "@/lib/mobile-nav";
 import { AuthWidget } from "@/components/AuthWidget";
 import { PageHeaderProvider } from "@/contexts/PageHeaderProvider";
 import { ProfileProvider } from "@/contexts/ProfileProvider";
@@ -462,8 +463,11 @@ export default function App() {
   const { pathname } = useLocation();
   const { manifests, loading: pluginsLoading } = usePlugins();
   const { theme } = useTheme();
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const closeMobile = useCallback(() => setMobileOpen(false), []);
+  // Меню ☰ открывают и фиксированная шапка, и строка разговора на экране
+  // агентов (там фиксированной шапки нет), поэтому состояние общее.
+  const mobileOpen = useStore($mobileNavOpen);
+  const setMobileOpen = useCallback((open: boolean) => $mobileNavOpen.set(open), []);
+  const closeMobile = useCallback(() => setMobileOpen(false), [setMobileOpen]);
 
   const [collapsed, setCollapsed] = useState(() => {
     try {
@@ -665,7 +669,7 @@ export default function App() {
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = prevOverflow;
     };
-  }, [mobileOpen]);
+  }, [mobileOpen, setMobileOpen]);
 
   useEffect(() => {
     const mql = window.matchMedia("(min-width: 1024px)");
@@ -674,7 +678,7 @@ export default function App() {
     };
     mql.addEventListener("change", onChange);
     return () => mql.removeEventListener("change", onChange);
-  }, []);
+  }, [setMobileOpen]);
 
   return (
     <ProfileProvider>
@@ -704,6 +708,10 @@ export default function App() {
           "flex items-center gap-2 px-4 py-2",
 
           "bg-background-base",
+          // На экране агентов шапку заменяет строка разговора с ☰ (мобильная
+          // шапка «D», 28.09): ряд «› KORRA» съедал место до переписки.
+          // Последним: `hidden` должен перебить `flex` при слиянии классов.
+          isAgentsRoute && "hidden",
         )}
         style={{
           background: componentSurfaceBackground("header"),
@@ -736,7 +744,7 @@ export default function App() {
           fixed lg:hidden header is h-14/z-40; previously each banner carried
           its own mt-14 AND the content kept pt-14, so two visible banners
           stacked three offsets (NS-656 review P3). One spacer, applied once. */}
-      <div aria-hidden className="h-14 shrink-0 lg:hidden" />
+      <div aria-hidden className={cn("h-14 shrink-0 lg:hidden", isAgentsRoute && "hidden")} />
       <PluginSlot name="header-banner" />
       <MemoryPressureBanner status={sidebarStatus} />
 
@@ -979,9 +987,11 @@ export default function App() {
               className={cn(
                 "relative z-2 flex min-w-0 min-h-0 flex-1 flex-col",
                 "px-3 sm:px-6",
-                isFullHeightRoute
-                  ? "pb-0 pt-1 sm:pt-2 lg:pt-4"
-                  : "pt-2 sm:pt-4 lg:pt-6",
+                isAgentsRoute
+                  ? "pb-0 pt-0 lg:pt-4"
+                  : isFullHeightRoute
+                    ? "pb-0 pt-1 sm:pt-2 lg:pt-4"
+                    : "pt-2 sm:pt-4 lg:pt-6",
                 isDocsRoute && "min-h-0 flex-1",
               )}
             >
