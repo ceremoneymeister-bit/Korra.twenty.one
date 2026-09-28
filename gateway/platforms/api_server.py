@@ -2463,6 +2463,9 @@ class APIServerAdapter(BasePlatformAdapter):
             ("POST", "/api/jobs/{job_id}/pause", self._handle_pause_job),
             ("POST", "/api/jobs/{job_id}/resume", self._handle_resume_job),
             ("POST", "/api/jobs/{job_id}/run", self._handle_run_job),
+            # A cron run's terminal asks whether its run secret is genuine
+            # (cron.recipients.running_job); nothing is granted by a file.
+            ("POST", "/api/cron/run-grant", self._handle_cron_run_grant),
         ]
         routes.extend(_room_grants._http_routes(self))
         routes.extend(_api_runs._http_routes(self))
@@ -7453,6 +7456,27 @@ class APIServerAdapter(BasePlatformAdapter):
             return web.json_response({"error": _redact_api_error_text(e)}, status=400)
         except Exception as e:
             return web.json_response({"error": _redact_api_error_text(e)}, status=500)
+
+    async def _handle_cron_run_grant(self, request: "web.Request") -> "web.Response":
+        """POST /api/cron/run-grant — vouch for a live cron run's secret.
+
+        Answers only for runs this process issued and still executes, in the
+        requesting profile; the token itself never leaves the caller's env.
+        """
+        auth_err = self._check_auth(request)
+        if auth_err:
+            return auth_err
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid body"}, status=400)
+        token = str((body or {}).get("token") or "")
+        from cron.recipients import lookup_live_run
+
+        grant = lookup_live_run(token, profile=_api_request_profile.get() or "default")
+        if not grant:
+            return web.json_response({"error": "not a live run"}, status=404)
+        return web.json_response({"job_id": grant["job_id"], "execution_id": grant["execution_id"]})
 
     async def _handle_delete_job(self, request: "web.Request") -> "web.Response":
         """DELETE /api/jobs/{job_id} — delete a cron job."""

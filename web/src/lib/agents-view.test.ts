@@ -77,6 +77,24 @@ describe("личный вид экрана агентов", () => {
     expect(JSON.parse(localStorage.getItem(viewCacheKey()) ?? "null")).toMatchObject({ agents_mobile: "list", revision: 4 });
   });
 
+  it("поздний ответ на прежнюю запись не отменяет последнее нажатие", async () => {
+    apiMocks.getDashboardView.mockResolvedValue(pref());
+    let answerFirst: (value: DashboardViewPreference) => void = () => {};
+    apiMocks.setDashboardView
+      .mockImplementationOnce(() => new Promise((resolve) => { answerFirst = resolve; }))
+      .mockImplementationOnce(async (body) => pref({ ...body, revision: 5 }));
+    await loadAgentsView();
+
+    chooseAgentsMobileMode("list");
+    await Promise.resolve();
+    chooseAgentsMobileMode("tabs");
+    answerFirst(pref({ agents_mobile: "list", revision: 4 }));
+    await settle();
+
+    expect(apiMocks.setDashboardView).toHaveBeenLastCalledWith({ revision: 4, agents_mobile: "tabs", pinned: [] });
+    expect($agentsView.get()).toMatchObject({ mode: "tabs", revision: 5, status: "saved" });
+  });
+
   it("закреплённый главный агент уходит на сервер как default", async () => {
     apiMocks.getDashboardView.mockResolvedValue(pref());
     apiMocks.setDashboardView.mockImplementation(async (body) => pref({ ...body, revision: 4 }));

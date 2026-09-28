@@ -559,3 +559,27 @@ class TestCronPromptScanParity:
                 assert "Blocked" in data["error"] or "threat" in data["error"].lower()
                 mock_create.assert_not_called()
 
+
+
+class TestCronRunGrant:
+    """A cron run's terminal asks the gateway whether its secret is genuine."""
+
+    @pytest.mark.asyncio
+    async def test_only_a_live_run_of_this_profile_is_vouched_for(self, adapter, monkeypatch):
+        from cron import recipients
+
+        app = _create_app(adapter)
+        app.router.add_post(recipients.GRANT_ROUTE, adapter._handle_cron_run_grant)
+        monkeypatch.setattr(recipients, "_execution_is_running", lambda execution_id: execution_id == "run-1")
+        live = recipients.issue_run_token({"id": "job-a", "execution_id": "run-1"})
+        ended = recipients.issue_run_token({"id": "job-b", "execution_id": "run-2"})
+        try:
+            async with TestClient(TestServer(app)) as cli:
+                ok = await cli.post(recipients.GRANT_ROUTE, json={"token": live})
+                assert ok.status == 200 and (await ok.json())["job_id"] == "job-a"
+                for token in (ended, "made-up", ""):
+                    refused = await cli.post(recipients.GRANT_ROUTE, json={"token": token})
+                    assert refused.status == 404
+        finally:
+            recipients.retire_run_token(live)
+            recipients.retire_run_token(ended)

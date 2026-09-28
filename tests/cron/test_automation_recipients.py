@@ -277,12 +277,15 @@ def test_a_one_shot_reminder_is_not_spent_before_the_answer(store):
 
 
 def test_korra_send_in_a_running_jobs_terminal_uses_its_confirmation(store):
-    """P1-1 / re-check A: a child process (``korra send`` in the job's
-    terminal) holds this run's secret; a public job id grants nothing, and the
-    secret works only while its exact execution runs."""
+    """P1-1 / re-checks A: a child process (``korra send`` in the job's
+    terminal) holds this run's secret, and only the scheduler that issued it
+    can vouch for it. A public id, a forged grant file, a made-up secret or a
+    finished run grant nothing."""
+    import http.server
     import os
     import subprocess
     import sys
+    import threading
 
     from cron import executions
 
@@ -290,13 +293,31 @@ def test_korra_send_in_a_running_jobs_terminal_uses_its_confirmation(store):
                     audience="клиенты с ДР")
     _resolve(created["recipients"]["decision_id"], "once")
     job = _job(created["job_id"])
+
+    class Scheduler(http.server.BaseHTTPRequestHandler):
+        """Stands in for the gateway: answers from this process's registry."""
+
+        def do_POST(self):  # noqa: N802
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            ok = self.path == recipients.GRANT_ROUTE and self.headers.get("Authorization") == "Bearer k"
+            grant = recipients.lookup_live_run(body.get("token", ""), profile="default") if ok else None
+            self.send_response(200 if grant else 404)
+            self.end_headers()
+            self.wfile.write(json.dumps(grant or {}).encode())
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Scheduler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
     child = (
         "from cron import recipients;"
         "job = recipients.running_job();"
         "print(job['id'] if job else '-', recipients.send_allowed_in_run('telegram', '555'))"
     )
     base_env = {**os.environ, "KORRA_HOME": str(store), "HERMES_HOME": str(store),
-                "KORRA_CRON_SESSION": "1", "PYTHONDONTWRITEBYTECODE": "1"}
+                "KORRA_CRON_SESSION": "1", "PYTHONDONTWRITEBYTECODE": "1", "API_SERVER_KEY": "k",
+                "API_SERVER_PROXY_TARGET": f"http://127.0.0.1:{server.server_port}"}
 
     def ask(**extra) -> list:
         return subprocess.run([sys.executable, "-c", child], env={**base_env, **extra},
@@ -306,14 +327,20 @@ def test_korra_send_in_a_running_jobs_terminal_uses_its_confirmation(store):
     executions.mark_execution_running(attempt["id"])
     token = recipients.issue_run_token({**job, "execution_id": attempt["id"]})
     try:
+        forged = store / "cron" / "run-tokens"
+        forged.mkdir(parents=True, exist_ok=True)
+        import hashlib
+        (forged / (hashlib.sha256(b"forged").hexdigest() + ".json")).write_text(
+            json.dumps({"job_id": job["id"], "execution_id": attempt["id"]}))
+        assert ask(KORRA_CRON_RUN_TOKEN="forged") == ["-", "False"]   # a file proves nothing
         assert ask(KORRA_CRON_JOB_ID=job["id"]) == ["-", "False"]      # an id is public
-        assert ask(KORRA_CRON_RUN_TOKEN="forged") == ["-", "False"]
         assert ask(KORRA_CRON_RUN_TOKEN=token) == [job["id"], "True"]
         executions.finish_execution(attempt["id"], success=True)
         assert ask(KORRA_CRON_RUN_TOKEN=token) == ["-", "False"]       # that run is over
     finally:
         recipients.retire_run_token(token)
-    assert not list((store / "cron" / "run-tokens").glob("*.json"))
+        server.shutdown()
+    assert recipients.lookup_live_run(token) is None
 
 
 def test_resume_run_now_and_forced_fire_wait_for_the_answer(store):
@@ -394,3 +421,30 @@ def test_saving_the_form_without_changing_recipients_keeps_the_wait(store):
     assert changed["recipients_pending"]["audience"] == "клиенты с ДР"
     assert changed["recipients_pending"]["targets"] == []
     assert changed["enabled"] is False
+
+
+def test_a_delivery_edit_racing_an_audience_removal_keeps_it_removed(store, monkeypatch):
+    """Re-check C (update path): a removal that lands after the tool read the
+    job but before its write wins — the plan is recomputed from the job as it
+    is under the store lock, never from the tool's earlier snapshot."""
+    import cron.jobs as jobs_module
+
+    created = _tool(OWNER_DM, action="create", prompt="Поздравления", schedule="every day at 10am",
+                    audience="source A")
+    _resolve(created["recipients"]["decision_id"], "once")
+    real_mutate = jobs_module.mutate_job
+
+    def removal_lands_first(job_id, compute):
+        jobs_module.update_job(job_id, {"audience": None,
+                                        "recipients_confirmed": {"targets": [], "audience": ""}})
+        return real_mutate(job_id, compute)
+
+    monkeypatch.setattr(jobs_module, "mutate_job", removal_lands_first)
+    _tool(OWNER_DM, action="update", job_id=created["job_id"], deliver="origin")
+    job = _job(created["job_id"])
+    assert recipients.confirmed_audience(job) == ""
+    token = recipients.bind_running_job(job)
+    try:
+        assert recipients.send_allowed_in_run("telegram", "555") is False
+    finally:
+        recipients.reset_running_job(token)

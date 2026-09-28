@@ -1496,7 +1496,17 @@ export function useChatStream(
   }, [loadSession, profile, reset, selectionKey]);
   useEffect(() => { openLatestRef.current = openLatest; }, [openLatest]);
 
+  const restoredKeyRef = useRef<string | null>(null);
   useEffect(() => {
+    // An agent tab nobody has opened yet downloads no history: on a phone
+    // with many agents every mounted tab used to fetch its whole conversation
+    // at once (0.21.15 Astra review; Birukova 28.09). It loads on first open.
+    if (active === false) {
+      if (restoredKeyRef.current !== selectionKey) sessionRef.current = null;
+      return;
+    }
+    if (restoredKeyRef.current === selectionKey) return;
+    restoredKeyRef.current = selectionKey;
     const selection = readChatSelection(selectionKey);
     const id = selection === undefined ? loadChatOutbox(profile ?? "")?.sessionId : selection;
     // The resume effect runs in this same commit, before RESET/LOAD_SESSION
@@ -1519,7 +1529,7 @@ export function useChatStream(
       // hid the history from the owner on the phone (Birukova, 28.09.2026).
       void openLatest();
     } else reset();
-  }, [loadSession, openLatest, profile, selectionKey, reset]);
+  }, [active, loadSession, openLatest, profile, selectionKey, reset]);
   useEffect(() => {
     if (!active) return;
     // Возврат к вкладке — не повод показывать чат заново. Проверяем в фоне:

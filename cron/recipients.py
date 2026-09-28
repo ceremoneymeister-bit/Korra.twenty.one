@@ -27,8 +27,8 @@ import json
 import logging
 import os
 import secrets
+import threading
 import time
-from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -62,15 +62,24 @@ def reset_running_job(token: contextvars.Token) -> None:
     _RUNNING_JOB.reset(token)
 
 
-def _run_tokens_dir() -> Path:
-    from cron.jobs import _current_cron_store
+#: Secrets of runs executing in THIS scheduler process: sha256 → grant.
+#: Kept in memory only — nothing on disk to forge (0.21.15 Astra review A).
+_LIVE_RUNS: dict[str, dict[str, str]] = {}
+_LIVE_RUNS_LOCK = threading.Lock()
+GRANT_ROUTE = "/api/cron/run-grant"
 
-    return _current_cron_store().cron_dir / "run-tokens"
+
+def _digest(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
 
 
-def _token_path(token: str) -> Path:
-    # Only the digest is on disk: listing the directory reveals no token.
-    return _run_tokens_dir() / (hashlib.sha256(token.encode()).hexdigest() + ".json")
+def _current_profile() -> str:
+    try:
+        from korra_cli.profiles import get_active_profile_name
+
+        return get_active_profile_name() or "default"
+    except Exception:
+        return "default"
 
 
 def issue_run_token(job: dict) -> str:
@@ -79,26 +88,30 @@ def issue_run_token(job: dict) -> str:
     if not execution_id:
         return ""
     token = secrets.token_urlsafe(32)
-    try:
-        directory = _run_tokens_dir()
-        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-        path = _token_path(token)
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump({"job_id": str(job["id"]), "execution_id": execution_id}, handle)
-    except Exception:
-        logger.warning("Could not issue a run token for job %s", job.get("id"), exc_info=True)
-        return ""
+    with _LIVE_RUNS_LOCK:
+        _LIVE_RUNS[_digest(token)] = {"job_id": str(job["id"]), "execution_id": execution_id,
+                                      "profile": _current_profile()}
     return token
 
 
 def retire_run_token(token: str) -> None:
     if not token:
         return
-    try:
-        _token_path(token).unlink(missing_ok=True)
-    except Exception:
-        logger.debug("Could not retire a run token", exc_info=True)
+    with _LIVE_RUNS_LOCK:
+        _LIVE_RUNS.pop(_digest(token), None)
+
+
+def lookup_live_run(token: str, profile: str | None = None) -> dict | None:
+    """The grant of a run this process issued and still executes, if any."""
+    if not token:
+        return None
+    with _LIVE_RUNS_LOCK:
+        grant = dict(_LIVE_RUNS.get(_digest(token)) or {})
+    if not grant or (profile is not None and grant.get("profile") != profile):
+        return None
+    if not _execution_is_running(grant["execution_id"]):
+        return None
+    return grant
 
 
 def _execution_is_running(execution_id: str) -> bool:
@@ -117,13 +130,45 @@ def _execution_is_running(execution_id: str) -> bool:
         return False
 
 
+def _ask_scheduler(token: str) -> dict | None:
+    """Ask the gateway that runs the scheduler whether it issued this secret.
+
+    The answer comes from the scheduler's memory over its own authenticated
+    local API; a file or an id the terminal could write proves nothing.
+    """
+    import urllib.request
+
+    from agent.secret_scope import get_secret
+
+    key = str(get_secret("API_SERVER_KEY", "") or "").strip()
+    if not key:
+        return None
+    base = (os.environ.get("API_SERVER_PROXY_TARGET")
+            or f"http://127.0.0.1:{os.environ.get('API_SERVER_PORT', '8642')}").rstrip("/")
+    profile = _current_profile()
+    prefix = "" if profile == "default" else f"/p/{profile}"
+    request = urllib.request.Request(
+        base + prefix + GRANT_ROUTE,
+        data=json.dumps({"token": token}).encode(),
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            grant = json.loads(response.read() or b"{}")
+    except Exception:
+        logger.debug("Run grant lookup failed", exc_info=True)
+        return None
+    return grant if isinstance(grant, dict) and grant.get("job_id") else None
+
+
 def running_job() -> dict | None:
     """The scheduled job this code runs for, in the scheduler or its terminal.
 
     ``korra send`` from an agent's terminal is a child process: the context
-    variable is gone, but the cron bridge carries this run's secret. The secret
-    counts only while its exact execution runs in a live scheduler process
-    (0.21.15 Astra review P1-1 and re-check A: a job id alone is public).
+    variable is gone, but the cron bridge carries this run's secret. Only the
+    scheduler process that issued it can vouch for it, and only while its exact
+    execution runs (0.21.15 Astra review P1-1 and re-checks A).
     """
     job = _RUNNING_JOB.get()
     if job:
@@ -136,15 +181,13 @@ def running_job() -> dict | None:
         token = str(get_session_env(RUNNING_JOB_ENV, "") or "").strip()
         if not token:
             return None
-        path = _token_path(token)
-        if not path.is_file():
-            return None
-        grant = json.loads(path.read_text(encoding="utf-8"))
-        if not _execution_is_running(str(grant.get("execution_id") or "")):
+        grant = lookup_live_run(token) or _ask_scheduler(token)
+        if not grant or not _execution_is_running(str(grant.get("execution_id") or "")):
             return None
         from cron.jobs import get_job
 
-        return get_job(str(grant.get("job_id") or ""))
+        job = get_job(str(grant.get("job_id") or ""))
+        return job if job and job.get("id") == grant.get("job_id") else None
     except Exception:
         logger.debug("Running job lookup failed", exc_info=True)
         return None

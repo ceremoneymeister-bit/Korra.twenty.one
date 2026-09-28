@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 
 /**
  * Hook that adds standard modal behaviors when `open` is true:
@@ -16,6 +16,13 @@ export function useModalBehavior({
   onClose: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  // The latest callback, read at Escape time. A parent that re-renders with a
+  // new closure (a chat list refreshing every few seconds) must not tear the
+  // modal down and throw focus out of the field the person is typing in.
+  const onCloseRef = useRef(onClose);
+  useLayoutEffect(() => {
+    onCloseRef.current = onClose;
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -25,7 +32,7 @@ export function useModalBehavior({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
-        onClose();
+        onCloseRef.current();
       }
     };
 
@@ -38,7 +45,7 @@ export function useModalBehavior({
       document.body.style.overflow = prevOverflow;
       prevActive?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   return containerRef;
 }

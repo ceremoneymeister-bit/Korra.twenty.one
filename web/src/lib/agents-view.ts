@@ -120,6 +120,10 @@ function accept(pref: DashboardViewPreference, status: AgentsViewStatus = "idle"
 let loading: Promise<void> | null = null;
 let writes: Promise<void> = Promise.resolve();
 let pendingWrites = 0;
+/** Растёт с каждым выбором человека. Ответ на запись, отправленную до
+ *  нового выбора, подтверждает только ревизию, а не прежний выбор
+ *  (0.21.15 Astra review: поздний PUT затирал последнее нажатие). */
+let intentGeneration = 0;
 
 /** Перечитать выбор с сервера. Пока идёт запись, чтение ждёт её исхода. */
 export function loadAgentsView(): Promise<void> {
@@ -167,6 +171,7 @@ function persist(): void {
       // Уходит последний выбор человека к этой минуте, а не тот, с которого
       // началась очередь: два быстрых нажатия — одна запись с итогом.
       const intent = $agentsView.get();
+      const sentGeneration = intentGeneration;
       try {
         const saved = await api.setDashboardView({
           revision,
@@ -174,7 +179,13 @@ function persist(): void {
           pinned: intent.pinned.map(toWireProfile),
         });
         const pref = validViewPreference(saved);
-        if (pref) accept(pref, "saved");
+        if (pref && sentGeneration !== intentGeneration) {
+          // A newer choice waits in the queue: keep it on screen and write it
+          // next against the revision this answer confirmed.
+          $agentsView.set({ ...$agentsView.get(), revision: pref.revision, scope: pref.scope });
+        } else if (pref) {
+          accept(pref, "saved");
+        }
       } catch (error) {
         const winner = conflictWinner(error);
         if (winner) {
@@ -210,6 +221,7 @@ export function chooseAgentsMobileMode(mode: AgentsMobileMode): void {
     $agentsView.set({ ...current, status: "saved", message: "" });
     return;
   }
+  intentGeneration += 1;
   $agentsView.set({ ...current, mode, status: "saving", message: "" });
   persist();
 }
@@ -220,6 +232,7 @@ export function togglePinnedAgent(profile: string): void {
   const pinned = current.pinned.includes(profile)
     ? current.pinned.filter((item) => item !== profile)
     : [...current.pinned, profile];
+  intentGeneration += 1;
   $agentsView.set({ ...current, pinned, status: "saving", message: "" });
   persist();
 }
@@ -229,5 +242,6 @@ export function resetAgentsViewForTests(): void {
   loading = null;
   writes = Promise.resolve();
   pendingWrites = 0;
+  intentGeneration = 0;
   $agentsView.set(initialAgentsView());
 }

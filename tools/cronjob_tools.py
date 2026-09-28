@@ -2214,21 +2214,36 @@ def cronjob(
             _card = None
             _retire = ""
             if deliver is not None or audience is not None:
-                # One write carries the change and its recipients guard.
-                _plan = _plan_owner_recipients(
-                    {**job, **updates},
-                    before=job,
-                    requested_deliver=updates.get("deliver"),
-                    deliver_changed=deliver is not None,
-                    audience=audience,
-                ) or {}
-                _card = _plan.pop("_card", None)
-                _retire = _plan.pop("_retire", "")
-                if "state" in updates and _plan.get("state") == "paused":
-                    updates.pop("enabled", None)
-                    updates.pop("state", None)
-                updates.update(_plan)
-            updated = update_job(job_id, updates)
+                # The recipients plan is computed from the job as it is at the
+                # moment of the write, under the store lock: a concurrent change
+                # (a removed audience) cannot be overwritten by an older snapshot
+                # (0.21.15 Astra re-check C).
+                from cron.jobs import mutate_job
+
+                _planned: Dict[str, Any] = {}
+
+                def _with_plan(current: Dict[str, Any]) -> Dict[str, Any]:
+                    merged = dict(updates)
+                    plan = _plan_owner_recipients(
+                        {**current, **merged},
+                        before=current,
+                        requested_deliver=merged.get("deliver"),
+                        deliver_changed=deliver is not None,
+                        audience=audience,
+                    ) or {}
+                    _planned["card"] = plan.pop("_card", None)
+                    _planned["retire"] = plan.pop("_retire", "")
+                    if "state" in merged and plan.get("state") == "paused":
+                        merged.pop("enabled", None)
+                        merged.pop("state", None)
+                    merged.update(plan)
+                    return merged
+
+                updated = mutate_job(job_id, _with_plan)
+                _card = _planned.get("card")
+                _retire = _planned.get("retire", "")
+            else:
+                updated = update_job(job_id, updates)
             _upd_recipients = None
             if _retire:
                 from cron.recipients import retire_card

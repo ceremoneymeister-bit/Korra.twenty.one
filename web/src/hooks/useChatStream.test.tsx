@@ -1257,3 +1257,25 @@ describe("opening an agent — Astra review of candidate ce8046b8e1", () => {
     }
   });
 });
+
+describe("фоновые вкладки агентов (0.21.15 Astra review)", () => {
+  beforeEach(async () => {
+    const { getChatRuns } = await import("@/lib/chat-runs");
+    vi.mocked(getChatRuns).mockResolvedValue([]);
+  });
+
+  it("неоткрытый агент не скачивает историю, пока его не откроют", async () => {
+    const lookups = vi.spyOn(api, "getSessions").mockResolvedValue({ sessions: [{ id: "latest" }], total: 1, limit: 1, offset: 0 } as never);
+    const history = vi.spyOn(api, "getSessionMessages").mockResolvedValue({ session_id: "latest", messages: [] });
+    const onValue = (value: UseChatStreamReturn) => { current = value; };
+    await act(async () => root.render(<Probe profile="rop" active={false} onValue={onValue} />));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(lookups).not.toHaveBeenCalledWith(1, 0, "rop", "recent", expect.anything());
+    expect(history).not.toHaveBeenCalledWith("latest", "rop", expect.anything());
+
+    await act(async () => root.render(<Probe profile="rop" active onValue={onValue} />));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(history).toHaveBeenCalledWith("latest", "rop", expect.any(AbortSignal));
+    expect(current.sessionId).toBe("latest");
+  });
+});
