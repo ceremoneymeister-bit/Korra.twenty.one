@@ -101,3 +101,31 @@ def test_promotion_failure_rolls_back_the_human_turn(tmp_path, monkeypatch):
             db.append_messages_batch("cron_job_run", [{"role": "user", "content": "Reply"}], human_turn=True)
         assert db.get_messages("cron_job_run") == before
         assert db.get_session("cron_job_run")["source"] == "cron"
+
+
+def test_engine_written_user_rows_are_not_a_discussion_and_moves_are_journaled(tmp_path):
+    """0.21.15 review P2-A: continuations and nudges the engine stores as
+    ``user`` must not turn a pure run visible; every move is recorded."""
+    from agent.context_compressor import MAX_ITERATIONS_SUMMARY_REQUEST
+    from agent.conversation_loop import _CODEX_INCOMPLETE_NUDGE
+
+    path = tmp_path / "state.db"
+    with SessionDB(path) as db:
+        seed(db, "cron_iteration_limit")
+        db.append_message("cron_iteration_limit", "user", MAX_ITERATIONS_SUMMARY_REQUEST)
+        seed(db, "cron_codex_nudge")
+        db.append_message("cron_codex_nudge", "user", _CODEX_INCOMPLETE_NUDGE)
+        seed(db, "cron_person")
+        db.append_message("cron_person", "user", "Перенеси отчёт на час")
+    with sqlite3.connect(path) as conn:
+        conn.execute("UPDATE sessions SET source='cron' WHERE id='cron_person'")
+        conn.execute("DELETE FROM state_meta WHERE key LIKE 'cron_discussions_v1%'")
+    with SessionDB(path) as db:
+        assert db.get_session("cron_iteration_limit")["source"] == "cron"
+        assert db.get_session("cron_codex_nudge")["source"] == "cron"
+        assert db.get_session("cron_person")["source"] == "cron_discussion"
+    with sqlite3.connect(path) as conn:
+        moved = conn.execute(
+            "SELECT value FROM state_meta WHERE key='cron_discussions_v1_moved'"
+        ).fetchone()[0]
+    assert json.loads(moved) == ["cron_person"]
