@@ -82,6 +82,9 @@ const MAIN_PLUGIN_ANCHOR = "/cron";
  * человек, независимо от того, что он купил.
  */
 export const CLIENT_SETTINGS_PATHS = [
+  // Тема и способ переключать агентов на телефоне (0.21.15). Первым: это
+  // личная настройка экрана, а не ключи и модель установки.
+  "/view",
   "/env",
   "/models",
   "/updates",
@@ -90,6 +93,7 @@ export const CLIENT_SETTINGS_PATHS = [
 ];
 
 export const CLIENT_SETTINGS_LABELS: Record<string, string> = {
+  "/view": "Вид",
   "/env": "Ключи и доступы",
   "/models": "Модель",
   "/updates": "Обновления",

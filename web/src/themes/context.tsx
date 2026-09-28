@@ -267,6 +267,9 @@ function applyTheme(theme: DashboardTheme) {
   }
   root.dataset.density = theme.layout.density;
   root.style.colorScheme = theme.name === "dark" ? "dark" : "light";
+  // Токены состояний агента (`--k-*`) переключаются по атрибуту: их нет в
+  // палитре темы, и переписывать их инлайном незачем.
+  root.dataset.korraTheme = theme.name === "dark" ? "dark" : "light";
   cancelAnimationFrame(transitionFrame);
   transitionFrame = requestAnimationFrame(() => {
     void root.offsetHeight;

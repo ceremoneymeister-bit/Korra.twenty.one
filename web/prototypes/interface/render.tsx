@@ -26,7 +26,7 @@ function DemoNavigation() {
   return null;
 }
 createRoot(document.getElementById("root")!).render(
-  <MemoryRouter initialEntries={[`/agents?agent=default&resume=demo-${scenario}`]}>
+  <MemoryRouter initialEntries={[new URLSearchParams(location.search).get("start") || `/agents?agent=default&resume=demo-${scenario}`]}>
     <DemoNavigation /><I18nProvider><ThemeProvider><SystemActionsProvider><App /></SystemActionsProvider></ThemeProvider></I18nProvider>
   </MemoryRouter>,
 );

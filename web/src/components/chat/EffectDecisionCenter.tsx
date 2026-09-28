@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, Inbox } from "lucide-react";
 
 import { CommandApprovalCard } from "@/components/chat/CommandApprovalCard";
@@ -36,6 +36,12 @@ interface EffectDecisionCenterProps {
     requestId: string,
     choice: ApprovalChoiceValue,
   ) => Promise<boolean>;
+  /** На телефоне полоса решений видна, только когда решения есть: строка
+   *  «Решения · нет ожидающих» занимала место под шапкой каждого агента.
+   *  Десктоп не меняется. */
+  hideWhenSettledOnPhone?: boolean;
+  /** Счётчик «раскрыть решения» (кнопка «Решить» в листе работ). */
+  expandRequest?: number;
 }
 
 function shortTarget(item: SSEApprovalRequestData): string {
@@ -55,9 +61,17 @@ export function EffectDecisionCenter({
   active = true,
   currentSessionId,
   onCurrentDecision,
+  hideWhenSettledOnPhone = false,
+  expandRequest = 0,
 }: EffectDecisionCenterProps) {
   const [items, setItems] = useState<SSEApprovalRequestData[]>([]);
   const [open, setOpen] = useState(false);
+  const handledExpand = useRef(expandRequest);
+  useEffect(() => {
+    if (handledExpand.current === expandRequest) return;
+    handledExpand.current = expandRequest;
+    setOpen(true);
+  }, [expandRequest]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState("");
 
@@ -134,9 +148,18 @@ export function EffectDecisionCenter({
   );
 
   if (items.length === 0) return null;
+  const settled = pending.length === 0 && legacy.length === 0;
 
   return (
-    <section className="relative z-20 border-b border-border/60 px-3 py-2 sm:px-5" aria-label="Центр решений">
+    <section
+      className={cn(
+        "relative z-20 border-b border-border/60 px-3 py-2 sm:px-5",
+        hideWhenSettledOnPhone && settled && "max-lg:hidden",
+      )}
+      aria-label="Центр решений"
+      data-decision-center
+      data-decisions-settled={settled ? "true" : undefined}
+    >
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}

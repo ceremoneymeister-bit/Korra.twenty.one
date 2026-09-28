@@ -68,6 +68,13 @@ import {
 import { hasCrossedDragThreshold, shouldStartTabDrag } from "@/lib/tab-drag-gesture";
 import { useAgentTabs } from "@/hooks/useAgentTabs";
 import { $activeAgentProfile } from "@/lib/active-agent";
+import { useStore } from "@nanostores/react";
+import { useBelowDesktop } from "@/hooks/useMediaQuery";
+import { $agentsView, loadAgentsView } from "@/lib/agents-view";
+import {
+  useAgentsMobileChrome,
+  type AgentsMobileActions,
+} from "@/components/agents/mobile/AgentsMobileChrome";
 
 /* ------------------------------------------------------------------ */
 /*  AgentWorkbenchPage (default export)                                */
@@ -193,7 +200,27 @@ export default function AgentWorkbenchPage() {
     {},
   );
   const [searchParams, setSearchParams] = useSearchParams();
-  const { pathname } = useLocation();
+  const location = useLocation();
+  const { pathname } = location;
+
+  // Телефон и узкий планшет — мобильная шапка «D» (принята 28.09): строка
+  // разговора и полоса аватаров или экран-список, по выбору человека в
+  // «Настройки → Вид». Десктоп — прежняя полоса вкладок, без изменений.
+  const isMobile = useBelowDesktop();
+  const view = useStore($agentsView);
+  const listMode = isMobile && view.mode === "list";
+  const [chatsOpen, setChatsOpen] = useState(false);
+  const [chatsHost, setChatsHost] = useState<HTMLElement | null>(null);
+  const [decisionsRequestByProfile, setDecisionsRequestByProfile] = useState<Record<string, number>>({});
+  // В режиме «Список» агент открыт поверх списка. Открытие из списка —
+  // отдельная запись в истории браузера: «‹» и жест «назад» Safari
+  // возвращают к списку. Ссылка из уведомления или дашборда открывает
+  // агента сразу, без записи: «‹» тогда просто показывает список.
+  const agentScreenInHistory = Boolean(
+    (location.state as { korraAgentScreen?: boolean } | null)?.korraAgentScreen,
+  );
+  const [directAgentOpen, setDirectAgentOpen] = useState(false);
+  const listHome = listMode && !agentScreenInHistory && !directAgentOpen;
 
   useEffect(() => {
     if (!openMenu) return;
@@ -260,7 +287,8 @@ export default function AgentWorkbenchPage() {
     } catch {
       // Device storage is optional; the strip remains normally scrollable.
     }
-  }, [onAgentsRoute]);
+    // Полоса есть только на десктопе: после поворота планшета её ещё нет.
+  }, [onAgentsRoute, isMobile]);
 
   // Выбранный агент всегда виден на полосе: стрелки, список «Все агенты»,
   // ссылка из уведомления и карточка дашборда могут выбрать того, кто стоит
@@ -273,7 +301,7 @@ export default function AgentWorkbenchPage() {
       scroller.querySelectorAll<HTMLElement>("[data-agent-tab-profile]"),
     ).find((element) => element.dataset.agentTabProfile === activeId);
     if (item) revealInStrip(scroller, item);
-  }, [activeId, onAgentsRoute]);
+  }, [activeId, onAgentsRoute, isMobile]);
 
   // Помещаются ли все вкладки. Меряем саму полосу и каждую вкладку: полоса
   // меняет ширину с окном и боковым меню, вкладка — с именем агента.
@@ -293,7 +321,7 @@ export default function AgentWorkbenchPage() {
     observer.observe(scroller);
     for (const child of Array.from(scroller.children)) observer.observe(child);
     return () => observer.disconnect();
-  }, [tabs]);
+  }, [tabs, isMobile]);
 
   // Колесо мыши над полосой листает её вбок. Без этого на десктопе без
   // тачпада до дальних вкладок было не добраться: полоса прокручивается, но
@@ -316,7 +344,7 @@ export default function AgentWorkbenchPage() {
     };
     scroller.addEventListener("wheel", onWheel, { passive: false });
     return () => scroller.removeEventListener("wheel", onWheel);
-  }, []);
+  }, [isMobile]);
 
   const rememberTabScroll = useCallback(() => {
     try {
@@ -371,6 +399,15 @@ export default function AgentWorkbenchPage() {
   }, [onAgentsRoute, refresh]);
 
   useEffect(() => {
+    if (onAgentsRoute) void loadAgentsView();
+    // Ушли с экрана — в следующий раз «Список» начинается со списка.
+    else setDirectAgentOpen(false);
+  }, [onAgentsRoute]);
+
+  // Другой агент — его шторка чатов закрыта.
+  useEffect(() => { setChatsOpen(false); }, [activeId, listHome]);
+
+  useEffect(() => {
     // Экран живёт смонтированным и на чужих маршрутах, а `?agent=` — ещё и
     // адрес редактора в «Настройках агентов» (`/profiles?agent=…&edit=role`).
     // Читаем и снимаем параметр только у себя, иначе диплинк соседнего
@@ -395,6 +432,7 @@ export default function AgentWorkbenchPage() {
       return;
     }
     setActiveId(agent);
+    setDirectAgentOpen(true);
     const resume = searchParams.get("resume");
     if (resume) setResumeByProfile(previous => ({ ...previous, [agent]: { sessionId: resume } }));
     if (draft) setDraftByProfile((previous) => ({ ...previous, [agent]: draft }));
@@ -544,24 +582,20 @@ export default function AgentWorkbenchPage() {
     [showToast],
   );
 
-  const submitDisplayName = useCallback(
-    async (event: FormEvent<HTMLFormElement>) => {
-      event.preventDefault();
-      const profile = renamingProfile;
-      const displayName = renameValue.trim();
-      if (profile === null || !displayName || savingName) return;
+  /** Переименовать агента: одно действие для меню вкладки и мобильной
+   *  шторки. `true` — имя сохранено. */
+  const renameAgent = useCallback(
+    async (profile: string, displayName: string): Promise<boolean> => {
       const previousLabel =
-        tabs.find((tab) => tab.profile === profile)?.label ?? "";
-      setSavingName(true);
+        [...tabs, ...hiddenTabs].find((tab) => tab.profile === profile)?.label ?? "";
       try {
         await updateDisplayName(profile, displayName);
-        setOpenMenu(null);
-        setRenamingProfile(null);
         // Главная вкладка — профиль самой панели: её подпись «Корра» не из
         // SOUL, роль главного агента не трогаем.
         if (profile && previousLabel && previousLabel !== displayName) {
           void noteSoulName(profile, previousLabel);
         }
+        return true;
       } catch (error) {
         const isMissingEndpoint =
           error instanceof Error && /^404(?:\s|:)/.test(error.message);
@@ -571,19 +605,29 @@ export default function AgentWorkbenchPage() {
             : ownerFacingError(error, "Не удалось переименовать агента."),
           "error",
         );
+        return false;
+      }
+    },
+    [hiddenTabs, noteSoulName, showToast, tabs, updateDisplayName],
+  );
+
+  const submitDisplayName = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      const profile = renamingProfile;
+      const displayName = renameValue.trim();
+      if (profile === null || !displayName || savingName) return;
+      setSavingName(true);
+      try {
+        if (await renameAgent(profile, displayName)) {
+          setOpenMenu(null);
+          setRenamingProfile(null);
+        }
       } finally {
         setSavingName(false);
       }
     },
-    [
-      renameValue,
-      renamingProfile,
-      savingName,
-      showToast,
-      noteSoulName,
-      tabs,
-      updateDisplayName,
-    ],
+    [renameAgent, renameValue, renamingProfile, savingName],
   );
 
   // Удаление агента — из меню его вкладки, с подтверждением. Раньше путь
@@ -678,12 +722,62 @@ export default function AgentWorkbenchPage() {
     else event.currentTarget.querySelector<HTMLInputElement>("input")?.focus();
   };
 
-  return (
-    // Ту же полную высоту, что и у одиночного чата, даёт обёртка в App.tsx
-    // (маршрут /agents получает `flex flex-1 flex-col` и `pb-0`).
-    <div className="flex h-full min-h-0 flex-col">
-      {/* Полоса вкладок тянется от края до края — отрицательные поля гасят
-          горизонтальный padding обёртки, внутренние возвращают его тексту. */}
+  const closeChats = useCallback(() => setChatsOpen(false), []);
+  const showAgentScreen = useCallback(() => {
+    // Из списка — запись в истории браузера: «‹» и жест «назад» вернут к
+    // списку. Уже открытый агент — просто смена агента, без новой записи.
+    if (listHome) navigate(`${location.pathname}${location.search}`, { state: { korraAgentScreen: true } });
+  }, [listHome, location.pathname, location.search, navigate]);
+  const openAgentOnPhone = useCallback((profile: string) => {
+    setActiveId(profile);
+    setChatsOpen(false);
+    showAgentScreen();
+  }, [showAgentScreen]);
+  const mobileActions: AgentsMobileActions = {
+    openAgent: openAgentOnPhone,
+    openChat: (profile, sessionId) => {
+      setResumeByProfile((previous) => ({ ...previous, [profile]: { sessionId } }));
+      openAgentOnPhone(profile);
+    },
+    newChat: (profile) => {
+      startNewChat(profile);
+      setChatsOpen(false);
+      showAgentScreen();
+    },
+    openChats: () => setChatsOpen(true),
+    openDecisions: (profile) => {
+      openAgentOnPhone(profile);
+      setDecisionsRequestByProfile((previous) => ({ ...previous, [profile]: (previous[profile] ?? 0) + 1 }));
+    },
+    back: () => {
+      setChatsOpen(false);
+      if (agentScreenInHistory) navigate(-1);
+      else setDirectAgentOpen(false);
+    },
+    rename: renameAgent,
+    remove: (profile) => profileDelete.requestDelete(profile),
+    hide: hideTab,
+    move: moveTab,
+    openSettings: (profile, kind) => navigate(agentSettingsHref(profile, kind)),
+    addAgent: () => navigate("/profiles/new"),
+    openViewSettings: () => navigate("/view"),
+  };
+  const mobile = useAgentsMobileChrome({
+    enabled: isMobile,
+    mode: view.mode,
+    listHome,
+    tabs,
+    hiddenTabs,
+    activeId,
+    chatsOpen,
+    onChatsHost: setChatsHost,
+    onCloseChats: closeChats,
+    actions: mobileActions,
+  });
+
+  // Полоса вкладок тянется от края до края — отрицательные поля гасят
+  // горизонтальный padding обёртки, внутренние возвращают его тексту.
+  const desktopStrip = (
       <div className="flex shrink-0 items-center gap-2 -mx-3 px-3 py-2 sm:-mx-6 sm:px-6">
         <div
           role="tablist"
@@ -799,6 +893,20 @@ export default function AgentWorkbenchPage() {
         </div>
         <SessionRunActivity tabs={mountedTabs} />
       </div>
+  );
+
+  return (
+    // Ту же полную высоту, что и у одиночного чата, даёт обёртка в App.tsx
+    // (маршрут /agents получает `flex flex-1 flex-col` и `pb-0`).
+    <div
+      {...(isMobile ? mobile.rootProps : {})}
+      className={cn("flex h-full min-h-0 flex-col", isMobile && mobile.rootProps.className)}
+    >
+      {isMobile ? mobile.header : desktopStrip}
+      {/* На телефоне вне экрана агентов остаётся прежнее уведомление «Новый
+          ответ» у края экрана; на самом экране его заменяет уведомление под
+          шапкой. */}
+      {isMobile && !onAgentsRoute ? <SessionRunActivity tabs={mountedTabs} /> : null}
 
       {openMenu?.kind === "tab" && menuTab &&
         createPortal(
@@ -1131,28 +1239,44 @@ export default function AgentWorkbenchPage() {
 
       <Toast toast={toast} />
 
-      <div className="flex min-h-0 flex-1 flex-col">
-        {mountedTabs.map((tab) => (
-          <div
-            key={tab.profile}
-            id={`agent-panel-${tab.profile}`}
-            role="tabpanel"
-            aria-labelledby={`agent-tab-${tab.profile}`}
-            // display:none, а НЕ снятие с монтирования — на этом держится
-            // весь экран (см. шапку файла).
-            style={{ display: tab.profile === activeId ? undefined : "none" }}
-            className="flex min-h-0 flex-1 flex-col"
-          >
-            <BubbleChatPage
-              agentProfile={tab.profile}
-              active={onAgentsRoute && tab.profile === activeId}
-              resumeSession={resumeByProfile[tab.profile]}
-              draft={draftByProfile[tab.profile] ?? null}
-              onDraftConsumed={() => clearDraft(tab.profile)}
-              newChatRequest={newChatByProfile[tab.profile] ?? 0}
-            />
-          </div>
-        ))}
+      {/* Чаты стоят на одном месте дерева и на телефоне, и на десктопе:
+          поворот планшета через границу `lg` не размонтирует их и не
+          обрывает идущий ответ. */}
+      <div className={cn("relative flex min-h-0 flex-1 flex-col", isMobile && "k-body")}>
+        {isMobile ? mobile.home : null}
+        <div className="flex min-h-0 flex-1 flex-col" style={{ display: listHome ? "none" : undefined }}>
+          {mountedTabs.map((tab) => (
+            <div
+              key={tab.profile}
+              id={`agent-panel-${tab.profile}`}
+              // На телефоне полосы вкладок нет — панель просто область чата.
+              role={isMobile ? "region" : "tabpanel"}
+              aria-labelledby={isMobile ? undefined : `agent-tab-${tab.profile}`}
+              aria-label={isMobile ? `Чат с агентом «${tab.label}»` : undefined}
+              data-agent-panel={tab.profile}
+              // display:none, а НЕ снятие с монтирования — на этом держится
+              // весь экран (см. шапку файла).
+              style={{ display: tab.profile === activeId ? undefined : "none" }}
+              className="flex min-h-0 flex-1 flex-col"
+            >
+              <BubbleChatPage
+                agentProfile={tab.profile}
+                active={onAgentsRoute && tab.profile === activeId && !listHome}
+                resumeSession={resumeByProfile[tab.profile]}
+                draft={draftByProfile[tab.profile] ?? null}
+                onDraftConsumed={() => clearDraft(tab.profile)}
+                newChatRequest={newChatByProfile[tab.profile] ?? 0}
+                mobileHistory={isMobile ? {
+                  open: chatsOpen && tab.profile === activeId,
+                  onOpenChange: setChatsOpen,
+                  host: chatsHost,
+                } : undefined}
+                decisionsRequest={decisionsRequestByProfile[tab.profile] ?? 0}
+              />
+            </div>
+          ))}
+        </div>
+        {isMobile ? mobile.overlays : null}
       </div>
     </div>
   );

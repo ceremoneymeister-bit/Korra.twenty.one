@@ -16,6 +16,8 @@ export interface ChatRun {
   title?: string | null;
   delivery?: "pending" | "delivered" | "failed" | "unknown";
   unread?: boolean;
+  /** У строки `waiting_decision`: сколько решений ждёт в этом разговоре. */
+  pending_decisions?: number;
   event_revision?: string;
   failure?: {
     message?: string;
@@ -42,9 +44,62 @@ export const $unreadChatRuns = atom<ChatRun[]>([]);
  *  именно этого чата (markChatViewed). */
 export const $dismissedRunToasts = atom<string[]>([]);
 
-export function dismissRunToasts(): void {
-  const ids = $unreadChatRuns.get().map(run => run.message_id);
-  $dismissedRunToasts.set([...new Set([...$dismissedRunToasts.get(), ...ids])].slice(-200));
+export function dismissRunToasts(ids?: readonly string[]): void {
+  const dismissed = ids ?? $unreadChatRuns.get().map(run => run.message_id);
+  $dismissedRunToasts.set([...new Set([...$dismissedRunToasts.get(), ...dismissed])].slice(-200));
+}
+
+/**
+ * Работы, которые не завершились и которые человек ещё не открыл.
+ *
+ * Знак «!» на агенте держится до открытия именно этого чата. Сбой, увиденный
+ * в прошлый раз, не возвращается после перезагрузки: открытые помечаются в
+ * localStorage. Сбой старше суток при первой загрузке не поднимается —
+ * глобальный опрос держит последний ход каждого разговора бессрочно, и
+ * давняя неудача иначе висела бы вечно.
+ */
+export const $failedChatRuns = atom<ChatRun[]>([]);
+const FAILURE_ACK_KEY = "korra-chat-failures-seen";
+const FAILURE_FRESH_SECONDS = 24 * 60 * 60;
+
+function readAcknowledgedFailures(): string[] {
+  try {
+    const value = JSON.parse(localStorage.getItem(FAILURE_ACK_KEY) ?? "[]");
+    return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function acknowledgeFailures(ids: readonly string[]): void {
+  if (!ids.length) return;
+  try {
+    const next = [...new Set([...readAcknowledgedFailures(), ...ids])].slice(-200);
+    localStorage.setItem(FAILURE_ACK_KEY, JSON.stringify(next));
+  } catch {
+    // Private browsing: the mark lasts for this page only.
+  }
+}
+
+/** Какие сбои из нового опроса показать знаком «!». Чистая функция для теста. */
+export function freshFailures(
+  runs: readonly ChatRun[],
+  previous: readonly ChatRun[],
+  known: readonly ChatRun[],
+  acknowledged: readonly string[],
+  viewed: { profile: string; sessionId: string | null } | null,
+  nowSeconds: number,
+): ChatRun[] {
+  const seen = new Set(acknowledged);
+  const next = runs.filter(run => {
+    if (run.status !== "failed" || seen.has(run.message_id)) return false;
+    if (viewed?.profile === run.profile && viewed.sessionId === run.session_id) return false;
+    if (known.some(item => item.message_id === run.message_id)) return true;
+    const wasBusy = previous.some(old => old.message_id === run.message_id && isRunBusy(old));
+    const recent = nowSeconds - (Number(run.updated_at) || 0) < FAILURE_FRESH_SECONDS;
+    return wasBusy || (!previous.some(old => old.message_id === run.message_id) && recent);
+  });
+  return next;
 }
 
 /** Есть ли у конкретного чата (profile + session) непрочитанный ответ. */
@@ -106,6 +161,11 @@ export function refreshChatRuns(): Promise<void> {
         markServerSessionRead(run.profile, run.session_id);
       }
     }
+    const failed = freshFailures(runs, previous, $failedChatRuns.get(), readAcknowledgedFailures(), viewed, Date.now() / 1000);
+    const known = $failedChatRuns.get();
+    if (failed.length !== known.length || failed.some((run, index) => run.message_id !== known[index]?.message_id)) {
+      $failedChatRuns.set(failed);
+    }
     $chatRuns.set(runs);
     $chatRunsUpdatedAt.set(Date.now());
     $chatRunsReachable.set(true);
@@ -116,6 +176,16 @@ export function refreshChatRuns(): Promise<void> {
 export function markChatViewed(profile: string, sessionId: string | null): void {
   $viewedChat.set({ profile, sessionId });
   $unreadChatRuns.set($unreadChatRuns.get().filter(run => run.profile !== profile || run.session_id !== sessionId));
+  // Открыл чат — увидел, что работа не завершилась: знак «!» уходит и не
+  // возвращается после перезагрузки.
+  const opened = $failedChatRuns.get().filter(run => run.profile === profile && run.session_id === sessionId);
+  if (opened.length) {
+    acknowledgeFailures(opened.map(run => run.message_id));
+    $failedChatRuns.set($failedChatRuns.get().filter(run => !opened.includes(run)));
+  }
+  acknowledgeFailures($chatRuns.get()
+    .filter(run => run.status === "failed" && run.profile === profile && run.session_id === sessionId)
+    .map(run => run.message_id));
   if (sessionId) markServerSessionRead(profile, sessionId);
 }
 

@@ -50,6 +50,9 @@ export function PageHeaderProvider({
   const displayTitle = titleOverride ?? defaultTitle;
 
   const isChatRoute = pathname === "/chat" || pathname === "/chat/";
+  // На телефоне экран агентов начинается со строки разговора (мобильная
+  // шапка «D», 28.09): заголовок «Агенты» над ней только отнимал высоту.
+  const isAgentsRoute = pathname === "/agents" || pathname === "/agents/";
   /** Env jump-nav is wide — stack below title on small screens so KEYS stays readable. */
   const isEnvRoute =
     pathname === "/env" || pathname.startsWith("/env/");
@@ -73,6 +76,7 @@ export function PageHeaderProvider({
             "bg-background-base",
             // Mobile stacks title + toolbar — fixed h-14 clips content; desktop stays one row.
             "min-h-0 overflow-x-hidden overflow-y-visible py-3 sm:h-14 sm:min-h-[3.5rem] sm:overflow-hidden sm:py-0",
+            isAgentsRoute && "max-lg:hidden",
           )}
           role="banner"
         >

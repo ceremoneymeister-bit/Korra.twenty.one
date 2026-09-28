@@ -129,7 +129,7 @@ function RunToast({ runs, name }: { runs: ChatRun[]; name: (profile: string) => 
     {/* Цель пальца 44 px: на телефоне это значок, на десктопе — подпись. */}
     <button type="button" aria-label="Скрыть уведомление" title="Скрыть уведомление"
       className="flex size-[44px] shrink-0 items-center justify-center text-muted-foreground lg:mt-1 lg:size-auto lg:min-h-[44px] lg:justify-start lg:px-2 lg:text-xs"
-      onClick={dismissRunToasts}>
+      onClick={() => dismissRunToasts()}>
       <X aria-hidden className="size-4 lg:hidden" />
       <span aria-hidden className="hidden lg:inline">Скрыть уведомление</span>
     </button>

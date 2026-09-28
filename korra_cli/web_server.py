@@ -1863,6 +1863,7 @@ from korra_cli.web_models import (  # noqa: F401
     ThemeSetBody,
     AgentTabsSetBody,
     DashboardLayoutSetBody,
+    DashboardViewSetBody,
     FontSetBody,
     _AgentPluginInstallBody,
     _PluginProvidersPutBody,
@@ -20202,7 +20203,7 @@ def mount_spa(application: FastAPI):
 
     _index_path = WEB_DIST / "index.html"
 
-    def _serve_index(prefix: str = ""):
+    def _serve_index(prefix: str = "", request: Optional[Request] = None):
         """Return index.html with the session token + base-path injected.
 
         ``prefix`` is the normalised ``X-Forwarded-Prefix`` (e.g. ``/hermes``)
@@ -20290,6 +20291,14 @@ def mount_spa(application: FastAPI):
         bootstrap_script = bootstrap_script.replace(
             "</script>", f"window.__KORRA_THEME_PREF__={theme_json};</script>", 1,
         )
+        # «Вкладки» и «Список агентов» — разные первые экраны телефона. Выбор
+        # человека приезжает вместе со страницей, чтобы не мелькал чужой вид.
+        view_pref = _dashboard_view_bootstrap(request)
+        if view_pref is not None:
+            view_json = json.dumps(view_pref, separators=(",", ":")).replace("<", "\\u003c")
+            bootstrap_script = bootstrap_script.replace(
+                "</script>", f"window.__KORRA_VIEW_PREF__={view_json};</script>", 1,
+            )
         html = html.replace("</head>", f"{theme_bootstrap}</head>", 1)
         html = html.replace("</head>", f"{bootstrap_script}</head>", 1)
         return HTMLResponse(
@@ -20385,7 +20394,7 @@ def mount_spa(application: FastAPI):
             and file_path.is_file()
         ):
             return FileResponse(file_path)
-        return _serve_index(prefix)
+        return _serve_index(prefix, request)
 
 
 # ---------------------------------------------------------------------------
@@ -20863,6 +20872,84 @@ async def set_dashboard_layout(body: DashboardLayoutSetBody, request: Request = 
             return saved
 
     return await asyncio.to_thread(_run)
+
+
+@app.get("/api/dashboard/view")
+async def get_dashboard_view(request: Request = None):
+    """Return this person's agents-screen view on a phone (tabs or list)."""
+    from korra_cli.dashboard_view import payload
+
+    key = _dashboard_layout_key(request)
+    return await asyncio.to_thread(lambda: payload(load_config(), key))
+
+
+@app.put("/api/dashboard/view")
+async def set_dashboard_view(body: DashboardViewSetBody, request: Request = None):
+    """CAS-update one person's view with the same contract as the board.
+
+    Whose record it is comes from the verified session, never from the body.
+    A losing browser gets 409 with the winning record so it can show what the
+    other device chose instead of guessing.
+    """
+    from korra_cli.dashboard_view import payload, preserve_keys, record, store, updated
+
+    key = _dashboard_layout_key(request)
+
+    def _run():
+        with _CONFIG_MUTATION_LOCK:
+            config = load_config()
+            before = payload(config, key)
+            if body.revision != before["revision"]:
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "detail": "Вид уже изменили на другом устройстве.",
+                        "preference": before,
+                    },
+                )
+            next_value = updated(
+                before, agents_mobile=body.agents_mobile, pinned=body.pinned
+            )
+            save_config(store(config, key, next_value), preserve_keys=preserve_keys(key))
+            saved = payload(load_config(), key)
+            if record(saved) != record(next_value):
+                # A managed policy can drop the write without raising; ACK only
+                # what a fresh read proves is durable.
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "detail": "Вид не сохранился; обновите экран.",
+                        "preference": saved,
+                    },
+                )
+            return saved
+
+    return await asyncio.to_thread(_run)
+
+
+def _dashboard_view_bootstrap(request: Request = None) -> Optional[dict]:
+    """The view to paint first, or None when the page does not know the person.
+
+    Behind the OAuth gate the page itself can be requested before a session is
+    attached; ``_dashboard_layout_key`` would then fall back to the
+    single-owner record, which belongs to whoever sits at the machine. Only a
+    loopback bind or a verified identity gets a record in the HTML.
+    """
+    from korra_cli.dashboard_view import payload
+
+    state = getattr(request, "state", None) if request is not None else None
+    verified = getattr(state, "session", None) is not None or getattr(
+        state, "token_principal", None
+    ) is not None
+    if bool(getattr(app.state, "auth_required", False)) and not verified:
+        return None
+    try:
+        key = _dashboard_layout_key(request)
+        return payload(load_config(), key)
+    except Exception:
+        # The browser falls back to its cache and then the API; a broken
+        # config must not take the whole page down with it.
+        return None
 
 
 from korra_cli.web_routers import dashboard_state as _dashboard_state_routes  # noqa: E402

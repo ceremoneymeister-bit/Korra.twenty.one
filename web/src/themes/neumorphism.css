@@ -50,6 +50,30 @@
   --neo-duration-control: 400ms;
   --neo-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --neo-ease-toggle: cubic-bezier(0.85, 0.05, 0.18, 1.35);
+
+  /* Состояния агента (мобильная шапка «D», принята 28.09). Различие держит
+     форма знака — кольцо, пунктир, точка, число, «!»; цвет только усиливает. */
+  --k-live: #5e8c00;
+  --k-live-text: #4a7000;
+  --k-unread: #1f1f1f;
+  --k-decision: #f2b233;
+  --k-decision-fg: #1f1f1f;
+  --k-error: #b42318;
+  --k-error-fg: #ffffff;
+  --k-active: #c9e08f;
+  --k-scrim: rgba(120, 120, 120, 0.42);
+}
+
+:root[data-korra-theme="dark"] {
+  --k-live: #9ede01;
+  --k-live-text: #9ede01;
+  --k-unread: #9ede01;
+  --k-decision: #f6c453;
+  --k-decision-fg: #1f1f1f;
+  --k-error: #ff6b74;
+  --k-error-fg: #1f1f1f;
+  --k-active: #3a4a1a;
+  --k-scrim: rgba(0, 0, 0, 0.55);
 }
 
   .neo-button {

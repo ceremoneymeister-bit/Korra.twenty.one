@@ -1,8 +1,21 @@
 // In-browser synthetic transport. No model, production account or backend.
 // Unrecognised requests fail closed; they are never forwarded to the network.
 const now = 1789552800;
-const names = ["Корра", "Дизайнер", "Юрист", "Наставник", "Секретарь", "SMM-отдел", "Студия сайтов", "Финансист", "Аналитик", "Редактор", "Учитель китайского", "Оператор терминала"];
-const ids = ["default", "designer", "lawyer", "mentor", "secretary", "smm", "web", "finance", "analytics", "editor", "teacher", "terminal"];
+const demoParams = new URLSearchParams(location.search);
+// `?cast=nagrada` — вымышленный клиент с девятью «Нюрами», как в макете
+// мобильной шапки 28.09 (имена и задачи придуманы, реальных данных нет).
+const nagrada = demoParams.get("cast") === "nagrada";
+const names = nagrada
+  ? ["Нюра", "Нюра | Ассистент", "Нюра | Дизайнер", "Нюра | Bitrix", "Нюра | Документы", "Нюра | Финансы", "Нюра | Управление", "Нюра | РОП", "Нюра | Юрист"]
+  : ["Корра", "Дизайнер", "Юрист", "Наставник", "Секретарь", "SMM-отдел", "Студия сайтов", "Финансист", "Аналитик", "Редактор", "Учитель китайского", "Оператор терминала"];
+const ids = nagrada
+  ? ["default", "assistant", "designer", "bitrix", "docs", "finance", "management", "rop", "lawyer"]
+  : ["default", "designer", "lawyer", "mentor", "secretary", "smm", "web", "finance", "analytics", "editor", "teacher", "terminal"];
+const nagradaTitles: Record<string, string> = {
+  default: "Поздравления на октябрь", assistant: "Разбор входящих писем", designer: "Медаль Мирнинского района",
+  bitrix: "Поздравить без указания имени", docs: "Договор аренды: правки", finance: "Бюджет на октябрь",
+  management: "План встречи руководителей", rop: "Скоринг звонков за неделю", lawyer: "Претензия поставщику",
+};
 const pairs = [
   ["Помоги подготовить встречу с командой.", "Конечно. Что хотите обсудить на встрече?"],
   ["Новый сайт и план запуска на октябрь.", "Предлагаю три темы: готовность сайта, контент и сроки запуска."],
@@ -15,7 +28,7 @@ const long = "## План запуска сайта\n\nСначала прове
 const titles = ["План запуска сайта на октябрь", "Структура проекта и задачи команды", "Материалы для встречи", "Договор с поставщиком: правки и сроки", "Контент-план на следующую неделю", "Письмо клиенту о запуске", "Презентация нового продукта", "Идеи для осенней кампании", "Сводка продаж за неделю", "Инструкция для нового менеджера", "Смета проекта и распределение бюджета", "Ответы на вопросы клиентов"];
 const sessions = ids.flatMap((profile, p) => Array.from({ length: p ? 4 : 60 }, (_, i) => ({
   id: p ? `${profile}-${i}` : i === 0 ? "demo-short" : i === 1 ? "demo-long" : i === 2 ? "demo-files" : `demo-${i}`,
-  profile, source: "dashboard", title: i === 59 ? "Архив: запуск весенней коллекции" : titles[i % titles.length],
+  profile, source: "dashboard", title: i === 59 ? "Архив: запуск весенней коллекции" : nagrada && i === 0 ? nagradaTitles[profile] : titles[i % titles.length],
   model: "demo", started_at: now - i * 76000, last_active: now - i * 76000,
   ended_at: null, is_active: false, message_count: i === 0 ? 12 : 2,
   tool_call_count: 0, input_tokens: 0, output_tokens: 0, preview: titles[i % titles.length],
@@ -28,6 +41,26 @@ for (const s of sessions) {
 }
 const files = ["Повестка встречи.md", "Бриф проекта.txt", "План запуска.md", "Эскиз баннера.png"];
 const fileText = "# Повестка встречи\n\n1. Готовность сайта\n2. Контент и сроки\n3. Следующие шаги\n\nДемонстрационные материалы Korra.";
+
+/** `?states=busy` — один агент работает, у другого новый ответ, третий ждёт
+ *  четыре решения, у четвёртого ошибка, пятый в очереди. */
+function demoRuns() {
+  if (demoParams.get("states") !== "busy") return [];
+  const t = Math.floor(Date.now() / 1000);
+  const run = (message_id: string, profile: string, status: string, extra: Record<string, unknown> = {}) => ({
+    message_id, profile, session_id: `${profile}-0`, status, updated_at: t - 30, started_at: t - 240, history_count: 2,
+    title: nagradaTitles[profile] ?? "Разговор", channel: "веб-чат",
+    user_message: { role: "user", content: `Задача: ${nagradaTitles[profile] ?? "разговор"}` }, ...extra,
+  });
+  return [
+    run("demo-run-designer", "designer", "running", { user_message: { role: "user", content: "Сделай только скорректированные варианты 1 и 2 и покажи их рядом." } }),
+    run("demo-run-rop", "rop", "queued"),
+    run("demo-decision-bitrix", "bitrix", "waiting_decision", { pending_decisions: 4, user_message: { role: "user", content: "Ожидает вашего решения" } }),
+    run("demo-reply-docs", "docs", "completed", { unread: true, updated_at: t - 60 }),
+    run("demo-fail-finance", "finance", "failed", { updated_at: t - 300, failure: { message: "Нет доступа к таблице «Бюджет 2026»" } }),
+  ];
+}
+const decisionPeople = ["Иванов Иван Петрович", "Сергеева Анна Викторовна", "Попов Олег Николаевич", "Ким Марина Юрьевна"];
 
 export function installDemo() {
   // The static preview host uses HTTP; the product normally uses HTTPS.
@@ -51,7 +84,9 @@ export function installDemo() {
   ctx.font = "24px sans-serif"; ctx.fillText("Демонстрационный эскиз · Korra",68,400);
   const imageBlob = new Promise<Blob>(resolve => illustration.toBlob(blob => resolve(blob!), "image/png"));
   let pref = { version: 1, known: true, theme: params.get("theme") === "dark" ? "dark" : "light", installation_id: "00000000000000000000000000000104", owner:"interface-demo", base_path:base, revision:"demo-1", evening:{ disabled:true, snooze_until:0 } };
-  Object.assign(window, { __KORRA_THEME_PREF__: pref, __interfaceDemoRequests: [] });
+  let viewPref = { version: 1, revision: 1, agents_mobile: params.get("view") === "list" ? "list" : "tabs", pinned: [] as string[], scope: "0123456789abcdef" };
+  const runs = demoRuns();
+  Object.assign(window, { __KORRA_THEME_PREF__: pref, __KORRA_VIEW_PREF__: viewPref, __interfaceDemoRequests: [] });
   const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers:{ "Content-Type":"application/json" } });
   window.fetch = async (input, init) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url, location.href);
@@ -70,8 +105,26 @@ export function installDemo() {
     if (route === "/status") return json({ version:"0.21.7", gateway_running:true, gateway_state:"running", gateway_platforms:{}, active_sessions:0, overall:"ok", profile:"default", uptime_seconds:3600, can_update_hermes:false });
     if (route === "/profiles") return json({ profiles:ids.map((name,i) => ({ name, display_name:names[i], path:`/demo/profiles/${name}`, is_default:!i, gateway_running:!i, gateway_status:i ? "served" : "running", description:`Помощник: ${names[i]}`, description_auto:false, skill_count:3 })) });
     if (route === "/profiles/active") return json({ active:"default", current:"default" });
-    if (route === "/chat/runs") return json({ runs:[] });
+    if (route === "/dashboard/view" && method === "PUT") {
+      if (body.revision !== viewPref.revision) return json({ detail:"Вид уже изменили на другом устройстве.", preference:viewPref }, 409);
+      viewPref = { ...viewPref, revision:viewPref.revision + 1, agents_mobile:body.agents_mobile, pinned:body.pinned ?? [] };
+      return json(viewPref);
+    }
+    if (route === "/dashboard/view") return json(viewPref);
+    if (route === "/chat/runs") {
+      const wanted = url.searchParams.get("session_id");
+      const scoped = url.searchParams.has("profile") ? (url.searchParams.get("profile") || "") : null;
+      return json({ runs:runs.filter(run => (scoped === null || (run.profile === "default" ? "" : run.profile) === scoped) && (!wanted || run.session_id === wanted)) });
+    }
+    if (route.startsWith("/chat/runs/") && route.endsWith("/stream")) {
+      // Идущая работа «Дизайнера»: поток живой и не заканчивается.
+      return new Response(new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode(": agent is working\n\n")); } }), { headers:{ "Content-Type":"text/event-stream" } });
+    }
     if (route === "/chat/approvals") return json({ approvals:[] });
+    if (route === "/chat/decisions") {
+      if (profile !== "bitrix" || !runs.some(run => run.profile === "bitrix")) return json({ data:[] });
+      return json({ data:decisionPeople.map((person, i) => ({ request_id:`demo-decision-${i}`, decision_kind:"outbound_message", effect_status:"pending", choices:["once","deny"], source_session_id:"bitrix-0", command:`Поздравление: ${person}\n«Уважаемый коллега, поздравляем с днём рождения! Желаем…»`, description:"Отправка в Telegram · сегодня 10:00" })) });
+    }
     if (route === "/sessions") {
       const list = sessions.filter(s => s.profile === profile);
       const limit = Number(url.searchParams.get("limit") || 50), offset = Number(url.searchParams.get("offset") || 0);
@@ -91,6 +144,7 @@ export function installDemo() {
       const id = decodeURIComponent(session[1]), item = sessions.find(s => s.id === id && s.profile === profile);
       if (session[2] === "/messages") return json({ session_id:id, messages:item ? messages.get(id) || [] : [] });
       if (session[2] === "/latest-descendant") return json({ session_id:id, requested_session_id:id, path:[id], changed:false });
+      if (method === "PATCH" && body.unread === false) { for (const run of runs) if (run.session_id === id) (run as { unread?: boolean }).unread = false; return json({ ok:true }); }
       if (method === "PATCH") { const target = sessions.find(s => s.id === id && s.profile === (body.profile || "default")); if (target) target.title = body.title; return json({ ok:true, title:body.title }); }
       if (method === "DELETE") { if (item) sessions.splice(sessions.indexOf(item),1); return json({ ok:true }); }
       return json(item || {}, item ? 200 : 404);
