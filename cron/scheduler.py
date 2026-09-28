@@ -3294,6 +3294,15 @@ def _deliver_result(
                         job["id"], platform_name, chat_id)
             continue
 
+        # Постороннему получателю результат уходит с замаскированными
+        # секретами; свой канал владельца видит текст как есть (решение
+        # Дмитрия 28.09; чистое ревью Astra, P1-3).
+        target_content = cleaned_delivery_content
+        if not _is_owner_side_chat(job, platform_name, chat_id):
+            from cron.recipients import mask_outgoing_text
+
+            target_content = mask_outgoing_text(cleaned_delivery_content)
+
         # bot-chat targets don't ride a gateway adapter: the output becomes a
         # real inbound turn in the target profile's canonical Bot Chat via the
         # chat CLI lane (the same one Bot Mode agent-to-agent sends use). The
@@ -3456,7 +3465,7 @@ def _deliver_result(
                     pconfig=pconfig,
                     chat_id=chat_id,
                     thread_id=thread_id,
-                    cleaned_message=cleaned_delivery_content,
+                    cleaned_message=target_content,
                     media_files=media_files,
                     force_document=False,
                     used_home_channel=False,
@@ -3465,7 +3474,7 @@ def _deliver_result(
                         "job_id": str(job.get("id") or ""),
                         "job_name": str(job.get("name") or ""),
                         "target": f"{platform_name}:{chat_id}",
-                        "message": cleaned_delivery_content,
+                        "message": target_content,
                     },
                     source_session_id=decision_session_id,
                     source_session_key=decision_session_id,
@@ -3714,7 +3723,7 @@ def _deliver_result(
                 # standalone cron path lacked this, so DM-topic cron deliveries
                 # landed in the General topic or were rejected by Bot API 10.0
                 # (#22773).
-                text_to_send = cleaned_delivery_content.strip()
+                text_to_send = target_content.strip()
                 adapter_ok = True
                 timed_out = False
                 delivered_message_id = None
@@ -4025,7 +4034,7 @@ def _deliver_result(
                 delivery_errors.extend(target_errors)
                 continue
             # Standalone path: run the async send in a fresh event loop (safe from any thread)
-            coro = _send_to_platform(platform, pconfig, chat_id, cleaned_delivery_content, thread_id=thread_id, media_files=media_files)
+            coro = _send_to_platform(platform, pconfig, chat_id, target_content, thread_id=thread_id, media_files=media_files)
             try:
                 result = asyncio.run(coro)
             except RuntimeError as run_err:
@@ -4054,7 +4063,7 @@ def _deliver_result(
                 try:
                     pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
                     try:
-                        future = pool.submit(asyncio.run, _send_to_platform(platform, pconfig, chat_id, cleaned_delivery_content, thread_id=thread_id, media_files=media_files))
+                        future = pool.submit(asyncio.run, _send_to_platform(platform, pconfig, chat_id, target_content, thread_id=thread_id, media_files=media_files))
                         result = future.result(timeout=30)
                     finally:
                         pool.shutdown(wait=False)

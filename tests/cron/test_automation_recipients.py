@@ -652,3 +652,131 @@ def test_a_delivery_edit_racing_an_audience_removal_keeps_it_removed(store, monk
         assert recipients.send_allowed_in_run("telegram", "555") is False
     finally:
         recipients.reset_running_job(token)
+
+
+# --- Чистое ревью Astra: P1-2 (неопределённый исход, адрес) и P1-3 (маскирование)
+
+SECRET_TEXT = "OPENAI_API_KEY=sk-" + "a" * 48
+
+
+@pytest.fixture
+def live_send(store, monkeypatch):
+    from cron import executions, jobs
+    from gateway.config import Platform
+
+    job = jobs.create_job(prompt="review", schedule="every 1h", deliver="local",
+                          created_by_owner=True, recipients_policy=1,
+                          recipients_confirmed={"targets": ["telegram:555"]})
+    execution = executions.create_execution(job["id"], source="scheduled")
+    executions.mark_execution_running(execution["id"])
+    token = recipients.issue_run_token({**job, "execution_id": execution["id"]})
+    grant = recipients.lookup_live_run(token)
+    assert grant
+    cfg = MagicMock(platforms={Platform.TELEGRAM: MagicMock(enabled=True, token="fake")})
+    monkeypatch.setattr("gateway.config.load_gateway_config", lambda: cfg)
+    try:
+        yield token, grant, cfg, job
+    finally:
+        recipients.retire_run_token(token)
+        executions.finish_execution(execution["id"], success=True)
+
+
+def _transport(monkeypatch, *answers):
+    sent = []
+
+    def dispatch(**kw):
+        sent.append((kw["chat_id"], kw["cleaned_message"]))
+        answer = answers[min(len(sent), len(answers)) - 1]
+        if isinstance(answer, BaseException):
+            raise answer
+        return answer
+
+    monkeypatch.setattr("tools.send_message_tool._dispatch_resolved_send", dispatch)
+    return sent
+
+
+def test_a_send_the_service_may_have_taken_is_not_sent_again(live_send, monkeypatch):
+    token, grant, _cfg, _job_ = live_send
+    sent = _transport(monkeypatch, TimeoutError("accepted; acknowledgement lost"), {"success": True})
+    first = recipients.send_once_for_live_run(token, grant, "telegram:555", "Birthday")
+    again = recipients.send_once_for_live_run(token, grant, "telegram:555", "Birthday")
+    assert first["status"] == "outcome_unknown" and first["success"] is False
+    assert again["status"] == "outcome_unknown" and again["repeat"] is True
+    assert "повторно не отправлялось" in again["error"]
+    assert sent == [("555", "Birthday")]
+
+
+def test_a_failure_the_transport_reports_is_an_unknown_outcome_too(live_send, monkeypatch):
+    # Длинный текст уходит частями: ошибка второй части не значит, что
+    # первая не дошла.
+    token, grant, _cfg, _job_ = live_send
+    sent = _transport(monkeypatch, {"error": "Telegram send failed: chunk 2/2 timed out"}, {"success": True})
+    first = recipients.send_once_for_live_run(token, grant, "telegram:555", "Отчёт")
+    again = recipients.send_once_for_live_run(token, grant, "telegram:555", "Отчёт")
+    assert first["status"] == again["status"] == "outcome_unknown"
+    assert len(sent) == 1
+
+
+def test_a_refusal_before_sending_can_be_tried_again(live_send, monkeypatch):
+    from gateway.config import Platform
+
+    token, grant, cfg, _job_ = live_send
+    sent = _transport(monkeypatch, {"success": True})
+    cfg.platforms[Platform.TELEGRAM].enabled = False
+    refused = recipients.send_once_for_live_run(token, grant, "telegram:555", "Birthday")
+    assert refused.get("error") and refused.get("status") != "outcome_unknown" and sent == []
+    cfg.platforms[Platform.TELEGRAM].enabled = True
+    assert recipients.send_once_for_live_run(token, grant, "telegram:555", "Birthday")["success"] is True
+    assert sent == [("555", "Birthday")]
+
+
+def test_one_recipient_spelled_two_ways_is_one_send(live_send, monkeypatch):
+    token, grant, _cfg, _job_ = live_send
+    sent = _transport(monkeypatch, {"success": True, "message_id": "7"})
+    assert recipients.send_once_for_live_run(token, grant, "TELEGRAM:555", "Birthday")["success"]
+    again = recipients.send_once_for_live_run(token, grant, "telegram:555", "Birthday")
+    assert again["repeat"] is True and len(sent) == 1
+
+
+def test_a_send_for_a_run_goes_out_with_secrets_masked(live_send, monkeypatch):
+    from agent.redact import redact_sensitive_text
+
+    token, grant, _cfg, _job_ = live_send
+    sent = _transport(monkeypatch, {"success": True})
+    assert recipients.send_once_for_live_run(token, grant, "telegram:555", SECRET_TEXT)["success"]
+    assert sent == [("555", redact_sensitive_text(SECRET_TEXT, force=True))]
+    assert SECRET_TEXT not in sent[0][1]
+
+
+def test_the_agents_own_send_inside_a_run_is_masked_as_well(live_send, monkeypatch):
+    from tools.send_message_tool import send_message_tool
+
+    _token, grant, _cfg, job = live_send
+    sent = _transport(monkeypatch, {"success": True})
+    bound = recipients.bind_running_job({**job, "execution_id": grant["execution_id"]})
+    try:
+        result = json.loads(send_message_tool({"action": "send", "target": "telegram:555",
+                                               "message": SECRET_TEXT}))
+    finally:
+        recipients.reset_running_job(bound)
+    assert result.get("success") is True
+    assert len(sent) == 1 and SECRET_TEXT not in sent[0][1]
+
+
+def test_the_result_reaches_other_people_masked_and_the_owner_as_is(store):
+    from cron import jobs
+    from cron.scheduler import _deliver_result
+    from gateway.config import Platform
+
+    job = jobs.create_job(prompt="Отчёт", schedule="every 1h", deliver="telegram:555,telegram:42",
+                          created_by_owner=True, recipients_policy=1,
+                          recipients_confirmed={"targets": ["telegram:555"]})
+    cfg = MagicMock()
+    cfg.platforms = {Platform.TELEGRAM: MagicMock(enabled=True)}
+    send = AsyncMock(return_value={"success": True})
+    with (patch("gateway.config.load_gateway_config", return_value=cfg),
+          patch("tools.send_message_tool._send_to_platform", new=send)):
+        assert _deliver_result(job, f"Ключ: {SECRET_TEXT}") is None
+    texts = {str(call.args[2]): call.args[3] for call in send.await_args_list}
+    assert SECRET_TEXT not in texts["555"]
+    assert SECRET_TEXT in texts["42"]

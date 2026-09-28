@@ -266,12 +266,55 @@ def send_for_live_run(grant: dict, target: str, message: str) -> dict | None:
         reset_running_job(bound)
 
 
+def mask_outgoing_text(text: str) -> str:
+    """Текст для постороннего получателя — с замаскированными секретами.
+
+    Решение Дмитрия 28.09: автоматизации шлют подтверждённым получателям без
+    карточки, но маскирование секретов сохраняется (чистое ревью Astra,
+    P1-3). Граница выхода данных наружу, поэтому ``force``: общая настройка
+    журналов её не отключает.
+    """
+    from agent.redact import redact_sensitive_text
+
+    return redact_sensitive_text(text or "", force=True)
+
+
+def _normalized_target(target: str) -> str:
+    """Один получатель — один адрес: ``TELEGRAM:555`` и ``telegram:555``
+    не две разные отправки (чистое ревью Astra, P1-2)."""
+    platform, _, ref = str(target or "").partition(":")
+    platform, ref = platform.strip().lower(), ref.strip()
+    try:
+        from tools.send_message_tool import prepare_send_message_platforms, resolve_send_target
+
+        prepare_send_message_platforms()
+        chat_id, thread_id, error = resolve_send_target(platform, ref)
+        if not error and chat_id:
+            return target_label(platform, chat_id, thread_id)
+    except Exception:
+        logger.debug("Target normalisation failed for %s", platform, exc_info=True)
+    return f"{platform}:{ref}"
+
+
 def _send_key(target: str, message: str) -> str:
-    return hashlib.sha256(json.dumps([target, message], ensure_ascii=False).encode()).hexdigest()
+    return hashlib.sha256(json.dumps([_normalized_target(target), message],
+                                     ensure_ascii=False).encode()).hexdigest()
 
 
 def _sent(result) -> bool:
     return isinstance(result, dict) and result.get("success") is True
+
+
+def _maybe_delivered(result) -> bool:
+    """Сервис мог принять сообщение: отправка дошла до транспорта и не
+    подтвердилась (``send_for_running_job`` помечает это ``outcome_unknown``)."""
+    return isinstance(result, dict) and result.get("status") == "outcome_unknown"
+
+
+def _unknown_repeat(entry: dict) -> dict:
+    return {**entry.get("result", {}), "success": False, "status": "outcome_unknown", "repeat": True,
+            "error": ("Сервис мог уже получить это сообщение; повторно не отправлялось. "
+                      "Проверьте доставку, прежде чем отправлять снова.")}
 
 
 def send_once_for_live_run(token: str, grant: dict, target: str, message: str,
@@ -281,10 +324,20 @@ def send_once_for_live_run(token: str, grant: dict, target: str, message: str,
     The same recipient and content within one run is one send: a repeat
     returns the stored result marked ``repeat``, and a repeat that arrives
     while the first is still sending waits for it rather than sending in
-    parallel. Different content or another recipient is another send. Only a
-    delivered send is remembered — after a failure the next attempt tries
-    again. Nothing outlives the run: retiring its secret drops the record.
+    parallel. Different content or another recipient is another send.
+
+    A delivered send is remembered. So is one the service may have accepted —
+    a transport error or exception after the send left (``outcome_unknown``):
+    repeating it could deliver a second copy, so a repeat reports the unknown
+    outcome instead of sending (clean Astra review P1-2). A refusal before
+    anything was sent — an unconfirmed recipient, a bad target, a platform
+    that is not set up — is forgotten, and the next attempt tries again.
+    Nothing outlives the run: retiring its secret drops the record.
+
+    The text is masked before anything else, so the key and the send both see
+    what actually goes out (P1-3).
     """
+    message = mask_outgoing_text(message)
     digest, key = _digest(token), _send_key(target, message)
     deadline = time.monotonic() + wait_seconds
     with _RUN_SENDS_CHANGED:
@@ -298,6 +351,8 @@ def send_once_for_live_run(token: str, grant: dict, target: str, message: str,
             if entry["state"] == "sent":
                 return {**entry["result"], "repeat": True,
                         "note": "Это сообщение уже отправлено в этом запуске; повторно не отправлялось."}
+            if entry["state"] == "unknown":
+                return _unknown_repeat(entry)
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 return {"success": False, "status": "in_progress",
@@ -313,6 +368,8 @@ def send_once_for_live_run(token: str, grant: dict, target: str, message: str,
             if sends is not None:
                 if _sent(result):
                     sends[key] = {"state": "sent", "result": dict(result)}
+                elif _maybe_delivered(result):
+                    sends[key] = {"state": "unknown", "result": dict(result)}
                 else:
                     sends.pop(key, None)
             _RUN_SENDS_CHANGED.notify_all()

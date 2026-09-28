@@ -997,7 +997,14 @@ def _handle_send(args, *, owner_initiated: bool = False, for_running_job: bool =
                     "точного решения владельца; не повторяйте вызов."
                 ),
             }, ensure_ascii=False)
-        result = _dispatch_resolved_send(
+        if not owner_initiated:
+            # Без карточки уходит только отправка подтверждённому получателю
+            # автоматизации — и только с замаскированными секретами (решение
+            # Дмитрия 28.09; чистое ревью Astra, P1-3).
+            from cron.recipients import mask_outgoing_text
+
+            cleaned_message = mask_outgoing_text(cleaned_message)
+        send = dict(
             platform=platform,
             platform_name=platform_name,
             pconfig=pconfig,
@@ -1010,9 +1017,36 @@ def _handle_send(args, *, owner_initiated: bool = False, for_running_job: bool =
             entry=entry,
             args=args,
         )
+        if for_running_job:
+            return json.dumps(_dispatch_for_running_job(**send), ensure_ascii=False)
+        result = _dispatch_resolved_send(**send)
         return json.dumps(result)
     except Exception as e:
         return json.dumps(_error(f"Send failed: {e}"))
+
+
+def _dispatch_for_running_job(**send) -> dict:
+    """Отправка шлюза от имени запуска: неподтверждённый исход — ``outcome_unknown``.
+
+    Транспорты сворачивают отказ сервиса и обрыв после приёма в одну строку
+    ошибки, а длинное сообщение уходит частями — по результату не понять,
+    получил ли человек текст. Поэтому, как у решений владельца
+    (``resolve_outbound_message_decision``), любая неудача на самой отправке —
+    неизвестный исход, а не повод отправить снова (чистое ревью Astra, P1-2).
+    """
+    try:
+        result = _dispatch_resolved_send(**send)
+    except Exception as exc:
+        return {"success": False, "status": "outcome_unknown",
+                "error": ("Сервис мог получить сообщение: отправка оборвалась "
+                          f"({_sanitize_error_text(str(exc))}). Повторно не отправлялось, "
+                          "проверьте доставку.")}
+    if result.get("success"):
+        return result
+    return {**result, "success": False, "status": "outcome_unknown",
+            "error": ("Сервис мог получить сообщение или его часть: "
+                      f"{result.get('error') or 'отправка не подтвердилась'}. "
+                      "Повторно не отправлялось, проверьте доставку.")}
 
 
 def _parse_target_ref(platform_name: str, target_ref: str):

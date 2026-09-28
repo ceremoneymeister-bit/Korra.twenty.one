@@ -709,13 +709,22 @@ class TestCronRunSend:
 
                     # Another text and another recipient are other sends.
                     assert (await post("telegram:555", "Второе"))[1]["success"] is True
-                    # A failed attempt is not remembered: the retry sends.
+                    # A transport failure may have delivered the text or part of
+                    # it: the repeat reports the unknown outcome and sends
+                    # nothing (clean Astra review P1-2).
                     failed = await post("telegram:556", "Второе")
-                    assert failed[1].get("success") is not True
-                    assert (await post("telegram:556", "Второе"))[1]["success"] is True
-                    assert (await post("telegram:556", "Второе"))[1]["repeat"] is True
+                    assert failed[1]["success"] is False and failed[1]["status"] == "outcome_unknown"
+                    again = await post("telegram:556", "Второе")
+                    assert again[1]["status"] == "outcome_unknown" and again[1]["repeat"] is True
+                    # A refusal before anything left is forgotten: the retry sends.
+                    cfg.platforms[Platform.TELEGRAM].enabled = False
+                    refused = await post("telegram:556", "После отказа")
+                    assert refused[1].get("success") is not True
+                    assert refused[1].get("status") != "outcome_unknown"
+                    cfg.platforms[Platform.TELEGRAM].enabled = True
+                    assert (await post("telegram:556", "После отказа"))[1]["success"] is True
                     assert sent == ["telegram:555 / С днём рождения", "telegram:555 / Второе",
-                                    "telegram:556 / Второе", "telegram:556 / Второе"]
+                                    "telegram:556 / Второе", "telegram:556 / После отказа"]
 
                     # Two identical requests at once: one delivery, both see it.
                     slow.set()
