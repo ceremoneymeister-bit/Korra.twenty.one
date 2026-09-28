@@ -2382,9 +2382,63 @@ class TestWebServerEndpoints:
         assert self.client.get(
             "/api/sessions/paged-chat/messages?before_id=5"
         ).status_code == 400
+        # Архив сжатия в ленте есть всегда: флаг не мешает постраничному чтению.
         assert self.client.get(
             "/api/sessions/paged-chat/messages?display_limit=30&include_compacted=true"
-        ).status_code == 400
+        ).status_code == 200
+
+    def test_chat_history_pages_cross_compaction(self):
+        """Догрузка не обрывается на сжатии (ревью Astra R4): после сжатия на
+        месте видна прежняя переписка, старый курсор продолжает работать, а
+        продолжение после сжатия показывает и сообщения родителя."""
+        from korra_state import SessionDB
+
+        db = SessionDB()
+        try:
+            db.create_session(session_id="compact-chat", source="dashboard")
+            db.append_messages_batch("compact-chat", [
+                {"role": role, "content": f"{role} {turn}"}
+                for turn in range(40) for role in ("user", "assistant")
+            ])
+            before = self.client.get("/api/sessions/compact-chat/messages?display_limit=30").json()
+            cursor = before["pagination"]["before_id"]
+            tail = db.get_messages("compact-chat")[-4:]
+            db.archive_and_compact(
+                "compact-chat", [{"role": "user", "content": "summary"}, *tail], tail_count=4
+            )
+            db.create_session(session_id="parent-chat", source="dashboard")
+            db.append_messages_batch("parent-chat", [
+                {"role": role, "content": f"parent {turn} {role}"}
+                for turn in range(25) for role in ("user", "assistant")
+            ])
+            db.end_session("parent-chat", "compression")
+            db.create_session(
+                session_id="child-chat", source="compression", parent_session_id="parent-chat"
+            )
+            db.append_messages_batch("child-chat", [
+                {"role": "user", "content": "new question"},
+                {"role": "assistant", "content": "new answer"},
+            ])
+        finally:
+            db.close()
+
+        after = self.client.get("/api/sessions/compact-chat/messages?display_limit=30").json()
+        assert after["pagination"]["has_more"] is True
+        contents = [m["content"] for m in after["messages"]]
+        assert contents[-1] == "assistant 39"
+        assert len([c for c in contents if c == "assistant 39"]) == 1  # перенесённый хвост без копий
+        earlier = self.client.get(
+            f"/api/sessions/compact-chat/messages?display_limit=30&before_id={cursor}"
+        ).json()
+        # Курсор, полученный до сжатия, продолжает ровно с того же места.
+        earlier_contents = [m["content"] for m in earlier["messages"]]
+        assert earlier_contents[0] == "user 10" and earlier_contents[-1] == "assistant 24"
+
+        chain = self.client.get("/api/sessions/parent-chat/messages?display_limit=30").json()
+        assert chain["session_id"] == "child-chat"
+        chain_contents = [m["content"] for m in chain["messages"]]
+        assert chain_contents[-2:] == ["new question", "new answer"]
+        assert "parent 24 assistant" in chain_contents
 
     def test_export_session_streams_bounded_message_pages(self, monkeypatch):
         from korra_state import SessionDB

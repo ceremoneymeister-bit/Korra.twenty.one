@@ -4588,12 +4588,25 @@ class TestGetMessagesPagination:
         assert [m["content"] for m in older] == ["отчёт"] and more is False
 
         db.create_session(session_id="huge-turn", source="dashboard")
-        db.append_messages_batch("huge-turn", [{"role": "user", "content": "сделай"}] + [
-            {"role": "tool", "content": f"шаг {i}", "tool_call_id": f"c{i}"} for i in range(30)
-        ])
+        turn = [{"role": "user", "content": "сделай"}]
+        for i in range(30):
+            turn += [
+                {"role": "assistant", "content": "", "tool_calls": [
+                    {"id": f"c{i}", "type": "function", "function": {"name": "terminal", "arguments": "{}"}}]},
+                {"role": "tool", "content": f"шаг {i}", "tool_call_id": f"c{i}"},
+            ]
+        db.append_messages_batch("huge-turn", turn)
         rows, cursor, has_more = db.get_display_page("huge-turn", limit=30, max_rows=10)
-        assert [m["content"] for m in rows] == [f"шаг {i}" for i in range(20, 30)]
+        # Страница ограничена до чтения полных строк и начинается с вызова,
+        # а не с результата, чей вызов остался бы на другой странице (R6).
+        assert len(rows) == 10 and rows[0]["role"] == "assistant"
+        assert [m["content"] for m in rows if m["role"] == "tool"] == [f"шаг {i}" for i in range(25, 30)]
         assert has_more is True and cursor == rows[0]["id"]
+        older, _, _ = db.get_display_page("huge-turn", limit=30, max_rows=10, before_id=cursor)
+        assert older[-1]["role"] == "tool" and older[-1]["content"] == "шаг 24"
+        # Срез пришёлся на результат: он уходит на следующую страницу.
+        odd, odd_cursor, _ = db.get_display_page("huge-turn", limit=30, max_rows=11)
+        assert odd[0]["role"] == "assistant" and len(odd) == 10
 
         with pytest.raises(ValueError):
             db.get_messages("s1", before_id=5, latest=True)

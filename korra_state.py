@@ -12661,6 +12661,9 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                 rows = cursor.fetchall()
             if latest:
                 rows.reverse()
+        return self._decode_message_rows(rows)
+
+    def _decode_message_rows(self, rows) -> List[Dict[str, Any]]:
         result = []
         for row in rows:
             msg = dict(row)
@@ -12692,50 +12695,81 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
         Сообщение ленты — реплика человека или весь ход агента: ответы с
         вызовами инструментов и их результаты чат сворачивает в один пузырь,
         поэтому 30 строк базы могли оказаться одним ответом. Страница
-        начинается с реплики человека, чтобы ход агента не делился между
-        страницами. Возвращает строки по возрастанию id, id первой строки —
-        курсор ``before_id`` для следующей, более ранней страницы — и есть ли
-        строки раньше. ``max_rows`` страхует от хода из тысяч вызовов: тогда
-        страница начинается внутри него.
+        начинается с реплики человека, чтобы ход агента не делился.
+
+        Лента — вся переписка, а не только живой контекст модели: строки
+        предков по цепочке сжатия и строки, сохранённые сжатием на месте
+        (``compacted``), без копий перенесённого хвоста — тем же ключом, что
+        ``get_messages(include_compacted=True)``. Иначе догрузка обрывалась на
+        границе сжатия (0.21.15, ревью Astra R4).
+
+        Сначала читается только лёгкая проекция строк; полные строки — лишь
+        выбранные для страницы. ``max_rows`` ограничивает страницу, а не
+        выдачу после полного чтения: ход из тысяч вызовов режется, и
+        страница тогда начинается с ответа агента, а не с осиротевшего
+        результата инструмента (R6).
+
+        Возвращает строки по возрастанию id, id первой строки — курсор
+        ``before_id`` следующей, более ранней страницы — и есть ли раньше.
         """
-        bound = " AND id < ?" if before_id is not None else ""
-        params: list = [session_id] + ([before_id] if before_id is not None else [])
-        start_id: Optional[int] = None
+        if self._is_explicit_branch_session(session_id):
+            lineage = [session_id]
+        else:
+            lineage = [sid for sid in self._session_lineage_root_to_tip(session_id) if sid] or [session_id]
+        placeholders = ",".join("?" for _ in lineage)
+        with self._read_ctx() as conn:
+            light = conn.execute(
+                "SELECT id, role, active, timestamp, tool_call_id, tool_name, display_kind, "
+                "length(content) AS clen, substr(content, 1, 256) AS chead, "
+                "length(tool_calls) AS tlen, substr(tool_calls, 1, 256) AS thead "
+                f"FROM messages WHERE session_id IN ({placeholders}) "
+                "AND (active = 1 OR compacted = 1) ORDER BY id ASC",
+                tuple(lineage),
+            ).fetchall()
+        # Копия, перенесённая сжатием, совпадает с оригиналом по роли,
+        # содержимому, времени и вызовам; остаётся живая, затем новейшая.
+        chosen: Dict[tuple, Any] = {}
+        for row in light:
+            key = (row["role"], row["clen"], row["chead"], row["timestamp"],
+                   row["tool_call_id"], row["tlen"], row["thead"], row["tool_name"])
+            current = chosen.get(key)
+            if current is None or (row["active"], row["id"]) > (current["active"], current["id"]):
+                chosen[key] = row
+        display = sorted(chosen.values(), key=lambda row: row["id"])
+        if before_id is not None:
+            display = [row for row in display if row["id"] < before_id]
+        if not display:
+            return [], None, False
+
+        selected: List[Any] = []
         shown = 0
         agent_turn_counted = False
-        stopped_at_user = False
+        for row in reversed(display):
+            selected.append(row)
+            if row["role"] == "user":
+                if row["display_kind"] in (None, ""):
+                    shown += 1
+                agent_turn_counted = False
+                if shown >= limit:
+                    break
+            elif row["role"] == "assistant" and not agent_turn_counted:
+                shown += 1
+                agent_turn_counted = True
+            if len(selected) >= max_rows:
+                # Огромный ход: не начинать страницу с результата инструмента,
+                # чей вызов остался бы на следующей странице.
+                while len(selected) > 1 and selected[-1]["role"] == "tool":
+                    selected.pop()
+                break
+        start_id = selected[-1]["id"]
+        has_more = display[0]["id"] < start_id
+        ids = sorted(row["id"] for row in selected)
         with self._read_ctx() as conn:
-            cursor = conn.execute(
-                "SELECT id, role FROM messages WHERE session_id = ? AND active = 1"
-                + bound + " ORDER BY id DESC",
-                params,
-            )
-            for row in cursor:
-                start_id = row["id"]
-                if row["role"] == "user":
-                    shown += 1
-                    agent_turn_counted = False
-                    if shown >= limit:
-                        stopped_at_user = True
-                        break
-                elif row["role"] == "assistant" and not agent_turn_counted:
-                    shown += 1
-                    agent_turn_counted = True
-        if start_id is None:
-            return [], None, False
-        rows = self.get_messages(session_id, after_id=start_id - 1, before_id=before_id)
-        if len(rows) > max_rows:
-            rows = rows[-max_rows:]
-            start_id = rows[0]["id"]
-            stopped_at_user = True
-        has_more = False
-        if stopped_at_user:
-            with self._read_ctx() as conn:
-                has_more = conn.execute(
-                    "SELECT 1 FROM messages WHERE session_id = ? AND active = 1 AND id < ? LIMIT 1",
-                    (session_id, start_id),
-                ).fetchone() is not None
-        return rows, (rows[0]["id"] if rows else None), has_more
+            rows = conn.execute(
+                f"SELECT * FROM messages WHERE id IN ({','.join('?' for _ in ids)}) ORDER BY id ASC",
+                tuple(ids),
+            ).fetchall()
+        return self._decode_message_rows(rows), start_id, has_more
 
     def find_pr_url_messages(self, session_ids: List[str]) -> List[Dict[str, Any]]:
         """Tool results in these sessions that mention a GitHub PR url.
