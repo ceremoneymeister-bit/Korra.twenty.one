@@ -116,6 +116,9 @@ def test_run_one_job_records_waiting_decision_without_delivery_failure(monkeypat
                 "error": None,
                 "delivery_outcome": "waiting_decision",
                 "delivery_error": None,
+                # Текст буквального напоминания хранится с исходом (b0fbb38c3b);
+                # у задания без напоминания его нет.
+                "result_text": None,
             },
         )
     ]
