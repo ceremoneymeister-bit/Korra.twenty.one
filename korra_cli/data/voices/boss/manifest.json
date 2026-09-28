@@ -1,0 +1,16 @@
+{
+  "id": "boss",
+  "name": "Босс",
+  "description": "Энергичный мужской голос с ритмичной подачей",
+  "model": "fish-audio/s2.1-pro",
+  "default_speed": 1.0,
+  "input_prefix": "[playful, confident spoken rap]",
+  "reference_file": "reference.wav",
+  "reference_text_file": "reference.txt",
+  "sample_file": "sample.mp3",
+  "sha256": {
+    "reference.wav": "b5897e6762a796ccbb915e80fedfffbf2e5257100e8fe37412a59a375d590520",
+    "reference.txt": "e9d514be52d18a433b79de95bddf8634919ef8d250c168ede40e883308cfc8af",
+    "sample.mp3": "d974072da8562d5384013c359edc16eec65895fdbf5425ba43ede1f09aca97a5"
+  }
+}

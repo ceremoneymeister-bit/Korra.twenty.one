@@ -32,16 +32,23 @@ def test_default_is_off_and_speech_refused(client):
     assert http.post("/api/profiles/default/voice/speak", json={"text": "hello"}).status_code == 409
 
 
-def test_bundled_navigator_can_be_selected_and_previewed_without_a_key(client):
+def test_bundled_voices_can_be_previewed_without_a_key(client):
     http, root = client
     catalog = http.get("/api/voices")
     assert catalog.status_code == 200, catalog.text
-    navigator = next(voice for voice in catalog.json()["voices"] if voice["id"] == "navigator")
+    voices = {voice["id"]: voice for voice in catalog.json()["voices"]}
+    assert {"navigator", "boss"} <= set(voices)
+    for voice_id, expected_hash in {
+        "navigator": "ecde8fc560f7f46cf434c59ea0e13a2770e79bafde8ea6a395ad56fe9a5155aa",
+        "boss": "d974072da8562d5384013c359edc16eec65895fdbf5425ba43ede1f09aca97a5",
+    }.items():
+        sample = http.get(voices[voice_id]["sample_url"])
+        assert sample.status_code == 200 and sample.headers["content-type"].startswith("audio/mpeg")
+        assert hashlib.sha256(sample.content).hexdigest() == expected_hash
+    navigator = voices["navigator"]
     assert navigator["model"] == "fish-audio/s2.1-pro"
     assert navigator["default_speed"] == 1.05
-    sample = http.get(navigator["sample_url"])
-    assert sample.status_code == 200 and sample.headers["content-type"].startswith("audio/mpeg")
-    assert hashlib.sha256(sample.content).hexdigest() == "154a056f89ac699ecd3f1009f911dd59ad5d2abf23a4ec8d9380c8d7c0745427"
+    assert voices["boss"]["default_speed"] == 1.0
     assert http.get("/api/voices/unknown/sample").status_code == 404
     selected = draft(provider="openrouter_fish", voice="navigator", model=navigator["model"],
                      base_url="", speed=1.05)
@@ -83,6 +90,27 @@ def test_bundled_navigator_synthesis_sends_reference_and_selected_speed(client, 
     assert hashlib.sha256(base64.b64decode(payload["input_references"][0]["input_audio"]["data"].split(",", 1)[1])).hexdigest() == "0cae14a9421df33626741420fca6d8eae0ef1a57c138b5bf2e3aa3a1a4b5ea0f"
     assert payload["input_references"][1]["text"].startswith("Внешне это пока")
     assert not list(root.rglob("korra-voice-*"))
+
+
+def test_bundled_boss_synthesis_uses_approved_voice_and_rap_style(client, monkeypatch):
+    import httpx
+    http, _ = client
+    selected = draft(provider="openrouter_fish", voice="boss", model="fish-audio/s2.1-pro",
+                     base_url="", speed=1.0, api_key="profile-openrouter-key")
+    assert http.put("/api/profiles/default/voice", json=selected).status_code == 200
+    captured = []
+    original_client = httpx.Client
+    def service(request):
+        captured.append(json.loads(request.content))
+        return httpx.Response(200, content=b"ID3fixture", headers={"content-type": "audio/mpeg"})
+    monkeypatch.setattr(httpx, "Client", lambda **kw: original_client(transport=httpx.MockTransport(service), **kw))
+    result = http.post("/api/profiles/default/voice/speak", json={"text": "Здравствуйте, чем помочь?"})
+    assert result.status_code == 200, result.text
+    assert len(captured) == 1
+    payload = captured[0]
+    assert payload["input"] == "[playful, confident spoken rap] Здравствуйте, чем помочь?"
+    assert payload["provider"]["options"]["fish-audio"]["prosody"]["speed"] == 1.0
+    assert hashlib.sha256(base64.b64decode(payload["input_references"][0]["input_audio"]["data"].split(",", 1)[1])).hexdigest() == "b5897e6762a796ccbb915e80fedfffbf2e5257100e8fe37412a59a375d590520"
 
 
 def test_profile_settings_and_keys_are_isolated_and_survive_read(client, monkeypatch):

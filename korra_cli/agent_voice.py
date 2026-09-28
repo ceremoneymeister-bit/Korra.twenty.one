@@ -118,9 +118,10 @@ def generate_openrouter_fish(text, output_path, tts_config):
         raise ValueError("Скорость речи вне допустимого диапазона")
     reference = bundled_voice_file(voice["id"], voice["reference_file"]).read_bytes()
     reference_text = bundled_voice_file(voice["id"], voice["reference_text_file"]).read_text(encoding="utf-8").strip()
+    prefix = str(voice.get("input_prefix") or "").strip()
     payload = {
         "model": voice["model"],
-        "input": text,
+        "input": f"{prefix} {text}" if prefix else text,
         "response_format": "mp3",
         "input_references": [
             {"type": "input_audio", "input_audio": {"data": "data:audio/wav;base64," + base64.b64encode(reference).decode("ascii")}},

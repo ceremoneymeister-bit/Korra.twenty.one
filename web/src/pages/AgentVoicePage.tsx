@@ -84,15 +84,13 @@ export function VoiceForm({ profile, name }: { profile: string; name: string }) 
         <label className="flex min-h-[44px] items-center gap-3 text-base font-medium"><input type="checkbox" checked={value.enabled} disabled={busy} onChange={event => change({ enabled: event.target.checked })} />Включить голос агента</label>
         <fieldset disabled={busy} className="grid min-w-0 gap-4">
           <div className="grid gap-2"><Label htmlFor="voice-provider">Сервис озвучки</Label><Select id="voice-provider" value={value.provider} onValueChange={provider => {
-            const first = bundledVoices[0];
-            if (provider === "openrouter_fish" && !first) {
+            if (provider === "openrouter_fish" && bundledVoices.length === 0) {
               setError("Встроенные голоса пока недоступны. Обновите страницу.");
               return;
             }
             change({ provider: provider as AgentVoiceSettings["provider"],
-              voice: provider === "openrouter_fish" ? (first?.id || "") : "",
-              model: provider === "elevenlabs" ? "eleven_multilingual_v2" : provider === "openrouter_fish" ? (first?.model || "") : "",
-              speed: provider === "openrouter_fish" ? (first?.default_speed || 1.05) : 1,
+              voice: "", model: provider === "elevenlabs" ? "eleven_multilingual_v2" : "",
+              speed: 1,
               base_url: "", has_key: false });
             setKey(""); setClearKey(false); setVoices([]);
           }}><SelectOption value="openrouter_fish">Голоса Korra · Fish Audio</SelectOption><SelectOption value="elevenlabs">ElevenLabs</SelectOption><SelectOption value="compatible">Свой сервер / совместимый API</SelectOption></Select></div>
