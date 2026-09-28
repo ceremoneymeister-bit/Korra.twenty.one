@@ -191,6 +191,13 @@ async function renameTab(tabLabel: string, id: string, newName: string) {
 }
 
 afterEach(async () => {
+  // Выбор агента переводит фокус на вкладку в следующем кадре. Кадр,
+  // отложенный в конце теста, должен сработать здесь, а не в следующем
+  // тесте: там уже стоит вкладка с тем же id, и чужой фокус закрывал
+  // открытый список «Все агенты».
+  await act(async () => {
+    await new Promise((resolve) => window.requestAnimationFrame(() => resolve(undefined)));
+  });
   await act(async () => root?.unmount());
   container?.remove();
 });
