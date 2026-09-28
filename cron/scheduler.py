@@ -3089,6 +3089,55 @@ def _delivery_decision_session(job: dict, execution_id: str) -> str:
     return f"cron:{job['id']}:{execution_id}"
 
 
+def _private_telegram_chat(platform_name: str, chat_id) -> str:
+    """The chat id when it is a Telegram private chat, else ""."""
+    chat = str(chat_id or "").strip()
+    # Telegram private chats carry the user's own id; groups and channels are
+    # negative, @usernames are somebody to look up — never «own» by shape.
+    if str(platform_name or "").strip().lower() != "telegram" or not chat.isdigit():
+        return ""
+    return chat
+
+
+def _is_creator_private_chat(job: dict, platform_name: str, chat_id) -> bool:
+    """The target is the private chat of the person who created the job.
+
+    Delivering there adds no reach: the creator gets their own delayed answer.
+    So a job anybody set up may answer its creator without a decision (Dmitry,
+    28.09.2026: a user of their own agent automates for themselves).
+    """
+    chat = _private_telegram_chat(platform_name, chat_id)
+    origin = job.get("origin") if isinstance(job.get("origin"), dict) else {}
+    return bool(chat) and (
+        str(origin.get("platform") or "").strip().lower() == "telegram"
+        and str(origin.get("user_id") or "").strip() == chat
+    )
+
+
+def _is_owner_side_chat(job: dict, platform_name: str, chat_id) -> bool:
+    """The creator's, an owner's or the profile home private chat.
+
+    A failure notice goes only here: it is a technical note for whoever set the
+    job up, never for its recipients — clients, groups, other agents.
+    """
+    if _is_creator_private_chat(job, platform_name, chat_id):
+        return True
+    chat = _private_telegram_chat(platform_name, chat_id)
+    if not chat:
+        return False
+    try:
+        from gateway.config import Platform, load_gateway_config
+        from gateway.credential_management import owner_matches
+
+        if owner_matches(load_config(), "telegram", chat):
+            return True
+        home = load_gateway_config().get_home_channel(Platform.TELEGRAM)
+        return bool(home) and str(getattr(home, "chat_id", "") or "").strip() == chat
+    except Exception:
+        logger.debug("Job '%s': owner lookup for a delivery target failed", job.get("id"), exc_info=True)
+        return False
+
+
 def _deliver_result(
     job: dict,
     content: str,
@@ -3096,6 +3145,7 @@ def _deliver_result(
     loop=None,
     *,
     decision_session_id: str = "",
+    failure_notice: bool = False,
 ) -> Optional[str]:
     """
     Deliver job output to the configured target(s) (origin chat, specific platform, etc.).
@@ -3234,6 +3284,15 @@ def _deliver_result(
         platform_name = target["platform"]
         chat_id = target["chat_id"]
         thread_id = target.get("thread_id")
+        creator_chat = _is_creator_private_chat(job, platform_name, chat_id)
+
+        if failure_notice and not _is_owner_side_chat(job, platform_name, chat_id):
+            # A failure notice is a technical note for whoever set the job up,
+            # never for its recipients: clients, groups, other agents (0.21.15
+            # review P2-4). The failure stays visible in the job history.
+            logger.info("Job '%s': failure notice not sent to %s:%s — not an own chat",
+                        job["id"], platform_name, chat_id)
+            continue
 
         # bot-chat targets don't ride a gateway adapter: the output becomes a
         # real inbound turn in the target profile's canonical Bot Chat via the
@@ -3243,6 +3302,11 @@ def _deliver_result(
         if platform_name == BOT_CHAT_PLATFORM:
             if job.get("reminder"):
                 delivery_errors.append("Напоминание не запускает агента: выберите канал для человека.")
+                continue
+            if decision_session_id:
+                # A Bot Chat turn runs with the owner's rights; only the owner's
+                # own jobs may start one (0.21.15 review P1-C).
+                delivery_errors.append("Внутренний чат агента принимает только задания владельца.")
                 continue
             bot_chat_error = _deliver_to_bot_chat(job, content, chat_id)
             if bot_chat_error:
@@ -3366,8 +3430,9 @@ def _deliver_result(
         # set up, queue that immutable payload instead of sending under
         # cron/yolo/off; the decision survives this worker and is visible from
         # every chat in the profile decision center. The owner's own jobs get
-        # no decision session (_delivery_decision_session) and send below.
-        if decision_session_id:
+        # no decision session (_delivery_decision_session) and send below; so
+        # does any job answering its creator's own private chat.
+        if decision_session_id and not creator_chat:
             try:
                 from korra_cli.profiles import get_active_profile_name
                 from tools.send_message_tool import _queue_outbound_decision, _configured_account_identity
@@ -7595,6 +7660,7 @@ def _run_one_job_body(
                             decision_session_id=_delivery_decision_session(
                                 job, execution_id
                             ),
+                            failure_notice=not success,
                         )
                         if delivery_error and delivery_error.startswith(
                             _WAITING_DECISION_PREFIX
@@ -7777,6 +7843,7 @@ def _run_one_job_body(
                         adapters=adapters,
                         loop=loop,
                         decision_session_id=_delivery_decision_session(job, execution_id),
+                        failure_notice=True,
                     )
                     if delivery_error and delivery_error.startswith(
                         _WAITING_DECISION_PREFIX

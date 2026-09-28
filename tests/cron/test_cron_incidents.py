@@ -47,7 +47,7 @@ def _tick_failing(job, tmp_path, deliveries, error="boom unrelated"):
     fake_db = MagicMock()
 
     def fake_deliver(
-        jb, content, adapters=None, loop=None, decision_session_id=""
+        jb, content, adapters=None, loop=None, decision_session_id="", failure_notice=False
     ):
         deliveries.append(content)
         return None

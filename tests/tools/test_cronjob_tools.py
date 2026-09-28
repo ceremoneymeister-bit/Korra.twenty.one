@@ -638,7 +638,8 @@ class TestLocalDeliveryNotice:
         # resolves to that chat — nothing to warn about.
         from gateway.session_context import set_session_vars
 
-        set_session_vars(platform="telegram", chat_id="999")
+        # A private chat: whoever writes there may automate for themselves.
+        set_session_vars(platform="telegram", chat_id="999", chat_type="dm", user_id="999")
         created = json.loads(
             cronjob(action="create", prompt="x", schedule="every 2m")
         )

@@ -15,7 +15,13 @@ import json
 
 import pytest
 
-from gateway.session_context import _VAR_MAP, clear_session_vars, set_session_vars
+from gateway.session_context import (
+    _VAR_MAP,
+    clear_session_vars,
+    reset_background_owner,
+    set_background_owner,
+    set_session_vars,
+)
 
 
 @pytest.fixture
@@ -35,7 +41,9 @@ def _enter_cron_context(platform=None, chat_id=None, thread_id=None):
         chat_name="",
         cron_session="1",
     )
-    extra = []
+    # The creating run is the owner's job: only then may it reach other chats
+    # (a non-owner job automates only for its creator — test_owner_configured_autonomy).
+    extra = [(None, set_background_owner(True))]
     if platform is not None:
         extra.append(
             (_VAR_MAP["KORRA_CRON_AUTO_DELIVER_PLATFORM"],
@@ -55,7 +63,10 @@ def _enter_cron_context(platform=None, chat_id=None, thread_id=None):
 
 def _exit_cron_context(tokens, extra):
     for var, token in reversed(extra):
-        var.reset(token)
+        if var is None:
+            reset_background_owner(token)
+        else:
+            var.reset(token)
     clear_session_vars(tokens)
 
 
@@ -171,10 +182,14 @@ class TestCronContextUpdatePath:
         from tools.cronjob_tools import cronjob
         from cron.jobs import get_job
 
-        created = _create(deliver="local")
-        result = json.loads(
-            cronjob(action="update", job_id=created["job_id"], deliver="origin")
-        )
+        tokens = set_session_vars(platform="")  # the owner's own CLI
+        try:
+            created = _create(deliver="local")
+            result = json.loads(
+                cronjob(action="update", job_id=created["job_id"], deliver="origin")
+            )
+        finally:
+            clear_session_vars(tokens)
         assert result["success"] is True
         assert get_job(created["job_id"]).get("deliver") == "origin"
 
@@ -183,7 +198,11 @@ class TestNonCronContextUnchanged:
     def test_chat_session_create_keeps_literal_origin(self, temp_cron_home):
         # No cron_session var — ordinary chat/CLI create. Existing semantics:
         # 'origin' stays literal and resolves at fire time.
-        result = _create(deliver="origin")
+        tokens = set_session_vars(platform="")  # the owner's own CLI
+        try:
+            result = _create(deliver="origin")
+        finally:
+            clear_session_vars(tokens)
         assert result["deliver"] == "origin"
 
     def test_chat_session_omitted_deliver_unchanged(self, temp_cron_home):

@@ -327,17 +327,73 @@ def _refuse_change_of_owner_job(job: Dict[str, Any]) -> Optional[str]:
 
     The owner's jobs deliver without a per-message decision, so a visitor who
     could rewrite their prompt or target — or run one with their own text —
-    would send in the owner's name unchecked.
+    would send in the owner's name unchecked. Somebody else's job answers its
+    creator's private chat without a decision too (28.09.2026), so it is its
+    creator's or the owner's to change — never a third person's in a group.
     """
     try:
         from gateway.principal import cron_job_acts_for_owner, current_principal
+        from gateway.session_context import get_session_env
 
-        if not cron_job_acts_for_owner(job) or current_principal().owner:
+        if current_principal().owner:
             return None
+        if not cron_job_acts_for_owner(job):
+            origin = job.get("origin") if isinstance(job.get("origin"), dict) else {}
+            creator = str(origin.get("user_id") or "").strip()
+            speaker = str(get_session_env("KORRA_SESSION_USER_ID", "") or "").strip()
+            # The creator, or — for a job no messaging person created (a room of
+            # agents, a one-shot run) — a turn that is no messaging person
+            # either. A group member never edits somebody else's job.
+            if creator == speaker:
+                return None
+            return tool_error(
+                "This scheduled job was set up by somebody else; only its creator or the owner can change, pause, remove or run it.",
+                success=False,
+            )
     except Exception:
         pass
     return tool_error(
         "This scheduled job belongs to the owner; only the owner can change, pause, remove or run it.",
+        success=False,
+    )
+
+
+def _refuse_reach_beyond_creator(deliver: Optional[str]) -> Optional[str]:
+    """Somebody other than the owner automates only for themselves.
+
+    Dmitry, 28.09.2026: a user of their own agent (or a visitor) may set up a
+    job whose results come back to their own private chat with this bot.
+    Sending to other people, groups, other agents or the owner's home channel
+    is the owner's to set up — refused here instead of queued for a decision
+    nobody in Telegram would ever see.
+    """
+    if _creator_is_owner():
+        return None
+    try:
+        from cron.scheduler import BOT_CHAT_PLATFORM, _is_creator_private_chat
+
+        origin = _origin_from_env() or {}
+        creator_job = {"origin": origin}
+        for part in [p.strip() for p in (deliver or "origin").split(",") if p.strip()]:
+            lowered = part.lower()
+            if lowered == "local":
+                continue
+            if lowered == "origin":
+                if _is_creator_private_chat(creator_job, origin.get("platform"), origin.get("chat_id")):
+                    continue
+            elif ":" in part and not lowered.startswith(BOT_CHAT_PLATFORM):
+                platform, _, rest = part.partition(":")
+                if _is_creator_private_chat(creator_job, platform, rest.split(":", 1)[0]):
+                    continue
+            break
+        else:
+            return None
+    except Exception:
+        logger.debug("Delivery reach check failed", exc_info=True)
+    return tool_error(
+        "Only the owner can set up automatic sends to other people, groups or agents. "
+        "This job may deliver only to the creator's own private chat with this bot "
+        "(deliver='origin' there) or stay local; ask the owner to set up other recipients.",
         success=False,
     )
 
@@ -1581,6 +1637,11 @@ def cronjob(
             bot_chat_error = _validate_bot_chat_deliver(_normalize_deliver_param(deliver))
             if bot_chat_error:
                 return tool_error(bot_chat_error, success=False)
+            reach_error = _refuse_reach_beyond_creator(
+                _resolve_cron_context_deliver(_normalize_deliver_param(deliver))
+            )
+            if reach_error:
+                return reach_error
 
             # Validate context_from references existing jobs
             if context_from:
@@ -1852,6 +1913,9 @@ def cronjob(
                 updates["deliver"] = _resolve_cron_context_deliver(
                     _normalize_deliver_param(deliver)
                 )
+                reach_error = _refuse_reach_beyond_creator(updates["deliver"])
+                if reach_error:
+                    return reach_error
             if skills is not None or skill is not None:
                 canonical_skills = _canonical_skills(skill, skills)
                 updates["skills"] = canonical_skills

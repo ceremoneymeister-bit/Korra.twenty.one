@@ -49,7 +49,7 @@ def _tick(job, tmp_path, current_provider, deliveries):
     fake_db = MagicMock()
 
     def fake_deliver(
-        job, content, adapters=None, loop=None, decision_session_id=""
+        job, content, adapters=None, loop=None, decision_session_id="", failure_notice=False
     ):
         deliveries.append(content)
         return None
@@ -132,7 +132,7 @@ class TestDriftAlertOnce:
         deliveries = []
 
         def fake_deliver(
-            jb, content, adapters=None, loop=None, decision_session_id=""
+            jb, content, adapters=None, loop=None, decision_session_id="", failure_notice=False
         ):
             deliveries.append(content)
             return None
