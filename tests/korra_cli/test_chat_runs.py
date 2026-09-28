@@ -224,3 +224,28 @@ def test_opened_chat_learns_where_the_turn_lies_in_history(isolated, monkeypatch
     assert runs[written]["turn_tracked"] is True
     # Опрос оболочки без открытого чата базу не читает.
     assert all("history_row_id" not in run for run in asyncio.run(chat_runs("lawyer"))["runs"])
+
+
+def test_a_turn_admitted_before_compression_is_seen_from_the_continuation(isolated, monkeypatch, tmp_path):
+    """Ревью Astra, раунд 6, P2-7: ход принят под id родителя, во время него
+    сжатие открыло продолжение; чат, открытый по новому id, видит этот ход, а
+    поток и отмена идут по сессии записи."""
+    from korra_state import SessionDB
+
+    mid = remember(isolated, message="before-compress-12345678", session="parent-s")
+    db_path = tmp_path / "state-chain.db"
+    db = SessionDB(db_path)
+    db.create_session("parent-s", source="dashboard")
+    db.append_message("parent-s", role="user", content="Проверка",
+                      display_metadata={"client_message_id": mid})
+    db.end_session("parent-s", "compression")
+    db.create_session("tip-s", source="compression", parent_session_id="parent-s")
+    db.append_message("tip-s", role="assistant", content="продолжение")
+    db.close()
+    monkeypatch.setattr(web_server, "_open_session_db_for_profile",
+                        lambda profile, read_only=True: SessionDB(db_path))
+
+    runs = asyncio.run(chat_runs("lawyer", "tip-s"))["runs"]
+    assert [run["message_id"] for run in runs] == [mid]
+    assert runs[0]["session_id"] == "parent-s"
+    assert runs[0]["history_row_id"] is not None

@@ -698,6 +698,12 @@ async def get_session_messages(
         )
     if before_id is not None and display_limit is None:
         raise HTTPException(status_code=400, detail="before_id requires display_limit")
+    if display_limit is not None and include_compacted:
+        # Лента чата — живая история сессии; архив сжатия читается прежним
+        # постраничным режимом без display_limit.
+        raise HTTPException(
+            status_code=400, detail="display_limit is incompatible with include_compacted"
+        )
 
     def _read():
         db = _open_session_db_for_profile(profile, read_only=True)
@@ -709,7 +715,6 @@ async def get_session_messages(
             if display_limit is not None:
                 # Лента чата: последние N сообщений (реплика или целый ход
                 # агента), более ранние — следующей страницей до before_id.
-                # Архив сжатия и предки по цепочке входят всегда.
                 rows, cursor, has_more = db.get_display_page(
                     sid, limit=display_limit, before_id=before_id
                 )

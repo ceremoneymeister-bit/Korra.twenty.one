@@ -183,3 +183,14 @@ it("запоминает сообщение и смещение внутри н�
   expect(JSON.parse(sessionStorage.getItem("chat:scroll") ?? "null")).toEqual({ id: "c-h62", offset: 50 });
   sessionStorage.clear();
 });
+
+it("пустой первый рендер до прихода истории не стирает место чтения (ревью Astra, раунд 6, P2-2)", async () => {
+  sessionStorage.setItem("chat:scroll", JSON.stringify({ id: "c-h36", offset: 10 }));
+  const load = vi.fn();
+  const idle = { hasOlder: false, loading: false, failed: false, load };
+  await renderStored([], idle);
+  expect(JSON.parse(sessionStorage.getItem("chat:scroll") ?? "null")).toEqual({ id: "c-h36", offset: 10 });
+  await renderStored(["c-h61", "c-h62"], { ...idle, hasOlder: true });
+  expect(load).toHaveBeenCalledTimes(1);
+  sessionStorage.clear();
+});

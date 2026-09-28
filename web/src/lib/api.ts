@@ -2936,6 +2936,10 @@ export interface SessionMessage {
   timestamp?: number;
   /** Показ реплики: например, id сообщения браузера, начавшего ход. */
   display_metadata?: Record<string, unknown> | null;
+  /** `hidden` — служебная строка (сводка сжатия), в ленте не показывается. */
+  display_kind?: string | null;
+  /** Видимая часть составной строки, если сервер её выделил. */
+  display_content?: string | null;
 }
 
 export interface SessionMessagesResponse {

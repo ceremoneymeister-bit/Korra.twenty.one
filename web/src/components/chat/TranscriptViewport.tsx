@@ -100,7 +100,10 @@ export function TranscriptViewport({ children, followKey, awaitingApproval, stor
     if (!el || !el.clientHeight) return;
     const prepended = previousAnchor.current !== undefined && previousAnchor.current !== anchorKey;
     previousAnchor.current = anchorKey;
-    if (place.current !== null) {
+    if (place.current !== null && historyRow(anchorKey) === null) {
+      // История чата ещё не пришла: пустая лента или только неотправленное
+      // сообщение — не повод забывать место чтения (ревью Astra, раунд 6, P2-2).
+    } else if (place.current !== null) {
       const reading = place.current;
       const target = messages().find(item => item.getAttribute("data-chat-message") === reading.id);
       const wanted = historyRow(reading.id);

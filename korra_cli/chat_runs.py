@@ -86,22 +86,37 @@ def _browser_sse(status_code: int, body: bytes, content_type: str) -> bytes:
     ) + b"data: [DONE]\n\n")
 
 
-def _history_rows(profile: str | None, items: list[dict]) -> dict[str, int | None]:
+def _conversation_aliases(profile: str | None, session_id: str) -> list[str]:
+    """Сессии одного разговора: открытая, её вершина и предки по сжатию.
+
+    Ход, принятый до сжатия, записан в журнале под прежним id; открытый по
+    новому id чат должен его видеть (ревью Astra, раунд 6, P2-7). Явные ветки
+    сюда не входят.
+    """
+    try:
+        db = _server()._open_session_db_for_profile(profile, read_only=True)
+    except Exception:
+        return [session_id]
+    try:
+        tip = db.resolve_resume_session_id(session_id) or session_id
+        lineage = db.get_compression_lineage(tip) or [tip]
+        return list(dict.fromkeys([session_id, tip, *lineage]))
+    except Exception:
+        return [session_id]
+    finally:
+        db.close()
+
+
+def _history_rows(profile: str | None, session_id: str, items: list[dict]) -> dict[str, int | None]:
     try:
         db = _server()._open_session_db_for_profile(profile, read_only=True)
     except Exception:
         return {}
     try:
-        found = {}
-        for item in items:
-            sid = str(item.get("session_id") or "")
-            try:
-                found[item["message_id"]] = db.find_client_message_row(
-                    db.resolve_resume_session_id(sid) if sid else sid, item["message_id"]
-                )
-            except Exception:
-                found[item["message_id"]] = None
-        return found
+        tip = db.resolve_resume_session_id(session_id) or session_id
+        return db.find_client_message_rows(tip, [item["message_id"] for item in items])
+    except Exception:
+        return {}
     finally:
         db.close()
 
@@ -110,12 +125,25 @@ def _history_rows(profile: str | None, items: list[dict]) -> dict[str, int | Non
 async def chat_runs(profile: str | None = None, session_id: str | None = None):
     server = _server()
     ledger = server._chat_delivery_ledger()
-    items = await server.run_in_threadpool(ledger.runs, profile, session_id)
+    if session_id is None:
+        items = await server.run_in_threadpool(ledger.runs, profile, None)
+    else:
+        aliases = await server.run_in_threadpool(_conversation_aliases, profile, session_id)
+        items = []
+        sources = 0
+        for alias in aliases:
+            found = await server.run_in_threadpool(ledger.runs, profile, alias)
+            sources += bool(found)
+            items.extend(found)
+        if sources > 1:
+            # Порядок журнала — порядок приёма внутри одной сессии; ходы
+            # разных поколений одного разговора сводятся по времени.
+            items.sort(key=lambda item: float(item.get("updated_at") or 0), reverse=True)
     rows = {}
     if session_id is not None and items:
         # Где в истории лежит реплика каждого хода: по ней чат отличает ход
         # раньше загруженной страницы от ещё не записанного (ревью Astra R2).
-        rows = await server.run_in_threadpool(_history_rows, profile, items)
+        rows = await server.run_in_threadpool(_history_rows, profile, session_id, items)
     result = []
     for item in items:
         summary = {**item, "status": _status(item, ledger)}

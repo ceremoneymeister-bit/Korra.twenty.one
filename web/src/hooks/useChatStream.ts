@@ -753,8 +753,12 @@ function sessionMessagesToChat(
   };
 
   messages.forEach((message, index) => {
+    // Служебная сводка сжатия — не реплика человека; у составной строки
+    // сервер отдаёт видимую часть отдельно (ревью Astra, раунд 6, P2-5).
+    if (message.display_kind === "hidden") return;
     const timestamp = message.timestamp ?? Date.now();
-    const content = typeof message.content === "string" ? message.content : "";
+    const shownContent = typeof message.display_content === "string" ? message.display_content : message.content;
+    const content = typeof shownContent === "string" ? shownContent : "";
 
     // id строки базы делает id сообщения устойчивым: страницы, догруженные
     // к началу, не повторяют id уже показанных.
@@ -938,7 +942,8 @@ export function useChatStream(
       try {
         const run = (await getChatRuns(profile ?? "", sessionId))[0];
         if (!run) throw new Error("Ход пока отправляется. Попробуйте остановить ещё раз.");
-        const response = await fetch(chatRunUrl(`/${encodeURIComponent(run.message_id)}/cancel`, profile ?? "", sessionId), {
+        // Ход, принятый до сжатия, записан под прежним id разговора.
+        const response = await fetch(chatRunUrl(`/${encodeURIComponent(run.message_id)}/cancel`, profile ?? "", run.session_id || sessionId), {
           method: "POST", headers: chatRunHeaders(),
         });
         if (!response.ok) throw new Error("Не удалось остановить ход. Проверьте связь и повторите.");
@@ -1129,7 +1134,8 @@ export function useChatStream(
         dispatch({ type: "LOAD_SESSION", sessionId, messages: beforeRun, history: loadedWindow });
         dispatch({ type: "SEND_USER", streaming: isRunBusy(run), userMsg, assistantMsg });
       }
-      const response = await fetch(chatRunUrl(`/${encodeURIComponent(run.message_id)}/stream`, profile ?? "", sessionId), {
+      // Ход, принятый до сжатия, записан под прежним id разговора.
+      const response = await fetch(chatRunUrl(`/${encodeURIComponent(run.message_id)}/stream`, profile ?? "", run.session_id || sessionId), {
         headers: chatRunHeaders(), signal: controller.signal, cache: "no-store",
       });
       if (!current()) return;

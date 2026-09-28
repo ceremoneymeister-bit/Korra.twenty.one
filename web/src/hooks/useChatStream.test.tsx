@@ -1437,3 +1437,16 @@ describe("ход узнаётся по id сообщения, а не по те�
     expect(current.older.hasOlder).toBe(true);
   });
 });
+
+it("служебная сводка сжатия не становится репликой, у составной строки видна её часть (ревью Astra, раунд 6, P2-5)", async () => {
+  const { getChatRuns } = await import("@/lib/chat-runs");
+  vi.mocked(getChatRuns).mockResolvedValue([]);
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ approvals: [] }))));
+  vi.spyOn(api, "getSessionMessages").mockResolvedValue({ session_id: "compacted", messages: [
+    { id: 1, role: "user", content: "INTERNAL SUMMARY", display_kind: "hidden" },
+    { id: 2, role: "user", content: "INTERNAL CARRIER REAL ASK", display_content: "REAL ASK" },
+    { id: 3, role: "assistant", content: "ответ" },
+  ] as SessionMessage[], pagination: { order: "latest", returned: 3, before_id: 1, has_more: false } });
+  await act(async () => { await current.loadSession("compacted"); });
+  expect(current.messages.map(m => m.content)).toEqual(["REAL ASK", "ответ"]);
+});
