@@ -4679,6 +4679,32 @@ def _run_job_script(
         return False, f"Script execution failed: {exc}"
 
 
+@contextlib.contextmanager
+def _job_send_context(job: dict, execution_id: Optional[str] = None):
+    """Контекст cron-запуска вокруг скрипта задания.
+
+    Скрипт задания без модели (``no_agent``) и проверочный скрипт перед
+    агентом — такая же автоматическая работа задания, как ход агента. Без
+    этого контекста ``korra send`` из скрипта считал себя ручной отправкой
+    владельца и обходил проверку подтверждённых получателей, передачу
+    отправки шлюзу, защиту от повторов и маскирование (второе чистое ревью
+    Astra, P1-1). Переменные уходят в окружение скрипта тем же мостом, что и
+    в терминал агента; секрет действует, пока идёт это выполнение.
+    """
+    from gateway.session_context import _VAR_MAP
+    from cron.recipients import RUNNING_JOB_ENV, issue_run_token, retire_run_token
+
+    session_token = _VAR_MAP["KORRA_CRON_SESSION"].set("1")
+    run_token = issue_run_token({**job, "execution_id": execution_id or job.get("execution_id")})
+    job_token = _VAR_MAP[RUNNING_JOB_ENV].set(run_token)
+    try:
+        yield
+    finally:
+        _VAR_MAP[RUNNING_JOB_ENV].reset(job_token)
+        _VAR_MAP["KORRA_CRON_SESSION"].reset(session_token)
+        retire_run_token(run_token)
+
+
 def _run_job_script_with_claim_heartbeat(
     job: dict,
     script_path: str,
@@ -5798,9 +5824,10 @@ def run_job(
             _job_workdir = None
 
         try:
-            ok, output = _run_job_script_with_claim_heartbeat(
-                job, script_path, workdir=_job_workdir, cancel_event=cancel_event,
-            )
+            with _job_send_context(job, execution_id):
+                ok, output = _run_job_script_with_claim_heartbeat(
+                    job, script_path, workdir=_job_workdir, cancel_event=cancel_event,
+                )
         except Exception as exc:
             logger.exception(
                 "Job '%s': script execution raised unexpectedly", job_id,
@@ -5958,9 +5985,10 @@ def run_job(
     prerun_script = None
     script_path = job.get("script")
     if script_path:
-        prerun_script = _run_job_script_with_claim_heartbeat(
-            job, script_path, cancel_event=cancel_event,
-        )
+        with _job_send_context(job, execution_id):
+            prerun_script = _run_job_script_with_claim_heartbeat(
+                job, script_path, cancel_event=cancel_event,
+            )
         _ran_ok, _script_output = prerun_script
         if _ran_ok and not _parse_wake_gate(_script_output):
             logger.info(

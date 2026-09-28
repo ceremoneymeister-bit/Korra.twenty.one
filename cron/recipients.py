@@ -285,10 +285,22 @@ def _normalized_target(target: str) -> str:
     platform, _, ref = str(target or "").partition(":")
     platform, ref = platform.strip().lower(), ref.strip()
     try:
-        from tools.send_message_tool import prepare_send_message_platforms, resolve_send_target
+        from tools.send_message_tool import (
+            home_channel_chat_id,
+            prepare_send_message_platforms,
+            resolve_send_target,
+        )
 
         prepare_send_message_platforms()
-        chat_id, thread_id, error = resolve_send_target(platform, ref)
+        if ref:
+            chat_id, thread_id, error = resolve_send_target(platform, ref)
+        else:
+            # Адрес без чата уходит в домашний канал — тот же, что возьмёт
+            # отправка (второе чистое ревью Astra, P2-1).
+            from gateway.config import Platform, load_gateway_config
+
+            chat_id = home_channel_chat_id(load_gateway_config(), Platform(platform), platform)
+            thread_id, error = None, None
         if not error and chat_id:
             return target_label(platform, chat_id, thread_id)
     except Exception:
@@ -463,7 +475,18 @@ def send_allowed_in_run(platform: str, chat_id, thread_id=None) -> bool:
         return False
     if confirmed_audience(job):
         return True
-    return _label_confirmed(job, target_label(platform, chat_id, thread_id))
+    if _label_confirmed(job, target_label(platform, chat_id, thread_id)):
+        return True
+    # Собственный личный чат владельца или создателя — не посторонний
+    # получатель (решение Дмитрия 28.09): так же, как автодоставка результата.
+    # Без этого скрипт-сторож, который шлёт владельцу, после P1-1 упёрся бы в
+    # карточку подтверждения.
+    try:
+        from cron.scheduler import _is_owner_side_chat
+
+        return bool(_is_owner_side_chat(job, platform, chat_id))
+    except Exception:
+        return False
 
 
 def audience_run_note(job: dict) -> str:

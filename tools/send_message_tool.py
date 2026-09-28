@@ -846,6 +846,22 @@ def resolve_outbound_message_decision(
     )
 
 
+def home_channel_chat_id(config, platform, platform_name: str) -> str | None:
+    """Домашний канал платформы, куда уходит адрес без чата (``telegram``).
+
+    Один источник для отправки и для ключа повтора в cron-запуске: иначе
+    ``telegram`` и ``telegram:555`` при домашнем канале 555 считались бы
+    двумя разными отправками (второе чистое ревью Astra, P2-1).
+    """
+    home = config.get_home_channel(platform)
+    if not home and platform_name == "weixin":
+        wx_home = os.getenv("WEIXIN_HOME_CHANNEL", "").strip()
+        if wx_home:
+            return wx_home
+    chat_id = str(getattr(home, "chat_id", "") or "").strip() if home else ""
+    return chat_id or None
+
+
 def _handle_send(args, *, owner_initiated: bool = False, for_running_job: bool = False):
     """Send a message to a platform target."""
     target = args.get("target", "")
@@ -926,14 +942,9 @@ def _handle_send(args, *, owner_initiated: bool = False, for_running_job: bool =
 
     used_home_channel = False
     if not chat_id:
-        home = config.get_home_channel(platform)
-        if not home and platform_name == "weixin":
-            wx_home = os.getenv("WEIXIN_HOME_CHANNEL", "").strip()
-            if wx_home:
-                from gateway.config import HomeChannel
-                home = HomeChannel(platform=platform, chat_id=wx_home, name="Weixin Home")
-        if home:
-            chat_id = home.chat_id
+        home_chat_id = home_channel_chat_id(config, platform, platform_name)
+        if home_chat_id:
+            chat_id = home_chat_id
             used_home_channel = True
         else:
             home_env = _HOME_CHANNEL_ENV_OVERRIDES.get(

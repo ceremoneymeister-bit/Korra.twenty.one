@@ -780,3 +780,94 @@ def test_the_result_reaches_other_people_masked_and_the_owner_as_is(store):
     texts = {str(call.args[2]): call.args[3] for call in send.await_args_list}
     assert SECRET_TEXT not in texts["555"]
     assert SECRET_TEXT in texts["42"]
+
+
+def test_home_channel_shorthand_and_its_id_are_one_send(live_send, monkeypatch):
+    """Второе чистое ревью Astra, P2-1: ``telegram`` уходит в домашний канал
+    555 — тот же получатель, что ``telegram:555``, и повтор не уходит дважды."""
+    token, grant, cfg, _job = live_send
+    cfg.get_home_channel.return_value = MagicMock(chat_id="555")
+    sent = _transport(monkeypatch, {"success": True, "message_id": "7"})
+    first = recipients.send_once_for_live_run(token, grant, "telegram", "Birthday")
+    again = recipients.send_once_for_live_run(token, grant, "telegram:555", "Birthday")
+    assert first["success"] is True and again["success"] is True
+    assert again.get("repeat") is True
+    assert len(sent) == 1, sent
+
+
+def test_the_owners_own_chat_needs_no_card_inside_a_run(store):
+    """Канал владельца — не посторонний: отправка туда из запуска проходит
+    без решения, как автодоставка результата (решение Дмитрия 28.09)."""
+    from cron import jobs
+
+    job = jobs.create_job(prompt="watchdog", schedule="every 1h", deliver="local",
+                          created_by_owner=True, recipients_policy=1,
+                          recipients_confirmed={"targets": ["telegram:555"]})
+    bound = recipients.bind_running_job(job)
+    try:
+        assert recipients.send_allowed_in_run("telegram", "42") is True
+        assert recipients.send_allowed_in_run("telegram", "555") is True
+        assert recipients.send_allowed_in_run("telegram", "777") is False
+    finally:
+        recipients.reset_running_job(bound)
+
+
+#: Скрипт задания без модели: печатает свой контекст и дважды шлёт постороннему.
+_SCRIPT_SEND = r"""
+import argparse, json, sys
+sys.path.insert(0, REPO)
+from unittest.mock import MagicMock, patch
+from gateway.config import Platform
+from gateway.session_context import get_session_env
+from korra_cli.send_cmd import cmd_send, _run_by_agent
+
+cfg = MagicMock(platforms={Platform.TELEGRAM: MagicMock(enabled=True, token="fake")})
+local, decisions = [], []
+def dispatch(**kw):
+    local.append((kw["chat_id"], kw["cleaned_message"]))
+    return {"success": True}
+def decide(**kw):
+    decisions.append(kw)
+    return {"id": "decision-from-script", "status": "pending"}
+context = {"run_by_agent": _run_by_agent(), "cron_session": get_session_env("KORRA_CRON_SESSION", ""),
+           "has_token": bool(get_session_env("KORRA_CRON_RUN_TOKEN", ""))}
+with patch("gateway.config.load_gateway_config", return_value=cfg), \
+     patch("tools.send_message_tool._dispatch_resolved_send", side_effect=dispatch), \
+     patch("tools.send_message_tool._queue_outbound_decision", side_effect=decide):
+    for _ in range(2):
+        try:
+            cmd_send(argparse.Namespace(to="telegram:777", message="REVIEW_API_KEY=synthetic-only",
+                                        file=None, subject=None, json=True, quiet=True, list=False))
+        except SystemExit:
+            pass
+print("RESULT " + json.dumps({**context, "local": local, "decisions": len(decisions)}))
+"""
+
+
+def test_a_script_job_sends_through_the_same_boundary_as_an_agent(store, monkeypatch):
+    """Второе чистое ревью Astra, P1-1: скрипт задания без модели — такая же
+    автоматическая работа, как ход агента. Его ``korra send`` постороннему не
+    уходит напрямую, а ждёт решения; секрет запуска живёт только пока идёт
+    скрипт."""
+    from pathlib import Path
+
+    from cron import jobs, scheduler
+
+    repo = str(Path(__file__).resolve().parents[2])
+    monkeypatch.setenv("API_SERVER_PROXY_TARGET", "http://127.0.0.1:1")
+    (store / "scripts").mkdir(exist_ok=True)
+    (store / "scripts" / "probe.py").write_text(_SCRIPT_SEND.replace("REPO", repr(repo)))
+    job = jobs.create_job(prompt="", schedule="every 1h", script="probe.py", no_agent=True,
+                          deliver="local", created_by_owner=True, recipients_policy=1,
+                          recipients_confirmed={"targets": ["telegram:555"]})
+
+    ok, _doc, output, _error = scheduler.run_job(job, execution_id="exec-script-probe")
+
+    assert ok, output
+    line = [row for row in str(output).splitlines() if row.startswith("RESULT ")][-1]
+    result = json.loads(line[len("RESULT "):])
+    assert result["run_by_agent"] is True
+    assert result["cron_session"] == "1" and result["has_token"] is True
+    assert result["local"] == []  # ничего не ушло мимо шлюза
+    assert result["decisions"] == 2
+    assert recipients._LIVE_RUNS == {}  # секрет отозван вместе с концом скрипта
