@@ -60,6 +60,8 @@ _BUILTIN_NAMES = frozenset({
     "kittentts",
     "piper",
     "deepinfra",
+    # Встроенные голоса Korra 0.21.15 (Fish Audio через OpenRouter).
+    "openrouter_fish",
 })
 
 
