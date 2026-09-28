@@ -235,6 +235,21 @@ describe("«Вкладки» на телефоне", () => {
       const add = container.querySelector<HTMLButtonElement>("[data-agent-add]");
       expect(add?.getAttribute("aria-label")).toBe("Добавить агента");
       expect(add?.textContent).toContain("Добавить агента");
+
+      // На 320 px подпись наезжала на «Все агенты» (чистое ревью Astra, P2-3):
+      // остаётся «+» с тем же доступным названием.
+      const wide = window.innerWidth;
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: 320 });
+      try {
+        await act(async () => root.unmount());
+        root = createRoot(container);
+        await render(page());
+        const narrow = container.querySelector<HTMLButtonElement>("[data-agent-add]");
+        expect(narrow?.getAttribute("aria-label")).toBe("Добавить агента");
+        expect(narrow?.textContent).not.toContain("Добавить агента");
+      } finally {
+        Object.defineProperty(window, "innerWidth", { configurable: true, value: wide });
+      }
     } finally {
       tabsState.tabs = null;
     }

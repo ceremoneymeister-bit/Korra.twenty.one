@@ -1036,6 +1036,8 @@ export function useChatStream(
       dispatch({ type: "LOAD_SESSION", sessionId, messages: pendingMessages() });
     }
     let timedOut = false;
+    let replayTimedOut = false;
+    let replayTimer: number | undefined;
     const historyTimer = window.setTimeout(() => {
       timedOut = true;
       controller.abort();
@@ -1083,7 +1085,6 @@ export function useChatStream(
       if (!current()) return;
       const run = runs[0];
       setIsLoading(false);
-      const savedIntents = loadChatOutboxRecords(profile ?? "", sessionId);
       for (const item of runs) {
         if (item.status === "completed" && runAnswered(chatMessages, item)) {
           clearChatOutbox(item.message_id, profile ?? "");
@@ -1108,8 +1109,11 @@ export function useChatStream(
       // Ход закончен, и его ответ уже целиком лежит в истории. Перечитывать
       // журнал на каждом возврате незачем: replay нужен, когда снимок истории
       // мог отстать от журнала, а не чтобы заново нарисовать то же самое.
-      const hasOtherIntent = savedIntents.some((record) => record.messageId !== run.message_id);
-      if ((background || hasOtherIntent) && run.status === "completed" && runAnswered(chatMessages, run)) {
+      // И при первом открытии: переигрывать готовый ответ значило заменить
+      // показанный текст пустым пузырём до прихода копии — а зависший поток
+      // оставлял чат без ответа и с заблокированной отправкой (чистое ревью
+      // Astra, P1-4).
+      if (run.status === "completed" && runAnswered(chatMessages, run)) {
         clearChatOutbox(run.message_id, profile ?? "");
         showWithPending(chatMessages, runs);
         return;
@@ -1134,10 +1138,23 @@ export function useChatStream(
         dispatch({ type: "LOAD_SESSION", sessionId, messages: beforeRun, history: loadedWindow });
         dispatch({ type: "SEND_USER", streaming: isRunBusy(run), userMsg, assistantMsg });
       }
+      // Подключение к журналу ограничено всегда; тишина — только у готового
+      // ответа: его копия лежит на сервере целиком, а идущий ход может
+      // законно молчать минутами, пока работает инструмент.
+      const armReplayTimer = () => {
+        window.clearTimeout(replayTimer);
+        replayTimer = window.setTimeout(() => {
+          replayTimedOut = true;
+          controller.abort();
+        }, HISTORY_LOAD_TIMEOUT_MS);
+      };
+      armReplayTimer();
       // Ход, принятый до сжатия, записан под прежним id разговора.
       const response = await fetch(chatRunUrl(`/${encodeURIComponent(run.message_id)}/stream`, profile ?? "", run.session_id || sessionId), {
         headers: chatRunHeaders(), signal: controller.signal, cache: "no-store",
       });
+      if (run.status === "completed") armReplayTimer();
+      else window.clearTimeout(replayTimer);
       if (!current()) return;
       if (!response.ok || !response.body) throw new Error("Не удалось восстановить ответ. Вернитесь в чат для повторного подключения.");
       const reader = response.body.getReader();
@@ -1148,6 +1165,7 @@ export function useChatStream(
         const part = await reader.read();
         if (!current()) { void reader.cancel(); return; }
         if (part.done) break;
+        if (run.status === "completed") armReplayTimer();
         const parsed = splitSSEBuffer(buffer + decoder.decode(part.value, { stream: true }));
         buffer = parsed.remainder;
         for (const event of parsed.events) {
@@ -1191,15 +1209,19 @@ export function useChatStream(
           type: "SET_ERROR",
           error: timedOut
             ? "Переписка не загрузилась за 30 секунд. Проверьте связь и откройте чат ещё раз — работа агента продолжается."
-            : `Не удалось обновить переписку. ${ownerFacingError(err, "Проверьте связь и откройте чат ещё раз. Работа агента могла продолжиться.")}`,
+            : replayTimedOut
+              ? "Ответ не удалось показать за 30 секунд. Он сохранён — откройте чат ещё раз; написать новое сообщение можно уже сейчас."
+              : `Не удалось обновить переписку. ${ownerFacingError(err, "Проверьте связь и откройте чат ещё раз. Работа агента могла продолжиться.")}`,
         });
       }
     } finally {
       window.clearTimeout(historyTimer);
+      window.clearTimeout(replayTimer);
       if (current()) {
         setIsLoading(false);
         streamingRef.current = false;
         activeStreamIdRef.current = null;
+        if (replayTimedOut) dispatch({ type: "RESET_STREAMING" });
       }
     }
   }, [profile, selectionKey]);

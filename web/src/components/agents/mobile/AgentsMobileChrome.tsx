@@ -44,6 +44,8 @@ import {
   IDLE_STATUS,
   pickRail,
   railSlots,
+  railInnerWidth,
+  ADD_AGENT_LABEL_ROOM,
   statusSpeech,
   strongestAttention,
   type AgentStatus,
@@ -224,6 +226,7 @@ export function useAgentsMobileChrome({
     statuses,
     { active: activeId, pinned: view.pinned, lastActive, slots: railSlots(width) },
   );
+  const addLabel = allTabs.length <= 1 && railInnerWidth(width) >= ADD_AGENT_LABEL_ROOM;
   const works = activityCount(statuses.values());
   const others = strongestAttention(allTabs.filter((tab) => tab.profile !== activeId).map((tab) => statusOf(tab.profile)));
 
@@ -420,13 +423,13 @@ export function useAgentsMobileChrome({
               // space; one agent alone gets the full label (Dmitry, 28.09).
               <button
                 type="button"
-                className={cn("k-add-agent", allTabs.length <= 1 && "k-add-agent--wide")}
+                className={cn("k-add-agent", addLabel && "k-add-agent--wide")}
                 aria-label="Добавить агента"
                 onClick={actions.addAgent}
                 data-agent-add
               >
                 <Plus size={18} aria-hidden className="k-icon" />
-                {allTabs.length <= 1 && <span>Добавить агента</span>}
+                {addLabel && <span>Добавить агента</span>}
               </button>
             )}
           </div>

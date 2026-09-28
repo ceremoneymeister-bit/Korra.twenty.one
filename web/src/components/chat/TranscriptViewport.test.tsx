@@ -194,3 +194,16 @@ it("пустой первый рендер до прихода истории н
   expect(load).toHaveBeenCalledTimes(1);
   sessionStorage.clear();
 });
+
+it("рост содержимого выше читаемого сообщения не сдвигает текст (чистое ревью Astra, P2-2)", async () => {
+  const load = vi.fn();
+  const viewport = await renderStored(["c-h61", "c-h62", "c-h63"], { hasOlder: false, loading: false, failed: false, load });
+  const tops = { "c-h61": 0, "c-h62": 300, "c-h63": 600 };
+  placeMessages(viewport, tops);
+  await scroll(viewport, 350);
+  // Над читаемым сообщением выросло вложение на 400 px.
+  tops["c-h62"] = 700; tops["c-h63"] = 1000;
+  await act(async () => resized());
+  expect(viewport.scrollTop).toBe(750);
+  sessionStorage.clear();
+});

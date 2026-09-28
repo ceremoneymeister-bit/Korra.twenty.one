@@ -719,8 +719,9 @@ describe("возврат к уже открытому чату", () => {
     }));
 
     await act(async () => { await current.loadSession("s-done"); });
-    // Первичная загрузка повторяет ход из журнала — это и есть durable replay.
-    expect(requests.filter(url => url.includes("/stream"))).toHaveLength(1);
+    // Ответ уже в истории: и первое открытие показывает его оттуда, не
+    // переигрывая журнал (чистое ревью Astra, P1-4).
+    expect(requests.filter(url => url.includes("/stream"))).toHaveLength(0);
     const before = current.messages;
 
     requests.length = 0;
@@ -1449,4 +1450,48 @@ it("служебная сводка сжатия не становится ре�
   ] as SessionMessage[], pagination: { order: "latest", returned: 3, before_id: 1, has_more: false } });
   await act(async () => { await current.loadSession("compacted"); });
   expect(current.messages.map(m => m.content)).toEqual(["REAL ASK", "ответ"]);
+});
+
+describe("зависшее восстановление ответа (чистое ревью Astra, P1-4)", () => {
+  it("готовый ответ из истории показывается и при первом открытии, без переигрывания", async () => {
+    const { getChatRuns } = await import("@/lib/chat-runs");
+    vi.mocked(getChatRuns).mockResolvedValue([{
+      message_id: "done-first-open-123", session_id: "done", profile: "", status: "completed", updated_at: 500,
+      history_count: 0, turn_tracked: true, history_row_id: 1, user_message: { role: "user", content: "вопрос" },
+    }]);
+    vi.spyOn(api, "getSessionMessages").mockResolvedValue({ session_id: "done", messages: [
+      { id: 1, role: "user", content: "вопрос", display_metadata: { client_message_id: "done-first-open-123" } },
+      { id: 2, role: "assistant", content: "готовый ответ" },
+    ] as SessionMessage[], pagination: { order: "latest", returned: 2, before_id: 1, has_more: false } });
+    const fetcher = vi.fn(async (_url: string) => new Response(JSON.stringify({ approvals: [] })));
+    vi.stubGlobal("fetch", fetcher);
+    await act(async () => { await current.loadSession("done"); });
+    expect(current.messages.map(m => m.content)).toEqual(["вопрос", "готовый ответ"]);
+    expect(fetcher.mock.calls.some(([url]) => String(url).includes("/stream"))).toBe(false);
+  });
+
+  it("поток готового ответа, который не отвечает, через 30 секунд отпускает чат", async () => {
+    vi.useFakeTimers();
+    try {
+      const { getChatRuns } = await import("@/lib/chat-runs");
+      vi.mocked(getChatRuns).mockResolvedValue([{
+        message_id: "stalled-replay-12345", session_id: "stall", profile: "", status: "completed", updated_at: 500,
+        history_count: 0, turn_tracked: true, history_row_id: 3, user_message: { role: "user", content: "новый вопрос" },
+      }]);
+      vi.spyOn(api, "getSessionMessages").mockResolvedValue({ session_id: "stall", messages: [
+        { id: 1, role: "user", content: "старый вопрос" }, { id: 2, role: "assistant", content: "старый ответ" },
+      ] as SessionMessage[], pagination: { order: "latest", returned: 2, before_id: 1, has_more: false } });
+      vi.stubGlobal("fetch", vi.fn((url: string, init?: RequestInit) => String(url).includes("/stream")
+        ? new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+        })
+        : Promise.resolve(new Response(JSON.stringify({ approvals: [] })))));
+      await act(async () => { void current.loadSession("stall"); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+      expect(current.isStreaming).toBe(false);
+      expect(current.error).toContain("Ответ не удалось показать за 30 секунд");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

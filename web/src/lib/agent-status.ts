@@ -211,11 +211,20 @@ export const RAIL_AVATAR_PX = 44;
  * поля 4 и кнопка «Все агенты» 50. На 320 px выходит 4, на 375–390 — 5,
  * на 430 — 6.
  */
-export function railSlots(width: number): number {
+/** Место для аватаров в полосе при ширине экрана `width`. */
+export function railInnerWidth(width: number): number {
   const tray = width - 32 - 44 - 6;
-  const inner = tray - 4 - 50;
-  return Math.max(2, Math.floor(inner / RAIL_AVATAR_PX));
+  return tray - 4 - 50;
 }
+
+export function railSlots(width: number): number {
+  return Math.max(2, Math.floor(railInnerWidth(width) / RAIL_AVATAR_PX));
+}
+
+/** Подпись «Добавить агента» рядом с единственным аватаром: аватар, зазор и
+ *  кнопка с текстом. На 320 px она наезжала на «Все агенты» (чистое ревью
+ *  Astra, P2-3) — там остаётся один «+». */
+export const ADD_AGENT_LABEL_ROOM = 44 + 6 + 186;
 
 export interface RailPickOptions {
   /** Открытый агент — всегда в полосе. */
