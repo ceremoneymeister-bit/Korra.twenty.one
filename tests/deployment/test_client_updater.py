@@ -1909,8 +1909,11 @@ def test_legacy_rollback_without_capability_refuses_before_stop(updater):
     assert not updater.calls
 
 
-@pytest.mark.parametrize("case,configured", [("fresh", False), ("key", True), ("missing_key", None)])
+@pytest.mark.parametrize("case,configured", [("fresh", False), ("key", True), ("missing_key", True)])
 def test_capability_probe_uses_real_native_resolver_in_isolated_home(tmp_path, case, configured):
+    # missing_key: a configured provider whose login does not resolve is still
+    # «configured» (Dmitry 29.09: no working model is no reason to skip the
+    # update); the model smoke reports provider_unavailable afterwards.
     home = tmp_path / "user"
     home.mkdir()
     data = home / ".hermes"
@@ -1923,14 +1926,13 @@ def test_capability_probe_uses_real_native_resolver_in_isolated_home(tmp_path, c
            "HERMES_SKIP_CHMOD": "1", "HERMES_DISABLE_LAZY_INSTALLS": "1"}
     result = subprocess.run([sys.executable, "-c", u.CAPABILITY_CODE], env=env,
                             capture_output=True, text=True, timeout=30)
-    if configured is None:
-        assert result.returncode != 0
-        assert not result.stdout.strip()
-    else:
-        assert result.returncode == 0, result.stderr
-        capability = u.validate_capability(json.loads(result.stdout))
-        assert capability["mode"] == ("configured" if configured else "foundation")
-        assert "synthetic-test-key" not in result.stdout
+    assert result.returncode == 0, result.stderr
+    capability = u.validate_capability(json.loads(result.stdout))
+    assert capability["mode"] == ("configured" if configured else "foundation")
+    assert "synthetic-test-key" not in result.stdout
+    if case == "missing_key":
+        unresolved = hashlib.sha256(json.dumps(["unresolved", "anthropic"]).encode()).hexdigest()
+        assert capability["provider_hash"] == unresolved
 
 
 @pytest.mark.parametrize("case", ["ok", "no_done", "success", "wrong_error", "malformed"])

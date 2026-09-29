@@ -308,13 +308,20 @@ from dotenv import load_dotenv
 from korra_constants import get_hermes_home
 load_dotenv(get_hermes_home() / '.env', override=False)
 from korra_cli.auth import AuthError
-from korra_cli.runtime_provider import resolve_runtime_provider
+from korra_cli.runtime_provider import resolve_requested_provider, resolve_runtime_provider
 try:
     runtime = resolve_runtime_provider()
 except AuthError as exc:
-    if exc.code != 'no_provider_configured':
-        raise RuntimeError('Configured provider cannot resolve') from None
-    result = {'mode': 'foundation'}
+    if exc.code == 'no_provider_configured':
+        result = {'mode': 'foundation'}
+    else:
+        # Configured, but its login does not resolve (expired or missing
+        # subscription credentials). Not a reason to keep the old release
+        # (Dmitry, 29.09.2026): identify the configured provider without its
+        # credentials; the model smoke then reports provider_unavailable.
+        requested = resolve_requested_provider()
+        result = {'mode': 'configured', 'provider_hash': hashlib.sha256(
+            json.dumps(['unresolved', requested]).encode()).hexdigest()}
 else:
     identity = [runtime.get(key) for key in ('provider', 'base_url', 'api_mode')]
     if not isinstance(identity[0], str) or not identity[0]:
