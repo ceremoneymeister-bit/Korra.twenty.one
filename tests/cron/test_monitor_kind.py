@@ -429,20 +429,27 @@ def test_cronjob_tool_rejects_monitor_script_path_escape(hermes_env):
 
 def test_cronjob_tool_update_clears_monitor_script(hermes_env):
     from cron.jobs import get_job
+    from gateway.session_context import clear_session_vars, set_session_vars
     from tools.cronjob_tools import cronjob
 
     _write_script(hermes_env, "mon.sh", "echo hi\n")
-    created = json.loads(
-        cronjob(
-            action="create",
-            prompt="React",
-            schedule="every 5m",
-            monitor_script="mon.sh",
-            deliver="local",
+    # Earlier scheduler tests engage the session context for the process; an
+    # unbound caller is then "unknown" and sees no jobs (K21-242). Act as owner.
+    tokens = set_session_vars(platform="cli", cron_session="")
+    try:
+        created = json.loads(
+            cronjob(
+                action="create",
+                prompt="React",
+                schedule="every 5m",
+                monitor_script="mon.sh",
+                deliver="local",
+            )
         )
-    )
-    result = json.loads(
-        cronjob(action="update", job_id=created["job_id"], monitor_script="")
-    )
+        result = json.loads(
+            cronjob(action="update", job_id=created["job_id"], monitor_script="")
+        )
+    finally:
+        clear_session_vars(tokens)
     assert result.get("success") is True
     assert get_job(created["job_id"]).get("monitor_script") is None
