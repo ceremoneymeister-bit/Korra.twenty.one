@@ -2536,7 +2536,7 @@ class AmbiguousJobReference(LookupError):
         )
 
 
-def resolve_job_ref(ref: str) -> Optional[Dict[str, Any]]:
+def resolve_job_ref(ref: str, *, jobs: Optional[List[Dict[str, Any]]] = None) -> Optional[Dict[str, Any]]:
     """Resolve a job reference (ID or name) to a job record.
 
     - Exact ID match wins (works even if a different job's name equals this ID).
@@ -2546,7 +2546,7 @@ def resolve_job_ref(ref: str) -> Optional[Dict[str, Any]]:
     """
     if not ref:
         return None
-    jobs = load_jobs()
+    jobs = load_jobs() if jobs is None else jobs
     for job in jobs:
         if job["id"] == ref:
             return _normalize_job_record(job)

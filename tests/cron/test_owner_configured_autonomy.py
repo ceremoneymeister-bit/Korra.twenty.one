@@ -155,7 +155,7 @@ def test_a_visitor_cannot_change_or_run_the_owners_job(cron_dir, action, extra):
     finally:
         clear_session_vars(tokens)
 
-    assert refused["success"] is False and "belongs to the owner" in refused["error"]
+    assert refused["success"] is False and "not found" in refused["error"]
     assert get_job(owners["id"])["prompt"] == "Отчёт"
     assert get_job(visitors["job_id"])["created_by_owner"] is False
     assert own_edit["success"] is True  # a visitor's own job stays theirs to edit
@@ -319,7 +319,7 @@ def test_only_the_creator_changes_somebody_elses_job(cron_dir):
     assert created["job_id"]
     stranger = _tool({**GROUP_MEMBER, "chat_type": "dm", "chat_id": "777"},
                      action="pause", job_id=created["job_id"])
-    assert stranger["success"] is False and "only its creator or the owner" in stranger["error"]
+    assert stranger["success"] is False and "not found" in stranger["error"]
     mine = _tool(EKATERINA_DM, action="pause", job_id=created["job_id"])
     assert mine.get("success", True) is True
 
