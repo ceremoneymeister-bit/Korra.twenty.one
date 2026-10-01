@@ -959,18 +959,21 @@ export default function App() {
               <PluginSlot name="header-right" />
               <div
                 className={cn(
-                  "sidebar-controls-row flex min-h-[44px] w-full items-center justify-between gap-[8px]",
+                  "sidebar-controls-row flex min-h-[44px] w-full items-center gap-[8px]",
                   isDesktopCollapsed && "lg:flex-col lg:gap-2",
                 )}
               >
+                {/* Одна строка (Дмитрий 01.10): выход значком слева, три темы
+                    делят остаток строки и не переносятся ни на какой ширине. */}
+                {isProductUiMode() && <AuthWidget compact collapsed={isDesktopCollapsed} />}
                 <SidebarIconWithTooltip
+                  className={cn("min-w-0 flex-1", isDesktopCollapsed && "lg:flex-none")}
                   collapsed={isDesktopCollapsed}
                   label={t.theme?.switchTheme ?? "Сменить тему"}
                   tooltipWarmRef={tooltipWarmRef}
                 >
                   <ThemeSwitcher collapsed={isDesktopCollapsed} />
                 </SidebarIconWithTooltip>
-                {isProductUiMode() && <AuthWidget compact collapsed={isDesktopCollapsed} />}
               </div>
             </div>
 
@@ -1453,6 +1456,7 @@ function SystemActionButton({
 
 function SidebarIconWithTooltip({
   children,
+  className,
   collapsed,
   label,
   tooltipWarmRef,
@@ -1474,6 +1478,7 @@ function SidebarIconWithTooltip({
         "relative",
         "w-fit shrink-0",
         collapsed && "group/icon",
+        className,
       )}
       onMouseEnter={collapsed ? showTooltip : undefined}
       onMouseLeave={collapsed ? hideTooltip : undefined}
@@ -1615,6 +1620,7 @@ interface NavItem {
 
 interface SidebarIconWithTooltipProps {
   children: ReactNode;
+  className?: string;
   collapsed: boolean;
   label: string;
   tooltipWarmRef: TooltipWarmRef;

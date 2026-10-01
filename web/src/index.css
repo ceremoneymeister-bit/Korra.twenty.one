@@ -296,10 +296,25 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
   border-radius: 0.625rem;
 }
 
-/* Keep all three theme choices and the full logout control reachable.
-   Wrapping also works for touch targets and compact sidebar densities. */
-.sidebar-controls-row {
-  flex-wrap: wrap;
+/* One line at any width and density (Дмитрий 01.10): the logout icon sits
+   on the left, the three theme choices share the rest of the row. The
+   logout keeps its accessible name and title; its visible label is dropped. */
+.sidebar-controls-row .theme-switcher,
+.sidebar-controls-row .theme-choices {
+  width: 100%;
+}
+.sidebar-controls-row .theme-choices button {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+}
+.sidebar-controls-row .sidebar-logout-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 /* The package's default Button calls its filled action `midground`. In the
