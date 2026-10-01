@@ -104,12 +104,16 @@ def test_retention_bounds_terminal_history_but_preserves_inflight(monkeypatch, t
     monkeypatch.setattr(executions, "MAX_TERMINAL_EXECUTIONS", 3)
     inflight = executions.create_execution("live", source="builtin")
     executions.mark_execution_running(inflight["id"])
+    rare = executions.create_execution("rare", source="builtin")
+    executions.finish_execution(rare["id"], success=False, error="retained")
     for index in range(8):
-        row = executions.create_execution(f"done-{index}", source="builtin")
+        row = executions.create_execution("frequent", source="builtin")
         executions.finish_execution(row["id"], success=True)
 
     records = executions.list_executions(limit=100)
     assert len([row for row in records if row["status"] == "completed"]) == 3
+    assert executions.latest_execution("rare")["id"] == rare["id"]
+    assert executions.latest_execution("rare")["error"] == "retained"
     assert executions.latest_execution("live")["status"] == "running"
 
 

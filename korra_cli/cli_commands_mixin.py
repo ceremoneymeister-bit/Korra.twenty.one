@@ -2986,14 +2986,18 @@ class CLICommandsMixin:
 
         review_skills = "skill_manage" in getattr(agent, "valid_tool_names", set())
         try:
-            agent._spawn_background_review(
+            started = agent._spawn_background_review(
                 messages_snapshot=snapshot,
                 review_memory=True,
                 review_skills=review_skills,
                 focus=focus or None,
+                manual=True,
             )
         except Exception as exc:
             _cprint(f'  Не удалось запустить /refine: {exc}')
+            return
+        if started is False:
+            _cprint("  Разбор уже выполняется. Дождитесь его завершения.")
             return
         tail = f" (focus: {focus})" if focus else ""
         _cprint(

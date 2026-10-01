@@ -22,6 +22,7 @@ from korra_time import now as _hermes_now
 # dashboard operations that temporarily enter another profile cannot leak that
 # profile's execution records into the import-time home.
 EXECUTIONS_FILE: Optional[Path] = None
+# Per job: frequent monitors must not evict rare reports.
 MAX_TERMINAL_EXECUTIONS = 1000
 _TERMINAL_STATES = ("completed", "failed", "unknown")
 _lock = threading.RLock()
@@ -148,9 +149,12 @@ def _prune_unlocked(conn: sqlite3.Connection) -> None:
     limit = max(0, int(MAX_TERMINAL_EXECUTIONS))
     conn.execute(
         """DELETE FROM executions WHERE id IN (
-             SELECT id FROM executions
-             WHERE status IN ('completed','failed','unknown')
-             ORDER BY claimed_at DESC, id DESC LIMIT -1 OFFSET ?
+             SELECT id FROM (
+               SELECT id, ROW_NUMBER() OVER (
+                 PARTITION BY job_id ORDER BY claimed_at DESC, id DESC
+               ) AS position FROM executions
+               WHERE status IN ('completed','failed','unknown')
+             ) WHERE position > ?
            )""",
         (limit,),
     )

@@ -1911,7 +1911,8 @@ class AIAgent:
         review_memory: bool = False,
         review_skills: bool = False,
         focus: Optional[str] = None,
-    ) -> None:
+        manual: bool = False,
+    ) -> bool:
         """Spawn the background memory/skill review thread.
 
         Thin wrapper — the heavy lifting lives in
@@ -1930,21 +1931,19 @@ class AIAgent:
         # are spawned with ``skip_memory=True``, so a review here has little to
         # persist — yet it inherits the subagent's (often premium) delegation
         # model and replays the whole conversation at premium rates, silently
-        # inflating token cost (#85859). An explicit ``/refine`` (``focus`` set)
+        # inflating token cost (#85859). An explicit ``/refine`` (``manual=True``)
         # is a deliberate user request and still runs.
-        if focus is None and getattr(self, "_delegate_depth", 0) > 0:
-            return
+        if not manual and focus is None and getattr(self, "_delegate_depth", 0) > 0:
+            return False
         # Explicit off-switch for automatic post-turn forks
         # (``auxiliary.background_review.enabled: false``). Manual ``/refine``
         # still works — same contract as zeroing the nudge intervals (#87250).
         # Load the task block once here and pass it into the spawn path so
         # aux routing does not re-read config.
-        task_cfg = None
-        if focus is None:
-            from agent.background_review import load_background_review_settings
-            enabled, task_cfg = load_background_review_settings()
-            if not enabled:
-                return
+        from agent.background_review import load_background_review_settings
+        enabled, task_cfg = load_background_review_settings()
+        if not manual and focus is None and not enabled:
+            return False
         from agent.background_review import (
             finish_background_review_run,
             prepare_background_review_run,
@@ -1954,7 +1953,7 @@ class AIAgent:
 
         review_run = prepare_background_review_run(self)
         if review_run is None:
-            return
+            return False
         try:
             target, _prompt = spawn_background_review_thread(
                 self,
@@ -1973,6 +1972,7 @@ class AIAgent:
                 name="bg-review",
             )
             t.start()
+            return True
         except Exception:
             finish_background_review_run(self, review_run)
             raise

@@ -364,8 +364,9 @@ _SECRET_HEADER_RE = re.compile(
 
 # Telegram bot tokens: bot<digits>:<token> or <digits>:<token>,
 # where token part is restricted to [-A-Za-z0-9_] and length >= 30
+# Anchor at the digit-run start so long non-matching numeric output stays linear.
 _TELEGRAM_RE = re.compile(
-    r"(bot)?(\d{8,}):([-A-Za-z0-9_]{30,})",
+    r"(?<!\d)(bot)?(\d{8,}):([-A-Za-z0-9_]{30,})",
 )
 
 # Private key blocks: -----BEGIN RSA PRIVATE KEY----- ... -----END RSA PRIVATE KEY-----

@@ -3,6 +3,15 @@
 from __future__ import annotations
 
 import threading
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def review_opt_in(tmp_path, monkeypatch):
+    """Lifecycle tests exercise explicitly enabled automatic review."""
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    (tmp_path / "config.yaml").write_text("auxiliary:\n  background_review:\n    enabled: true\n")
+
 
 import run_agent as run_agent_module
 from run_agent import AIAgent

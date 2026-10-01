@@ -12487,6 +12487,13 @@ def rewind_notify_cursor(
 # Retention + garbage collection
 # ---------------------------------------------------------------------------
 
+def _retention_seconds(value: int) -> int:
+    seconds = int(value)
+    if seconds < 0:
+        raise ValueError("older_than_seconds must be >= 0; 0 disables deletion")
+    return seconds
+
+
 def gc_events(
     conn: sqlite3.Connection, *, older_than_seconds: int = 30 * 24 * 3600,
 ) -> int:
@@ -12494,7 +12501,10 @@ def gc_events(
     in a terminal state (``done`` or ``archived``). Returns the number of
     rows deleted. Running / ready / blocked tasks keep their full event
     history."""
-    cutoff = int(time.time()) - int(older_than_seconds)
+    older_than_seconds = _retention_seconds(older_than_seconds)
+    if older_than_seconds == 0:
+        return 0
+    cutoff = int(time.time()) - older_than_seconds
     with write_txn(conn):
         cur = conn.execute(
             "DELETE FROM task_events WHERE created_at < ? AND task_id IN "
@@ -12513,6 +12523,9 @@ def gc_worker_logs(
     log files live on disk, not in SQLite. Scoped to ``board`` (defaults
     to the active board) — per-board isolation means deleting logs from
     board A cannot touch board B's logs."""
+    older_than_seconds = _retention_seconds(older_than_seconds)
+    if older_than_seconds == 0:
+        return 0
     log_dir = worker_logs_dir(board=board)
     if not log_dir.exists():
         return 0

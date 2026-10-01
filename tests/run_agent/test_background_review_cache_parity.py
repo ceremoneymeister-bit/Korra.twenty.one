@@ -12,6 +12,14 @@ Sonnet 4.5 per the contributor's measurement).
 """
 
 from unittest.mock import patch
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def review_opt_in(tmp_path, monkeypatch):
+    """Fork-invariant tests run with an owner's explicit automatic opt-in."""
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    (tmp_path / "config.yaml").write_text("auxiliary:\n  background_review:\n    enabled: true\n")
 
 
 def _make_agent_stub(agent_cls):

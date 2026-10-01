@@ -2227,6 +2227,36 @@ def _creator_is_owner() -> bool:
         return False
 
 
+def required_result_extensions(job: Dict[str, Any]) -> Optional[Tuple[str, ...]]:
+    """Conservative file contract for existing prompts; None means text is OK.
+
+    An explicit required_file boolean can override inference. No schema
+    migration is needed: old jobs are checked against their current prompt.
+    Skills alone and arbitrary mentions of input paths are not a contract.
+    """
+    if job.get("reminder") or job.get("required_file") is False:
+        return None
+    prompt = str(job.get("prompt") or "")
+    formats = {"html": (".html", ".htm"), "pdf": (".pdf",),
+        "xlsx": (".xlsx",), "docx": (".docx",), "csv": (".csv",),
+        "pptx": (".pptx",), "zip": (".zip",)}
+    # Only sentences requesting output, not a source-file mention.
+    output_request = r"(?:создай|создать|сформируй|сформировать|подготовь|подготовить|пришли|отправь|отправить|верни|сделай|только|результат|итог|вложени|deliver|send|create|generate|produce|return|output)"
+    file_request = r"(?:файл|вложени|attachment|\bfile\b)"
+    for sentence in re.split(r"[\n;!?]", prompt.lower()):
+        if not re.search(output_request, sentence):
+            continue
+        output = re.search(output_request, sentence)
+        requested = sentence[output.start():]
+        extensions = tuple(ext for fmt, exts in formats.items()
+            if re.search(r"(?<![\w/.])" + fmt + r"(?!\w)", requested) for ext in exts)
+        if extensions:
+            return extensions
+        if re.search(file_request, requested):
+            return ()  # A file is mandatory, format unrestricted.
+    return () if job.get("required_file") is True else None
+
+
 def create_job(
     prompt: Optional[str],
     schedule: str,
@@ -2257,6 +2287,7 @@ def create_job(
     recipients_pending: Optional[Dict[str, Any]] = None,
     paused_reason: Optional[str] = None,
     recipients_confirmed: Optional[Dict[str, Any]] = None,
+    required_file: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """
     Create a new cron job.
@@ -2328,6 +2359,8 @@ def create_job(
     Returns:
         The created job dict
     """
+    if required_file is not None and not isinstance(required_file, bool):
+        raise ValueError("required_file must be a boolean or null")
     parsed_schedule = parse_schedule(schedule)
     from cron.result_validity import validate_policy
     validate_policy({"delivery_ttl_seconds": delivery_ttl_seconds, "pending_result_policy": pending_result_policy})
@@ -2506,6 +2539,9 @@ def create_job(
         job.update(enabled=False, state="paused", paused_at=_hermes_now().isoformat(),
                    paused_reason=paused_reason)
 
+    if required_file is not None:
+        job["required_file"] = required_file
+
     with _jobs_lock():
         jobs = load_jobs()
         jobs.append(job)
@@ -2579,6 +2615,8 @@ def list_jobs(include_disabled: bool = False) -> List[Dict[str, Any]]:
 
 def update_job(job_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Update a job by ID, refreshing derived schedule fields when needed."""
+    if "required_file" in updates and updates["required_file"] is not None and not isinstance(updates["required_file"], bool):
+        raise ValueError("required_file must be a boolean or null")
     # Block mutation of immutable fields. ``id`` in particular is a filesystem
     # path component under OUTPUT_DIR — letting an update change it leaks
     # path-escape values into output writes/deletes.
