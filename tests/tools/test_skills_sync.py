@@ -574,9 +574,9 @@ class TestResetBundledSkill:
         manifest_file.write_text("google-workspace:STALEHASH000000000000000000000000\n")
 
         with self._patches(bundled, skills_dir, manifest_file):
-            # Sanity check: without reset, sync would flag it user_modified
+            # An identical new delivery is adopted automatically before reset.
             pre = sync_skills(quiet=True)
-            assert "google-workspace" in pre["user_modified"]
+            assert "google-workspace" not in pre["user_modified"]
 
             # Reset (no --restore) should clear the manifest entry and re-baseline
             result = reset_bundled_skill("google-workspace", restore=False)
@@ -1002,3 +1002,51 @@ class TestCallTimeDirResolution:
                 ss._rmtree_writable(foreign)
         finally:
             reset_hermes_home_override(token)
+
+
+class TestPlatformOwnedFiles:
+    def setup_tree(self, tmp_path, monkeypatch):
+        import tools.skills_sync as sync
+        source = tmp_path / 'bundle/productivity/google-workspace'
+        source.joinpath('scripts').mkdir(parents=True)
+        source.joinpath('SKILL.md').write_text('---\nname: google-workspace\n---\nstock')
+        source.joinpath('scripts/api.py').write_text('new platform')
+        home = tmp_path / 'home'
+        monkeypatch.setattr(sync, 'HERMES_HOME', home)
+        monkeypatch.setattr(sync, 'SKILLS_DIR', home / 'skills')
+        monkeypatch.setattr(sync, 'MANIFEST_FILE', home / 'skills/.bundled_manifest')
+        monkeypatch.setattr(sync, '_get_bundled_dir', lambda: tmp_path / 'bundle')
+        sync.sync_skills(quiet=True)
+        return sync, source, home / 'skills/productivity/google-workspace'
+
+    def test_edited_instructions_do_not_freeze_platform_files(self, tmp_path, monkeypatch):
+        sync, source, dest = self.setup_tree(tmp_path, monkeypatch)
+        dest.joinpath('SKILL.md').write_text('my instructions')
+        dest.joinpath('scripts/api.py').write_text('old or custom platform')
+        dest.joinpath('notes.md').write_text('my notes')
+        result = sync.sync_skills(quiet=True)
+        assert 'google-workspace' in result['updated']
+        assert dest.joinpath('scripts/api.py').read_text() == 'new platform'
+        assert dest.joinpath('SKILL.md').read_text() == 'my instructions'
+        assert dest.joinpath('notes.md').read_text() == 'my notes'
+        backups = list((sync._skills_dir() / '.bundled-backups').rglob('api.py'))
+        assert len(backups) == 1
+        assert backups[0].read_text() == 'old or custom platform'
+        assert sync._read_manifest()['google-workspace'] == sync._dir_hash(source)
+        assert sync.sync_skills(quiet=True)['updated'] == []
+
+    def test_identical_delivery_adopts_new_hash(self, tmp_path, monkeypatch):
+        sync, source, dest = self.setup_tree(tmp_path, monkeypatch)
+        sync._write_manifest({'google-workspace': 'unknown-old-origin'})
+        assert sync.list_user_modified_bundled_skills() == []
+        sync.sync_skills(quiet=True)
+        assert sync._read_manifest()['google-workspace'] == sync._dir_hash(source)
+
+    def test_symlink_script_cannot_escape(self, tmp_path, monkeypatch):
+        sync, source, dest = self.setup_tree(tmp_path, monkeypatch)
+        outside = tmp_path / 'outside'
+        outside.write_text('untouched')
+        dest.joinpath('scripts/api.py').unlink()
+        dest.joinpath('scripts/api.py').symlink_to(outside)
+        sync.sync_skills(quiet=True)
+        assert outside.read_text() == 'untouched'
