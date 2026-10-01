@@ -4,6 +4,12 @@ Instructions for AI coding assistants and developers working on the Korra codeba
 
 **Never give up on the right solution.**
 
+**Simplify, don't accumulate.** First ask what can be removed instead of added. A change is good
+if the user's path got shorter or more precise and the system is not more complex. Add a new concept,
+rule, format or tool only when nothing can be removed instead, and say why. One customer's case is not
+a reason for a new mechanism. Before removing something, check git history for why it exists. In your
+summary, state what was removed and what was added.
+
 ## What Korra Is
 
 Korra is a personal AI agent that runs the same agent core across a CLI, a
