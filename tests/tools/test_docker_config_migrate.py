@@ -111,7 +111,8 @@ def test_docker_config_migrate_stamps_minimal_seed_and_preserves_comments(tmp_pa
     assert first.returncode == 0, first.stderr
     raw = yaml.safe_load(config_path.read_text())
     assert raw.pop("_config_version", None) == DEFAULT_CONFIG["_config_version"]
-    assert raw.pop("auxiliary") == {"background_review": {"enabled": False}}
+    # The seed already pins background review off (K21-230): nothing to add.
+    assert raw["auxiliary"] == {"background_review": {"enabled": False}}
     assert raw == yaml.safe_load(original)
     for comment in (line for line in original.splitlines() if line.lstrip().startswith("#")):
         assert comment in config_path.read_text()
