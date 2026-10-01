@@ -3155,17 +3155,27 @@ def _is_owner_side_chat(job: dict, platform_name: str, chat_id) -> bool:
 
 
 def _prepare_required_file_result(job: dict, content: str) -> tuple[str, Optional[str]]:
-    """Validate a mandatory artifact before booking success or sending text."""
+    """Attach this run's result file and enforce an explicit file contract.
+
+    Any job: a fresh file the answer links as ``sandbox:`` is attached (the
+    model meant to deliver it; a person cannot open that link). With
+    ``required_file: true`` backticked paths count too, and no file is an
+    error. ``[SILENT]`` is never a missing file.
+    """
     from cron.jobs import required_result_extensions
     from gateway.platforms.base import BasePlatformAdapter
     from gateway.media_policy import apply_media_policy_env
 
-    extensions = required_result_extensions(job)
-    if extensions is None:
+    if job.get("reminder") or _is_cron_silence_response(content):
         return content, None
-    apply_media_policy_env(load_config())
+    required = required_result_extensions(job) is not None
     explicit, _ = BasePlatformAdapter.extract_media(content)
     candidates, _ = BasePlatformAdapter.extract_media(content, result_links=True)
+    if not required:
+        candidates = [c for c in candidates if f"sandbox:{c[0]}" in content]
+        if not candidates:
+            return content, None
+    apply_media_policy_env(load_config())
     safe = BasePlatformAdapter.filter_media_delivery_paths(candidates)
     explicit_safe = {p for p, _ in BasePlatformAdapter.filter_media_delivery_paths(explicit)}
     home = get_hermes_home().resolve()
@@ -3176,8 +3186,6 @@ def _prepare_required_file_result(job: dict, content: str) -> tuple[str, Optiona
     accepted = []
     for path, _ in safe:
         resolved = Path(path)
-        if extensions and resolved.suffix.lower() not in extensions:
-            continue
         if path not in explicit_safe:
             # Fallback references must point to this run's output in its
             # profile/workdir/temp area, never a pre-existing or sibling file.
@@ -3195,9 +3203,10 @@ def _prepare_required_file_result(job: dict, content: str) -> tuple[str, Optiona
         if path not in accepted:
             accepted.append(path)
     if not accepted:
-        format_note = ", ".join(extensions) if extensions else "файл"
+        if not required:
+            return content, None
         return content, (
-            f"Задание требует файл результата ({format_note}), но доступного вложения нет. "
+            "Задание требует файл результата, но доступного вложения нет. "
             "Создайте файл и укажите в финальном ответе MEDIA:/полный/путь/к/файлу."
         )
     # Preserve explicit directives; append only validated fallback references.

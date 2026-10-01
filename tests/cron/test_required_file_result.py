@@ -21,34 +21,34 @@ def store(tmp_path, monkeypatch):
     return tmp_path
 
 
-@pytest.mark.parametrize('prompt,expected', [
-    ('Создай HTML-отчёт и отправь его вложением.', ('.html', '.htm')),
-    ('Финал: только HTML-вложение', ('.html', '.htm')),
-    ('Generate a PDF report', ('.pdf',)),
-    ('Отправь файл результата', ()),
-    ('Прочитай HTML и отправь краткое описание', None),
-    ('Read /input/report.html and send a summary', None),
-    ('Напиши краткий отчёт', None),
+@pytest.mark.parametrize('prompt', [
+    'Создай HTML-отчёт и отправь его вложением.',
+    'Подготовь краткую сводку по данным CSV и пришли текстом, без файлов',
+    'Если появились новые сделки, создай HTML-отчёт. Если изменений нет, верни [SILENT]',
+    'Напиши краткий отчёт',
 ])
-def test_existing_prompts_have_narrow_file_contract(prompt, expected):
-    assert jobs.required_result_extensions({'prompt': prompt}) == expected
+def test_prompt_wording_never_creates_a_file_contract(prompt):
+    # Review R1/R2: guessing from wording failed text-only and [SILENT] jobs.
+    assert jobs.required_result_extensions({'prompt': prompt}) is None
 
 
 def test_explicit_contract_survives_create_update_and_old_json_shape(store):
     job = jobs.create_job('Do it', 'every 1h', required_file=True)
     assert jobs.get_job(job['id'])['required_file'] is True
+    assert jobs.required_result_extensions(jobs.get_job(job['id'])) == ()
     jobs.update_job(job['id'], {'required_file': False})
     assert jobs.required_result_extensions(jobs.get_job(job['id'])) is None
     with pytest.raises(ValueError):
         jobs.update_job(job['id'], {'required_file': 'true'})
     assert jobs.get_job(job['id'])['required_file'] is False
     jobs.update_job(job['id'], {'required_file': None, 'prompt': 'Создай HTML-отчёт'})
-    assert jobs.required_result_extensions(jobs.get_job(job['id'])) == ('.html', '.htm')
+    assert jobs.required_result_extensions(jobs.get_job(job['id'])) is None
 
 
 def _job():
     return {'id': 'report', 'name': 'Вечерний отчёт', 'prompt': 'Создай HTML-отчёт и отправь вложением',
-        'deliver': 'telegram:123', 'created_by_owner': True, '_result_started_at': time.time() - 2}
+        'deliver': 'telegram:123', 'created_by_owner': True, 'required_file': True,
+        '_result_started_at': time.time() - 2}
 
 
 @pytest.mark.parametrize('style', ['sandbox', 'backticks', 'media', 'both'])
@@ -72,16 +72,13 @@ def test_existing_file_delivered_once(store, style):
     assert send.call_args.kwargs['media_files'] == [(str(file.resolve()), False)]
 
 
-@pytest.mark.parametrize('case', ['missing', 'wrong_format', 'old', 'sibling', 'symlink', 'quoted_example', 'json_example'])
+@pytest.mark.parametrize('case', ['missing', 'old', 'sibling', 'symlink', 'quoted_example', 'json_example'])
 def test_no_arbitrary_or_unavailable_fallback_file(store, case):
     file = store / 'reports/report.html'
     file.parent.mkdir()
     if case != 'missing':
         file.write_text('result')
-    if case == 'wrong_format':
-        file = file.with_suffix('.csv')
-        file.write_text('wrong format')
-    elif case == 'old':
+    if case == 'old':
         os.utime(file, (0, 0))
     elif case in ('sibling', 'symlink'):
         foreign = store / 'profiles/other/report.html'
@@ -115,7 +112,7 @@ def test_failed_attachment_never_books_delivered(store):
 
 def test_missing_file_is_failed_in_real_job_and_execution_store(store):
     job = jobs.create_job('Создай HTML-отчёт и отправь вложением', 'every 1h',
-        name='Вечерний отчёт', deliver='telegram:123', created_by_owner=True,
+        name='Вечерний отчёт', deliver='telegram:123', created_by_owner=True, required_file=True,
         origin={'platform': 'telegram', 'chat_id': '123', 'user_id': '123'})
     cfg = GatewayConfig(platforms={Platform.TELEGRAM: PlatformConfig(enabled=True, token='fake')})
     send = AsyncMock(return_value={'success': True, 'message_id': '1'})
@@ -176,3 +173,23 @@ def test_active_profile_does_not_attach_sibling_even_in_shared_workdir(store, mo
     content, error = scheduler._prepare_required_file_result(job, f'[Отчёт](sandbox:{own})')
     assert error is None
     assert f'MEDIA:{own}' in content
+
+
+def test_job_without_contract_attaches_sandbox_link_but_not_mentions(store):
+    """K21-239 cause: the file existed, the model linked it as sandbox:."""
+    file = store / 'report.html'
+    file.write_text('<html>report</html>')
+    job = {**_job(), 'required_file': None}
+    content, error = scheduler._prepare_required_file_result(job, f'[Отчёт](sandbox:{file})')
+    assert error is None and f'MEDIA:{file}' in content
+    text = f'Обновил `{file}`, сводка ниже.'
+    assert scheduler._prepare_required_file_result(job, text) == (text, None)
+
+
+def test_text_only_and_silent_jobs_are_not_failed(store):
+    # Review R1: text answer for a prompt that mentions CSV.
+    text_job = {**_job(), 'required_file': None,
+        'prompt': 'Подготовь краткую сводку по данным CSV и пришли текстом, без файлов'}
+    assert scheduler._prepare_required_file_result(text_job, 'Итог: 3 сделки.') == ('Итог: 3 сделки.', None)
+    # Review R2: allowed silence is never a missing file, even with a contract.
+    assert scheduler._prepare_required_file_result(_job(), '[SILENT]') == ('[SILENT]', None)

@@ -2228,33 +2228,15 @@ def _creator_is_owner() -> bool:
 
 
 def required_result_extensions(job: Dict[str, Any]) -> Optional[Tuple[str, ...]]:
-    """Conservative file contract for existing prompts; None means text is OK.
+    """Explicit file contract only; None means a text result is fine.
 
-    An explicit required_file boolean can override inference. No schema
-    migration is needed: old jobs are checked against their current prompt.
-    Skills alone and arbitrary mentions of input paths are not a contract.
+    ``required_file: true`` makes a file mandatory (any format). The prompt
+    wording is not parsed: guessing a contract from it failed text-only and
+    ``[SILENT]`` jobs right after update (0.21.16 review R1/R2).
     """
-    if job.get("reminder") or job.get("required_file") is False:
+    if job.get("reminder") or job.get("required_file") is not True:
         return None
-    prompt = str(job.get("prompt") or "")
-    formats = {"html": (".html", ".htm"), "pdf": (".pdf",),
-        "xlsx": (".xlsx",), "docx": (".docx",), "csv": (".csv",),
-        "pptx": (".pptx",), "zip": (".zip",)}
-    # Only sentences requesting output, not a source-file mention.
-    output_request = r"(?:создай|создать|сформируй|сформировать|подготовь|подготовить|пришли|отправь|отправить|верни|сделай|только|результат|итог|вложени|deliver|send|create|generate|produce|return|output)"
-    file_request = r"(?:файл|вложени|attachment|\bfile\b)"
-    for sentence in re.split(r"[\n;!?]", prompt.lower()):
-        if not re.search(output_request, sentence):
-            continue
-        output = re.search(output_request, sentence)
-        requested = sentence[output.start():]
-        extensions = tuple(ext for fmt, exts in formats.items()
-            if re.search(r"(?<![\w/.])" + fmt + r"(?!\w)", requested) for ext in exts)
-        if extensions:
-            return extensions
-        if re.search(file_request, requested):
-            return ()  # A file is mandatory, format unrestricted.
-    return () if job.get("required_file") is True else None
+    return ()
 
 
 def create_job(
