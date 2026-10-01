@@ -1026,6 +1026,7 @@ class ProcessRegistry:
                     from ptyprocess import PtyProcess as _PtyProcessCls
                 user_shell = _find_shell()
                 pty_env = _sanitize_subprocess_env(os.environ, env_vars)
+                pty_env["KORRA_AGENT_SUBPROCESS"] = "1"
                 pty_env["PYTHONUNBUFFERED"] = "1"
                 # PTY mode is a real TTY, so pager-happy tools (git log/diff,
                 # man) WILL page and hang waiting for `q` — default them to
@@ -1106,6 +1107,7 @@ class ProcessRegistry:
         # during background execution (libraries like tqdm/datasets buffer when
         # stdout is a pipe, hiding output from process(action="poll")).
         bg_env = _sanitize_subprocess_env(os.environ, env_vars)
+        bg_env["KORRA_AGENT_SUBPROCESS"] = "1"
         bg_env["PYTHONUNBUFFERED"] = "1"
         _popen_kwargs = {"creationflags": windows_hide_flags()} if _IS_WINDOWS else {}
 
