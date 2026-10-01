@@ -623,7 +623,7 @@ export function AuxiliaryTasksModal({
           <X />
         </Button>
 
-        <header className="px-5 pb-4 pt-5 pr-16 sm:px-6 sm:pt-6">
+        <header className="px-5 pb-4 pt-5 pr-16 sm:pl-6 sm:pt-6">
           <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
             <h2
               id="aux-modal-title"

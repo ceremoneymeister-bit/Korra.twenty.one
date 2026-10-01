@@ -372,7 +372,7 @@ export function ModelPickerDialog(props: Props) {
           <X />
         </Button>
 
-        <header className="px-5 pb-4 pt-5 pr-16 sm:px-7 sm:pt-7">
+        <header className="px-5 pb-4 pt-5 pr-16 sm:pl-7 sm:pt-7">
           <h2
             id="model-picker-title"
             className="text-2xl font-semibold leading-tight text-foreground"

@@ -291,7 +291,7 @@ export function FilePreviewDialog({
   return (
     <Dialog open={open} onOpenChange={(next) => !saving && onOpenChange(next)}>
       <DialogContent className="flex h-[min(92dvh,58rem)] w-[min(96vw,78rem)] max-w-none flex-col overflow-hidden rounded-2xl">
-        <DialogHeader className="shrink-0 gap-2 px-4 py-4 pr-12 sm:px-6">
+        <DialogHeader className="shrink-0 gap-2 px-4 py-4 pr-12 sm:pl-6">
           <div className="flex flex-wrap items-center gap-2">
             <span className="rounded-full bg-primary/12 px-2.5 py-1 text-xs font-semibold text-primary">
               {file ? fileTypeLabel(file, kind) : "Файл"}
