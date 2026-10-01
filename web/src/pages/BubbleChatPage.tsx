@@ -1519,6 +1519,9 @@ export default function BubbleChatPage({
     setRecoveryNotice("Текст и вложения возвращены в поле. Ничего не отправлено. Если агент успел выполнить часть задачи, учтите это перед новой отправкой.");
   };
   const handledNewChatRequestRef = useRef(newChatRequest);
+  const handledResumeRef = useRef(resumeSession);
+  // Do not deliver link attachments to the old draft while the target switches.
+  const handoffSwitching = handledNewChatRequestRef.current !== newChatRequest || handledResumeRef.current !== resumeSession;
 
   useEffect(() => {
     if (handledNewChatRequestRef.current === newChatRequest) return;
@@ -1629,6 +1632,12 @@ export default function BubbleChatPage({
     }, { replace: true });
   }, [agentProfile, searchParams, setSearchParams, sessionId, loadSession]);
 
+  useEffect(() => {
+    if (agentProfile !== undefined || searchParams.get("new_chat") !== "1") return;
+    reset();
+    setSearchParams(previous => { const next = new URLSearchParams(previous); next.delete("new_chat"); return next; }, { replace: true });
+  }, [agentProfile, searchParams, setSearchParams, reset]);
+
   // After the current stream finalizes, refresh the sidebar so the new
   // session (just created server-side via X-Korra-Session-Id) appears
   // without waiting for the next poll tick.
@@ -1640,7 +1649,7 @@ export default function BubbleChatPage({
     prevStreamingRef.current = isStreaming;
   }, [isStreaming, sessionList]);
 
-  useEffect(() => { if (resumeSession) void loadSession(resumeSession.sessionId); }, [resumeSession, loadSession]);
+  useEffect(() => { handledResumeRef.current = resumeSession; if (resumeSession) void loadSession(resumeSession.sessionId); }, [resumeSession, loadSession]);
 
   const handleSelect = useCallback(
     (id: string) => {
@@ -1873,7 +1882,7 @@ export default function BubbleChatPage({
           draftKey={chatViewKey(agentProfile, sessionId)}
           agentLabel={agentLabel}
           onSend={send}
-          disabled={isLoading}
+          disabled={isLoading || handoffSwitching || searchParams.get("new_chat") === "1" || Boolean(searchParams.get("resume") && searchParams.get("resume") !== sessionId)}
           prefill={prefill}
           onPrefillConsumed={() => setPrefill(null)}
           streaming={isStreaming}

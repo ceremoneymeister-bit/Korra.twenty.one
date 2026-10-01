@@ -40,9 +40,10 @@ export function WorkspaceFilePicker({ disabled, onPick, remaining = MAX_ATTACHME
   const fleetMode = productUiMode() === "fleet";
   const incoming = JSON.stringify([...new Set(params.getAll("attach"))]);
   const recipient = params.get("agent");
+  const switching = params.has("resume") || params.get("new_chat") === "1";
   useEffect(() => {
     const paths: string[] = JSON.parse(incoming);
-    if (!paths.length || disabled) return;
+    if (!paths.length || disabled || switching) return;
     if (recipient && recipient !== (profile || "default")) return;
     let cancelled = false;
     if (paths.length > remaining) {
@@ -57,7 +58,7 @@ export function WorkspaceFilePicker({ disabled, onPick, remaining = MAX_ATTACHME
       if (!cancelled) setParams(previous => { const next = new URLSearchParams(previous); next.delete("attach"); return next; }, { replace: true });
     });
     return () => { cancelled = true; };
-  }, [incoming, disabled, remaining, recipient, profile, onPick, setParams]);
+  }, [incoming, disabled, switching, remaining, recipient, profile, onPick, setParams]);
   useEffect(() => {
     if (!open) return;
     let cancelled = false;

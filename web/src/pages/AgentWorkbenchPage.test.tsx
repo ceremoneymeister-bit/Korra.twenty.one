@@ -1020,3 +1020,11 @@ describe("много агентов", () => {
     expect(container.querySelector("#agent-tab-studio_sales_bot")?.getAttribute("aria-selected")).toBe("true");
   });
 });
+
+it("K21-231: the Files new-chat link resets only the selected agent", async () => {
+  await render(<MemoryRouter initialEntries={["/agents?agent=calculator&new_chat=1&attach=%2Fw%2Freport.txt"]}><AgentWorkbenchPage /><LocationProbe /></MemoryRouter>);
+  expect(container.querySelector('[data-testid="chat-calculator"]')?.getAttribute("data-new-chat-request")).toBe("1");
+  expect(container.querySelector('[data-testid="chat-default"]')?.getAttribute("data-new-chat-request")).toBe("0");
+  expect(container.querySelector('[data-testid="location"]')?.textContent).toContain("attach=");
+  expect(container.querySelector('[data-testid="location"]')?.textContent).not.toContain("new_chat");
+});

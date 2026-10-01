@@ -434,7 +434,11 @@ export default function AgentWorkbenchPage() {
     setActiveId(agent);
     setDirectAgentOpen(true);
     const resume = searchParams.get("resume");
-    if (resume) setResumeByProfile(previous => ({ ...previous, [agent]: { sessionId: resume } }));
+    if (searchParams.get("new_chat") === "1") {
+      setNewChatByProfile(previous => ({ ...previous, [agent]: (previous[agent] ?? 0) + 1 }));
+      setResumeByProfile(previous => { const next = { ...previous }; delete next[agent]; return next; });
+    }
+    else if (resume) setResumeByProfile(previous => ({ ...previous, [agent]: { sessionId: resume } }));
     if (draft) setDraftByProfile((previous) => ({ ...previous, [agent]: draft }));
     // Параметры снимаем сразу: иначе возврат на экран назад-вперёд подставил
     // бы тот же текст поверх уже набранного.
@@ -443,6 +447,7 @@ export default function AgentWorkbenchPage() {
         const next = new URLSearchParams(previous);
         next.delete("agent");
         next.delete("resume");
+        next.delete("new_chat");
         next.delete("draft");
         return next;
       },

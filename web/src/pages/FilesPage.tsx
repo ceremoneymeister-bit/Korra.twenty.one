@@ -42,7 +42,8 @@ import { useToast } from "@nous-research/ui/hooks/use-toast";
 import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
 import { FilePreviewDialog, type PreviewFile } from "@/components/FilePreviewDialog";
 import { usePageHeader } from "@/contexts/usePageHeader";
-import { api } from "@/lib/api";
+import { api, type SessionInfo } from "@/lib/api";
+import { chatViewKey, readChatSelection } from "@/lib/chat-view-state";
 import type { ManagedFileEntry, ManagedFilesResponse, ManagedTrashEntry } from "@/lib/api";
 import {
   getOwnerTimeZone,
@@ -622,12 +623,41 @@ export default function FilesPage() {
     }
   };
 
+  const [handoff, setHandoff] = useState<{ paths: string[]; profile: string } | null>(null);
+  const [handoffChats, setHandoffChats] = useState<SessionInfo[]>([]);
+  const [handoffLoading, setHandoffLoading] = useState(false);
+  const [handoffError, setHandoffError] = useState("");
+  useEffect(() => {
+    if (!handoff) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      controller.abort();
+      setHandoffLoading(false);
+      setHandoffError("Недавние разговоры не загрузились. Можно выбрать текущий или новый.");
+    }, 10_000);
+    setHandoffChats([]); setHandoffLoading(true); setHandoffError("");
+    void api.getSessions(10, 0, { profile: handoff.profile, order: "recent", excludeSources: ["cron", "tool"] }, "recent", controller.signal)
+      .then(value => { if (!controller.signal.aborted) setHandoffChats(value.sessions); })
+      .catch(() => { if (!controller.signal.aborted) setHandoffError("Не удалось загрузить недавние разговоры."); })
+      .finally(() => { window.clearTimeout(timer); if (!controller.signal.aborted) setHandoffLoading(false); });
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [handoff]);
+
   const sendToAgent = (paths: string[]) => {
     if (!paths.length) return;
     if (paths.length > 30) { setError("В сообщение можно передать до 30 вложений. Выберите содержащую их папку или уменьшите выбор."); return; }
-    const query = new URLSearchParams({ agent: recipient });
-    paths.forEach(path => query.append("attach", path));
+    setHandoff({ paths, profile: recipient });
+  };
+  const openHandoff = (target: "current" | "new" | string) => {
+    if (!handoff) return;
+    const query = new URLSearchParams({ agent: handoff.profile });
+    const profile = handoff.profile === "default" ? "" : handoff.profile;
+    const current = readChatSelection(`${chatViewKey(profile)}:selected`);
+    if (target === "new" || (target === "current" && current === null)) query.set("new_chat", "1");
+    else if (target !== "current" || current) query.set("resume", target === "current" ? current! : target);
+    handoff.paths.forEach(path => query.append("attach", path));
     navigate(`${productUiMode() === "fleet" ? "/agents" : "/chat"}?${query}`);
+    setHandoff(null);
   };
 
   const copyPaths = (paths: string[]) => {
@@ -1089,6 +1119,23 @@ export default function FilesPage() {
       </Card>
 
       <PluginSlot name="files:bottom" />
+
+      <Dialog open={Boolean(handoff)} onOpenChange={open => { if (!open) setHandoff(null); }}>
+        <DialogContent className="max-w-md"><DialogHeader>
+          <DialogTitle>В какой разговор передать файлы?</DialogTitle>
+          <DialogDescription>Файлы появятся в поле сообщения выбранного разговора. Отправьте их, когда будете готовы.</DialogDescription>
+        </DialogHeader>
+          <div className="flex flex-col gap-2">
+            <Button type="button" outlined onClick={() => openHandoff("current")}>Текущий разговор</Button>
+            <Button type="button" outlined onClick={() => openHandoff("new")}>Новый разговор</Button>
+            <p className="text-sm text-muted-foreground">Недавние разговоры</p>
+            {handoffLoading && <p role="status">Загружаем разговоры…</p>}
+            {handoffError && <p role="alert">{handoffError}</p>}
+            {!handoffLoading && !handoffError && !handoffChats.length && <p className="text-sm">Разговоров пока нет.</p>}
+            {handoffChats.map(chat => <Button key={chat.id} type="button" ghost className="justify-start whitespace-normal text-left" onClick={() => openHandoff(chat.id)}>{chat.title || chat.preview || "Без названия"}</Button>)}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={Boolean(pendingBatch)} onOpenChange={open => { if (!open) setPendingBatch(null); }}>
         <DialogContent className="max-w-md"><DialogHeader>

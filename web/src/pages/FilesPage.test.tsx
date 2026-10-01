@@ -4,12 +4,12 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter, useLocation } from "react-router";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ listFiles: vi.fn(), listTrash: vi.fn(), getProfiles: vi.fn(),
+const mocks = vi.hoisted(() => ({ listFiles: vi.fn(), listTrash: vi.fn(), getProfiles: vi.fn(), getSessions: vi.fn(),
   prepareUploadBatch: vi.fn(), startUploadJob: vi.fn(), setEnd: vi.fn(), setAfterTitle: vi.fn(),
   cabinet: { restrictedFiles: false, canCreateFolders: true } }));
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
-  return { ...actual, api: { ...actual.api, listFiles: mocks.listFiles, listTrash: mocks.listTrash, getProfiles: mocks.getProfiles } };
+  return { ...actual, api: { ...actual.api, listFiles: mocks.listFiles, listTrash: mocks.listTrash, getProfiles: mocks.getProfiles, getSessions: mocks.getSessions } };
 });
 vi.mock("@/lib/upload-batch", () => ({ prepareUploadBatch: mocks.prepareUploadBatch }));
 vi.mock("@/store/upload-jobs", async () => ({
@@ -35,6 +35,7 @@ beforeEach(() => {
   vi.clearAllMocks(); localStorage.clear(); sessionStorage.clear();
   mocks.cabinet = { restrictedFiles: false, canCreateFolders: true };
   window.__KORRA_UI_MODE__ = "fleet";
+  mocks.getSessions.mockResolvedValue({ sessions: [{ id: "recent-chat", title: "Недавний разговор" }], total: 1 });
   mocks.listTrash.mockResolvedValue({ entries: [], total: 0 });
   mocks.getProfiles.mockResolvedValue({ profiles: [{ name: "default", is_default: true }, { name: "designer", display_name: "Дизайнер" }] });
   mocks.prepareUploadBatch.mockResolvedValue({ manifest: { upload_id: "test" }, blobs: [], title: "Файлы" });
@@ -51,6 +52,7 @@ it("transfers every selected path to the chosen agent without sending a message"
     select.value = "designer"; select.dispatchEvent(new Event("change", { bubbles: true }));
   });
   await act(async () => button("Передать агенту").click());
+  await act(async () => ([...document.querySelectorAll("button")].find(item => item.textContent?.trim() === "Текущий разговор")!).click());
   const location = new URL(host.querySelector("output")!.textContent!, "https://local.test");
   expect(location.pathname).toBe("/agents");
   expect(location.searchParams.get("agent")).toBe("designer");
@@ -189,4 +191,33 @@ it("sorts files and folders together by both dates and explains icon buttons on 
   for (const title of expectedTitles) {
     expect(host.querySelector(`[title="${title}"]`), title).not.toBeNull();
   }
+});
+
+
+it.each([ ["Новый разговор", "new_chat", "1"], ["Недавний разговор", "resume", "recent-chat"] ])("K21-231: handoff to %s addresses the selected conversation", async (label, param, value) => {
+  await render();
+  await act(async () => host.querySelector<HTMLInputElement>('input[aria-label="Выбрать a.txt"]')!.click());
+  await act(async () => button("Передать агенту").click());
+  expect(host.querySelector("output")!.textContent).toContain("/files");
+  await act(async () => ([...document.querySelectorAll("button")].find(item => item.textContent?.trim() === label)!).click());
+  const url = new URL(host.querySelector("output")!.textContent!, "https://local.test");
+  expect(url.searchParams.get(param)).toBe(value);
+  expect(url.searchParams.getAll("attach")).toEqual(["/w/a.txt"]);
+  expect(mocks.getSessions.mock.calls[0][2].profile).toBe("default");
+});
+
+it("K21-231: current handoff uses that agent's saved conversation", async () => {
+  const { chatViewKey, writeChatSelection } = await import("@/lib/chat-view-state");
+  writeChatSelection(`${chatViewKey("designer")}:selected`, "chosen-chat");
+  await render();
+  await act(async () => {
+    host.querySelector<HTMLInputElement>('input[aria-label="Выбрать a.txt"]')!.click();
+    const select = host.querySelector<HTMLSelectElement>('select[aria-label="Агент для файлов"]')!;
+    select.value = "designer"; select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await act(async () => button("Передать агенту").click());
+  await act(async () => ([...document.querySelectorAll("button")].find(item => item.textContent?.trim() === "Текущий разговор")!).click());
+  const url = new URL(host.querySelector("output")!.textContent!, "https://local.test");
+  expect(url.searchParams.get("resume")).toBe("chosen-chat");
+  expect(url.searchParams.get("agent")).toBe("designer");
 });
