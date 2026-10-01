@@ -2577,6 +2577,110 @@ def _is_shell_token_spliced_gateway_lifecycle(command: str) -> bool:
     return contains_gateway_lifecycle_command(command)
 
 
+_PROTECTION_CHANGE_KEY = "change Korra protection policy"
+_PROTECTION_CONFIG_KEYS = (
+    "approvals", "security", "command_allowlist", "hooks_auto_accept",
+    "agent.manage_profiles", "kanban.chat_tools", "toolsets",
+    "memory.write_approval", "skills.write_approval", "skills.guard_agent_created",
+    "skills.inline_shell", "skills.trusted_project_dirs",
+    "gateway.credential_management", "terminal",
+)
+_ADMISSION_KEYS = frozenset({
+    "dm_policy", "allow_from", "allow_admin_from", "group_policy",
+    "group_allow_from", "group_allow_admin_from", "allowed_users", "allow_all",
+    "allowed_chats", "group_allowed_chats", "allowed_topics", "user_allowed_commands", "extra",
+})
+
+
+def _is_protection_key(key: str) -> bool:
+    if any(key == protected or key.startswith(protected + ".")
+           or protected.startswith(key + ".") for protected in _PROTECTION_CONFIG_KEYS):
+        return True
+    # Both platform config spellings are consumed by gateway.config. Parent
+    # replacement can remove the admission policy just like editing a leaf.
+    if key in {"platforms", "gateway.platforms"}:
+        return True
+    prefix = "gateway.platforms." if key.startswith("gateway.platforms.") else "platforms."
+    if key.startswith(prefix):
+        path = key[len(prefix):].split(".")
+        return len(path) == 1 or path[1] in _ADMISSION_KEYS
+    return False
+
+
+def _changes_protection_policy(command: str) -> bool:
+    """Recognize ordinary CLI policy writes, including parent replacements.
+
+    This is a guard for supported commands, not an OS boundary against root
+    or arbitrary scripts. MCP setup and unrelated config edits stay usable.
+    """
+    cli = re.compile(_CMDPOS + r'(?:[^\s]+/)?(?:korra|hermes|python[\d.]*\s+-m\s+korra_cli\.main)\s+'
+                     r'(?:(?:-p|--profile)\s+\S+\s+|--profile=\S+\s+|--yolo\s+)*'
+                     r'config\s+(?:set|unset)\s+(?:--force\s+)?["\']?([\w.]+)', re.I)
+    from korra_constants import get_default_hermes_root
+
+    root = re.escape(str(get_default_hermes_root()).lower())
+    config_path = rf'(?:{root}|(?:~|\$home|\$\{{home\}})/\.hermes|\$(?:korra_home|hermes_home)|\$\{{(?:korra_home|hermes_home)\}})(?:/profiles/[^\s/"\']+)?/config\.yaml' + _WRITE_TARGET_BOUNDARY
+    writes = (
+        rf'>>?\s*["\']?{config_path}',
+        rf'\btee\b[^\n]*{config_path}',
+        rf'\b(?:cp|mv|install)\b[^\n]*\s["\']?{config_path}["\']?\s*(?:$|\n)',
+        rf'\b(?:sed|perl|ruby)\b[^\n]*\s-(?:[^\s]*i[^\s]*|\-in-place)[^\n]*{config_path}',
+        r'\bcurl\b(?=[^\n]*(?:-x\s*put|--request[=\s]+put))[^\n]*/api/config(?:/raw)?\b',
+    )
+    for variant in _command_detection_variants(command):
+        for match in cli.finditer(variant):
+            key = match.group(1).lower()
+            if _is_protection_key(key):
+                return True
+        if any(re.search(pattern, variant.lower()) for pattern in writes):
+            return True
+    return False
+
+
+def _check_protection_change(command: str, approval_callback=None) -> dict:
+    """One owner decision per operation, independent of off/yolo/allowlists."""
+    from gateway.principal import current_principal
+
+    principal = current_principal()
+    description = "Изменение защиты Корры — нужно отдельное решение владельца"
+    blocked = {"approved": False, "message": description + ". Команда не выполнена.",
+               "pattern_key": _PROTECTION_CHANGE_KEY, "description": description}
+    if (not principal.owner or not principal.live or _is_single_query_approval_context()
+            or _is_cron_approval_context()):
+        return blocked
+    session_key = get_current_session_key()
+    callback = _resolve_cli_approval_callback(approval_callback)
+    transport = _present_with_selected_transport(
+        command=command, description=description, pattern_key=_PROTECTION_CHANGE_KEY,
+        pattern_keys=[_PROTECTION_CHANGE_KEY], session_key=session_key,
+        surface="gateway" if _is_gateway_approval_context() else "cli",
+        allow_session=False, allow_permanent=False,
+    )
+    if transport.get("selected") and not (transport.get("failure") and transport.get("fallback") == "builtin"):
+        choice = transport.get("choice") if not transport.get("failure") else "deny"
+    elif _is_gateway_approval_context() or env_var_enabled("KORRA_EXEC_ASK"):
+        from agent.redact import redact_sensitive_text
+
+        with _lock:
+            notify = _gateway_notify_cbs.get(session_key)
+        if notify is None:
+            return blocked
+        decision = _await_gateway_decision(session_key, notify, {
+            "command": redact_sensitive_text(command, force=True),
+            "pattern_key": _PROTECTION_CHANGE_KEY, "pattern_keys": [_PROTECTION_CHANGE_KEY],
+            "description": description, "allow_session": False, "allow_permanent": False,
+        }, surface="gateway")
+        choice = decision.get("choice") if decision.get("resolved") else "deny"
+    elif _is_interactive_cli():
+        choice = prompt_dangerous_approval(command, description, approval_callback=callback,
+                                           allow_session=False, allow_permanent=False)
+    else:
+        return blocked
+    if choice != "once":
+        return blocked
+    return {"approved": True, "message": None, "user_approved": True, "description": description}
+
+
 def detect_dangerous_command(command: str) -> tuple:
     """Check if a command matches any dangerous patterns.
 
@@ -2585,6 +2689,8 @@ def detect_dangerous_command(command: str) -> tuple:
     """
     if _command_parser_limit_exceeded(command):
         return (True, _PARSER_LIMIT_DESCRIPTION, _PARSER_LIMIT_DESCRIPTION)
+    if _changes_protection_policy(command):
+        return (True, _PROTECTION_CHANGE_KEY, _PROTECTION_CHANGE_KEY)
     if _is_verification_artifact_cleanup(command):
         return (False, None, None)
 
@@ -4289,7 +4395,8 @@ def check_dangerous_command(command: str, env_type: str,
     Returns:
         {"approved": True/False, "message": str or None, ...}
     """
-    if _should_skip_container_guards(env_type, has_host_access=has_host_access):
+    policy_change = _changes_protection_policy(command)
+    if not policy_change and _should_skip_container_guards(env_type, has_host_access=has_host_access):
         return {"approved": True, "message": None}
 
     # Hardline floor: commands with no recovery path (rm -rf /, mkfs, dd
@@ -4310,6 +4417,9 @@ def check_dangerous_command(command: str, env_type: str,
         logger.warning("User deny rule %r blocked command: %s",
                        deny_pattern, command[:200])
         return _user_deny_block_result(deny_pattern)
+
+    if policy_change:
+        return _check_protection_change(command, approval_callback)
 
     # --yolo: bypass all approval prompts. Gateway /yolo is session-scoped;
     # CLI --yolo remains process-scoped via the env var for local use.
@@ -4928,7 +5038,8 @@ def check_all_command_guards(command: str, env_type: str,
     """
     # Skip isolated container backends for both checks. Docker stops skipping
     # once host paths are bind-mounted into the sandbox.
-    if _should_skip_container_guards(env_type, has_host_access=has_host_access):
+    policy_change = _changes_protection_policy(command)
+    if not policy_change and _should_skip_container_guards(env_type, has_host_access=has_host_access):
         return {"approved": True, "message": None}
 
     # Hardline floor: unconditional block for catastrophic commands
@@ -4959,6 +5070,9 @@ def check_all_command_guards(command: str, env_type: str,
         logger.warning("User deny rule %r blocked command: %s",
                        deny_pattern, command[:200])
         return _user_deny_block_result(deny_pattern)
+
+    if policy_change:
+        return _check_protection_change(command, approval_callback)
 
     # --yolo bypasses all approval prompts. Gateway /yolo is session-scoped;
     # CLI --yolo remains process-scoped. Global mode=off is applied only after
