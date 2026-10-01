@@ -1,6 +1,6 @@
 ---
 name: google-workspace
-description: "Gmail, Calendar, Drive, Docs, Sheets via gws CLI or Python."
+description: "Gmail, Calendar, Drive, Docs, Sheets, Contacts and Tasks via gws CLI or Python."
 version: 1.3.0
 author: Nous Research
 license: MIT
@@ -17,14 +17,14 @@ required_credential_files:
     description: Profile-local Google OAuth grant (created by google_workspace_auth)
 metadata:
   hermes:
-    tags: [Google, Gmail, Calendar, Drive, Sheets, Docs, Contacts, Email, OAuth]
+    tags: [Google, Gmail, Calendar, Drive, Sheets, Docs, Contacts, Tasks, Email, OAuth]
     homepage: https://github.com/NousResearch/hermes-agent
     related_skills: [himalaya]
 ---
 
 # Google Workspace
 
-Gmail, Calendar, Drive, Contacts, Sheets, and Docs — through Korra-managed OAuth and a thin CLI wrapper. When `gws` is installed, the skill uses it as the execution backend for broader Google Workspace coverage; otherwise it falls back to the bundled Python client implementation.
+Gmail, Calendar, Drive, Contacts, Sheets, Docs, and Tasks — through Korra-managed OAuth and a thin CLI wrapper. When `gws` is installed, the skill uses it as the execution backend for broader Google Workspace coverage; otherwise it falls back to the bundled Python client implementation.
 
 ## References
 

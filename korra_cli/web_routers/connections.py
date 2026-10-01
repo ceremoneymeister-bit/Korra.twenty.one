@@ -29,23 +29,6 @@ router = APIRouter()
 
 _list_cron_jobs_sync = late("_list_cron_jobs_sync")
 
-# Where the bundled Google Workspace skill lands in a profile.  Curated agents
-# created from ready-made packages carry only their own skills, so for them
-# Gmail/Drive/Sheets through the skill are not available even when the grant
-# is shared.  The calendar tool does not depend on the skill.
-_WORKSPACE_SKILL_PATHS = (
-    Path("skills") / "productivity" / "google-workspace" / "SKILL.md",
-    Path("skills") / "google-workspace" / "SKILL.md",
-)
-
-
-def _has_workspace_skill(home: Path) -> bool:
-    try:
-        return any((home / relative).is_file() for relative in _WORKSPACE_SKILL_PATHS)
-    except OSError:
-        return False
-
-
 #: Chat surfaces whose toolset lists decide whether an agent has the calendar
 #: tool: the cabinet chat and the messaging bots.
 _CHAT_PLATFORMS = ("api_server", "telegram")
