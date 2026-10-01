@@ -73,6 +73,23 @@ def test_local_content_links_resolve(source):
             )
 
 
+def test_all_methodology_documents_are_reachable_from_the_role():
+    """A packaged reference is useful only if the installed role can lead to it."""
+    pending = [(PACKAGE / "SOUL.md").resolve()]
+    visited = set()
+    while pending:
+        source = pending.pop()
+        if source in visited:
+            continue
+        visited.add(source)
+        for href in re.findall(r"\[[^\]\n]+\]\(([^)]+)\)", source.read_text()):
+            target = (source.parent / href.split("#", 1)[0]).resolve()
+            assert target.is_relative_to(PACKAGE.resolve())
+            if target.suffix == ".md":
+                pending.append(target)
+    assert visited == {path.resolve() for path in PACKAGE.rglob("*.md")}
+
+
 def test_native_payload_copy_excludes_author_docs_and_preserves_user_data(tmp_path):
     """Exercise the existing copier, not CLI installation or provider bootstrap."""
     target = tmp_path / "synthetic-profile"

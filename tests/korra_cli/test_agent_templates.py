@@ -76,6 +76,10 @@ def test_every_catalogue_package_installs_loadable_payload_and_replay_preserves_
         assert response.status_code == 200, response.text
         target = Path(response.json()["path"])
         entry, source, manifest = agent_templates._template(template["id"])
+        assert template["version"] == manifest.version
+        receipt = json.loads((target / ".agent-template.json").read_text())
+        assert response.json()["template_version"] == manifest.version
+        assert receipt["response"]["template_version"] == manifest.version
         assert load_soul_md(home_override=target).strip() == (source / "SOUL.md").read_text().strip()
         scope = set_hermes_home_override(str(target))
         try:
@@ -97,6 +101,15 @@ def test_every_catalogue_package_installs_loadable_payload_and_replay_preserves_
                         skill_name = yaml.safe_load(file.read_text().split("---")[1])["name"]
                         viewed = json.loads(skill_view(skill_name, preprocess=False))
                         assert viewed["success"], viewed
+                        expected_refs = {
+                            ref.relative_to(file.parent).as_posix()
+                            for ref in (file.parent / "references").glob("*.md")
+                        }
+                        assert set((viewed["linked_files"] or {}).get("references", [])) == expected_refs
+                        for relative in expected_refs:
+                            reference = json.loads(skill_view(skill_name, relative, preprocess=False))
+                            assert reference["success"], reference
+                            assert reference["content"] == (file.parent / relative).read_text()
         finally:
             reset_hermes_home_override(scope)
         if not entry.get("image_generation"):
