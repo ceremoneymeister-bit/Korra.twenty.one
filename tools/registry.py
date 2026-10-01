@@ -393,7 +393,8 @@ def _check_fn_cached(fn: Callable) -> bool:
     scope = check_fn_cache_scope()
     if scope == CHECK_FN_CACHE_BYPASS:
         return _run_check_fn_uncached(fn, unresolved_scope=True)
-    cache_key = (fn, scope)
+    from agent.auxiliary_client import runtime_cache_identity
+    cache_key = (fn, scope, runtime_cache_identity())
     with _check_fn_cache_lock:
         _prune_check_fn_caches(now)
         cached = _check_fn_cache.get(cache_key)

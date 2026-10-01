@@ -4331,8 +4331,6 @@ class APIServerAdapter(BasePlatformAdapter):
             from korra_cli.tools_config import (
                 _get_effective_configurable_toolsets,
                 _get_platform_tools,
-                _toolset_has_keys,
-                get_nous_subscription_features,
             )
             from toolsets import resolve_toolset
 
@@ -4342,11 +4340,31 @@ class APIServerAdapter(BasePlatformAdapter):
                 "api_server",
                 include_default_mcp_servers=False,
             )
-            features = get_nous_subscription_features(config)
+            from model_tools import get_tool_definitions
+            from agent.auxiliary_client import scoped_runtime_main
+            rows = _get_effective_configurable_toolsets()
+            model_config = config.get("model") or {}
+            model_config = model_config if isinstance(model_config, dict) else {}
+            selection = self._session_runtime_request_from_body(dict(request.query))
+            route = selection.get("route") or {}
+            runtime = {
+                "provider": route.get("provider") or request.query.get("provider") or model_config.get("provider", ""),
+                "model": route.get("model") or model_config.get("default", ""),
+                "base_url": route.get("base_url") or model_config.get("base_url", ""),
+                "api_key": route.get("api_key") or "",
+            }
+            public_runtime = {field: runtime[field] for field in ("provider", "model")}
+            with scoped_runtime_main(runtime):
+                definitions = get_tool_definitions(
+                    enabled_toolsets=[name for name, _, _ in rows], quiet_mode=True,
+                    skip_tool_search_assembly=True,
+                )
+            available = {definition["function"]["name"] for definition in definitions}
             data: List[Dict[str, Any]] = []
-            for name, label, desc in _get_effective_configurable_toolsets():
+            for name, label, desc in rows:
                 try:
-                    tools = sorted(set(resolve_toolset(name)))
+                    declared_tools = set(resolve_toolset(name))
+                    tools = sorted(declared_tools & available)
                 except Exception:
                     tools = []
                 is_enabled = name in enabled_toolsets
@@ -4355,7 +4373,11 @@ class APIServerAdapter(BasePlatformAdapter):
                     "label": label,
                     "description": desc,
                     "enabled": is_enabled,
-                    "configured": _toolset_has_keys(name, config, features=features),
+                    "configured": bool(tools),
+                    "ready": is_enabled and bool(tools),
+                    "reason": "toolset_disabled" if not is_enabled else "context_required" if name == "vision" and not runtime["model"] and not tools else "requirements_unavailable" if not tools else None,
+                    "runtime": public_runtime,
+                    "runtime_source": "request" if route else "profile_default",
                     "tools": tools,
                 })
         except Exception:

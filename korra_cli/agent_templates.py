@@ -30,7 +30,7 @@ _CATALOGUE = {
         "description": "Универсальный дизайнер: презентации, визуалы, сторис, карусели и работа по референсам.",
         "requirements": [
             "Для общения нужна чат-модель; Claude или DeepSeek тоже подходят. Чат-модель и генератор изображений остаются независимыми.",
-            "При добавлении Korra выбирает GPT Image 2.5 через OpenAI (Codex auth) и включает генерацию в панели и CLI. Если ChatGPT OAuth ещё не подключён, агент сохранится и мастер покажет, что именно нужно подключить. Добавление агента не запускает генерацию.",
+            "При добавлении Korra выбирает GPT Image 2.5 через OpenAI (Codex auth) и включает генерацию во всех каналах агента. Если ChatGPT OAuth ещё не подключён, агент сохранится и мастер покажет, что именно нужно подключить. Добавление агента не запускает генерацию.",
             "Для презентаций нужен доступный рендер и экспорт; агент проверит их перед работой.",
         ],
         # Selecting this ready-made agent is the user's explicit opt-in to its
@@ -174,6 +174,7 @@ def _configure_template_image_generation(profile_dir: Path, entry: dict) -> dict
             **image_config,
             "provider": provider,
             "model": model,
+            "enabled": True,
         }
         save_config(config)
 

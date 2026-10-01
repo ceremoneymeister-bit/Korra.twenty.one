@@ -1597,6 +1597,11 @@ def init_agent(
             print(f"🔄 Fallback chain ({len(agent._fallback_chain)} providers): " +
                   " → ".join(f"{f['model']} ({f['provider']})" for f in agent._fallback_chain))
 
+    # Existing shared grants also authorize a missing Google skill on a fresh
+    # conversation. Provision before the immutable instruction/tool snapshot.
+    from korra_cli.google_workspace import ensure_workspace_skill
+    ensure_workspace_skill()
+
     # A multiplexed gateway may enter a different HERMES_HOME after
     # ``model_tools`` was first imported. Ensure that profile's keyed plugin
     # manager has discovered its registrations before taking the tool snapshot.
@@ -1615,11 +1620,16 @@ def init_agent(
         agent._tool_snapshot_generation = _snapshot_registry._generation
     except Exception:
         agent._tool_snapshot_generation = 0
-    agent.tools = _ra().get_tool_definitions(
-        enabled_toolsets=enabled_toolsets,
-        disabled_toolsets=disabled_toolsets,
-        quiet_mode=agent.quiet_mode,
-    )
+    from agent.auxiliary_client import scoped_runtime_main
+    # The initial schema sees the same resolved route as the first turn.
+    # This scope is context-local and leaves concurrent agents untouched.
+    with scoped_runtime_main({field: getattr(agent, field, "") or "" for field in
+                              ("provider", "requested_provider", "model", "base_url", "api_key", "api_mode", "auth_mode")}):
+        agent.tools = _ra().get_tool_definitions(
+            enabled_toolsets=enabled_toolsets,
+            disabled_toolsets=disabled_toolsets,
+            quiet_mode=agent.quiet_mode,
+        )
     
     # Show tool configuration and store valid tool names for validation
     agent.valid_tool_names = set()

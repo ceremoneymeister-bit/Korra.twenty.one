@@ -370,6 +370,7 @@ def get_tool_definitions(
             cfg_fp = (cfg_stat.st_mtime_ns, cfg_stat.st_size)
         except (FileNotFoundError, OSError, ImportError):
             cfg_fp = None
+        from agent.auxiliary_client import runtime_cache_identity
         profile_scope = check_fn_cache_scope()
         if profile_scope != CHECK_FN_CACHE_BYPASS:
             cache_key = (
@@ -383,6 +384,7 @@ def get_tool_definitions(
                 _is_delegated_child_context(),
                 _is_dispatcher_owned_worker(),
                 profile_scope,
+                runtime_cache_identity(),
                 # The owner's services (calendar, board) are offered only to
                 # turns acting for the owner; their check_fns are uncached,
                 # so this memo must not hand one principal's list to another.

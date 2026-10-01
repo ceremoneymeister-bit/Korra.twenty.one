@@ -28,6 +28,7 @@ from korra_constants import get_default_hermes_root, get_hermes_home, korra_env
 from korra_cli.google_workspace_scopes import (
     GOOGLE_IDENTITY_SCOPES,
     SERVICE_SCOPES,
+    KNOWN_SCOPES,
     TOKEN_REQUESTED_SCOPES_KEY,
     TOKEN_SERVICES_KEY,
     granted_scopes_from_payload,
@@ -81,7 +82,7 @@ def token_path(profile_home: Path | None = None) -> Path:
 
 
 def pending_path(profile_home: Path | None = None) -> Path:
-    return profile_google_dir(profile_home) / "pending.json"
+    return profile_google_dir(profile_home) / "pending-v2.json"
 
 
 def legacy_token_path(profile_home: Path | None = None) -> Path:
@@ -107,7 +108,36 @@ def shared_all_path(root: Path | None = None) -> Path:
     return profile_google_dir(root or get_default_hermes_root()) / "shared-all.json"
 
 
+def extended_token_path(profile_home: Path | None = None) -> Path:
+    """.15 ignores this file and keeps reading the previous compatible grant."""
+    return profile_google_dir(profile_home) / "extended-token.json"
+
+
+def _rollback_grant_fingerprint(profile_home: Path | None) -> str | None:
+    for path in (token_path(profile_home), legacy_token_path(profile_home)):
+        _reject_symlink(path)
+        if path.exists():
+            payload = _read_json(path, label="token")
+            # Refresh keeps these fields stable; reconnect/revoke changes them.
+            authority = {key: payload.get(key) for key in
+                         ("refresh_token", "scopes", TOKEN_SERVICES_KEY, TOKEN_REQUESTED_SCOPES_KEY)}
+            return hashlib.sha256(json.dumps(authority, sort_keys=True).encode()).hexdigest()
+    return None
+
+
 def _local_active_token_path(profile_home: Path | None = None) -> Path:
+    extended = extended_token_path(profile_home)
+    _reject_symlink(extended)
+    if extended.exists():
+        try:
+            extended_payload = _read_json(extended, label="token")
+        except GoogleWorkspaceError:
+            return extended  # Let the caller report the invalid contract.
+        if ("base_grant_fingerprint" not in extended_payload or
+                extended_payload["base_grant_fingerprint"] == _rollback_grant_fingerprint(profile_home)):
+            return extended
+        # An owner changed/revoked the .15 grant after downgrade. Respect that
+        # action on return to .16, rather than resurrecting another account.
     current = token_path(profile_home)
     _reject_symlink(current)
     if current.exists():
@@ -577,6 +607,7 @@ def configure_sharing(
                 if mapped == source
             )
             _apply_shared_all(source, all_profiles)
+            _provision_shared_skills(explicit, _read_shared_all() == source)
             return {
                 "source_profile": source,
                 "profiles": explicit,
@@ -661,6 +692,7 @@ def configure_sharing(
         _write_sharing_policy(updated)
         _apply_shared_all(source, all_profiles)
         everyone = _read_shared_all() == source
+    _provision_shared_skills(consumers, everyone)
     return {"source_profile": source, "profiles": sorted(consumers), "all_profiles": everyone}
 
 
@@ -761,7 +793,7 @@ def _pending_record(profile_home: Path | None = None) -> dict[str, Any] | None:
             _safe_unlink(path)
             return None
         services = parse_services(",".join(payload["services"]))
-        if payload.get("scopes") != scopes_for_services(services):
+        if (not payload.get("legacy_contract") and payload.get("scopes") != scopes_for_services(services)) or (payload.get("legacy_contract") and (not set(scopes_for_services(services)).issubset(payload.get("scopes", [])) or set(payload.get("scopes", [])) - set(KNOWN_SCOPES))):
             raise ValueError("scope mismatch")
         if payload.get("redirect_uri") != REDIRECT_URI:
             raise ValueError("redirect mismatch")
@@ -778,7 +810,7 @@ def _pending_record(profile_home: Path | None = None) -> dict[str, Any] | None:
 
 
 def _token_status(profile_home: Path | None = None) -> dict[str, Any]:
-    path = token_path(profile_home)
+    path = _local_active_token_path(profile_home)
     _reject_symlink(path)
     if path.exists():
         try:
@@ -794,12 +826,13 @@ def _token_status(profile_home: Path | None = None) -> dict[str, Any]:
                     "unknown_scope_count": inventory["unknown_scope_count"],
                     "usable_services": inventory["usable_services"],
                     "legacy_compatible": inventory["compatible"],
-                    "action": "revoke_reconnect",
+                    "action": "extend" if inventory["compatible"] else "revoke_reconnect",
                 }
             return {
                 "state": "connected",
                 "services": list(services),
                 "expires_at": payload.get("expires_at"),
+                "rollback_requires_reconnect": path == extended_token_path(profile_home) and not token_path(profile_home).exists() and not legacy_token_path(profile_home).exists(),
                 "action": None,
             }
         except GoogleWorkspaceError as exc:
@@ -863,10 +896,16 @@ def status(*, profile_home: Path | None = None) -> dict[str, Any]:
     return {
         "app": app,
         "connection": token,
+        "authorized_services": list(token.get("services") or token.get("usable_services") or []),
+        "service_states": {service: ("authorized" if service in (token.get("services") or token.get("usable_services") or [])
+                                      else "no_grant" if token["state"] == "not_connected" else "missing_scope" if token["state"] == "connected" or token.get("legacy_compatible") else "connection_invalid")
+                           for service in SERVICE_SCOPES},
+        "workspace_skill": workspace_skill_status(profile_home, services=list(token.get("services") or token.get("usable_services") or [])),
         "pending": (
             {
                 "active": True,
                 "services": list(pending["services"]),
+                "operation": pending.get("operation", "connect"),
                 "expires_at": pending["expires_at"],
             }
             if pending
@@ -875,6 +914,109 @@ def status(*, profile_home: Path | None = None) -> dict[str, Any]:
         "available_services": list(SERVICE_SCOPES),
         "completion_mode": "manual_localhost_url",
     }
+
+
+def workspace_skill_status(profile_home: Path | None = None, *, services: list[str] | None = None) -> dict[str, Any]:
+    """Read-only execution readiness, independent of owner management rights."""
+    from korra_constants import reset_hermes_home_override, set_hermes_home_override
+    from agent.skill_utils import get_disabled_skill_names, get_external_skills_dirs, iter_skill_index_files
+    from tools.skills_sync import _read_skill_name, _read_suppressed_names
+
+    home = Path(profile_home or get_hermes_home())
+    token = set_hermes_home_override(str(home))
+    try:
+        candidates = []
+        for root in [home / "skills", *get_external_skills_dirs()]:
+            for skill_md in iter_skill_index_files(root, "SKILL.md"):
+                if _read_skill_name(skill_md, skill_md.parent.name) == "google-workspace":
+                    candidates.append(skill_md.parent)
+        unique = list(dict.fromkeys(candidates))
+        script = unique[0] / "scripts/google_api.py" if len(unique) == 1 else None
+        available = bool(script and script.is_file())
+        suppressed = "google-workspace" in _read_suppressed_names()
+        enabled = {platform: not suppressed and "google-workspace" not in get_disabled_skill_names(platform)
+                   for platform in ("cli", "api_server", "telegram")}
+        authorized = services
+        if authorized is None:
+            grant = _token_status(_grant_profile_home(home))
+            authorized = list(grant.get("services") or grant.get("usable_services") or [])
+        reason = ("not_authenticated" if not authorized else
+                  "skill_disabled" if not enabled["api_server"] else
+                  "skill_ambiguous" if len(unique) > 1 else
+                  "skill_missing" if not available else None)
+        return {"available": available, "enabled_for_channel": enabled,
+                "execution_path": str(script) if available else None,
+                "ready": bool(authorized and available and enabled["api_server"]),
+                "reason": reason,
+                "enable_hint": "Ключи и доступы → Google Workspace → Включить навык" if reason == "skill_disabled" else None}
+    finally:
+        reset_hermes_home_override(token)
+
+
+def ensure_workspace_skill(profile_home: Path | None = None) -> dict[str, Any] | None:
+    """Provision only Google after an existing grant; never clear an opt-out."""
+    import logging
+    from korra_constants import reset_hermes_home_override, set_hermes_home_override
+    from agent.skill_utils import get_disabled_skill_names
+
+    home = Path(profile_home or get_hermes_home())
+    token = set_hermes_home_override(str(home))
+    try:
+        grant = _token_status(_grant_profile_home(home))
+        if not (grant.get("services") or grant.get("usable_services")):
+            return None
+        if "google-workspace" in get_disabled_skill_names():
+            return None
+        from tools.skills_sync import sync_skills
+        return sync_skills(quiet=True, only={"google-workspace"})
+    except Exception:
+        logging.getLogger(__name__).warning("Could not provision Google skill for %s", home, exc_info=True)
+        return None
+    finally:
+        reset_hermes_home_override(token)
+
+
+def set_workspace_skill_enabled(enabled: bool, *, profile_home: Path) -> dict[str, Any]:
+    """Owner's Google settings control only this service's execution skill."""
+    from korra_constants import reset_hermes_home_override, set_hermes_home_override
+    from korra_cli.config import load_config, save_config, _CONFIG_LOCK
+    from agent.skill_utils import parse_config_string_list
+    from tools.skill_usage import read_suppressed_names, _write_suppressed_names
+    from tools.skills_sync import _read_manifest, _write_manifest
+
+    token = set_hermes_home_override(str(profile_home))
+    try:
+        with _CONFIG_LOCK:
+            config = load_config()
+            skills = config.setdefault("skills", {})
+            disabled = set(parse_config_string_list(skills.get("disabled")))
+            if enabled:
+                disabled.discard("google-workspace")
+                for platform, names in (skills.get("platform_disabled") or {}).items():
+                    skills["platform_disabled"][platform] = [name for name in parse_config_string_list(names) if name != "google-workspace"]
+            else:
+                disabled.add("google-workspace")
+            skills["disabled"] = sorted(disabled)
+            save_config(config)
+            if enabled:
+                suppressed = read_suppressed_names()
+                suppressed.discard("google-workspace")
+                _write_suppressed_names(suppressed)
+                if not workspace_skill_status(profile_home)["available"]:
+                    manifest = _read_manifest()
+                    manifest.pop("google-workspace", None)
+                    _write_manifest(manifest)
+                ensure_workspace_skill(profile_home)
+        return {"ok": True, "enabled": enabled}
+    finally:
+        reset_hermes_home_override(token)
+
+
+def _provision_shared_skills(profiles: list[str], everyone: bool) -> None:
+    from korra_cli import profiles as profile_store
+    names = profile_store.list_profile_names() if everyone else profiles
+    for name in names:
+        ensure_workspace_skill(_profile_home_for_name(name))
 
 
 def app_ready() -> bool:
@@ -988,7 +1130,7 @@ def start(
     *,
     profile_home: Path | None = None,
 ) -> dict[str, Any]:
-    selected = parse_services(services) if isinstance(services, str) else services
+    selected = parse_services(services if isinstance(services, str) else ",".join(services))
     scopes = scopes_for_services(selected)
     _, app = _load_app()
     state = secrets.token_urlsafe(32)
@@ -1009,17 +1151,26 @@ def start(
             _reject_symlink(token_path(profile_home))
             _reject_symlink(legacy_token_path(profile_home))
             _reject_symlink(pending_path(profile_home))
-            if token_path(profile_home).exists() or legacy_token_path(profile_home).exists():
-                raise GoogleWorkspaceError(
-                    "revoke_required",
-                    "Disconnect the existing Google grant before selecting services again",
-                    status_code=409,
-                )
+            active = _local_active_token_path(profile_home)
+            operation = "connect"
+            if active.exists():
+                previous = _read_json(active, label="token")
+                try:
+                    existing_services, existing_scopes = validate_scope_contract(previous)
+                except ValueError as exc:
+                    raise GoogleWorkspaceError("scope_contract_invalid", str(exc), status_code=409) from exc
+                selected = parse_services(",".join(set(existing_services) | set(selected)))
+                scopes = scopes_for_services(selected)
+                # Preserve recognized legacy broad permissions during consent.
+                scopes = list(dict.fromkeys(scopes + [scope for scope in existing_scopes if scope not in GOOGLE_IDENTITY_SCOPES]))
+                operation = "extend"
             directory = profile_google_dir(profile_home)
             _atomic_private_json(
                 pending_path(profile_home),
                 {
-                    "version": 1,
+                    "version": 2,
+                    "operation": operation,
+                    "legacy_contract": operation == "extend" and previous.get(TOKEN_SERVICES_KEY) is None,
                     "state": state,
                     "code_verifier": verifier,
                     "redirect_uri": REDIRECT_URI,
@@ -1165,9 +1316,21 @@ def complete(
                 TOKEN_REQUESTED_SCOPES_KEY: list(pending["scopes"]),
                 "expires_at": now + max(0, expires_in),
             }
-            _atomic_private_json(token_path(profile_home), payload)
-            _safe_unlink(legacy_token_path(profile_home))
+            if pending.get("legacy_contract"):
+                # Keep broad scopes explicit; the bounded legacy validator knows
+                # their capabilities without pretending they are least privilege.
+                payload.pop(TOKEN_SERVICES_KEY)
+                payload.pop(TOKEN_REQUESTED_SCOPES_KEY)
+            destination = (extended_token_path(profile_home)
+                           if "tasks" in pending["services"] or extended_token_path(profile_home).exists()
+                           else token_path(profile_home))
+            if destination == extended_token_path(profile_home):
+                payload["base_grant_fingerprint"] = _rollback_grant_fingerprint(profile_home)
+            _atomic_private_json(destination, payload)
+            if destination == token_path(profile_home):
+                _safe_unlink(legacy_token_path(profile_home))
             profile_google_dir(profile_home).chmod(0o700)
+            ensure_workspace_skill(profile_home)
             return {"status": "connected", "services": list(pending["services"])}
         except (TypeError, ValueError) as exc:
             if isinstance(exc, GoogleWorkspaceError):
@@ -1247,7 +1410,7 @@ def revoke(
             path = token_path(profile_home)
             old_path = legacy_token_path(profile_home)
             payload: dict[str, Any] = {}
-            target = path if path.exists() else old_path
+            target = _local_active_token_path(profile_home)
             target_exists = target.exists()
             remote_ok = not target_exists
             if target_exists:
@@ -1262,6 +1425,7 @@ def revoke(
                     remote_ok = True
                 except Exception:
                     remote_ok = False
+            _safe_unlink(extended_token_path(profile_home))
             _safe_unlink(path)
             _safe_unlink(old_path)
             _safe_unlink(pending_path(profile_home))
@@ -1280,6 +1444,8 @@ def _credentials(
     grant_home = _grant_profile_home(profile_home)
     with _state_lock(grant_home):
         path = _local_active_token_path(grant_home)
+        if not path.exists():
+            raise GoogleWorkspaceError("not_authenticated", "Google is not connected for this agent", status_code=401)
         payload = _read_json(path, label="token")
         try:
             services, scopes = validate_scope_contract(payload)
@@ -1364,7 +1530,10 @@ def check_service(
 ) -> dict[str, Any]:
     if service not in SERVICE_SCOPES:
         raise GoogleWorkspaceError("service_invalid", f"Unknown Google service: {service}")
-    payload = _read_json(_active_token_path(profile_home), label="token")
+    active = _active_token_path(profile_home)
+    if not active.exists():
+        raise GoogleWorkspaceError("not_authenticated", "Google is not connected for this agent", status_code=401)
+    payload = _read_json(active, label="token")
     try:
         services, _ = validate_scope_contract(payload)
     except ValueError as exc:
@@ -1410,11 +1579,25 @@ def _live_probe(service: str, creds: Any) -> None:
     elif service == "sheets":
         expected_not_found = True
         request = build("sheets", "v4", credentials=creds).spreadsheets().get(spreadsheetId="1KorraScopeProbe0000000000000000000000000000", fields="spreadsheetId")
-    else:
+    elif service == "tasks":
+        request = build("tasks", "v1", credentials=creds).tasklists().list(maxResults=1)
+    elif service == "docs":
         expected_not_found = True
         request = build("docs", "v1", credentials=creds).documents().get(documentId="1KorraScopeProbe0000000000000000000000000000")
+    else:
+        raise GoogleWorkspaceError("service_invalid", f"Unknown Google service: {service}")
     try:
         request.execute()
     except HttpError as exc:
         if not expected_not_found or getattr(exc.resp, "status", None) != 404:
-            raise GoogleWorkspaceError("live_check_failed", f"Google {service} check failed", status_code=502) from exc
+            try:
+                payload = json.loads(exc.content)
+                error = payload.get("error", {})
+                reasons = {item.get("reason") for item in error.get("errors", [])}
+                reasons |= {item.get("reason") for item in error.get("details", [])}
+            except (TypeError, ValueError, AttributeError):
+                reasons = set()
+            code = ("insufficient_scope" if reasons & {"insufficientPermissions", "ACCESS_TOKEN_SCOPE_INSUFFICIENT"}
+                    else "api_disabled" if reasons & {"accessNotConfigured", "SERVICE_DISABLED"}
+                    else "live_check_failed")
+            raise GoogleWorkspaceError(code, f"Google {service} check failed", status_code=502) from exc

@@ -22,6 +22,7 @@ const SERVICE_LABELS: Record<string, string> = {
   docs: "Google Docs",
   contacts: "Google Contacts",
   email: "Gmail",
+  tasks: "Google Tasks",
 };
 
 const DEFAULT_SERVICES = ["drive", "sheets", "calendar"];
@@ -103,7 +104,7 @@ function GoogleWorkspaceCardBody({ onError, onSuccess, onChanged, profileKey, na
   const sharedFrom = sharedToAll ? undefined : status?.connection.shared_from;
   const sharedWith = status?.connection.shared_with ?? [];
   const sharedWithAll = Boolean(status?.connection.shared_with_all);
-  const canStart = Boolean(status?.app.configured && selected.length && !busy && !needsReauth && !sharedFrom);
+  const canStart = Boolean(status?.app.configured && selected.length && !busy && (!needsReauth || legacyCompatible) && !sharedFrom);
   const stateLabel = useMemo(() => {
     if (!status) return "Проверяем";
     if (!status.app.configured) return "Приложение не установлено";
@@ -162,6 +163,20 @@ function GoogleWorkspaceCardBody({ onError, onSuccess, onChanged, profileKey, na
     } catch (error) {
       if (!alive.current) return;
       onError(ownerFacingError(error, "Не удалось отменить подключение Google."));
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const enableSkill = async () => {
+    setBusy("skill");
+    try {
+      await api.enableGoogleWorkspaceSkill(profileKey);
+      await load();
+      onChanged?.();
+      onSuccess("Работа с Google включена. Откройте новый чат агента.");
+    } catch (error) {
+      onError(ownerFacingError(error, "Не удалось включить навык Google."));
     } finally {
       setBusy("");
     }
@@ -232,6 +247,18 @@ function GoogleWorkspaceCardBody({ onError, onSuccess, onChanged, profileKey, na
           </div>
         ) : null}
 
+        {(status?.workspace_skill?.reason === "skill_disabled" || (status?.workspace_skill?.ready && Object.values(status.workspace_skill.enabled_for_channel).some(enabled => !enabled))) ? (
+          <div className="grid gap-2 rounded-md border p-3 text-sm">
+            <p>Доступ выдан, навык выключен. Включите его для работы агента с Диском и Таблицами.</p>
+            <Button size="sm" className="w-fit" disabled={Boolean(busy)} onClick={() => void enableSkill()}>Включить навык</Button>
+          </div>
+        ) : status?.workspace_skill?.reason === "skill_missing" ? (
+          <div className="grid gap-2 rounded-md border p-3 text-sm">
+            <p>Доступ выдан, навык отсутствует.</p>
+            <Button size="sm" className="w-fit" disabled={Boolean(busy)} onClick={() => void enableSkill()}>Установить навык</Button>
+          </div>
+        ) : null}
+
         {sharedToAll ? (
           <div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-sm">
             Сейчас этот агент пользуется подключением Google агента <strong>{label(status?.connection.shared_from ?? "")}</strong>, открытым всем агентам. Здесь можно подключить ему отдельный аккаунт.
@@ -240,7 +267,7 @@ function GoogleWorkspaceCardBody({ onError, onSuccess, onChanged, profileKey, na
 
         {sharedFrom ? (
           <div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-sm">
-            Источник подключения: <strong>{label(sharedFrom)}</strong>. Отключение здесь снимет доступ только у этого агента; остальные продолжат работу.
+            Источник подключения: <strong>{label(sharedFrom)}</strong>. Отключение здесь снимет доступ только у этого агента; остальные продолжат работу. Дополнительные сервисы подключайте у агента-источника.
           </div>
         ) : null}
 
@@ -265,7 +292,7 @@ function GoogleWorkspaceCardBody({ onError, onSuccess, onChanged, profileKey, na
           </div>
         ) : null}
 
-        {!connected && !needsReauth && !sharedFrom ? (
+        {(!needsReauth || legacyCompatible) && !sharedFrom ? (
           // Пока открыт поток согласия, выбор сервисов заморожен: он уже ушёл в
           // Google, и новый выбор без отмены молча заменил бы начатый поток.
           <fieldset className="grid gap-2" disabled={!status?.app.configured || Boolean(busy) || Boolean(status?.pending.active)}>
@@ -275,6 +302,7 @@ function GoogleWorkspaceCardBody({ onError, onSuccess, onChanged, profileKey, na
                 <label key={service} className="flex cursor-pointer items-center gap-2 text-sm">
                   <input
                     type="checkbox"
+                    disabled={Boolean(!sharedToAll && (connected || legacyCompatible) && (status?.connection.services ?? legacyServices).includes(service))}
                     checked={selected.includes(service)}
                     onChange={event => setSelected(value => event.target.checked ? [...value, service] : value.filter(item => item !== service))}
                   />
@@ -285,7 +313,7 @@ function GoogleWorkspaceCardBody({ onError, onSuccess, onChanged, profileKey, na
           </fieldset>
         ) : null}
 
-        {!connected && !needsReauth && !sharedFrom && status?.app.configured ? (
+        {(!needsReauth || legacyCompatible) && !sharedFrom && status?.app.configured ? (
           <div className="flex flex-wrap gap-2">
             {/* Начать и завершить — взаимоисключающие шаги: при открытом потоке
                 второй «Подключить Google» заменил бы state, и вставленный адрес
@@ -294,10 +322,17 @@ function GoogleWorkspaceCardBody({ onError, onSuccess, onChanged, profileKey, na
               <Button size="sm" outlined disabled={Boolean(busy)} onClick={() => void cancel()}>Отменить подключение</Button>
             ) : (
               <Button size="sm" disabled={!canStart} onClick={() => void start()}>
-                {busy === "start" ? "Открываем…" : "Подключить Google"}
+                {busy === "start" ? "Открываем…" : (connected || legacyCompatible ? "Добавить сервисы" : "Подключить Google")}
               </Button>
             )}
           </div>
+        ) : null}
+
+        {status?.pending.active && (connected || legacyCompatible) ? (
+          <p className="text-sm text-muted-foreground">Текущий доступ сохранён до завершения нового согласия. Отмена его не отключает.</p>
+        ) : null}
+        {status?.connection.rollback_requires_reconnect ? (
+          <p className="text-sm text-muted-foreground">При возврате к версии 0.21.15 потребуется подключить Google заново.</p>
         ) : null}
 
         {authUrl ? (

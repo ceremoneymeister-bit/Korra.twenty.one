@@ -2924,6 +2924,18 @@ def _get_platform_tools(
     else:
         enabled_toolsets.update(explicit_mcp_servers)
 
+    # Image generation is a profile capability. Existing per-channel opt-ins
+    # also cover future channels; an explicit profile switch is authoritative.
+    image = config.get("image_gen") or {}
+    image_enabled = image.get("enabled") if isinstance(image, dict) else None
+    if image_enabled is None:
+        image_enabled = any(isinstance(names, list) and "image_gen" in names
+                            for names in platform_toolsets.values())
+    if image_enabled:
+        enabled_toolsets.add("image_gen")
+    elif isinstance(image, dict) and image.get("enabled") is False:
+        enabled_toolsets.discard("image_gen")
+
     # Honor agent.disabled_toolsets from config.yaml — allows users to
     # globally suppress specific toolsets (e.g. "memory") across all
     # platforms without per-platform toolset configuration.  This runs
@@ -2974,6 +2986,15 @@ def _save_platform_tools(config: dict, platform: str, enabled_toolset_keys: Set[
     Preserves any non-configurable toolset entries (like MCP server names)
     that were already in the config for this platform.
     """
+    image_was_enabled = "image_gen" in _get_platform_tools(config, platform, include_default_mcp_servers=False)
+    image_requested = "image_gen" in enabled_toolset_keys
+    if image_requested != image_was_enabled:
+        image = config.get("image_gen")
+        if not isinstance(image, dict):
+            image = {}
+            config["image_gen"] = image
+        image["enabled"] = image_requested
+
     config.setdefault("platform_toolsets", {})
 
     # Drop platform-scoped toolsets that don't apply here.  Prevents the

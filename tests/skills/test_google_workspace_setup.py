@@ -178,7 +178,7 @@ def test_auth_url_uses_and_persists_exact_selected_scope_contract(
     assert capsys.readouterr().out.startswith("https://accounts.google.com/")
 
 
-def test_auth_url_refuses_scope_change_while_token_exists(setup_module, monkeypatch):
+def test_auth_url_extends_scope_without_removing_existing_token(setup_module, monkeypatch):
     _provision_operator_app(setup_module, monkeypatch)
     setup_module.TOKEN_PATH.write_text(
         json.dumps(
@@ -196,10 +196,10 @@ def test_auth_url_refuses_scope_change_while_token_exists(setup_module, monkeypa
         lambda: pytest.fail("OAuth dependencies must not load after scope mismatch"),
     )
 
-    with pytest.raises(SystemExit):
-        setup_module.get_auth_url(("calendar", "drive"))
-
-    assert not setup_module.PENDING_AUTH_PATH.exists()
+    previous = setup_module.TOKEN_PATH.read_bytes()
+    setup_module.get_auth_url(("calendar", "drive"))
+    assert setup_module.TOKEN_PATH.read_bytes() == previous
+    assert setup_module.PENDING_AUTH_PATH.exists()
 
 
 def test_setup_rejects_runtime_client_secret_install_option(setup_module, monkeypatch):

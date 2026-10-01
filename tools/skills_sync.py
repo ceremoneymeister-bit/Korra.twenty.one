@@ -12,10 +12,10 @@ Old v1 manifests (plain names without hashes) are auto-migrated.
 Update logic:
   - NEW skills (not in manifest): copied to user dir, origin hash recorded.
   - EXISTING skills (in manifest, present in user dir):
-      * If bundled still matches origin hash: no update → skip without reading
-        the user copy.
-      * If bundled changed and user copy matches origin hash: safe to update.
-      * If bundled changed and user copy differs: user customized it → SKIP.
+      * If the copy matches the new delivery: adopt its official hash.
+      * If the copy matches origin: safe to update the whole skill.
+      * Otherwise keep instructional/user files, and refresh platform scripts
+        with content-addressed backups under skills/.bundled-backups/.
   - DELETED by user (in manifest, absent from user dir): respected, not re-added.
   - REMOVED from bundled (in manifest, gone from repo): cleaned from manifest.
 
@@ -708,7 +708,62 @@ def _recover_renamed_skill(
     return None
 
 
-def sync_skills(quiet: bool = False) -> dict:
+def _reject_sync_symlinks(path: Path) -> None:
+    for component in (path, *path.parents):
+        if component.is_symlink():
+            raise OSError(f"Refusing skill sync through symlink: {component}")
+
+
+def _sync_platform_files(src: Path, dest: Path, *, install: bool = True) -> bool:
+    """Bundled executable resources belong to the platform, even in edited skills.
+
+    Keep content-addressed backups outside the skill tree before replacing a
+    differing file. User instructions and additional files remain untouched.
+    """
+    import tempfile
+
+    def atomic_copy(source, target):
+        target.parent.mkdir(parents=True, exist_ok=True)
+        fd, staging = tempfile.mkstemp(prefix=".platform-", dir=target.parent)
+        os.close(fd)
+        try:
+            shutil.copy2(source, staging)
+            os.replace(staging, target)
+        finally:
+            Path(staging).unlink(missing_ok=True)
+
+    changed = False
+    for source in sorted(src.rglob("*")):
+        rel = source.relative_to(src)
+        if "__pycache__" in rel.parts or source.suffix == ".pyc":
+            continue
+        if not source.is_file():
+            continue
+        if "scripts" not in rel.parts and source.suffix not in {".py", ".sh", ".bash", ".js", ".mjs", ".ts", ".rb", ".ps1"}:
+            continue
+        target = dest / rel
+        _reject_sync_symlinks(source)
+        _reject_sync_symlinks(target)
+        if target.exists():
+            old = target.read_bytes()
+            if old == source.read_bytes():
+                continue
+            backup = (_skills_dir() / ".bundled-backups" /
+                      dest.relative_to(_skills_dir()) /
+                      hashlib.sha256(old).hexdigest() / rel)
+            _reject_sync_symlinks(backup)
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            if not backup.exists():
+                atomic_copy(target, backup)
+            elif backup.read_bytes() != old:
+                raise OSError(f"Invalid platform backup: {backup}")
+        if install:
+            atomic_copy(source, target)
+            changed = True
+    return changed
+
+
+def sync_skills(quiet: bool = False, *, only: Optional[Set[str]] = None) -> dict:
     """
     Sync bundled skills into ~/.hermes/skills/ using the manifest.
 
@@ -743,21 +798,24 @@ def sync_skills(quiet: bool = False) -> dict:
     _skills_dir().mkdir(parents=True, exist_ok=True)
     manifest = _read_manifest()
     bundled_skills = _discover_bundled_skills(bundled_dir)
-    if essential_only:
+    if only is not None:
+        bundled_skills = [(name, src) for name, src in bundled_skills if name in only]
+    if essential_only and only is None:
         # Opted-out profile: only the essential skills are synced.
         bundled_skills = [
             (name, src) for name, src in bundled_skills
             if name in _essential_names()
         ]
-    bundled_names = {name for name, _ in bundled_skills}
+    from collections import Counter
+    bundled_counts = Counter(name for name, _ in bundled_skills)
+    bundled_names = set(bundled_counts)
     suppressed = _read_suppressed_names()
     # Index of skills already provided by external_dirs (skip writing them)
     external_index = _build_external_skill_index()
     shadowed_by_external: List[str] = []
-    # Rename recovery indexes are expensive on host bind mounts. Build them
-    # only if a tracked skill is actually missing from its canonical path.
-    active_index: Optional[Dict[str, List[Path]]] = None
-    hub_paths: Optional[Set[str]] = None
+    # Resolve ownership before any write, including targeted provisioning.
+    active_index = _index_active_skills()
+    hub_paths = _read_hub_install_paths()
 
     copied = []
     updated = []
@@ -778,6 +836,22 @@ def sync_skills(quiet: bool = False) -> dict:
             continue
 
         dest = _compute_relative_dest(skill_src, bundled_dir)
+        try:
+            _reject_sync_symlinks(dest)
+            if dest.exists():
+                for child in dest.rglob("*"):
+                    _reject_sync_symlinks(child)
+        except OSError:
+            logger.warning("Skipped unsafe skill path: %s", dest)
+            skipped += 1
+            continue
+        matches = active_index.get(skill_name, [])
+        if (bundled_counts[skill_name] > 1 or len(matches) > 1 or
+                (skill_name not in manifest and matches and dest not in matches) or
+                dest.relative_to(_skills_dir()).as_posix() in hub_paths):
+            logger.warning("Bundled skill %s is ambiguous or hub-owned; kept", skill_name)
+            skipped += 1
+            continue
         bundled_hash = _dir_hash(skill_src)
 
         # Recover an orphaned backup before classifying. If a previous
@@ -804,9 +878,6 @@ def sync_skills(quiet: bool = False) -> dict:
         # "in manifest but not on disk" branch below misreads the skill as
         # user-deleted, stranding the old copy at its stale path forever.
         if not dest.exists() and skill_name in manifest:
-            if active_index is None:
-                active_index = _index_active_skills()
-                hub_paths = _read_hub_install_paths()
             _moved_from = _recover_renamed_skill(
                 skill_name,
                 manifest.get(skill_name, ""),
@@ -882,16 +953,32 @@ def sync_skills(quiet: bool = False) -> dict:
             # ── Existing skill — in manifest AND on disk ──
             origin_hash = manifest.get(skill_name, "")
 
-            # If the bundled source still matches the version recorded when
-            # it was installed, there is no update to apply. Avoid recursively
-            # hashing the user's copy just to rediscover that fact; when the
-            # bundled source changes, the normal user-modification check below
-            # still protects local edits before any overwrite.
-            if origin_hash and bundled_hash == origin_hash:
+            user_hash = _dir_hash(dest)
+            if user_hash == bundled_hash:
+                manifest[skill_name] = bundled_hash
                 skipped += 1
                 continue
 
-            user_hash = _dir_hash(dest)
+            try:
+                pristine = bool(origin_hash and user_hash == origin_hash)
+                # Archive old executables before a pristine whole-tree update,
+                # without changing the tree that its rollback must restore.
+                platform_updated = _sync_platform_files(skill_src, dest, install=not pristine)
+            except OSError:
+                logger.warning("Could not update platform files in %s", dest, exc_info=True)
+                skipped += 1
+                continue
+            if platform_updated:
+                updated.append(skill_name)
+                # Always store the official hash, never the mixed user tree:
+                # .15 must keep custom instructions after a downgrade.
+                manifest[skill_name] = bundled_hash
+                if _dir_hash(dest) != bundled_hash:
+                    user_modified.append(skill_name)
+                continue
+            if origin_hash and bundled_hash == origin_hash:
+                skipped += 1
+                continue
 
             if not origin_hash:
                 # v1 migration: no origin hash recorded. Set baseline from
@@ -964,7 +1051,7 @@ def sync_skills(quiet: bool = False) -> dict:
     # Skip on an opted-out profile: bundled_skills was filtered to the
     # essential set there, and cleaning would drop tracking for every other
     # previously-synced skill still on disk.
-    if essential_only:
+    if essential_only or only is not None:
         cleaned = []
     else:
         cleaned = sorted(set(manifest.keys()) - bundled_names)
@@ -977,7 +1064,7 @@ def sync_skills(quiet: bool = False) -> dict:
     _essential_cat_dirs = {
         _compute_relative_dest(src, bundled_dir).parent
         for _, src in bundled_skills
-    } if essential_only else None
+    } if essential_only or only is not None else None
     for desc_md in bundled_dir.rglob("DESCRIPTION.md"):
         rel = desc_md.relative_to(bundled_dir)
         dest_desc = _skills_dir() / rel
@@ -991,7 +1078,16 @@ def sync_skills(quiet: bool = False) -> dict:
                 logger.debug("Could not copy %s: %s", desc_md, e)
 
     _write_manifest(manifest)
-    optional_provenance_backfilled = _backfill_optional_provenance(quiet=quiet)
+    optional_provenance_backfilled = (_backfill_optional_provenance(quiet=quiet)
+                                     if only is None else [])
+
+    if only is None:
+        # Covers existing --no-skills profiles during the regular updater.
+        from korra_cli.google_workspace import ensure_workspace_skill
+        google_result = ensure_workspace_skill(_hermes_home())
+        if google_result:
+            copied.extend(name for name in google_result["copied"] if name not in copied)
+            updated.extend(name for name in google_result["updated"] if name not in updated)
 
     return {
         "copied": copied,
@@ -1199,7 +1295,8 @@ def list_user_modified_bundled_skills() -> List[dict]:
         dest = _compute_relative_dest(skill_dir, bundled_dir)
         if not dest.exists():
             continue
-        if _is_tracked_user_modification(origin_hash, _dir_hash(dest)):
+        user_hash = _dir_hash(dest)
+        if user_hash != _dir_hash(skill_dir) and _is_tracked_user_modification(origin_hash, user_hash):
             modified.append(
                 {"name": skill_name, "dest": dest, "bundled_src": skill_dir}
             )

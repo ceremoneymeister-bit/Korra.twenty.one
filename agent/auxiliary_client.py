@@ -3746,6 +3746,30 @@ def _runtime_main_value(field: str) -> Any:
     return ""
 
 
+def runtime_cache_identity() -> tuple:
+    """Non-secret route identity for availability caches; never session IDs."""
+    runtime = _RUNTIME_MAIN_CONTEXT.get()
+    if runtime is None:
+        runtime = _compat_runtime_main() or {}
+    # No API key bytes or URLs (which may contain credentials) in cache keys.
+    import hashlib
+    route = str(runtime.get("base_url") or "")
+    from korra_constants import get_hermes_home, get_default_hermes_root
+    home = get_hermes_home()
+    revisions = []
+    for path in (home / ".env", home / "auth.json", home / "config.yaml", get_default_hermes_root() / "auth.json"):
+        try:
+            info = path.stat()
+            revisions.append((info.st_mtime_ns, info.st_size))
+        except OSError:
+            revisions.append(None)
+    return (str(home), tuple(revisions)) + tuple(str(runtime.get(field) or "") for field in
+                 ("provider", "requested_provider", "model", "api_mode", "auth_mode")) + (
+        hashlib.sha256(route.encode()).hexdigest() if route else "",
+        bool(runtime.get("api_key")),
+    )
+
+
 def set_runtime_main(
     provider: str,
     model: str,

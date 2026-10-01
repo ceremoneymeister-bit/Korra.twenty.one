@@ -189,7 +189,7 @@ def test_add_loads_role_and_skills_without_user_state_and_replay_preserves_edits
         "image_gen": {"provider": "private-owner-route", "model": "private-model"},
         "gateway": {"multiplex_profiles": True},
     }))
-    (root / ".env").write_text("CHOSEN_API_KEY=synthetic-key\nTELEGRAM_BOT_TOKEN=never-copy\n")
+    (root / ".env").write_text("CHOSEN_API_KEY=synthetic-key\nDEEPGRAM_API_KEY=synthetic-stt\nTELEGRAM_BOT_TOKEN=never-copy\n")
     protected = {"SOUL.md": "чужая роль", "memories/USER.md": "личная память", "cron/jobs.json": "[]", "workspace/design.txt": "чужой макет"}
     for rel, text in protected.items():
         file = root / rel
@@ -225,15 +225,19 @@ def test_add_loads_role_and_skills_without_user_state_and_replay_preserves_edits
     assert profiles.read_profile_meta(target)["display_name"] == "Наш дизайнер"
     assert "TELEGRAM_BOT_TOKEN" not in load_env_file(target / ".env")
     assert load_env_file(target / ".env")["CHOSEN_API_KEY"] == "synthetic-key"
+    assert load_env_file(target / ".env")["DEEPGRAM_API_KEY"] == "synthetic-stt"
     config = yaml.safe_load((target / "config.yaml").read_text())
     assert config["platforms"]["api_server"]["enabled"] is False
     assert config["image_gen"] == {
         "provider": "openai-codex",
         "model": "gpt-image-2.5-sunburst",
+        "enabled": True,
     }
     from korra_cli.tools_config import _get_platform_tools
     assert "image_gen" in _get_platform_tools(config, "cli")
     assert "image_gen" in _get_platform_tools(config, "api_server")
+    assert "image_gen" in _get_platform_tools(config, "telegram")
+    assert "image_gen" in _get_platform_tools(config, "future_channel")
     for rel, text in protected.items():
         assert (root / rel).read_text() == text
         assert not (target / rel).exists() or (target / rel).read_text() != text

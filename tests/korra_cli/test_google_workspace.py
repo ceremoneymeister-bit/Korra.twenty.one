@@ -97,7 +97,7 @@ def _exchange_for(scopes: list[str]):
 def _write_token(profile: Path, services: tuple[str, ...]) -> None:
     scopes = scopes_for_services(services)
     directory = google.profile_google_dir(profile)
-    directory.mkdir(parents=True, mode=0o700)
+    directory.mkdir(parents=True, mode=0o700, exist_ok=True)
     from utils import atomic_json_write
 
     atomic_json_write(
@@ -172,6 +172,7 @@ def test_explicit_profiles_use_one_source_grant_without_token_copies(tmp_path, m
         "state": "connected",
         "services": ["drive", "sheets"],
         "expires_at": None,
+        "rollback_requires_reconnect": False,
         "action": None,
         "shared_from": "assistant",
     }
@@ -360,7 +361,7 @@ def test_default_profile_state_is_separate_from_operator_app_directory(tmp_path)
     result = google.start("drive", profile_home=root)
 
     assert result["status"] == "pending"
-    assert google.pending_path(root) == root / "google-workspace" / "pending.json"
+    assert google.pending_path(root) == root / "google-workspace" / "pending-v2.json"
     assert google.pending_path(root).is_file()
     assert _app_path(root).read_bytes() == app_before
     assert stat.S_IMODE(google.installation_google_dir(root).stat().st_mode) == 0o750
@@ -506,11 +507,11 @@ def test_start_waits_for_inflight_completion_and_cannot_replace_flow(tmp_path):
     assert not complete_thread.is_alive()
     assert not start_thread.is_alive()
     assert complete_errors == []
-    assert len(start_errors) == 1
-    assert isinstance(start_errors[0], google.GoogleWorkspaceError)
-    assert start_errors[0].code == "revoke_required"
+    assert start_errors == []
     assert google.token_path(profile).exists()
-    assert not google.pending_path(profile).exists()
+    pending = google._pending_record(profile)
+    assert pending["operation"] == "extend"
+    assert set(pending["services"]) == {"calendar", "drive"}
 
 
 def test_expired_pending_flow_fails_closed(tmp_path, monkeypatch):
@@ -549,7 +550,7 @@ def test_deployed_nine_scope_legacy_token_stays_bounded_and_requires_reconnect(t
         "unknown_scope_count": 0,
         "usable_services": ["email", "calendar", "drive", "contacts", "sheets", "docs"],
         "legacy_compatible": True,
-        "action": "revoke_reconnect",
+        "action": "extend",
     }
     assert "never-returned" not in json.dumps(current)
 
@@ -590,7 +591,7 @@ def test_nagrada_send_and_slides_legacy_grant_reports_only_usable_services(tmp_p
         "unknown_scope_count": 0,
         "usable_services": ["calendar", "drive", "contacts", "sheets", "docs"],
         "legacy_compatible": True,
-        "action": "revoke_reconnect",
+        "action": "extend",
     }
 
 
@@ -627,9 +628,11 @@ def test_recognized_mail_and_contacts_legacy_grant_keeps_only_actual_services(tm
     assert denied.value.code == "service_not_selected"
     assert observed == [("email", marker), ("contacts", marker)]
 
-    with pytest.raises(google.GoogleWorkspaceError) as expansion:
-        google.start("drive", profile_home=profile)
-    assert expansion.value.code == "revoke_required"
+    flow = google.start("drive", profile_home=profile)
+    assert set(flow["services"]) == {"email", "contacts", "drive"}
+    pending = google._pending_record(profile)
+    assert pending["legacy_contract"] is True
+    assert set(legacy["scopes"]).issubset(pending["scopes"])
 
 
 def test_unknown_legacy_scope_is_not_usable(tmp_path, monkeypatch):
@@ -850,7 +853,7 @@ def test_profile_google_directory_symlink_fails_closed(tmp_path):
     with pytest.raises(google.GoogleWorkspaceError) as denied:
         google.start("drive", profile_home=profile)
     assert denied.value.code == "state_path_unsafe"
-    assert not (outside / "pending.json").exists()
+    assert not (outside / "pending-v2.json").exists()
 
 
 def test_installation_google_directory_symlink_is_not_followed(tmp_path):
@@ -968,7 +971,7 @@ def test_runtime_default_path_requires_exact_read_only_mount(tmp_path, monkeypat
     assert google._load_app()[0] == "installed"
 
 
-@pytest.mark.parametrize("name", ["token.json", "pending.json"])
+@pytest.mark.parametrize("name", ["token.json", "pending-v2.json"])
 def test_profile_state_file_symlink_fails_closed_without_touching_target(tmp_path, name):
     profile = tmp_path / "profile"
     state_dir = profile / "google-workspace"
@@ -1166,6 +1169,25 @@ def test_dashboard_sharing_uses_selected_profile_as_source(monkeypatch, tmp_path
     assert calls == [{"source_profile": "assistant", "profiles": ["rop"], "all_profiles": None}]
 
 
+def test_dashboard_skill_enable_uses_selected_profile_without_changing_sharing(monkeypatch, tmp_path):
+    from fastapi import HTTPException
+    from korra_cli.web_routers import google_workspace as routes
+
+    home = tmp_path / "profiles" / "assistant"
+    calls = []
+    monkeypatch.setattr(routes, "_profile_home", lambda _: home)
+    monkeypatch.setattr(routes.google, "set_workspace_skill_enabled",
+                        lambda enabled, **kwargs: calls.append((enabled, kwargs)) or {"ok": True})
+    assert asyncio.run(routes.google_configure_sharing(
+        routes.GoogleSharingBody(skill_enabled=True), profile="assistant")) == {"ok": True}
+    assert calls == [(True, {"profile_home": home})]
+    with pytest.raises(HTTPException) as denied:
+        asyncio.run(routes.google_configure_sharing(
+            routes.GoogleSharingBody(skill_enabled=True, all_profiles=True), profile="assistant"))
+    assert denied.value.status_code == 400
+    assert len(calls) == 1
+
+
 def test_google_console_legacy_auth_uri_is_accepted(tmp_path):
     """Скачанный из Google Console клиент пишет `auth_uri` без `/v2/`.
 
@@ -1188,3 +1210,243 @@ def test_google_console_legacy_auth_uri_is_accepted(tmp_path):
     path.write_text(json.dumps(payload), encoding="utf-8")
     assert google.status(profile_home=root)["app"]["configured"] is False
     assert google.status(profile_home=root)["app"]["reason"] == "app_invalid"
+
+
+@pytest.mark.parametrize('failure', ['cancel', 'expired', 'partial', 'no_refresh', 'exchange', 'write'])
+def test_extension_failure_preserves_existing_grant(tmp_path, monkeypatch, failure):
+    root = tmp_path / 'install'
+    home = root / 'profiles/assistant'
+    _write_app(root)
+    _write_token(home, ('email', 'calendar', 'drive', 'sheets'))
+    previous = google.token_path(home).read_bytes()
+    flow = google.start('tasks,docs', profile_home=home)
+    assert google.token_path(home).read_bytes() == previous
+    pending = google._pending_record(home)
+    assert set(pending['services']) == {'email', 'calendar', 'drive', 'sheets', 'tasks', 'docs'}
+    callback = _callback(flow['authorization_url'])
+    if failure == 'cancel':
+        google.cancel(profile_home=home)
+        with pytest.raises(google.GoogleWorkspaceError):
+            google.complete(callback, profile_home=home, exchange=_exchange_for(pending['scopes']))
+    elif failure == 'expired':
+        monkeypatch.setattr(google.time, 'time', lambda: pending['expires_at'] + 1)
+        assert google.status(profile_home=home)['pending']['active'] is False
+    else:
+        def exchange(*args):
+            result = _exchange_for(pending['scopes'])(*args)
+            if failure == 'partial':
+                result['scope'] = ' '.join(scopes_for_services(('drive',)))
+            elif failure == 'no_refresh':
+                result.pop('refresh_token')
+            elif failure == 'exchange':
+                raise google.GoogleWorkspaceError('token_exchange_failed', 'fake network failure')
+            return result
+        if failure == 'write':
+            writer = google._atomic_private_json
+            def fail_write(path, payload):
+                if path == google.extended_token_path(home):
+                    raise OSError('fake disk failure')
+                writer(path, payload)
+            monkeypatch.setattr(google, '_atomic_private_json', fail_write)
+        with pytest.raises((google.GoogleWorkspaceError, OSError)):
+            google.complete(callback, profile_home=home, exchange=exchange)
+    assert google.token_path(home).read_bytes() == previous
+    assert not google.extended_token_path(home).exists()
+    assert google._token_status(home)['services'] == ['email', 'calendar', 'drive', 'sheets']
+
+
+def test_tasks_extension_shared_consumers_and_rollback_file(tmp_path, monkeypatch):
+    root = tmp_path / 'install'
+    _installation_profiles(monkeypatch, root, 'assistant', 'consumer')
+    source = root / 'profiles/assistant'
+    consumer = root / 'profiles/consumer'
+    _write_app(root)
+    _write_token(source, ('drive', 'sheets'))
+    before = google.token_path(source).read_bytes()
+    google.configure_sharing(source_profile='assistant', profiles=['consumer'])
+    flow = google.start('tasks,docs', profile_home=source)
+    pending = google._pending_record(source)
+    google.complete(_callback(flow['authorization_url']), profile_home=source,
+                    exchange=_exchange_for(pending['scopes']))
+    assert google.token_path(source).read_bytes() == before
+    assert google._active_token_path(consumer) == google.extended_token_path(source)
+    assert not google.extended_token_path(consumer).exists()
+    assert set(google.status(profile_home=consumer)['connection']['services']) == {'drive', 'sheets', 'docs', 'tasks'}
+    with pytest.raises(google.GoogleWorkspaceError) as replay:
+        google.complete(_callback(flow['authorization_url']), profile_home=source,
+                        exchange=_exchange_for(pending['scopes']))
+    assert replay.value.code == 'flow_missing'
+
+
+def test_live_probe_tasks_and_unknown_service(tmp_path, monkeypatch):
+    from unittest.mock import MagicMock
+    import googleapiclient.discovery
+    fake = MagicMock()
+    monkeypatch.setattr(googleapiclient.discovery, 'build', fake)
+    google._live_probe('tasks', object())
+    assert fake.call_args.args == ('tasks', 'v1')
+    fake.return_value.tasklists.return_value.list.assert_called_once_with(maxResults=1)
+    fake.reset_mock()
+    with pytest.raises(google.GoogleWorkspaceError) as denied:
+        google._live_probe('mystery', object())
+    assert denied.value.code == 'service_invalid'
+    fake.assert_not_called()
+
+
+def test_missing_grant_and_missing_service_have_distinct_codes(tmp_path):
+    home = tmp_path / 'profile'
+    with pytest.raises(google.GoogleWorkspaceError) as missing:
+        google.check_service('tasks', profile_home=home)
+    assert missing.value.code == 'not_authenticated'
+    _write_token(home, ('drive',))
+    with pytest.raises(google.GoogleWorkspaceError) as scope:
+        google.check_service('tasks', profile_home=home)
+    assert scope.value.code == 'service_not_selected'
+
+
+def test_google_grant_provisions_only_google_for_blank_profile(tmp_path, monkeypatch):
+    root = tmp_path / 'install'
+    _installation_profiles(monkeypatch, root, 'assistant', 'blank', 'disabled')
+    _write_token(root / 'profiles/assistant', ('drive', 'sheets'))
+    blank = root / 'profiles/blank'
+    disabled = root / 'profiles/disabled'
+    for home in (blank, disabled):
+        (home / '.no-bundled-skills').write_text('keep marker')
+    (disabled / 'config.yaml').write_text('skills:\n  disabled: [google-workspace]\n')
+    google.configure_sharing(source_profile='assistant', all_profiles=True)
+    assert (blank / 'skills/productivity/google-workspace/scripts/google_api.py').is_file()
+    assert (blank / '.no-bundled-skills').read_text() == 'keep marker'
+    assert not (blank / 'skills/korra-agent').exists()
+    assert not (disabled / 'skills/productivity/google-workspace').exists()
+    ready = google.workspace_skill_status(blank)
+    assert ready['ready'] is True and ready['execution_path'].endswith('/scripts/google_api.py')
+    assert google.workspace_skill_status(disabled)['reason'] == 'skill_disabled'
+    assert not google.token_path(blank).exists()
+    before = list(disabled.rglob('*'))
+    google.workspace_skill_status(disabled)
+    assert list(disabled.rglob('*')) == before
+
+
+def test_workspace_status_honors_platform_disable_and_suppression(tmp_path, monkeypatch):
+    home = tmp_path / 'profile'
+    _write_token(home, ('drive',))
+    (home / 'config.yaml').write_text('skills:\n  platform_disabled:\n    telegram: [google-workspace]\n')
+    google.ensure_workspace_skill(home)
+    info = google.workspace_skill_status(home)
+    assert info['enabled_for_channel']['telegram'] is False
+    assert info['enabled_for_channel']['api_server'] is True
+    (home / 'skills/.curator_suppressed').write_text('google-workspace\n')
+    assert google.workspace_skill_status(home)['reason'] == 'skill_disabled'
+
+
+def test_owner_can_enable_only_google_without_changing_sharing(tmp_path, monkeypatch):
+    root = tmp_path / 'install'
+    _installation_profiles(monkeypatch, root, 'assistant', 'blank')
+    home = root / 'profiles/blank'
+    _write_token(root / 'profiles/assistant', ('drive', 'sheets'))
+    (home / '.no-bundled-skills').write_text('keep')
+    (home / 'config.yaml').write_text('skills:\n  disabled: [google-workspace, other]\n  platform_disabled:\n    telegram: [google-workspace, telegram-skill]\n')
+    google.configure_sharing(source_profile='assistant', profiles=['blank'])
+    sharing_before = google.sharing_policy_path().read_bytes()
+    (home / 'skills').mkdir(exist_ok=True)
+    (home / 'skills/.curator_suppressed').write_text('google-workspace\nother\n')
+    result = google.set_workspace_skill_enabled(True, profile_home=home)
+    assert result == {'ok': True, 'enabled': True}
+    import yaml
+    config = yaml.safe_load((home / 'config.yaml').read_text())
+    assert config['skills']['disabled'] == ['other']
+    assert config['skills']['platform_disabled']['telegram'] == ['telegram-skill']
+    assert google.workspace_skill_status(home)['ready'] is True
+    assert (home / '.no-bundled-skills').read_text() == 'keep'
+    assert (home / 'skills/.curator_suppressed').read_text().strip() == 'other'
+    assert google.sharing_policy_path().read_bytes() == sharing_before
+    assert not google.token_path(home).exists()
+
+
+def test_profile_created_under_shared_all_gets_google_without_other_skills(tmp_path, monkeypatch):
+    from korra_cli import profiles
+    root = tmp_path / 'install'
+    _installation_profiles(monkeypatch, root)
+    monkeypatch.setenv('HERMES_HOME', str(root))
+    monkeypatch.setattr(profiles, '_maybe_register_gateway_service', lambda *_: None)
+    _write_token(root, ('drive', 'sheets'))
+    google.configure_sharing(source_profile='default', all_profiles=True)
+    created = profiles.create_profile('new-agent', no_skills=True, no_alias=True)
+    assert (created / '.no-bundled-skills').exists()
+    assert (created / 'skills/productivity/google-workspace/scripts/google_api.py').is_file()
+    assert google.workspace_skill_status(created)['ready'] is True
+    assert not google.token_path(created).exists()
+    assert len(list((created / 'skills').rglob('SKILL.md'))) == 1
+
+
+def test_historical_all_does_not_acquire_tasks_scope(tmp_path):
+    from korra_cli.google_workspace_scopes import validate_scope_contract
+    old_services = tuple(service for service in SERVICE_SCOPES if service != 'tasks')
+    old_scopes = scopes_for_services(old_services)
+    payload = {'scopes': old_scopes, TOKEN_SERVICES_KEY: ['all'], TOKEN_REQUESTED_SCOPES_KEY: old_scopes}
+    services, scopes = validate_scope_contract(payload)
+    assert services == old_services and scopes == old_scopes
+    assert 'tasks' not in services
+
+
+def test_downgrade_revoke_or_reconnect_is_respected_after_upgrade(tmp_path):
+    root = tmp_path / 'install'
+    home = root / 'profiles/assistant'
+    _write_app(root)
+    _write_token(home, ('drive',))
+    flow = google.start('tasks', profile_home=home)
+    pending = google._pending_record(home)
+    google.complete(_callback(flow['authorization_url']), profile_home=home,
+                    exchange=_exchange_for(pending['scopes']))
+    assert google._local_active_token_path(home) == google.extended_token_path(home)
+    # Simulate .15's local revoke: it ignores the extended file.
+    google.token_path(home).unlink()
+    assert google._token_status(home)['state'] == 'not_connected'
+    assert google.extended_token_path(home).exists()  # preserved, not silently erased
+    # A .15 reconsent may connect another account. .16 must use that account.
+    _write_token(home, ('sheets',))
+    assert google._local_active_token_path(home) == google.token_path(home)
+    assert google._token_status(home)['services'] == ['sheets']
+
+
+def test_tasks_installed_cli_uses_effective_grant_with_fake_http(tmp_path, monkeypatch, capsys):
+    import importlib.util
+    import httplib2
+    import googleapiclient.discovery
+    from google_auth_httplib2 import AuthorizedHttp
+    from korra_constants import set_hermes_home_override, reset_hermes_home_override
+    root = tmp_path / 'install'
+    home = root / 'profiles/assistant'
+    _write_app(root)
+    _write_token(home, ('drive',))
+    flow = google.start('tasks', profile_home=home)
+    pending = google._pending_record(home)
+    google.complete(_callback(flow['authorization_url']), profile_home=home,
+                    exchange=_exchange_for(pending['scopes']))
+    monkeypatch.setenv('HERMES_HOME', str(home))
+    calls = []
+    class FakeHTTP:
+        def request(self, uri, method='GET', body=None, headers=None, **kwargs):
+            calls.append((uri, method, json.loads(body), headers.get('authorization')))
+            return httplib2.Response({'status': '200', 'content-type': 'application/json'}), b'{"id":"task-1","status":"completed"}'
+    real_build = googleapiclient.discovery.build
+    def fake_transport(api, version, *, credentials):
+        return real_build(api, version, http=AuthorizedHttp(credentials, http=FakeHTTP()), static_discovery=True)
+    monkeypatch.setattr(googleapiclient.discovery, 'build', fake_transport)
+    scope = set_hermes_home_override(str(home))
+    try:
+        script = home / 'skills/productivity/google-workspace/scripts/google_api.py'
+        spec = importlib.util.spec_from_file_location('tasks_installed_cli', script)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        monkeypatch.setattr(module, '_gws_binary', lambda: None)
+        monkeypatch.setattr(module.sys, 'argv', [str(script), 'tasks', 'complete', 'task-1', '--tasklist', 'list-1'])
+        module.main()
+    finally:
+        reset_hermes_home_override(scope)
+    assert len(calls) == 1
+    uri, method, body, auth = calls[0]
+    assert uri.endswith('/lists/list-1/tasks/task-1?alt=json')
+    assert method == 'PATCH' and body == {'status': 'completed'}
+    assert auth == 'Bearer access-value'
+    assert json.loads(capsys.readouterr().out)['status'] == 'completed'

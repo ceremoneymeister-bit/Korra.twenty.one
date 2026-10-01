@@ -53,8 +53,8 @@ _native_google._private_dir(_native_google.profile_google_dir(GRANT_HOME))
 SCOPES = list(MINIMUM_SCOPES)
 def _ensure_authenticated():
     if not TOKEN_PATH.exists():
-        print("Not authenticated. Run the setup script first:", file=sys.stderr)
-        print(f"  python {Path(__file__).parent / 'setup.py'}", file=sys.stderr)
+        print("ERROR: not_authenticated: Google is not connected for this agent.", file=sys.stderr)
+        print("Connect or share Google in Settings → Keys → Google Workspace.", file=sys.stderr)
         sys.exit(1)
 
 
@@ -76,9 +76,14 @@ def _require_selected_service(api_name: str) -> None:
     _ensure_authenticated()
     try:
         payload = json.loads(TOKEN_PATH.read_text(encoding="utf-8"))
-        require_selected_service(payload, api_name)
+        validate_scope_contract(payload)
     except (json.JSONDecodeError, ValueError) as e:
-        print(f"ERROR: Google service is unavailable: {e}", file=sys.stderr)
+        print(f"ERROR: scope_contract_invalid: {e}", file=sys.stderr)
+        sys.exit(1)
+    try:
+        require_selected_service(payload, api_name)
+    except ValueError as e:
+        print(f"ERROR: service_not_selected: {e}", file=sys.stderr)
         sys.exit(1)
 
 
@@ -237,7 +242,7 @@ def get_credentials():
     try:
         return _native_google._credentials(HERMES_HOME)
     except _native_google.GoogleWorkspaceError as native_error:
-        print(str(native_error), file=sys.stderr)
+        print(f"ERROR: {native_error.code}: {native_error}", file=sys.stderr)
         sys.exit(1)
 
 
@@ -1088,6 +1093,38 @@ def _docs_insert_text(doc_id: str, text: str, index: int) -> None:
     service.documents().batchUpdate(documentId=doc_id, body={"requests": requests}).execute()
 
 
+def tasks_command(args):
+    """Task API operations share the same native auth and gws transport."""
+    resource = "tasklists" if args.action == "tasklists" else "tasks"
+    method = {"tasklists": "list", "create": "insert", "complete": "patch"}.get(args.action, args.action)
+    params = {} if resource == "tasklists" else {"tasklist": args.tasklist}
+    body = None
+    if args.action in {"tasklists", "list"}:
+        params["maxResults"] = args.max
+        if args.page_token:
+            params["pageToken"] = args.page_token
+        if args.action == "list":
+            params.update(showCompleted=args.show_completed, showHidden=args.show_completed)
+    if args.action in {"get", "complete"}:
+        params["task"] = args.task_id
+    if args.action == "create":
+        body = {"title": args.title}
+        if args.notes:
+            body["notes"] = args.notes
+        if args.due:
+            body["due"] = args.due
+    if args.action == "complete":
+        body = {"status": "completed"}
+    if _gws_binary():
+        result = _run_gws(["tasks", resource, method], params=params, body=body)
+    else:
+        service = build_service("tasks", "v1")
+        if body is not None:
+            params["body"] = body
+        result = getattr(getattr(service, resource)(), method)(**params).execute()
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+
+
 # =========================================================================
 # CLI parser
 # =========================================================================
@@ -1258,6 +1295,25 @@ def main():
     p.add_argument("doc_id")
     p.add_argument("--text", required=True, help="Text to append to the end of the document")
     p.set_defaults(func=docs_append)
+
+    tasks = sub.add_parser("tasks")
+    task_sub = tasks.add_subparsers(dest="action", required=True)
+    for action in ("tasklists", "list", "get", "create", "complete"):
+        p = task_sub.add_parser(action)
+        if action != "tasklists":
+            p.add_argument("--tasklist", default="@default")
+        if action in {"get", "complete"}:
+            p.add_argument("task_id")
+        if action in {"tasklists", "list"}:
+            p.add_argument("--max", type=int, choices=range(1, 101), default=20)
+            p.add_argument("--page-token", default="")
+        if action == "list":
+            p.add_argument("--show-completed", action="store_true")
+        if action == "create":
+            p.add_argument("--title", required=True)
+            p.add_argument("--notes", default="")
+            p.add_argument("--due", default="", help="RFC3339 date; Tasks stores only the date")
+        p.set_defaults(func=tasks_command)
 
     args = parser.parse_args()
     _require_selected_service(args.service)

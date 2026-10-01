@@ -76,7 +76,7 @@ def _from_workspace_error(exc: google.GoogleWorkspaceError) -> CalendarError:
             "Google connection is not set up on this Korra server yet.",
             action=ACTION_SUPPORT,
         )
-    if code == "token_missing":
+    if code in {"token_missing", "not_authenticated"}:
         return CalendarError(
             "not_connected",
             "Google Calendar is not connected for this agent.",
