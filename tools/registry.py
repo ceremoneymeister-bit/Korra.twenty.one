@@ -464,8 +464,10 @@ def get_cached_check_fn_result(fn: Callable) -> Optional[bool]:
         # Unresolved profile identity bypasses the cache entirely; there is no
         # trustworthy cached verdict to report.
         return None
+    from agent.auxiliary_client import runtime_cache_identity
     with _check_fn_cache_lock:
-        cached = _check_fn_cache.get((fn, scope))
+        # Same key as the writer in _check_fn_cached (K21-246).
+        cached = _check_fn_cache.get((fn, scope, runtime_cache_identity()))
         if cached is None:
             return None
         ts, value = cached
