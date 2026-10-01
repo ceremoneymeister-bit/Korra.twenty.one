@@ -141,7 +141,7 @@ export function TranscriptViewport({ children, followKey, awaitingApproval, stor
       if (target) {
         el.scrollTop = messageTop(el, target) + saved.offset;
         place.current = null;
-      } else if (wanted !== null && first !== null && wanted < first && older?.hasOlder && !older.failed
+      } else if ((wanted === null ? Boolean(saved.key) : first !== null && wanted < first) && older?.hasOlder && !older.failed
         && restorePages.current < MAX_RESTORE_PAGES) {
         // Место чтения раньше загруженной страницы: догружаем до него.
         if (!older.loading) {

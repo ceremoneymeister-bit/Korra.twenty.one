@@ -1545,3 +1545,53 @@ it("новый чат с сорвавшимся первым сообщение�
   expect(current.messages.map(m => m.content)).toEqual(["Подготовь договор"]);
   expect(current.messages[0]?.delivery).toBe("failed");
 });
+
+it("K21-206: disjoint repeated dialogue keeps the new persisted identities", async () => {
+  const { getChatRuns } = await import("@/lib/chat-runs");
+  vi.mocked(getChatRuns).mockReset().mockResolvedValue([]);
+  const page = (first: number) => Array.from({ length: 30 }, (_, n) => ({ id: first+n, role: n%2 ? "assistant" as const : "user" as const, content: n%2 ? "Готово" : "Да" }));
+  vi.spyOn(api,"getSessionMessages")
+    .mockResolvedValueOnce({session_id:"review",messages:page(1)})
+    .mockResolvedValueOnce({session_id:"review",messages:page(71),pagination:{order:"latest",before_id:71,has_more:true,returned:30}});
+  await act(async()=>{await current.loadSession("review");});
+  await act(async()=>{await current.loadSession("review",{background:true});});
+  expect(current.messages.map(message => message.historyId)).toEqual(page(71).map(message => message.id));
+});
+
+it("K21-220/234: a send supersedes slow background history without blocking input", async () => {
+  const { getChatRuns } = await import("@/lib/chat-runs");
+  vi.mocked(getChatRuns).mockReset().mockResolvedValue([]);
+  let release!: (value: Awaited<ReturnType<typeof api.getSessionMessages>>) => void;
+  let signal: AbortSignal | undefined;
+  vi.spyOn(api, "getSessionMessages")
+    .mockResolvedValueOnce({ session_id: "focus", messages: [{ id: 1, role: "user", content: "До" }, { id: 2, role: "assistant", content: "Ответ" }] })
+    .mockImplementationOnce((_, __, cancel) => { signal = cancel; return new Promise(resolve => { release = resolve; }); });
+  vi.stubGlobal("fetch", vi.fn(async () => sseResponse('data: {"choices":[{"delta":{"content":"Новый ответ"}}]}\n\n', 'data: [DONE]\n\n')));
+  await act(async () => { await current.loadSession("focus"); });
+  let background!: Promise<void>;
+  await act(async () => { background = current.loadSession("focus", { background: true }); });
+  expect(current.isLoading).toBe(false);
+  await act(async () => { expect(await current.send("Новое сообщение")).toBe(true); });
+  expect(signal?.aborted).toBe(true);
+  await act(async () => { release({ session_id: "focus", messages: [{ id: 1, role: "user", content: "Устаревший снимок" }] }); await background; });
+  expect(current.messages.some(message => message.content === "Новое сообщение")).toBe(true);
+  expect(current.messages.some(message => message.content === "Устаревший снимок")).toBe(false);
+});
+
+it("K21-234: rereading the open conversation stays editable, switching still waits", async () => {
+  const { getChatRuns } = await import("@/lib/chat-runs");
+  vi.mocked(getChatRuns).mockReset().mockResolvedValue([]);
+  const reads = vi.spyOn(api, "getSessionMessages").mockResolvedValue({ session_id: "open", messages: [] });
+  await act(async () => { await current.loadSession("open"); });
+  let release!: (value: Awaited<ReturnType<typeof api.getSessionMessages>>) => void;
+  reads.mockImplementationOnce(() => new Promise(done => { release = done; }));
+  let reading!: Promise<void>;
+  await act(async () => { reading = current.loadSession("open"); });
+  expect(current.isLoading).toBe(false);
+  await act(async () => { release({ session_id: "open", messages: [] }); await reading; });
+  reads.mockImplementationOnce(() => new Promise(done => { release = done; }));
+  await act(async () => { reading = current.loadSession("other"); });
+  expect(current.isLoading).toBe(true);
+  await act(async () => { release({ session_id: "other", messages: [] }); await reading; });
+  expect(current.isLoading).toBe(false);
+});

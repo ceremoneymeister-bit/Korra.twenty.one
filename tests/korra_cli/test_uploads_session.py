@@ -639,3 +639,36 @@ def test_manifest_body_is_bounded_before_json_parsing(panel, monkeypatch):
     response = client.post("/api/uploads", content=b" " * 65,
                            headers={"Content-Type": "application/json"})
     assert response.status_code == 413
+
+
+@pytest.mark.parametrize("name", ["IMG_TEST.HEIC", "IMG_TEST.heif"])
+def test_chat_heic_original_survives_upload_and_has_image_reader(panel, name):
+    """K21-217/220: a desktop picker need not decode HEIC before upload."""
+    import io
+    from PIL import Image
+    import pillow_heif
+    from agent.image_routing import transcode_image_to_png
+
+    pillow_heif.register_heif_opener()
+    buffer = io.BytesIO()
+    Image.new("RGB", (16, 12), (90, 120, 200)).save(buffer, format="HEIF")
+    payload = buffer.getvalue()
+    client, _, _ = panel
+    manifest = _manifest(files=[_entry(name, payload)])
+    created = client.post("/api/uploads", json=manifest)
+    assert created.status_code == 201, created.text
+    uid = manifest["upload_id"]
+    assert _put(client, uid, 0, payload).status_code == 200
+    completed = client.post(f"/api/uploads/{uid}/complete", json={})
+    assert completed.status_code == 200, completed.text
+    descriptor = completed.json()["files"][0]
+    assert descriptor["reader"] == "image"
+    assert Path(descriptor["path"]).read_bytes() == payload
+    png, error = transcode_image_to_png(payload)
+    assert png and not error
+    body = {"messages": [{"role": "user", "content": "Фото"}], "attachments": [descriptor]}
+    server._apply_chat_attachments(body)
+    assert "читать: image" in body["messages"][0]["content"]
+    legacy = client.post("/api/chat/upload", files={"file": (name, payload, "application/octet-stream")})
+    assert legacy.status_code == 200, legacy.text
+    assert legacy.json()["reader"] == "image"
