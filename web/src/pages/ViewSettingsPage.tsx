@@ -9,9 +9,10 @@
 
 import { useEffect, useId, type ComponentType } from "react";
 import { useStore } from "@nanostores/react";
-import { Check, Moon, Sun } from "lucide-react";
+import { Check } from "lucide-react";
 
 import { $agentsView, chooseAgentsMobileMode, loadAgentsView, type AgentsMobileMode } from "@/lib/agents-view";
+import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { useTheme } from "@/themes";
 
 import "@/components/agents/mobile/agents-mobile.css";
@@ -76,7 +77,7 @@ const MODES: Array<{ value: AgentsMobileMode; title: string; description: string
 
 export default function ViewSettingsPage() {
   const view = useStore($agentsView);
-  const { themeName, setTheme, saveState: themeSave, saveError: themeError } = useTheme();
+  const { saveState: themeSave, saveError: themeError } = useTheme();
   const themeId = useId();
   const modeId = useId();
 
@@ -94,14 +95,7 @@ export default function ViewSettingsPage() {
     <div className="k-agents k-view" data-view-settings>
       <section className="k-view__sec" aria-labelledby={themeId}>
         <h2 id={themeId}>Тема</h2>
-        <div className="k-seg" role="radiogroup" aria-labelledby={themeId}>
-          <button type="button" role="radio" aria-checked={themeName !== "dark"} onClick={() => void setTheme("light")}>
-            <Sun size={18} aria-hidden />Светлая
-          </button>
-          <button type="button" role="radio" aria-checked={themeName === "dark"} onClick={() => void setTheme("dark")}>
-            <Moon size={18} aria-hidden />Тёмная
-          </button>
-        </div>
+        <ThemeSwitcher labeled />
         {themeSave === "error" && (
           <p className="k-view__saved is-problem" role="alert">{themeError || "Тема не сохранилась. Повторите выбор."}</p>
         )}

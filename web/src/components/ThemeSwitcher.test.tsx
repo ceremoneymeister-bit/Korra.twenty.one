@@ -11,6 +11,7 @@ const state = vi.hoisted(() => ({
   saveState: "idle" as "idle" | "pending" | "saved" | "error",
   setTheme: vi.fn(async () => true),
   themeName: "light",
+  color: "#5275d9",
 }));
 
 vi.mock("@/themes", () => ({ useTheme: () => state }));
@@ -34,45 +35,37 @@ afterEach(async () => {
   host.remove();
 });
 
-it("renders two centered icon-only choices in the expanded sidebar", async () => {
+it("offers three explicit choices and opens a palette without losing the selected theme", async () => {
   await act(async () => root.render(<ThemeSwitcher />));
-
-  const group = host.querySelector<HTMLElement>('[role="group"]');
-  const light = host.querySelector<HTMLButtonElement>('[aria-label="Светлая тема"]');
-  const dark = host.querySelector<HTMLButtonElement>('[aria-label="Тёмная тема"]');
-
-  expect(group?.className).toContain("grid-cols-2");
-  // Compact pill: 32 px with a mouse, finger-sized on touch screens.
-  expect(group?.className).toContain("h-[32px]");
-  expect(group?.className).toContain("pointer-coarse:h-[40px]");
-  expect(light?.className).toContain("place-items-center");
-  expect(dark?.className).toContain("place-items-center");
-  expect(light?.textContent).toBe("");
-  expect(dark?.textContent).toBe("");
-  expect(light?.getAttribute("aria-pressed")).toBe("true");
-  expect(dark?.getAttribute("aria-pressed")).toBe("false");
-  expect(light?.className).toContain("rounded-full");
-  expect(light?.hasAttribute("data-theme-control")).toBe(true);
-  const thumb = light?.querySelector<HTMLElement>("span");
-  expect(thumb?.className).toContain("h-[26px]");
-  expect(thumb?.className).toContain("pointer-coarse:h-[34px]");
-  expect(thumb?.className).toContain("shadow-[var(--neo-depth-1)]");
-
-  await act(async () => dark?.click());
+  const light = host.querySelector<HTMLButtonElement>('[aria-label="Светлая тема"]')!;
+  const dark = host.querySelector<HTMLButtonElement>('[aria-label="Тёмная тема"]')!;
+  const color = host.querySelector<HTMLButtonElement>('[aria-label="Цвет"]')!;
+  expect(light.getAttribute("aria-pressed")).toBe("true");
+  expect(dark.getAttribute("aria-pressed")).toBe("false");
+  expect(color.getAttribute("aria-pressed")).toBe("false");
+  await act(async () => dark.click());
   expect(state.setTheme).toHaveBeenCalledWith("dark");
+  await act(async () => color.click());
+  expect(state.setTheme).toHaveBeenCalledWith("color");
+  expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+  expect(document.querySelector('input[aria-label="Любой цвет"]')).not.toBeNull();
+  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Розовый"]')!.click());
+  expect(state.setTheme).toHaveBeenCalledWith("color", "#d95791");
 });
 
-it("uses one compact direct toggle in the collapsed sidebar, finger-sized on touch", async () => {
+it.each(["light", "dark", "color"])("collapsed %s opens all three choices without silently cycling", async name => {
+  state.themeName = name;
   await act(async () => root.render(<ThemeSwitcher collapsed />));
-
-  const toggle = host.querySelector<HTMLButtonElement>('[aria-label="Включить тёмную тему"]');
+  const toggle = host.querySelector<HTMLButtonElement>('[aria-label="Выбрать тему"]')!;
   expect(host.querySelectorAll("button")).toHaveLength(1);
-  expect(toggle?.className).toContain("size-[36px]");
-  expect(toggle?.className).toContain("pointer-coarse:size-[44px]");
-  expect(toggle?.querySelector("svg")?.classList.contains("lucide-moon")).toBe(true);
-
-  await act(async () => toggle?.click());
-  expect(state.setTheme).toHaveBeenCalledWith("dark");
+  await act(async () => toggle.click());
+  expect(state.setTheme).not.toHaveBeenCalled();
+  const dialog = document.querySelector('[role="dialog"]')!;
+  expect(dialog.querySelector('[aria-label="Светлая тема"]')).not.toBeNull();
+  expect(dialog.querySelector('[aria-label="Тёмная тема"]')).not.toBeNull();
+  expect(dialog.querySelector('[aria-label="Цвет"]')).not.toBeNull();
+  await act(async () => dialog.querySelector<HTMLButtonElement>('[aria-label="Закрыть палитру"]')!.click());
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
 });
 
 it("shows a portaled save error without changing sidebar geometry", async () => {
@@ -98,4 +91,12 @@ it("keeps the retry target at 44 px regardless of theme density", async () => {
   // темы, поэтому цель пальца задаётся абсолютной величиной.
   expect(retry?.className).toContain("min-h-[44px]");
   expect(retry?.className).not.toMatch(/\bmin-h-\d+\b/);
+});
+
+it("retries the selected theme from Appearance after a failed save", async () => {
+  state.themeName = "color";
+  state.saveState = "error";
+  await act(async () => root.render(<ThemeSwitcher labeled />));
+  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Цвет"]')!.click());
+  expect(state.retryTheme).toHaveBeenCalledOnce();
 });

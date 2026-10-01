@@ -26,3 +26,31 @@ it.each(['{', JSON.stringify(pref('dark','stale')), JSON.stringify({...pref('dar
 it('removes a legacy font override and migrates the server preference to the theme font',async()=>{localStorage.setItem('hermes-dashboard-font','onest');document.documentElement.style.setProperty('--theme-font-override-sans','legacy');api.getFontPref.mockResolvedValue({font:'onest'});await mount();await vi.waitFor(()=>expect(api.setFontPref).toHaveBeenCalledWith('theme'));expect(localStorage.getItem('hermes-dashboard-font')).toBeNull();expect(document.documentElement.style.getPropertyValue('--theme-font-override-sans')).toBe('');});
 
 it('honors server dark without caching when installation identity is unavailable',async()=>{window.__KORRA_THEME_PREF__={...pref('dark'),installation_id:null};await mount();expect(current.themeName).toBe('dark');expect(api.setTheme).not.toHaveBeenCalled();expect(Object.keys(localStorage).filter(key=>key.startsWith('korra-dashboard'))).toHaveLength(0);});
+
+it('applies server color before GET and clears the gradient on returning to a neutral theme', async () => {
+  window.__KORRA_THEME_PREF__ = {...pref('color'), color: '#d95791'};
+  await mount();
+  expect(current.themeName).toBe('color');
+  expect(current.color).toBe('#d95791');
+  expect(document.documentElement.style.getPropertyValue('--theme-asset-bg')).toContain('linear-gradient');
+  expect(document.documentElement.style.getPropertyValue('--neo-shadow')).not.toBe('#bebebe');
+  await act(async () => { await current.setTheme('light'); });
+  expect(document.documentElement.style.getPropertyValue('--theme-asset-bg')).toBe('none');
+  expect(document.documentElement.style.getPropertyValue('--neo-shadow')).toBe('#bebebe');
+});
+it('saves color alongside the theme, uses durable revisions and rejects an incomplete ACK', async () => {
+  window.__KORRA_THEME_PREF__ = pref();
+  await mount();
+  api.setTheme.mockImplementation(async(name, _revision, _evening, color) => ({ok:true, preference:{...pref(name, 'r2'), color}}));
+  await act(async () => { await current.setTheme('color', '#FFFFEE'); });
+  expect(api.setTheme).toHaveBeenCalledWith('color', 'r1', undefined, '#ffffee');
+  expect(current.color).toBe('#ffffee');
+  expect(current.saveState).toBe('saved');
+  expect(JSON.parse(localStorage.getItem('korra-dashboard-v1:'+ 'a'.repeat(32)+':owner:%2Fc%2Ftest:theme')!).color).toBe('#ffffee');
+  await act(async () => resolveGet({preference:pref()}));
+  expect(current.themeName).toBe('color');
+  api.setTheme.mockResolvedValue({ok:true, preference:pref('color', 'r3')});
+  await act(async () => { await current.setTheme('color', '#5275d9'); });
+  expect(current.saveState).toBe('error');
+  expect(current.color).toBe('#5275d9');
+});
