@@ -1,4 +1,4 @@
-"""K21-033: image generation ships to every profile but is opt-in per platform."""
+"""K21-229: image generation is an explicit opt-in for the whole profile."""
 
 from korra_cli.tools_config import _get_platform_tools
 
@@ -8,7 +8,7 @@ def test_image_gen_is_off_without_platform_opt_in():
     assert "image_gen" not in _get_platform_tools({}, "telegram")
 
 
-def test_image_gen_can_be_enabled_for_one_platform_only():
+def test_legacy_platform_opt_in_reaches_other_profile_channels():
     config = {
         "platform_toolsets": {
             "cli": ["file", "image_gen"],
@@ -16,7 +16,7 @@ def test_image_gen_can_be_enabled_for_one_platform_only():
         }
     }
     assert "image_gen" in _get_platform_tools(config, "cli")
-    assert "image_gen" not in _get_platform_tools(config, "telegram")
+    assert "image_gen" in _get_platform_tools(config, "telegram")
 
 
 def test_image_gen_opt_in_is_isolated_between_profile_config_files(tmp_path):
@@ -49,5 +49,6 @@ def test_image_gen_opt_in_is_isolated_between_profile_config_files(tmp_path):
         reset_hermes_home_override(token)
 
     assert "image_gen" in _get_platform_tools(enabled_config, "cli")
-    assert "image_gen" not in _get_platform_tools(enabled_config, "telegram")
+    assert "image_gen" in _get_platform_tools(enabled_config, "telegram")
     assert "image_gen" not in _get_platform_tools(disabled_config, "cli")
+    assert "image_gen" not in _get_platform_tools(disabled_config, "telegram")

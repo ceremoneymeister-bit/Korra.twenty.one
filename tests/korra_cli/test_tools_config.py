@@ -1323,3 +1323,21 @@ def test_default_off_builtin_toolsets_stay_switchable_on():
         "выключены по умолчанию и не могут быть включены владельцем: "
         f"{unreachable}"
     )
+
+
+@pytest.mark.parametrize('platform', ['cli', 'api_server', 'telegram', 'discord', 'future_channel'])
+def test_image_capability_applies_to_all_channels(platform):
+    from korra_cli.tools_config import _get_platform_tools
+    config = {'image_gen': {'enabled': True, 'provider': 'openai-codex'},
+              'platform_toolsets': {platform: ['file']}}
+    assert 'image_gen' in _get_platform_tools(config, platform, include_default_mcp_servers=False)
+    config['image_gen']['enabled'] = False
+    assert 'image_gen' not in _get_platform_tools(config, platform, include_default_mcp_servers=False)
+
+
+def test_existing_image_opt_in_covers_new_channel_but_global_disable_wins():
+    from korra_cli.tools_config import _get_platform_tools
+    config = {'platform_toolsets': {'api_server': ['image_gen'], 'telegram': ['file']}}
+    assert 'image_gen' in _get_platform_tools(config, 'telegram', include_default_mcp_servers=False)
+    config['agent'] = {'disabled_toolsets': ['image_gen']}
+    assert 'image_gen' not in _get_platform_tools(config, 'telegram', include_default_mcp_servers=False)
