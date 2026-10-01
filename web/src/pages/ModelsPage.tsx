@@ -570,7 +570,7 @@ type MoaPickerTarget =
   | { kind: "reference"; index: number }
   | { kind: "aggregator" };
 
-function AuxiliaryTasksModal({
+export function AuxiliaryTasksModal({
   aux,
   refreshKey,
   onSaved,
@@ -602,7 +602,8 @@ function AuxiliaryTasksModal({
     }
   };
 
-  return (
+  // Портал: внутри карточки «fixed» ограничен её рамкой, окно обрезалось.
+  return createPortal(
     <div
       ref={modalRef}
       className="neo-overlay fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-6"
@@ -662,7 +663,7 @@ function AuxiliaryTasksModal({
                       {t.hint}
                     </span>
                   </div>
-                  <div className="mt-1 truncate font-mono text-xs text-text-secondary">
+                  <div className={cn("mt-1 truncate text-xs text-text-secondary", !isAuto && "font-mono")}>
                     {isAuto
                       ? "Автоматически — используется основная модель"
                       : `${providerDisplayName(cur?.provider ?? "")} · ${cur?.model || "модель поставщика"}`}
@@ -712,7 +713,8 @@ function AuxiliaryTasksModal({
           loading={resetBusy}
         />
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

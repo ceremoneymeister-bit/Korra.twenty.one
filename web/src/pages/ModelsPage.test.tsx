@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 vi.mock("@/components/KorraLoader", () => ({ KorraLoader: () => null }));
-import { UseAsMenu } from "./ModelsPage";
+import { AuxiliaryTasksModal, UseAsMenu } from "./ModelsPage";
 
 let root: Root;
 let container: HTMLDivElement;
@@ -31,4 +31,13 @@ it("меню назначения выходит из обрезающей ка�
   expect(menu.textContent).toContain("Куратор");
   await act(async () => document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })));
   expect(document.querySelector('[role="menu"]')).toBeNull();
+});
+
+it("окно служебных задач открывается поверх страницы, а не внутри карточки", async () => {
+  await act(async () => root.render(<AuxiliaryTasksModal aux={null} refreshKey={0} onSaved={vi.fn()} onClose={vi.fn()} />));
+  const dialog = document.querySelector<HTMLElement>('[role="dialog"][aria-labelledby="aux-modal-title"]')!;
+  expect(dialog.parentElement).toBe(document.body);
+  expect(container.contains(dialog)).toBe(false);
+  const auto = Array.from(dialog.querySelectorAll("div")).find((node) => node.textContent === "Автоматически — используется основная модель")!;
+  expect(auto.className).not.toContain("font-mono");
 });
