@@ -686,6 +686,7 @@ export default function App() {
       data-layout-variant={layoutVariant}
       data-client-ui={isProductUiMode() ? "true" : undefined}
       className="flex h-dvh max-h-dvh min-h-0 flex-col overflow-hidden bg-background-base text-text-primary antialiased"
+      style={{ backgroundImage: "var(--theme-asset-bg, none)" }}
     >
       <a
         href="#main-content"

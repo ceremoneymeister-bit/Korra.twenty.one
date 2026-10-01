@@ -171,11 +171,13 @@ html {
      themes/theme-color.ts). Расхождение этих зон и давало полосу прежней
      темы вокруг уже переключённого интерфейса. */
   background: var(--neo-background, var(--background-base, #e8e8e8));
+  background-image: var(--theme-asset-bg, none);
 }
 
 body {
   font-family: var(--theme-font-sans);
   background: var(--neo-background, var(--background-base, #e8e8e8));
+  background-image: var(--theme-asset-bg, none);
   color: var(--neo-text-primary);
   min-height: 0;
   height: 100%;

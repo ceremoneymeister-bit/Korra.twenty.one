@@ -41,9 +41,9 @@ it("«Вид»: тема и две карточки способа перекл�
   root = createRoot(container);
   await act(async () => root.render(<ViewSettingsPage />));
 
-  const radios = [...container.querySelectorAll<HTMLButtonElement>("[role=radiogroup] [role=radio]")];
+  const radios = [...container.querySelectorAll<HTMLButtonElement>(".theme-choices button")];
   expect(radios.map((radio) => radio.textContent?.trim().split("Агенты")[0])).toEqual(
-    expect.arrayContaining(["Светлая", "Тёмная"]),
+    expect.arrayContaining(["Светлая", "Тёмная", "Цвет"]),
   );
   const tabs = container.querySelector<HTMLButtonElement>("[data-agents-mode=tabs]")!;
   const list = container.querySelector<HTMLButtonElement>("[data-agents-mode=list]")!;

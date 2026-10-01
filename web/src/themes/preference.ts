@@ -1,9 +1,11 @@
+import { validColor } from "./color";
 /** Server metadata is authoritative. A cache is only an optimization within
  * this installation, process owner, cabinet path and acknowledged revision. */
 export interface ThemePreference {
   version: 1;
   known: boolean;
-  theme: 'light' | 'dark';
+  theme: 'light' | 'dark' | 'color';
+  color?: string;
   installation_id: string | null;
   owner: string;
   base_path: string;
@@ -18,7 +20,9 @@ export function validPreference(value: unknown): ThemePreference | null {
     typeof p.evening.disabled !== 'boolean' || typeof p.evening.snooze_until !== 'number' ||
     !Number.isFinite(p.evening.snooze_until) || p.evening.snooze_until < 0)) return null;
   return p.version === 1 && p.known === true &&
-    (p.theme === 'light' || p.theme === 'dark') &&
+    (p.theme === 'light' || p.theme === 'dark' || p.theme === 'color') &&
+    (p.color === undefined || validColor(p.color)) &&
+    (p.theme !== 'color' || validColor(p.color)) &&
     (p.installation_id === null || (typeof p.installation_id === 'string' && /^[a-f0-9]{32}$/.test(p.installation_id))) &&
     typeof p.owner === 'string' && p.owner.length > 0 &&
     typeof p.base_path === 'string' && (p.base_path === '' || p.base_path.startsWith('/')) &&
@@ -37,6 +41,6 @@ export function cachePreference(p: ThemePreference): void {
     // A single bounded record per owner. The revision is part of the record's
     // identity; stale, malformed and global legacy records never seed a theme.
     const cached = validPreference(JSON.parse(localStorage.getItem(key) ?? 'null'));
-    if (cached?.revision !== p.revision || cached.theme !== p.theme) localStorage.setItem(key, JSON.stringify(p));
+    if (cached?.revision !== p.revision || cached.theme !== p.theme || cached.color !== p.color) localStorage.setItem(key, JSON.stringify(p));
   } catch { /* Private browsing/quota must not prevent a server-backed render. */ }
 }

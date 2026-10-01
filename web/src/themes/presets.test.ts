@@ -31,8 +31,9 @@ function contrast(first: string, second: string): number {
 }
 
 describe("built-in dashboard themes", () => {
-  it("exposes exactly the light and dark palettes and defaults to light", () => {
-    expect(Object.keys(BUILTIN_THEMES)).toEqual(["light", "dark"]);
+  it("keeps neutral palettes available and defaults to light", () => {
+    expect(BUILTIN_THEMES.light).toBe(lightTheme);
+    expect(BUILTIN_THEMES.dark).toBe(darkTheme);
     expect(defaultTheme).toBe(lightTheme);
     expect(lightTheme.label).toBe("Светлая");
     expect(darkTheme.label).toBe("Тёмная");

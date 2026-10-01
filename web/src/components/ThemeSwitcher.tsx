@@ -1,130 +1,81 @@
 import { createPortal } from "react-dom";
-import { Moon, Sun } from "lucide-react";
-import type { ReactNode } from "react";
+import { Moon, Palette, Sun, X } from "lucide-react";
+import { useState } from "react";
+import { Popover } from "radix-ui";
 
-import { cn } from "@/lib/utils";
 import { useTheme } from "@/themes";
+import { ThemeColorPalette } from "./ThemeColorPalette";
+import "./theme-switcher.css";
 
-/**
- * A direct light/dark control for the bottom of the sidebar.
- *
- * The expanded sidebar shows a compact 32 px pill with two icon-only
- * segments instead of a full-width block; the narrow rail shows the mode
- * pressing it will choose. With a mouse the targets stay small so the control
- * does not crowd the sidebar; on touch screens (`pointer-coarse`) they grow
- * back to finger size.
- */
-export function ThemeSwitcher({ collapsed = false }: ThemeSwitcherProps) {
+const CHOICES = [
+  { name: "light", label: "Светлая", Icon: Sun },
+  { name: "dark", label: "Тёмная", Icon: Moon },
+  { name: "color", label: "Цвет", Icon: Palette },
+];
+
+/** Collapsing the rail keeps an explicit menu, never a hidden three-way cycle. */
+export function ThemeSwitcher({ collapsed = false, labeled = false }: ThemeSwitcherProps) {
   const { themeName, setTheme, saveState, saveError, retryTheme } = useTheme();
-  const isDark = themeName === "dark";
-  const isSaving = saveState === "pending";
-
-  const chooseTheme = (name: "light" | "dark") => {
-    if (name !== themeName) void setTheme(name);
-  };
-
+  const [open, setOpen] = useState(false);
+  const CurrentIcon = CHOICES.find(choice => choice.name === themeName)?.Icon ?? Sun;
+  const choices = (inMenu = false) => (
+    <div className={`theme-choices${labeled || inMenu ? " is-labeled" : ""}`} role="group" aria-label="Цветовая тема" aria-busy={saveState === "pending" || undefined}>
+      {CHOICES.map(({ name, label, Icon }) => {
+        const button = (
+          <button
+            type="button" data-theme-control aria-label={name === "color" ? "Цвет" : `${label} тема`}
+            title={label} aria-pressed={themeName === name}
+            onClick={() => {
+              if (saveState === "error" && name === themeName) void retryTheme();
+              else if (name !== themeName) void setTheme(name);
+              if (name !== "color") setOpen(false);
+            }}
+          >
+            <span><Icon size={15} aria-hidden />{(labeled || inMenu) && label}</span>
+          </button>
+        );
+        return name === "color" && !inMenu
+          ? <Popover.Trigger asChild key={name}>{button}</Popover.Trigger>
+          : <span className="theme-choice-slot" key={name}>{button}</span>;
+      })}
+    </div>
+  );
   return (
-    <div className="w-auto">
-      {collapsed ? (
-        <button
-          aria-busy={isSaving || undefined}
-          aria-label={isDark ? "Включить светлую тему" : "Включить тёмную тему"}
-          data-theme-control
-          className={cn(
-            "grid size-[36px] place-items-center rounded-full pointer-coarse:size-[44px]",
-            "text-[var(--neo-text-secondary)] transition-[box-shadow,color,opacity]",
-            "hover:text-[var(--neo-text-primary)] hover:shadow-[var(--neo-inset-compact)]",
-            "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--neo-accent-line)]",
-            isSaving && "opacity-65",
-          )}
-          onClick={() => chooseTheme(isDark ? "light" : "dark")}
-          type="button"
-        >
-          {isDark ? <Sun aria-hidden className="size-[16px]" /> : <Moon aria-hidden className="size-[16px]" />}
-        </button>
-      ) : (
-        <div
-          aria-busy={isSaving || undefined}
-          aria-label="Цветовая тема"
-          className="grid h-[32px] w-[84px] grid-cols-2 gap-[2px] rounded-full bg-[var(--neo-surface)] p-[3px] shadow-[var(--neo-inset-compact)] pointer-coarse:h-[40px] pointer-coarse:w-[100px]"
-          role="group"
-        >
-          <ThemeChoice
-            active={!isDark}
-            label="Светлая тема"
-            onClick={() => chooseTheme("light")}
-          >
-            <Sun aria-hidden className="size-[15px]" />
-          </ThemeChoice>
-          <ThemeChoice
-            active={isDark}
-            label="Тёмная тема"
-            onClick={() => chooseTheme("dark")}
-          >
-            <Moon aria-hidden className="size-[15px]" />
-          </ThemeChoice>
-        </div>
-      )}
-
-      {saveState === "error" && typeof document !== "undefined" && createPortal(
+    <div className="theme-switcher">
+      <Popover.Root open={open} onOpenChange={setOpen}>
+        {collapsed ? (
+          <Popover.Trigger asChild>
+            <button type="button" data-theme-control className="theme-collapsed" aria-label="Выбрать тему" title="Выбрать тему">
+              <CurrentIcon size={16} aria-hidden />
+            </button>
+          </Popover.Trigger>
+        ) : choices()}
+        <Popover.Portal>
+          <Popover.Content className="theme-palette-popover" side="top" align="start" sideOffset={12} collisionPadding={12} aria-label="Цветовая тема">
+            <div className="theme-palette-heading">
+              <strong>{collapsed ? "Тема" : "Цвет интерфейса"}</strong>
+              <Popover.Close className="theme-palette-close" aria-label="Закрыть палитру"><X size={18} aria-hidden /></Popover.Close>
+            </div>
+            {collapsed && choices(true)}
+            <ThemeColorPalette />
+          </Popover.Content>
+        </Popover.Portal>
+      </Popover.Root>
+      {saveState === "error" && !labeled && typeof document !== "undefined" && createPortal(
         <div
           className="fixed bottom-4 left-4 right-4 z-[120] rounded-[var(--neo-radius-control)] bg-[var(--neo-surface)] p-3 text-sm text-[var(--neo-text-primary)] shadow-[var(--neo-depth-3)] sm:left-auto sm:max-w-sm"
-          data-theme-save-status
-          role="alert"
+          data-theme-save-status role="alert"
         >
           <p>{saveError || "Тема не сохранена. Проверьте соединение и повторите."}</p>
-          <button
-            // 44 px в абсолютной единице: шкала Tailwind у нас умножена на
-            // плотность темы (`--spacing: var(--korra-space)` в index.css), и
-            // `min-h-11` давал бы ~35 px — палец мимо единственной кнопки,
-            // которой можно вернуть несохранённую тему.
-            className="mt-2 min-h-[44px] rounded-lg px-3 font-medium text-[var(--neo-text-primary)] underline underline-offset-4 hover:shadow-[var(--neo-inset-compact)]"
-            onClick={() => void retryTheme()}
-            type="button"
-          >
+          <button className="mt-2 min-h-[44px] rounded-lg px-3 font-medium text-[var(--neo-text-primary)] underline underline-offset-4 hover:shadow-[var(--neo-inset-compact)]" onClick={() => void retryTheme()} type="button">
             Повторить сохранение
           </button>
-        </div>,
-        document.body,
+        </div>, document.body,
       )}
     </div>
   );
 }
-
-function ThemeChoice({ active, children, label, onClick }: ThemeChoiceProps) {
-  return (
-    <button
-      aria-label={label}
-      aria-pressed={active}
-      data-theme-control
-      className={cn(
-        "relative grid h-full place-items-center rounded-full",
-        "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--neo-accent-line)]",
-        active
-          ? "text-[var(--neo-text-primary)]"
-          : "text-[var(--neo-text-secondary)] hover:text-[var(--neo-text-primary)]",
-      )}
-      onClick={onClick}
-      type="button"
-    >
-      <span className={cn(
-        "absolute inset-x-0 top-0 grid h-[26px] place-items-center rounded-full pointer-coarse:h-[34px]",
-        "transition-[box-shadow,color,background-color]",
-        active && "bg-[var(--neo-surface)] shadow-[var(--neo-depth-1)]",
-      )}>
-        {children}
-      </span>
-    </button>
-  );
-}
-
-interface ThemeChoiceProps {
-  active: boolean;
-  children: ReactNode;
-  label: string;
-  onClick: () => void;
-}
-
 interface ThemeSwitcherProps {
   collapsed?: boolean;
+  labeled?: boolean;
 }
