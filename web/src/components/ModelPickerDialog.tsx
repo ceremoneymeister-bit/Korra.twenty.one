@@ -41,6 +41,7 @@ interface ModelOptionProvider {
   models?: string[];
   total_models?: number;
   is_current?: boolean;
+  authenticated?: boolean;
   warning?: string;
 }
 
@@ -581,7 +582,13 @@ function ProviderColumn({
                 {p.is_current && <CurrentTag />}
               </span>
               <span className="mt-0.5 block truncate text-xs text-text-tertiary">
-                {modelCount > 0 ? tr("{count} models", { count: modelCount }) : "нужно подключить"}
+                {p.authenticated === false
+                  ? p.slug === "anthropic" || p.slug === "claude-code"
+                    ? "Нужны подписка Claude Max и вход в аккаунт"
+                    : p.slug === "openai-codex"
+                      ? "Нужны подписка ChatGPT / Codex и вход в аккаунт"
+                      : "Нужно подключить аккаунт"
+                  : modelCount > 0 ? tr("{count} models", { count: modelCount }) : "нужно подключить"}
               </span>
             </span>
           </button>
@@ -637,6 +644,13 @@ function ModelColumn({
         <span className="shrink-0 text-xs text-text-tertiary">{models.length} из {allModels.length}</span>
       </div>
 
+      {provider.authenticated === false && (
+        <p className="mx-3 mb-2 text-sm leading-relaxed text-text-secondary">
+          {provider.slug === "anthropic" || provider.slug === "claude-code"
+            ? "Для работы нужна подписка Claude Max. Бесплатного аккаунта недостаточно. Подключите её в разделе «Подключения» и войдите в аккаунт."
+            : "Подключите подписку и войдите в аккаунт в разделе «Подключения». Сохранённый выбор модели останется здесь."}
+        </p>
+      )}
       {provider.warning && (
         <div className="mx-3 mb-2 rounded-xl bg-warning/10 p-3 text-sm leading-relaxed text-text-secondary">
           {russianInterfaceText(

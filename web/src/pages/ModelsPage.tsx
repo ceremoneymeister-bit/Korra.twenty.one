@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { KorraLoader } from "@/components/KorraLoader";
 import { createPortal } from "react-dom";
 import {
@@ -210,7 +210,7 @@ function CapabilityBadges({
 /*  Per-card "Use as" menu                                              */
 /* ──────────────────────────────────────────────────────────────────── */
 
-function UseAsMenu({
+export function UseAsMenu({
   provider,
   model,
   isMain,
@@ -226,6 +226,32 @@ function UseAsMenu({
   onAssigned(): void;
 }) {
   const [open, setOpen] = useState(false);
+  const anchor = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState<React.CSSProperties>({});
+  useLayoutEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const rect = anchor.current?.getBoundingClientRect();
+      if (!rect) return;
+      const below = window.innerHeight - rect.bottom - 16;
+      const above = rect.top - 16;
+      const upwards = below < 240 && above > below;
+      setPosition({
+        position: "fixed",
+        left: Math.max(8, Math.min(rect.right - 290, window.innerWidth - 298)),
+        width: Math.min(290, window.innerWidth - 16),
+        maxHeight: Math.max(120, upwards ? above : below),
+        ...(upwards ? { bottom: window.innerHeight - rect.top + 6 } : { top: rect.bottom + 6 }),
+      });
+    };
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [open]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingConfirm, setPendingConfirm] = useState<{
@@ -285,7 +311,7 @@ function UseAsMenu({
   }, [open]);
 
   return (
-    <div className={cn("relative", open && "z-20")} data-use-as-menu>
+    <div ref={anchor} className={cn("relative", open && "z-20")} data-use-as-menu>
       <Button
         size="sm"
         outlined
@@ -296,8 +322,8 @@ function UseAsMenu({
       >
         Назначить <ChevronDown className="h-3 w-3" />
       </Button>
-      {open && (
-        <div className="neo-select-menu absolute right-0 top-full z-50 mt-2 min-w-[270px] overflow-hidden p-1.5 font-sans">
+      {open && createPortal(
+        <div data-use-as-menu role="menu" aria-label="Назначить модель" style={position} className="neo-select-menu z-50 overflow-y-auto p-1.5 font-sans">
           <button
             type="button"
             onClick={() => assign("main", "")}
@@ -350,7 +376,7 @@ function UseAsMenu({
               {error}
             </div>
           )}
-        </div>
+        </div>, document.body,
       )}
       <ConfirmDialog
         open={!!pendingConfirm}
@@ -514,7 +540,7 @@ function ModelCard({
             )}
           </div>
           {entry.last_used_at > 0 && (
-            <span>{timeAgo(entry.last_used_at, tr)}</span>
+            <span>Использовалась {timeAgo(entry.last_used_at, tr)}</span>
           )}
         </div>
 
@@ -1017,7 +1043,7 @@ function ModelSettingsPanel({
                 </p>
                 <p className="mt-3 text-sm text-foreground">
                   {auxOverrideCount > 0
-                    ? `Назначено вручную: ${auxOverrideCount}`
+                    ? `Модель выбрана отдельно для ${auxOverrideCount} служебных задач`
                     : "Автоматический выбор"}
                 </p>
               </div>
