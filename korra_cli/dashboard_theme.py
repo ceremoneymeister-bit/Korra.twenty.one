@@ -1,6 +1,5 @@
 """The dashboard's palettes, shared with its pre-paint bootstrap."""
 from __future__ import annotations
-import colorsys
 import copy
 import math
 import hashlib
@@ -19,7 +18,7 @@ def normalize_color(value: Any) -> str:
 
 
 def color_theme(value: str) -> dict:
-    """Same bounded HSL palette as web/src/themes/color.ts, for first paint."""
+    """Same surface-derived palette as web/src/themes/color.ts, for first paint."""
     def rgb(color):
         return [int(color[i:i + 2], 16) / 255 for i in (1, 3, 5)]
 
@@ -37,37 +36,53 @@ def color_theme(value: str) -> dict:
         x, y = luminance(a), luminance(b)
         return (max(x, y) + .05) / (min(x, y) + .05)
 
-    h, raw_l, saturation = colorsys.rgb_to_hls(*rgb(normalize_color(value)))
-    lightness = max(.35, min(.6, raw_l))
-    accent = hex_color(colorsys.hls_to_rgb(h, lightness, saturation))
-    def gradient_end(lightness):
-        return mix(hex_color(colorsys.hls_to_rgb((h + .05) % 1, lightness, saturation)), "#ffffff", .89)
+    color = normalize_color(value)
+    dark = luminance(color) < .35
+    ink = "#ffffff" if dark else "#000000"
+    surface = color
+    low, high = (.012, .095) if dark else (.5, .85)
+    while luminance(surface) < low:
+        surface = mix(surface, "#ffffff", .02)
+    while luminance(surface) > high:
+        surface = mix(surface, "#000000", .02)
+    background = mix(surface, "#000000" if dark else "#ffffff", .045)
+    end = mix(surface, "#000000" if dark else "#ffffff", .015)
+    surfaces = [surface, background, end]
 
-    while min(contrast(accent, mix(accent, "#ffffff", .88)), contrast(accent, gradient_end(lightness))) < 3:
-        lightness -= .005
-        accent = hex_color(colorsys.hls_to_rgb(h, lightness, saturation))
-    end = gradient_end(lightness)
-    line_l = lightness
-    accent_line = accent
-    while min(contrast(accent_line, mix(accent, "#ffffff", .88)), contrast(accent_line, end)) < 4.5:
-        line_l -= .005
-        accent_line = hex_color(colorsys.hls_to_rgb(h, line_l, saturation))
-    background = mix(accent, "#ffffff", .94)
-    surface = mix(accent, "#ffffff", .88)
-    shadow = mix(surface, accent, .22)
+    def readable(start):
+        for step in range(101):
+            candidate = mix(start, ink, step / 100)
+            if all(contrast(candidate, bg) >= 4.5 for bg in surfaces):
+                return candidate
+        return ink
+
+    accent = readable(mix(surface, ink, .55))
+    surfaces.append(mix(surface, accent, .22))
+    primary = readable(mix(surface, ink, .94))
+    secondary = readable(mix(surface, ink, .68))
+    destructive = readable("#ff6b74" if dark else "#b42318")
     foreground = "#000000" if contrast(accent, "#000000") >= contrast(accent, "#ffffff") else "#ffffff"
-    theme = copy.deepcopy(THEMES["light"])
+    shadow = mix(surface, "#000000", .3 if dark else .16)
+    highlight = mix(surface, "#ffffff", .065 if dark else .6)
+    theme = copy.deepcopy(THEMES["dark" if dark else "light"])
     theme.update(name="color", label="Цвет", description="Любой цвет с мягким градиентом")
-    theme["palette"]["background"]["hex"] = background
+    theme["palette"].update(background={"hex": background, "alpha": 1},
+        midground={"hex": primary, "alpha": 1}, foreground={"hex": highlight, "alpha": 0})
     theme["neumorphism"].update(background=background, surface=surface, shadow=shadow,
-        highlight=mix(surface, "#ffffff", .8), textSecondary="#505050", accent=accent,
-        accentLine=accent_line, accentForeground=foreground)
-    theme["colorOverrides"].update(card=surface, popover=surface, secondary=surface, muted=surface,
+        highlight=highlight, textPrimary=primary, textSecondary=secondary, accent=accent,
+        accentLine=readable(accent), accentForeground=foreground)
+    theme["colorOverrides"].update(card=surface, cardForeground=primary,
+        popover=surface, popoverForeground=primary, secondary=surface, secondaryForeground=primary, muted=surface,
         primary=accent, accent=accent, primaryForeground=foreground, accentForeground=foreground,
-        mutedForeground="#505050", border=shadow, input=shadow, ring=accent)
+        mutedForeground=secondary, border=shadow, input=shadow, ring=readable(accent),
+        destructive=destructive,
+        destructiveForeground="#000000" if contrast(destructive, "#000000") >= contrast(destructive, "#ffffff") else "#ffffff",
+        success=readable("#9ede01" if dark else "#047857"), warning=readable("#f6c453" if dark else "#8a5200"))
     theme["assets"] = {"bg": f"linear-gradient(135deg, {background}, {end})"}
     theme["terminalBackground"] = surface
-    theme["seriesColors"] = {"inputTokenAccent": accent, "outputTokenAccent": "#505050"}
+    theme["terminalForeground"] = primary
+    theme["swatchColors"] = [background, primary, accent]
+    theme["seriesColors"] = {"inputTokenAccent": accent, "outputTokenAccent": secondary}
     return theme
 
 
@@ -130,11 +145,14 @@ def bootstrap_css(value: dict) -> str:
     })
     if theme_name == "color":
         variables["--theme-asset-bg"] = theme["assets"]["bg"]
+    background_rgb = [int(theme["palette"]["background"]["hex"][i:i + 2], 16) / 255 for i in (1, 3, 5)]
+    lightness = sum((c / 12.92 if c <= .04045 else ((c + .055) / 1.055) ** 2.4) * w
+                    for c, w in zip(background_rgb, (.2126, .7152, .0722)))
     # Shipped tokens or derived from a strictly validated hex color.
     css = "".join(f"{key}:{val};" for key, val in variables.items())
     return (
         '<style id="hermes-theme-bootstrap">:root{' + css
-        + f'color-scheme:{"dark" if theme_name == "dark" else "light"};'
+        + f'color-scheme:{"dark" if lightness < .35 else "light"};'
         + "}html,body{background-color:var(--background-base);color:var(--midground-base);"
         + "font-family:var(--theme-font-sans);font-size:var(--theme-base-size);"
         + "background-image:var(--theme-asset-bg,none);}</style>"

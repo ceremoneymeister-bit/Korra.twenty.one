@@ -1,3 +1,4 @@
+import { themeColorScheme } from "@/themes/color";
 import {
   lazy,
   Suspense,
@@ -726,7 +727,7 @@ export default function App() {
           onClick={() => setMobileOpen(true)}
         />
 
-        <KorraBrand themeName={theme.name} className="h-[21px]" />
+        <KorraBrand themeName={themeColorScheme(theme)} className="h-[21px]" />
       </header>
 
       {mobileOpen && (
@@ -785,7 +786,7 @@ export default function App() {
               >
                 <PluginSlot name="header-left" />
 
-                <KorraBrand themeName={theme.name} />
+                <KorraBrand themeName={themeColorScheme(theme)} />
               </div>
 
               <SidebarToggle

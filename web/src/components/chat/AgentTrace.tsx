@@ -1,3 +1,4 @@
+import { themeColorScheme } from "@/themes/color";
 /**
  * Ход работы агента — сворачиваемый след над текстом ответа.
  *
@@ -132,7 +133,7 @@ export function AgentTrace({
   answering = false,
   startedAt,
 }: AgentTraceProps) {
-  const { themeName } = useTheme();
+  const { theme } = useTheme();
   const writing = active && answering && !tools.some(tool => tool.status === "running");
   const working = active && !writing;
   // Ручной выбор действует до смены этапа: работа → текст → завершение.
@@ -182,7 +183,7 @@ export function AgentTrace({
             state="working"
             size={20}
             speed={1.3}
-            theme={themeName === "dark" ? "dark" : "light"}
+            theme={themeColorScheme(theme)}
             aria-hidden
           />
         ) : (

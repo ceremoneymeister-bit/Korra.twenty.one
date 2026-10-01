@@ -1,3 +1,4 @@
+import { themeColorScheme } from "@/themes/color";
 import { ThinkingOrb } from "thinking-orbs";
 
 import { useTheme } from "@/themes";
@@ -50,7 +51,7 @@ export function KorraLoader({
   size = 64,
   className,
 }: KorraLoaderProps) {
-  const { themeName } = useTheme();
+  const { theme } = useTheme();
   return (
     <div
       className={cn("flex flex-col items-center justify-center gap-4", className)}
@@ -63,7 +64,7 @@ export function KorraLoader({
         state="working"
         size={size}
         speed={1.4}
-        theme={themeName === "dark" ? "dark" : "light"}
+        theme={themeColorScheme(theme)}
         aria-label={label}
         style={size === 64 ? { transform: "scale(1.75)", margin: "1.5rem" } : undefined}
       />

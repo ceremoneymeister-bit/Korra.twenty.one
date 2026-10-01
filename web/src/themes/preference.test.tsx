@@ -54,3 +54,18 @@ it('saves color alongside the theme, uses durable revisions and rejects an incom
   expect(current.saveState).toBe('error');
   expect(current.color).toBe('#5275d9');
 });
+
+it.each([['#182c54', 'dark'], ['#f4e7b2', 'light']])('applies %s native controls and foregrounds before GET', async (color, scheme) => {
+  window.__KORRA_THEME_PREF__ = {...pref('color'), color};
+  await mount();
+  const style = document.documentElement.style;
+  expect(style.colorScheme).toBe(scheme);
+  expect(style.getPropertyValue('--midground-base')).toBe(current.theme.neumorphism?.textPrimary);
+  expect(style.getPropertyValue('--card-foreground')).toBe(current.theme.neumorphism?.textPrimary);
+  await act(async () => { await current.setTheme('dark'); });
+  expect(style.colorScheme).toBe('dark');
+  expect(style.getPropertyValue('--theme-asset-bg')).toBe('none');
+  await act(async () => { await current.setTheme('light'); });
+  expect(style.colorScheme).toBe('light');
+  expect(style.getPropertyValue('--midground-base')).toBe('#1f1f1f');
+});

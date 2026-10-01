@@ -1,3 +1,4 @@
+import { THEME_COLORS } from "@/themes/color";
 // @vitest-environment jsdom
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -50,7 +51,7 @@ it("offers three explicit choices and opens a palette without losing the selecte
   expect(document.querySelector('[role="dialog"]')).not.toBeNull();
   expect(document.querySelector('input[aria-label="Любой цвет"]')).not.toBeNull();
   await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Розовый"]')!.click());
-  expect(state.setTheme).toHaveBeenCalledWith("color", "#d95791");
+  expect(state.setTheme).toHaveBeenCalledWith("color", THEME_COLORS.find(([label]) => label === "Розовый")![1]);
 });
 
 it.each(["light", "dark", "color"])("collapsed %s opens all three choices without silently cycling", async name => {

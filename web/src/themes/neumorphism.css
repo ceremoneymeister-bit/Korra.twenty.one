@@ -76,6 +76,25 @@
   --k-scrim: rgba(0, 0, 0, 0.55);
 }
 
+/* Agent state surfaces follow the same palette as the rest of a color theme. */
+:root[data-korra-theme="color"] {
+  --theme-artwork-surface: var(--neo-surface);
+  --theme-artwork-foreground: var(--neo-text-primary);
+  --theme-artwork-accent: var(--neo-accent);
+  --theme-artwork-detail: var(--neo-text-secondary);
+  --theme-on-accent: var(--neo-accent-foreground);
+  --theme-chart-bars: linear-gradient(90deg, var(--neo-text-secondary), var(--neo-accent));
+  --k-live: var(--success);
+  --k-live-text: var(--success);
+  --k-unread: var(--neo-accent-line);
+  --k-decision: var(--neo-accent);
+  --k-decision-fg: var(--neo-accent-foreground);
+  --k-error: var(--destructive);
+  --k-error-fg: var(--destructive-foreground);
+  --k-active: color-mix(in srgb, var(--neo-accent) 22%, var(--neo-surface));
+  --k-scrim: color-mix(in srgb, var(--neo-shadow) 68%, transparent);
+}
+
   .neo-button {
     border: 0;
     border-radius: var(--neo-radius-control);

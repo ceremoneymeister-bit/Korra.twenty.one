@@ -18,22 +18,27 @@ export function migrateThemeName(name: unknown): BuiltinThemeName {
   return value === "color" ? "color" : value === "dark" || data.legacy_dark.includes(value) ? "dark" : "light";
 }
 
-/** A light preset with a derived palette; no separate theme storage or schema. */
+/** Derive every surface from the chosen color, using the existing preset shape. */
 export function colorTheme(color: string): DashboardTheme {
-  const { gradient, ...neo } = colorTokens(color);
+  const { dark, gradient, destructive, destructiveForeground, success, warning, ...neo } = colorTokens(color);
+  const base = dark ? darkTheme : lightTheme;
   return {
-    ...lightTheme, name: "color", label: "Цвет", description: "Любой цвет с мягким градиентом",
-    palette: { ...lightTheme.palette, background: { hex: neo.background, alpha: 1 } },
+    ...base, name: "color", label: "Цвет", description: "Любой цвет с мягким градиентом",
+    palette: { ...base.palette, background: { hex: neo.background, alpha: 1 },
+      midground: { hex: neo.textPrimary, alpha: 1 }, foreground: { hex: neo.highlight, alpha: 0 } },
     neumorphism: neo,
     assets: { bg: gradient },
-    terminalBackground: neo.surface,
+    terminalBackground: neo.surface, terminalForeground: neo.textPrimary,
+    swatchColors: [neo.background, neo.textPrimary, neo.accent],
     seriesColors: { inputTokenAccent: neo.accent, outputTokenAccent: neo.textSecondary },
     colorOverrides: {
-      ...lightTheme.colorOverrides,
+      ...base.colorOverrides,
+      cardForeground: neo.textPrimary, popoverForeground: neo.textPrimary, secondaryForeground: neo.textPrimary,
+      destructive, destructiveForeground, success, warning,
       card: neo.surface, popover: neo.surface, secondary: neo.surface, muted: neo.surface,
       primary: neo.accent, accent: neo.accent,
       primaryForeground: neo.accentForeground, accentForeground: neo.accentForeground,
-      mutedForeground: neo.textSecondary, border: neo.shadow, input: neo.shadow, ring: neo.accent,
+      mutedForeground: neo.textSecondary, border: neo.shadow, input: neo.shadow, ring: neo.accentLine,
     },
   };
 }

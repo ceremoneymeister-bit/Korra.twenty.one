@@ -1,5 +1,14 @@
+import type { DashboardTheme } from "./types";
+
 /** Color math shared in behavior with korra_cli.dashboard_theme (pre-paint). */
 export const DEFAULT_COLOR = "#5275d9";
+export const THEME_COLORS = [
+  ["Тёмно-синий", "#182c54"], ["Синий", "#2456b8"],
+  ["Тёмно-зелёный", "#164c3b"], ["Бордовый", "#65243e"],
+  ["Фиолетовый", "#49336b"], ["Розовый", "#b83e73"],
+  ["Бледно-жёлтый", "#f4e7b2"], ["Мятный", "#c6e4d5"],
+  ["Лавандовый", "#ded5f0"], ["Персиковый", "#f2d3bd"],
+];
 export function validColor(value: unknown): value is string {
   return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value);
 }
@@ -18,46 +27,47 @@ export function contrast(a: string, b: string): number {
   const x = luminance(a), y = luminance(b);
   return (Math.max(x, y) + .05) / (Math.min(x, y) + .05);
 }
-function hsl(color: string): [number, number, number] {
-  const [r, g, b] = rgb(color);
-  const max = Math.max(r, g, b), min = Math.min(r, g, b), delta = max - min;
-  const l = (max + min) / 2;
-  if (!delta) return [0, 0, l];
-  const h = max === r ? (g - b) / delta + (g < b ? 6 : 0) : max === g ? (b - r) / delta + 2 : (r - g) / delta + 4;
-  return [h / 6, delta / (1 - Math.abs(2 * l - 1)), l];
+export function themeColorScheme(theme: DashboardTheme): "dark" | "light" {
+  return luminance(theme.palette.background.hex) < .35 ? "dark" : "light";
 }
-function fromHsl(h: number, s: number, l: number): string {
-  return hex([0, 8, 4].map(n => {
-    const k = (n + h * 12) % 12;
-    return l - s * Math.min(l, 1 - l) * Math.max(-1, Math.min(k - 3, 9 - k, 1));
-  }));
-}
+
 export function colorTokens(value: string) {
-  const [h, s, rawL] = hsl(validColor(value) ? value : DEFAULT_COLOR);
-  let l = Math.max(.35, Math.min(.6, rawL));
-  let accent = fromHsl(h, s, l);
-  const gradientEnd = (lightness: number) => mix(fromHsl((h + .05) % 1, s, lightness), "#ffffff", .89);
-  // Both the surface and the shifted hue at the far end of the gradient.
-  while (Math.min(contrast(accent, mix(accent, "#ffffff", .88)), contrast(accent, gradientEnd(l))) < 3) {
-    l -= .005;
-    accent = fromHsl(h, s, l);
-  }
-  const end = gradientEnd(l);
-  let lineL = l;
-  let accentLine = accent;
-  while (Math.min(contrast(accentLine, mix(accent, "#ffffff", .88)), contrast(accentLine, end)) < 4.5) {
-    lineL -= .005;
-    accentLine = fromHsl(h, s, lineL);
-  }
-  const background = mix(accent, "#ffffff", .94);
-  const surface = mix(accent, "#ffffff", .88);
+  const color = validColor(value) ? value.toLowerCase() : DEFAULT_COLOR;
+  const dark = luminance(color) < .35;
+  const ink = dark ? "#ffffff" : "#000000";
+  // Retain the chosen color. Only move luminance enough to leave room for
+  // readable secondary text, raised surfaces and both neumorphic shadows.
+  let surface = color;
+  const low = dark ? .012 : .5, high = dark ? .095 : .85;
+  while (luminance(surface) < low) surface = mix(surface, "#ffffff", .02);
+  while (luminance(surface) > high) surface = mix(surface, "#000000", .02);
+  const background = mix(surface, dark ? "#000000" : "#ffffff", .045);
+  const end = mix(surface, dark ? "#000000" : "#ffffff", .015);
+  const surfaces = [surface, background, end];
+  const readable = (start: string) => {
+    for (let step = 0; step <= 100; step++) {
+      const candidate = mix(start, ink, step / 100);
+      if (surfaces.every(bg => contrast(candidate, bg) >= 4.5)) return candidate;
+    }
+    return ink;
+  };
+  const accent = readable(mix(surface, ink, .55));
+  // Cards and agent tabs also use subtle accent washes on hover/selection.
+  surfaces.push(mix(surface, accent, .22));
+  const textPrimary = readable(mix(surface, ink, .94));
+  const textSecondary = readable(mix(surface, ink, .68));
+  const destructive = readable(dark ? "#ff6b74" : "#b42318");
   return {
-    background, surface, accent,
-    shadow: mix(surface, accent, .22),
-    highlight: mix(surface, "#ffffff", .8),
-    textPrimary: "#1f1f1f", textSecondary: "#505050",
-    accentLine,
+    dark, background, surface, accent,
+    shadow: mix(surface, "#000000", dark ? .3 : .16),
+    highlight: mix(surface, "#ffffff", dark ? .065 : .6),
+    textPrimary, textSecondary,
+    accentLine: readable(accent),
     accentForeground: contrast(accent, "#000000") >= contrast(accent, "#ffffff") ? "#000000" : "#ffffff",
+    destructive,
+    destructiveForeground: contrast(destructive, "#000000") >= contrast(destructive, "#ffffff") ? "#000000" : "#ffffff",
+    success: readable(dark ? "#9ede01" : "#047857"),
+    warning: readable(dark ? "#f6c453" : "#8a5200"),
     gradient: `linear-gradient(135deg, ${background}, ${end})`,
   };
 }

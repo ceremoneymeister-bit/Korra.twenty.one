@@ -1,3 +1,4 @@
+import { themeColorScheme } from "@/themes/color";
 import { useLayoutEffect, useRef, type ReactNode } from 'react';
 import { ArrowLeft, ArrowRight, BookOpen, Check, ChevronRight, Clock3, Search } from 'lucide-react';
 import { Link, useHref, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
@@ -18,10 +19,10 @@ function HelpLinks({ links }: { links: HelpLink[] }) {
 }
 
 function HelpFigure({ illustration }: { illustration: HelpImage }) {
-  const { themeName } = useTheme();
+  const { theme } = useTheme();
   const viewer = useRef<HTMLDialogElement>(null);
   // Роутер добавляет префикс кабинета и к статическим иллюстрациям.
-  const src = useHref(`/help/${illustration.name}-${themeName === 'dark' ? 'dark' : 'light'}.webp`);
+  const src = useHref(`/help/${illustration.name}-${themeColorScheme(theme)}.webp`);
   return <details className="help-illustration">
     <summary>Посмотреть в интерфейсе<ChevronRight size={16} aria-hidden /></summary>
     <figure>

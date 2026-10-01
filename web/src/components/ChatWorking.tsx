@@ -1,3 +1,4 @@
+import { themeColorScheme } from "@/themes/color";
 /**
  * «Агент работает» — вместо пустого пузыря ответа.
  *
@@ -29,7 +30,7 @@ export function ChatWorking({
   startedAt: number;
   state?: BusyKind;
 }) {
-  const { themeName } = useTheme();
+  const { theme } = useTheme();
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 1000);
@@ -47,7 +48,7 @@ export function ChatWorking({
         state={busy.orb}
         size={20}
         speed={1.3}
-        theme={themeName === "dark" ? "dark" : "light"}
+        theme={themeColorScheme(theme)}
         aria-label={busy.label}
         style={{ transform: "scale(1.4)", margin: "0.25rem" }}
       />

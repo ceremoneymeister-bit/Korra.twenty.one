@@ -1,3 +1,4 @@
+import { themeColorScheme } from "@/themes/color";
 import { AgentSpeech } from "@/components/chat/AgentSpeech";
 import { useAgentVoice } from "@/hooks/useAgentVoice";
 import type { AgentVoiceSettings } from "@/lib/agent-voice";
@@ -771,7 +772,7 @@ export function BubbleChatComposer({
   const attachmentsRef = useRef<PendingAttachment[]>([]);
   const textareaId = useId();
   const shortcutId = useId();
-  const { themeName } = useTheme();
+  const { theme } = useTheme();
 
   const pickWorkspaceFile = useCallback((uploaded: UploadedAttachment) => {
     setAttachments(list => {
@@ -1310,7 +1311,7 @@ export function BubbleChatComposer({
                       state="working"
                       size={20}
                       speed={1.3}
-                      theme={themeName === "dark" ? "dark" : "light"}
+                      theme={themeColorScheme(theme)}
                       aria-label={DICTATION_LABEL[dictation.state]}
                     />
                     {transcribing && (

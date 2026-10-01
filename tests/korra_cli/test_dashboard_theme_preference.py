@@ -97,7 +97,7 @@ def test_color_round_trip_real_config_and_prepaint(tmp_path, monkeypatch, color)
         assert f'--neo-surface:{tokens["surface"]};' in head
         assert f'--neo-accent:{tokens["accent"]};' in head
         assert "linear-gradient(" in head and '"color":"' + color.lower() + '"' in head
-        assert "color-scheme:light;" in head
+        assert f"color-scheme:{'light' if color == '#ffffee' else 'dark'};" in head
         assert client.put("/api/dashboard/theme", json={"name": "color", "color": "#aabbcc", "revision": before["revision"]}).status_code == 409
         # An old client can still choose a neutral theme; retain its last color.
         assert client.put("/api/dashboard/theme", json={"name": "light"}).status_code == 200

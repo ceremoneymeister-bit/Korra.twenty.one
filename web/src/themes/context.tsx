@@ -28,7 +28,7 @@ import {
 } from "./semantic-colors";
 import { NEUMORPHISM_CSS_VARS, neumorphismVars } from "./neumorphism";
 import { applyThemeColorMeta, resolveThemeColor } from "./theme-color";
-import { DEFAULT_COLOR, validColor } from "./color";
+import { DEFAULT_COLOR, validColor, themeColorScheme } from "./color";
 import { api } from "@/lib/api";
 import { cachePreference, readBootstrap, validPreference, type ThemePreference } from "./preference";
 
@@ -267,7 +267,7 @@ function applyTheme(theme: DashboardTheme) {
     document.head.append(suppression);
   }
   root.dataset.density = theme.layout.density;
-  root.style.colorScheme = theme.name === "dark" ? "dark" : "light";
+  root.style.colorScheme = themeColorScheme(theme);
   // Токены состояний агента (`--k-*`) переключаются по атрибуту: их нет в
   // палитре темы, и переписывать их инлайном незачем.
   root.dataset.korraTheme = theme.name;
