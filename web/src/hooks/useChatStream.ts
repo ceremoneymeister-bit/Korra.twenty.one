@@ -1930,12 +1930,10 @@ export function useChatStream(
   // Канбан может задать вопрос после завершения модельного хода. Опрос
   // обнаруживает его в исходном чате и восстанавливает после F5; обычные
   // вопросы команд во время живого хода остаются под управлением SSE.
-  const hasWaitingApproval = state.approvals.some(
-    (entry) => entry.status === "pending",
-  );
+  // Только видимая вкладка: скрытые чаты не опрашивают сервер (ревью 0.21.16, R3).
   const { sessionId: currentSessionId, isStreaming } = state;
   useEffect(() => {
-    if (!currentSessionId) return;
+    if (!active || !currentSessionId) return;
     let cancelled = false;
     const load = async () => {
       try {
@@ -1956,7 +1954,7 @@ export function useChatStream(
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [currentSessionId, isStreaming, hasWaitingApproval, profile]);
+  }, [active, currentSessionId, isStreaming, profile]);
 
   return {
     isLoading,

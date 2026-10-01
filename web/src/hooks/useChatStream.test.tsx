@@ -1620,3 +1620,21 @@ it("K21-234: rereading the open conversation stays editable, switching still wai
   await act(async () => { release({ session_id: "other", messages: [] }); await reading; });
   expect(current.isLoading).toBe(false);
 });
+
+it("a hidden chat tab does not poll approvals (0.21.16 review R3)", async () => {
+  vi.spyOn(api, "getSessionMessages").mockResolvedValue({ messages: [], session_id: "hidden-chat" } as never);
+  const fetcher = vi.fn(async (..._args: unknown[]) => new Response(JSON.stringify({ data: [] }), { status: 200 }));
+  vi.stubGlobal("fetch", fetcher);
+  vi.useFakeTimers();
+  try {
+    await act(async () => { await current.loadSession("hidden-chat"); });
+    await act(async () => root.render(<Probe active={false} onValue={value => { current = value; }} />));
+    fetcher.mockClear();
+    await act(async () => { await vi.advanceTimersByTimeAsync(15000); });
+    const polls = fetcher.mock.calls.filter(call => String(call[0]).includes("/api/chat/approvals")).length;
+    expect(polls).toBe(0);
+  } finally {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  }
+});
