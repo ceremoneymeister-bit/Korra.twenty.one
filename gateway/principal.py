@@ -50,7 +50,7 @@ CONTENT_SURFACES = frozenset({"webhook", "msgraph_webhook", "homeassistant", "em
 @dataclass(frozen=True)
 class Principal:
     kind: str
-    """``owner`` | ``outsider`` | ``group`` | ``content`` | ``cron`` |
+    """``owner`` | ``outsider`` | ``group`` | ``content`` | ``cron`` | ``delivery`` |
     ``kanban_worker`` | ``unknown``."""
     owner: bool
     """Acts for the verified owner (live or delegated)."""
@@ -104,6 +104,12 @@ def current_principal() -> Principal:
         return Principal("unknown", owner=False, live=False)
     if platform in CONTENT_SURFACES:
         return Principal("content", owner=False, live=False)
+    if _one_shot_run():
+        # Delivery has no person speaking, even if its subprocess inherited
+        # the sender's live DM markers. Only an explicitly delegated owner
+        # launch may read owner services; it never gets live write rights.
+        return Principal("delivery", owner=(platform in OWNER_SURFACES
+                         and _session("KORRA_SESSION_OWNER") == "delegated"), live=False)
     if platform in OWNER_SURFACES:
         return OWNER_LIVE
 
@@ -150,7 +156,11 @@ def origin_owner_verdict() -> bool:
     but nobody is typing: bot-chat delivery and agent-to-agent messages feed
     it text written elsewhere, so the jobs it creates are not the owner's.
     """
+    # A delegated report may read services, but does not authorize another
+    # automation's recipients merely by delivering text into Bot Chat.
     current = current_principal()
+    if current.kind == "delivery":
+        return False
     if not current.owner:
         return False
     if current.kind == "owner" and current.live and (_one_shot_run() or _room_turn()):
