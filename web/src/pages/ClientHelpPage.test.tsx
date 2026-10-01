@@ -6,9 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PageHeaderContext } from '@/contexts/page-header-context';
 import { HELP_ARTICLES } from './help/articles';
 import ClientHelpPage from './ClientHelpPage';
+import { BUILTIN_THEMES, colorTheme } from '@/themes/presets';
 
 const appearance = vi.hoisted(() => ({ themeName: 'light' }));
-vi.mock('@/themes', () => ({ useTheme: () => appearance }));
+vi.mock('@/themes', () => ({ useTheme: () => ({ theme: appearance.themeName === 'color' ? colorTheme('#182c54') : BUILTIN_THEMES[appearance.themeName as 'light' | 'dark'] }) }));
 let root: Root;
 let container: HTMLDivElement;
 const header = { setTitle: vi.fn(), setAfterTitle: vi.fn(), setEnd: vi.fn() };
@@ -83,8 +84,8 @@ describe('Страницы помощи в кабинете', () => {
     expect(container.querySelectorAll('.help-catalog-item').length).toBe(HELP_ARTICLES.length);
   });
 
-  it('тёмная тема получает свои изображения с тем же префиксом', async () => {
-    appearance.themeName = 'dark';
+  it.each(['dark', 'color'])('%s тема получает тёмные изображения с тем же префиксом', async name => {
+    appearance.themeName = name;
     await render('/help/agents');
     for (const image of container.querySelectorAll('img')) expect(image.getAttribute('src')).toMatch(/^\/c\/uchebny\/help\/.+-dark\.webp$/);
   });

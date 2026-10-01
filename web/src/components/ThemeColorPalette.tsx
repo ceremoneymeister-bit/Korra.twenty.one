@@ -1,12 +1,6 @@
 import { Check } from "lucide-react";
 import { useTheme } from "@/themes";
-import { contrast } from "@/themes/color";
-
-const COLORS = [
-  ["Синий", "#5275d9"], ["Фиолетовый", "#8657cf"], ["Розовый", "#d95791"],
-  ["Красный", "#cf5252"], ["Оранжевый", "#d88736"], ["Жёлтый", "#dfc34a"],
-  ["Зелёный", "#55985c"], ["Бирюзовый", "#369c94"], ["Голубой", "#489cbe"], ["Серый", "#777c89"],
-];
+import { contrast, THEME_COLORS } from "@/themes/color";
 
 /** The same palette in the sidebar and Appearance settings. */
 export function ThemeColorPalette() {
@@ -14,7 +8,7 @@ export function ThemeColorPalette() {
   return (
     <div className="theme-color-palette">
       <div className="theme-color-swatches" role="group" aria-label="Готовые цвета">
-        {COLORS.map(([label, value]) => (
+        {THEME_COLORS.map(([label, value]) => (
           <button
             key={value} type="button" title={label} aria-label={label}
             aria-pressed={themeName === "color" && color === value}
@@ -31,7 +25,7 @@ export function ThemeColorPalette() {
         <span>Любой цвет</span>
         <span className="theme-color-hex">{color.toUpperCase()}</span>
       </label>
-      <p>Мягкий оттенок фона. Яркость акцента подстраивается для читаемости.</p>
+      <p>Цвет всего интерфейса. Текст и кнопки подстраиваются для читаемости.</p>
     </div>
   );
 }

@@ -5,7 +5,8 @@
  * Только семантические токены темы (`--neo-*`): светлая и тёмная темы
  * получаются сами. Исключение — «предметы» на обложках артефактов (бумага,
  * графитовая презентация, таблица): как и в макете, они одинаковы в обеих
- * темах, потому что изображают сам файл, а не интерфейс.
+ * нейтральных темах, потому что изображают сам файл. Цветная тема
+ * задаёт их поверхности через переменные, сохраняя форму каждого вида файла.
  *
  * Геометрию плитки задаёт `dashboard-grid.css`; здесь — только содержимое,
  * которое обязано уместиться в плитку без внутренней прокрутки.
@@ -121,7 +122,7 @@
 
 .kdw-attention-icon--action {
   background: var(--kdw-accent);
-  color: #1f1f1f;
+  color: var(--neo-accent-foreground);
   box-shadow: 0 2px 6px #00000014;
 }
 
@@ -152,7 +153,7 @@
 
 .kdw-attention-row[data-severity="action"] .kdw-attention-action {
   background: var(--kdw-accent);
-  color: #1f1f1f;
+  color: var(--neo-accent-foreground);
 }
 
 @container korra-dashboard (max-width: 520px) {
@@ -194,13 +195,13 @@
 }
 
 .kdw-avatar--graphite {
-  background: #2d2e2c;
-  color: #f0f0ec;
+  background: var(--theme-artwork-surface, #2d2e2c);
+  color: var(--theme-artwork-foreground, #f0f0ec);
 }
 
 .kdw-avatar--lime {
-  background: #9ede01;
-  color: #1f1f1f;
+  background: var(--neo-accent);
+  color: var(--neo-accent-foreground);
 }
 
 .kdw-avatar--stone {
@@ -209,13 +210,13 @@
 }
 
 .kdw-avatar--sand {
-  background: #e9dfc9;
-  color: #3b3222;
+  background: var(--theme-artwork-surface, #e9dfc9);
+  color: var(--theme-artwork-foreground, #3b3222);
 }
 
 .kdw-avatar--mist {
-  background: #cfd6d1;
-  color: #243029;
+  background: var(--theme-artwork-surface, #cfd6d1);
+  color: var(--theme-artwork-foreground, #243029);
 }
 
 .kdw-avatar-flower {
@@ -435,7 +436,7 @@
   font-size: 12px;
   font-weight: 600;
   background: var(--kdw-accent);
-  color: #1f1f1f;
+  color: var(--neo-accent-foreground);
 }
 
 .kdw-delta[data-direction="down"] .kdw-delta-chip,
@@ -507,7 +508,7 @@
   min-width: 0;
   max-width: 34px;
   border-radius: 6px 6px 2px 2px;
-  background: linear-gradient(90deg, #7b8076, #92968c);
+  background: var(--theme-chart-bars, linear-gradient(90deg, #7b8076, #92968c));
   box-shadow: 1px 2px 3px #00000012;
 }
 
@@ -875,7 +876,7 @@
   overflow: hidden;
   padding: 12px;
   border-radius: 5px 11px 11px 5px;
-  color: #252525;
+  color: var(--theme-artwork-foreground, #252525);
   box-shadow:
     1px 4px 6px #00000017,
     7px 11px 17px #00000013;
@@ -960,7 +961,7 @@
 }
 
 .kdw-cover--paper {
-  background: #f2f1ed;
+  background: var(--theme-artwork-surface, #f2f1ed);
 }
 
 .kdw-cover--paper::before {
@@ -971,11 +972,11 @@
   width: 10px;
   height: 22px;
   border-radius: 0 0 3px 3px;
-  background: #9ede01;
+  background: var(--theme-artwork-accent, #9ede01);
 }
 
 .kdw-cover--pdf {
-  background: #f4efe9;
+  background: var(--theme-artwork-surface, #f4efe9);
 }
 
 .kdw-cover--pdf::before {
@@ -985,26 +986,26 @@
   right: 0;
   border-style: solid;
   border-width: 0 22px 22px 0;
-  border-color: transparent #d9cfc2 transparent transparent;
+  border-color: transparent var(--theme-artwork-detail, #d9cfc2) transparent transparent;
 }
 
 .kdw-cover--deck {
-  background: #272828;
-  color: #f0f0ec;
+  background: var(--theme-artwork-surface, #272828);
+  color: var(--theme-artwork-foreground, #f0f0ec);
 }
 
 .kdw-cover--sheet {
-  background: #d2d5d0;
+  background: var(--theme-artwork-surface, #d2d5d0);
 }
 
 .kdw-cover--media {
-  background: #3a3d38;
-  color: #f0f0ec;
+  background: var(--theme-artwork-surface, #3a3d38);
+  color: var(--theme-artwork-foreground, #f0f0ec);
 }
 
 .kdw-cover--image {
   padding: 0;
-  background: #d9d9d4;
+  background: var(--theme-artwork-surface, #d9d9d4);
 }
 
 .kdw-cover--image img {
@@ -1024,11 +1025,11 @@
 .kdw-cover-grid i {
   height: 8px;
   border-radius: 2px;
-  background: #ffffff8c;
+  background: var(--theme-artwork-detail, #ffffff8c);
 }
 
 .kdw-cover-grid i:nth-child(4n + 1) {
-  background: #666d64;
+  background: var(--theme-artwork-detail, #666d64);
 }
 
 .kdw-cover-orbit {
@@ -1044,13 +1045,13 @@
   position: absolute;
   inset: 0;
   border-radius: 50%;
-  background: #9ede01;
+  background: var(--theme-artwork-accent, #9ede01);
   box-shadow: inset -10px -6px 14px #00000024;
 }
 
 .kdw-cover-orbit i:nth-child(2) {
   inset: 22%;
-  background: #272828;
+  background: var(--theme-artwork-surface, #272828);
 }
 
 .kdw-cover-icon {
@@ -1335,7 +1336,7 @@
   justify-content: center;
   border-radius: 11px;
   background: var(--kdw-accent);
-  color: #202020;
+  color: var(--theme-on-accent, #202020);
   line-height: 1;
   box-shadow: 0 2px 5px color-mix(in srgb, var(--neo-shadow) 25%, transparent);
 }

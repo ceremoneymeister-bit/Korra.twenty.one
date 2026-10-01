@@ -1,3 +1,4 @@
+import { themeColorScheme } from "@/themes/color";
 /**
  * ProfileBuilderPage — мастер создания агента.
  *
@@ -127,7 +128,7 @@ export default function ProfileBuilderPage() {
   // (находка Астры, 05.09).
   const { refreshProfiles } = useProfileScope();
   // Орбита шага «Проверка» рисуется в теме панели — как в чате.
-  const { themeName } = useTheme();
+  const { theme } = useTheme();
 
   useEffect(() => {
     setTitle("Новый агент");
@@ -609,7 +610,7 @@ export default function ProfileBuilderPage() {
                   state="working"
                   size={20}
                   speed={1.3}
-                  theme={themeName === "dark" ? "dark" : "light"}
+                  theme={themeColorScheme(theme)}
                   aria-label="Проверяю агента"
                   style={{ transform: "scale(1.4)", margin: "0.25rem" }}
                 />

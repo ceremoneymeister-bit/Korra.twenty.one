@@ -21,7 +21,7 @@ export function AgentRunBadge({ profile }: { profile: string }) {
   return <>
     {uncertain
       ? <span className="text-xs" title={stale ? "Статус задачи требует проверки" : "Не удалось обновить статус работы"}>?<span className="sr-only"> Статус требует проверки</span></span>
-      : busy.length > 0 && <span className="inline-flex min-w-5 justify-center rounded-full bg-[var(--neo-accent)] px-1 text-xs text-[#1f1f1f]" title={waiting ? "Ждёт вас" : busy[0].status === "queued" ? "В очереди" : `В работе: ${busy.length}`}>
+      : busy.length > 0 && <span className="inline-flex min-w-5 justify-center rounded-full bg-[var(--neo-accent)] px-1 text-xs text-[var(--neo-accent-foreground)]" title={waiting ? "Ждёт вас" : busy[0].status === "queued" ? "В очереди" : `В работе: ${busy.length}`}>
       {waiting ? "Ждёт вас" : <><span aria-hidden>{busy.length}</span><span className="sr-only">{busy[0].status === "queued" ? "В очереди" : "В работе"}</span></>}
     </span>}
     {ready && <span className="inline-flex" title="Есть непрочитанный ответ"><span aria-hidden className="size-2 rounded-full bg-[var(--neo-accent-line)]" /><span className="sr-only">Ответ готов</span></span>}
@@ -34,8 +34,8 @@ export function AgentRunBadge({ profile }: { profile: string }) {
 export function ChatUnreadMark({ profile, sessionId, className = "" }: { profile: string; sessionId: string | null | undefined; className?: string }) {
   const unread = useStore($unreadChatRuns);
   if (!hasUnreadResponse(unread, profile, sessionId)) return null;
-  return <span data-unread-response className={`inline-flex shrink-0 items-center gap-1 rounded-full bg-[var(--neo-accent)] px-2 py-0.5 text-xs font-medium text-[#1f1f1f] ${className}`} aria-label="Новый ответ, не прочитан">
-    <span aria-hidden className="size-1.5 rounded-full bg-[#1f1f1f]" />Новый ответ
+  return <span data-unread-response className={`inline-flex shrink-0 items-center gap-1 rounded-full bg-[var(--neo-accent)] px-2 py-0.5 text-xs font-medium text-[var(--neo-accent-foreground)] ${className}`} aria-label="Новый ответ, не прочитан">
+    <span aria-hidden className="size-1.5 rounded-full bg-[var(--neo-accent-foreground)]" />Новый ответ
   </span>;
 }
 
