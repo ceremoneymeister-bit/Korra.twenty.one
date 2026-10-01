@@ -857,3 +857,12 @@ it("lets the next draft be edited during a reply without sending or clearing it 
   expect(textarea.value).toBe("Следующий вопрос");
   expect(container.querySelector<HTMLButtonElement>('button[aria-label="Отправить"]')?.disabled).toBe(false);
 });
+
+it("K21-220: refused picker selection explains why instead of disappearing", async () => {
+  await render(<BubbleChatComposer onSend={vi.fn()} disabled />);
+  const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+  Object.defineProperty(input, "files", { configurable: true, value: [new File(["test"], "photo.HEIC")] });
+  await act(async () => { input.dispatchEvent(new Event("change", { bubbles: true })); });
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain("Разговор ещё загружается");
+  expect(attachmentMocks.createUpload).not.toHaveBeenCalled();
+});

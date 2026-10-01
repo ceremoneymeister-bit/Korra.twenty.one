@@ -1,7 +1,7 @@
 """Read-only discovery and reattachment for the dashboard's durable chat turns."""
 import json
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 
 router = APIRouter()
@@ -126,7 +126,6 @@ def _history_rows(profile: str | None, session_id: str, items: list[dict]) -> di
         db.close()
 
 
-@router.get("/api/chat/runs")
 async def chat_runs(profile: str | None = None, session_id: str | None = None):
     server = _server()
     ledger = server._chat_delivery_ledger()
@@ -199,6 +198,22 @@ async def chat_runs(profile: str | None = None, session_id: str | None = None):
             ),
         ) from None
     return {"runs": projected}
+
+
+@router.get("/api/chat/runs")
+async def conditional_chat_runs(request: Request, profile: str | None = None, session_id: str | None = None):
+    snapshot = await chat_runs(profile, session_id)
+    # Hash the final public snapshot: leases, unread and decisions participate.
+    import hashlib
+
+    body = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    scope = json.dumps([profile, session_id], separators=(",", ":")).encode()
+    etag = '"' + hashlib.sha256(scope + b"\0" + body).hexdigest() + '"'
+    headers = {"ETag": etag, "Cache-Control": "private, no-cache"}
+    candidates = request.headers.get("if-none-match", "").split(",")
+    if any(value.strip().removeprefix("W/") in (etag, "*") for value in candidates):
+        return Response(status_code=304, headers=headers)
+    return Response(body, media_type="application/json", headers=headers)
 
 
 @router.get("/api/chat/runs/{message_id}/stream")

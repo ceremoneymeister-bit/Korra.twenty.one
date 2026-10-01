@@ -123,10 +123,48 @@ export function chatRunHeaders(): Record<string, string> {
   return { Authorization: `Bearer ${window.__HERMES_SESSION_TOKEN__ ?? ""}` };
 }
 
+export const CHAT_RUNS_TIMEOUT_MS = 10_000;
+const snapshots = new Map<string, { etag: string; runs: ChatRun[] }>();
+
 export async function getChatRuns(profile?: string, sessionId?: string, signal?: AbortSignal): Promise<ChatRun[]> {
-  const response = await fetch(chatRunUrl("", profile, sessionId), { headers: chatRunHeaders(), cache: "no-store", signal });
-  if (!response.ok) throw new Error("Не удалось проверить работу агентов");
-  return ((await response.json()) as { runs: ChatRun[] }).runs;
+  const url = chatRunUrl("", profile, sessionId);
+  const headers = chatRunHeaders();
+  const key = `${headers.Authorization}\0${url}`;
+  const cached = snapshots.get(key);
+  const controller = new AbortController();
+  const cancel = () => controller.abort();
+  signal?.addEventListener("abort", cancel, { once: true });
+  if (signal?.aborted) cancel();
+  const timer = window.setTimeout(cancel, CHAT_RUNS_TIMEOUT_MS);
+  let rejectAbort: () => void = () => {};
+  const aborted = new Promise<never>((_, reject) => {
+    rejectAbort = () => reject(new DOMException("Проверка работы агентов отменена или превысила 10 секунд", "AbortError"));
+    controller.signal.addEventListener("abort", rejectAbort, { once: true });
+    if (controller.signal.aborted) rejectAbort();
+  });
+  const read = async () => {
+    let response = await fetch(url, { headers: { ...headers, ...(cached ? { "If-None-Match": cached.etag } : {}) }, cache: "no-store", signal: controller.signal });
+    if (response.status === 304) {
+      if (cached) return cached.runs;
+      response = await fetch(url, { headers, cache: "no-store", signal: controller.signal });
+    }
+    if (!response.ok) throw new Error("Не удалось проверить работу агентов");
+    const runs = ((await response.json()) as { runs: ChatRun[] }).runs;
+    if (controller.signal.aborted) throw new DOMException("Отменено", "AbortError");
+    const etag = response.headers?.get("ETag");
+    if (etag) {
+      snapshots.delete(key);
+      snapshots.set(key, { etag, runs });
+      if (snapshots.size > 32) snapshots.delete(snapshots.keys().next().value!);
+    } else snapshots.delete(key);
+    return runs;
+  };
+  try { return await Promise.race([read(), aborted]); }
+  finally {
+    window.clearTimeout(timer);
+    signal?.removeEventListener("abort", cancel);
+    controller.signal.removeEventListener("abort", rejectAbort);
+  }
 }
 
 export function isRunBusy(run: ChatRun): boolean {
@@ -148,9 +186,19 @@ function markServerSessionRead(profile: string, sessionId: string): void {
 }
 
 let refreshing: Promise<void> | null = null;
+let refreshController: AbortController | null = null;
+
+function cancelRefresh() {
+  refreshController?.abort();
+  refreshController = null;
+  refreshing = null;
+}
 export function refreshChatRuns(): Promise<void> {
   if (refreshing) return refreshing;
-  refreshing = getChatRuns().then(runs => {
+  const controller = new AbortController();
+  refreshController = controller;
+  refreshing = getChatRuns(undefined, undefined, controller.signal).then(runs => {
+    if (refreshController !== controller) return;
     const previous = $chatRuns.get();
     const viewed = $viewedChat.get();
     const newlyReady = runs.filter(run => run.status === "completed" &&
@@ -174,7 +222,11 @@ export function refreshChatRuns(): Promise<void> {
     $chatRuns.set(runs);
     $chatRunsUpdatedAt.set(Date.now());
     $chatRunsReachable.set(true);
-  }).catch(() => { $chatRunsReachable.set(false); }).finally(() => { refreshing = null; });
+  }).catch(() => {
+    if (refreshController === controller) $chatRunsReachable.set(false);
+  }).finally(() => {
+    if (refreshController === controller) { refreshing = null; refreshController = null; }
+  });
   return refreshing;
 }
 
@@ -198,14 +250,19 @@ onMount($chatRuns, () => {
   void refreshChatRuns();
   const timer = window.setInterval(() => { if (!document.hidden) void refreshChatRuns(); }, 2000);
   const resume = () => { if (!document.hidden) void refreshChatRuns(); };
+  window.addEventListener("pagehide", cancelRefresh);
+  window.addEventListener("pageshow", resume);
   window.addEventListener("focus", resume);
   window.addEventListener("online", resume);
   document.addEventListener("visibilitychange", resume);
   return () => {
+    cancelRefresh();
     // nanostores убирает подписку отложенно, и окно успевает исчезнуть раньше
     // уборки: без проверки падал весь прогон web, а не один тест.
     if (typeof window === "undefined") return;
     window.clearInterval(timer);
+    window.removeEventListener("pagehide", cancelRefresh);
+    window.removeEventListener("pageshow", resume);
     window.removeEventListener("focus", resume);
     window.removeEventListener("online", resume);
     document.removeEventListener("visibilitychange", resume);

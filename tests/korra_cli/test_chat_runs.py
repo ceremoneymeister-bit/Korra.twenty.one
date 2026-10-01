@@ -266,3 +266,26 @@ def test_an_opened_long_chat_does_not_pull_every_old_prompt(isolated):
     assert all(len(run["user_message"]["content"]) == len(long_text) for run in runs[:10])
     assert all(len(run["user_message"]["content"]) <= 160 for run in runs[10:])
     assert len(json.dumps(runs, ensure_ascii=False)) < 200_000
+
+
+def test_conditional_poll_tracks_final_snapshot_and_scope(isolated):
+    async def scenario():
+        mid = remember(isolated)
+        app = FastAPI()
+        app.include_router(router)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
+            query = {"profile": "lawyer", "session_id": "session-a"}
+            first = await client.get("/api/chat/runs", params=query)
+            etag = first.headers["etag"]
+            unchanged = await client.get("/api/chat/runs", params=query, headers={"If-None-Match": etag})
+            assert unchanged.status_code == 304 and unchanged.content == b""
+            assert unchanged.headers["cache-control"] == "private, no-cache"
+            other = await client.get("/api/chat/runs", params={"profile": "accountant"}, headers={"If-None-Match": etag})
+            assert other.status_code == 200 and other.headers["etag"] != etag
+            isolated.complete(mid, response_body=b'{"choices":[]}', status_code=200, content_type="application/json")
+            changed = await client.get("/api/chat/runs", params=query, headers={"If-None-Match": etag})
+            assert changed.status_code == 200 and changed.headers["etag"] != etag
+            assert changed.json()["runs"][0]["status"] == "completed"
+            # The old SPA does not send a conditional header and keeps receiving JSON.
+            assert (await client.get("/api/chat/runs", params=query)).status_code == 200
+    asyncio.run(scenario())

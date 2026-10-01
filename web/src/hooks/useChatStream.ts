@@ -283,14 +283,27 @@ function mergeMessages(
   next: ChatMessage[],
   keepUndelivered: boolean,
 ): ChatMessage[] {
+  const identity = (message: ChatMessage) => message.clientMessageId
+    ? `${message.role}:client:${message.clientMessageId}`
+    : message.historyId !== undefined ? `${message.role}:row:${message.historyId}` : undefined;
+  const byIdentity = new Map(previous.flatMap(message => {
+    const key = identity(message);
+    return key ? [[key, message] as const] : [];
+  }));
   let changed = previous.length !== next.length;
   const merged = next.map((message, index) => {
-    const shown = previous[index];
+    const key = identity(message);
+    const positional = previous[index];
+    // Text can bridge a live bubble into history only when one has no durable
+    // identity. Two different persisted rows are never the same turn.
+    const shown = (key ? byIdentity.get(key) : undefined) ??
+      (positional && (!key || !identity(positional)) ? positional : undefined);
     if (!shown || !sameChatTurn(shown, message)) {
       changed = true;
       return message;
     }
-    if (sameRendered(shown, message)) return shown;
+    if (sameRendered(shown, message) && shown.historyId === message.historyId &&
+      shown.clientMessageId === message.clientMessageId) return shown;
     changed = true;
     return { ...message, id: shown.id };
   });
@@ -300,7 +313,7 @@ function mergeMessages(
     ? previous.filter(
         (message) =>
           message.delivery === "failed" &&
-          !merged.some((kept) => sameChatTurn(kept, message)),
+          !merged.some((kept) => identity(kept) && identity(kept) === identity(message)),
       )
     : [];
   if (undelivered.length > 0) {
@@ -897,6 +910,8 @@ export function useChatStream(
   const openLatestRef = useRef<(() => Promise<void>) | null>(null);
   /** Догрузка более ранней страницы: одна за раз, отменяется открытием чата. */
   const olderRequestRef = useRef<AbortController | null>(null);
+  const backgroundLoadRef = useRef<AbortController | null>(null);
+  const loadedSessionRef = useRef<string | null>(null);
   const [olderStatus, setOlderStatus] = useState<"idle" | "loading" | "failed">("idle");
   // Synchronous mirror of state.isStreaming so concurrent send() calls
   // can guard against re-entry without waiting for a re-render. React
@@ -977,16 +992,19 @@ export function useChatStream(
   }, [profile, state.sessionId]);
 
   const loadSession = useCallback(async (sessionId: string, options?: LoadSessionOptions): Promise<void> => {
-    const background = options?.background === true;
+    const background = options?.background === true || loadedSessionRef.current === `${selectionKey}\0${sessionId}`;
+    if (background && backgroundLoadRef.current) return;
     if (!background) openIntentRef.current += 1;
-    setIsLoading(true);
+    if (!background) { loadedSessionRef.current = null; setIsLoading(true); }
     writeChatSelection(selectionKey, sessionId);
     const generation = crypto.randomUUID();
     activeStreamIdRef.current = generation;
     abortControllerRef.current?.abort();
     const controller = new AbortController();
     abortControllerRef.current = controller;
-    streamingRef.current = true; // Loading also excludes a concurrent send.
+    backgroundLoadRef.current = background ? controller : null;
+    // Only opening a conversation excludes send; background reads yield to it.
+    streamingRef.current = !background;
     const current = () => mountedRef.current && activeStreamIdRef.current === generation;
     if (!background) {
       olderRequestRef.current?.abort();
@@ -1086,6 +1104,7 @@ export function useChatStream(
         queueMicrotask(onMissing);
         return;
       }
+      loadedSessionRef.current = `${selectionKey}\0${sessionId}`;
       const chatMessages = sessionMessagesToChat(sessionId, resp.messages as HistoryMessage[]);
       loadedWindow = historyWindow(resp);
       let runs: ChatRun[];
@@ -1135,6 +1154,7 @@ export function useChatStream(
         showWithPending(chatMessages, runs);
         return;
       }
+      streamingRef.current = true; // Replay owns the last assistant bubble.
       const pending = loadChatOutboxRecords(profile ?? "", sessionId)
         .find((record) => record.messageId === run.message_id);
       const userMsg: ChatMessage = {
@@ -1234,6 +1254,7 @@ export function useChatStream(
     } finally {
       window.clearTimeout(historyTimer);
       window.clearTimeout(replayTimer);
+      if (backgroundLoadRef.current === controller) backgroundLoadRef.current = null;
       if (current()) {
         setIsLoading(false);
         streamingRef.current = false;
@@ -1245,6 +1266,7 @@ export function useChatStream(
 
   const reset = useCallback(() => {
     openIntentRef.current += 1;
+    loadedSessionRef.current = null;
     writeChatSelection(selectionKey, null);
     // Same triple-guard as loadSession — abort any active stream so its
     // residual APPEND_DELTAs don't leak into the new chat.
@@ -1302,6 +1324,9 @@ export function useChatStream(
       // programmatic callers (tests, plugins) can call send() directly.
       // This ref-based guard is the source of truth.
       if (streamingRef.current) return false;
+      // A late history snapshot must never replace a newly sent turn.
+      backgroundLoadRef.current?.abort();
+      backgroundLoadRef.current = null;
       // Явный признак доставки: у send() много точек выхода, и без него
       // undefined читался бы вызывающим кодом как успех. Кнопка «Согласовать»
       // именно так и показывала «отправлено» при оборванной сети.
@@ -1748,10 +1773,11 @@ export function useChatStream(
   }, [active, loadSession, openLatest, profile, selectionKey, reset]);
   useEffect(() => {
     if (!active) return;
+    const statusController = new AbortController();
     // Возврат к вкладке — не повод показывать чат заново. Проверяем в фоне:
     // новые сообщения и состояние хода доезжают поверх уже показанной ленты.
     const reconcile = async (forceHistory = false) => {
-      if (document.hidden) return;
+      if (document.hidden || statusController.signal.aborted) return;
       void refreshChatRuns();
       const sessionId = sessionRef.current;
       if (!sessionId) return;
@@ -1772,7 +1798,8 @@ export function useChatStream(
       // server state is authoritative: once no run is busy, reconnect the
       // history even while that stale local lock remains set.
       try {
-        const runs = await getChatRuns(profile ?? "", sessionId);
+        const runs = await getChatRuns(profile ?? "", sessionId, statusController.signal);
+        if (statusController.signal.aborted) return;
         if (!runs.some(isRunBusy)) await loadSession(sessionId, { background: true });
       } catch {
         // refreshChatRuns exposes reachability; keep the visible transcript.
@@ -1788,6 +1815,13 @@ export function useChatStream(
     };
     window.addEventListener("storage", syncOutbox);
     return () => {
+      statusController.abort();
+      const background = backgroundLoadRef.current;
+      if (background && abortControllerRef.current === background) {
+        activeStreamIdRef.current = null;
+        background.abort();
+        backgroundLoadRef.current = null;
+      }
       window.removeEventListener("online", resume);
       window.removeEventListener("focus", resume);
       document.removeEventListener("visibilitychange", resume);

@@ -249,3 +249,17 @@ it("замена окна фоновым обновлением возвраща
   expect(load).toHaveBeenCalledTimes(1);
   sessionStorage.clear();
 });
+
+it("K21-207: F5 searches older pages for a live response key", async () => {
+  sessionStorage.setItem("chat:scroll", JSON.stringify({ id: "asst-live", offset: 40, key: "assistant:older-client" }));
+  const load = vi.fn();
+  const idle = { hasOlder: true, loading: false, failed: false, load };
+  const viewport = await renderKeyed([], idle);
+  placeMessages(viewport, { "c-h71": 600, "c-h42": 300 });
+  await renderKeyed([["c-h71"]], idle);
+  expect(load).toHaveBeenCalledTimes(1);
+  await renderKeyed([["c-h41"], ["c-h42", "assistant:older-client"], ["c-h71"]], { ...idle, hasOlder: false });
+  expect(viewport.scrollTop).toBe(340);
+  expect(sessionStorage.getItem("chat:scroll")).toContain("older-client");
+  sessionStorage.clear();
+});

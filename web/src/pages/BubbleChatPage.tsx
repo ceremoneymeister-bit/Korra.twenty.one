@@ -782,7 +782,12 @@ export function BubbleChatComposer({
   }, [setAttachments]);
 
   const addFiles = useCallback((files: FileList | File[], folder?: FolderSelection) => {
-    if (disabled || submitting || !active) return;
+    if (disabled || submitting || !active) {
+      setComposerError(disabled ? "Разговор ещё загружается. Выберите файл после загрузки."
+        : submitting ? "Сообщение отправляется. Выберите файл после отправки."
+          : "Откройте вкладку этого агента и выберите файл ещё раз.");
+      return;
+    }
     setComposerError(null);
     void attachUploadBatch(Array.from(files), { profile, folder, originals, set: setAttachments })
       .catch(cause => setComposerError(ownerFacingError(cause, "Не удалось подготовить вложения.")));
