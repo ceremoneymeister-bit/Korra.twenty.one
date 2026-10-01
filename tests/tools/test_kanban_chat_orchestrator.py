@@ -120,13 +120,15 @@ def test_worker_is_told_what_to_do_after_a_refusal():
     assert "сдайте результат" in inspect.getsource(kb.respond_to_block)
 
 
-def test_only_the_card_decision_grants_external_changes():
-    """Live run 24.09: the planner wrote «approval … unless already given in
-    the previous step», and the worker took the owner's plan step «вносите как
-    есть» as permission. In limited v1 the instructions are the only guard."""
+def test_saved_scope_repeats_do_not_need_a_second_approval():
     from agent.prompt_builder import KANBAN_CHAT_GUIDANCE, KANBAN_GUIDANCE
-    assert "even if an earlier step agreed to them" in KANBAN_CHAT_GUIDANCE
-    assert "earlier step, a comment or a chat message is not a grant" in KANBAN_GUIDANCE
+    for instructions in (KANBAN_CHAT_GUIDANCE, KANBAN_GUIDANCE):
+        assert "recipients" in instructions
+        assert "first external action" in instructions
+    assert "without another approval" in KANBAN_CHAT_GUIDANCE
+    assert "need no new approval" in KANBAN_GUIDANCE
+    assert "Never approve or accept on the owner's behalf" in KANBAN_CHAT_GUIDANCE
+    assert "acceptance='auto'" in KANBAN_CHAT_GUIDANCE
 
 
 def test_chat_comment_is_signed_by_the_chat_not_worker(chat_env, monkeypatch):
