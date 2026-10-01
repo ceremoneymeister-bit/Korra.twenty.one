@@ -11206,6 +11206,13 @@ async def reveal_env_var(
 # in env_vars from OPTIONAL_ENV_VARS via prefix matching when not specified,
 # and pulls required_env from a plugin's PlatformEntry when available.
 _PLATFORM_OVERRIDES: dict[str, dict[str, Any]] = {
+    "max": {
+        "name": "MAX (Макс)",
+        "description": "Общение с Korra в личных сообщениях и группах MAX, отправка файлов и результатов автоматизаций.",
+        "docs_url": "https://dev.max.ru/docs-api#авторизация",
+        "env_vars": ("MAX_BOT_TOKEN", "MAX_ALLOWED_USERS"),
+        "required_env": ("MAX_BOT_TOKEN",),
+    },
     "telegram": {
         "name": "Telegram",
         "description": "Работа с Korra через личные сообщения, группы и темы Telegram.",
@@ -11455,6 +11462,7 @@ _PLATFORM_OVERRIDES: dict[str, dict[str, Any]] = {
 # the end alphabetically.
 _PLATFORM_ORDER: tuple[str, ...] = (
     "telegram",
+    "max",
     "discord",
     "slack",
     "mattermost",
@@ -13053,20 +13061,35 @@ async def test_messaging_platform(platform_id: str, profile: Optional[str] = Non
     def _run():
         with _profile_scope(profile) as scoped_dir:
             env_on_disk = load_env()
+            from gateway.platform_registry import platform_registry
+            from korra_cli.plugins import discover_plugins
+
+            discover_plugins()
+            platform_entry = platform_registry.get(platform_id)
+            probe = platform_entry.test_connection_fn if platform_entry else None
+            if probe:
+                credentials = {
+                    key: env_on_disk.get(key) or ("" if scoped_dir is not None else os.getenv(key, ""))
+                    for key in entry["env_vars"]
+                }
+                return None, probe, credentials
             runtime = (
                 read_runtime_status(path=scoped_dir / "gateway_state.json")
                 if scoped_dir is not None
                 else read_runtime_status()
             )
-            return _messaging_platform_payload(
+            payload = _messaging_platform_payload(
                 entry,
                 env_on_disk,
                 runtime,
                 scoped=scoped_dir is not None,
                 profile_home=scoped_dir,
             )
+            return payload, None, None
 
-    payload = await asyncio.to_thread(_run)
+    payload, probe, credentials = await asyncio.to_thread(_run)
+    if probe:
+        return await probe(credentials)
     if not payload["enabled"]:
         message = (
             f"{entry['name']} отключён. Включите его и перезапустите шлюз."

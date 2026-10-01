@@ -37,6 +37,10 @@ status display, gateway setup, and more.
   `deliver=<name>` job fires correctly but the actual send returns
   `No live adapter for platform '<name>'`.  Pair with `cron_deliver_env_var`
   for end-to-end cron support.  See the docsite for the signature.
+- `test_connection_fn: async (env: dict) -> dict`: an explicit credential
+  check for the Channels page, without connecting a listener. Receives this
+  platform's profile-scoped credential fields and returns `ok`, `state`, and
+  a user-facing `message`. Never echo secrets. MAX uses it for `GET /me`.
 - `plugin.yaml` `requires_env` / `optional_env` rich-dict entries —
   auto-populate `OPTIONAL_ENV_VARS` in `korra_cli/config.py` so the setup
   wizard surfaces proper descriptions, prompts, password flags, and URLs.

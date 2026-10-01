@@ -1,0 +1,16 @@
+name: max
+label: MAX (Макс)
+kind: platform
+version: 1.0.0
+description: Общение с Korra в личных сообщениях и группах MAX, отправка файлов и результатов автоматизаций.
+requires_env:
+  - name: MAX_BOT_TOKEN
+    description: 'Токен: платформа MAX → Чат-боты → Настройки или «MAX для бизнеса» → «Получить токен».'
+    prompt: Токен бота MAX
+    password: true
+    url: https://dev.max.ru/docs-api#авторизация
+optional_env:
+  - name: MAX_ALLOWED_USERS
+    description: ID пользователей MAX через запятую. Допуск к боту не даёт прав владельца.
+    prompt: Допущенные пользователи MAX
+    password: false

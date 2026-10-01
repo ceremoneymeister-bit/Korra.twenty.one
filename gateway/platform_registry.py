@@ -228,6 +228,11 @@ class PlatformEntry:
     # targets when the gateway is not co-resident with the cron process.
     standalone_sender_fn: Optional[Callable[..., Awaitable[dict]]] = None
 
+    # Channels' explicit "Test" action, without starting an inbound listener.
+    # Receives only this platform's effective, profile-scoped credential fields;
+    # returns {ok: bool, state: str, message: str} with no credentials echoed.
+    test_connection_fn: Optional[Callable[[dict], Awaitable[dict]]] = None
+
 
 class PlatformRegistry:
     """Central registry of platform adapters.
