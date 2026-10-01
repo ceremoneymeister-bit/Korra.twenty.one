@@ -581,7 +581,7 @@ export function BubbleChatTranscript({
   onDiscard?: (target: PendingMessageTarget) => void;
   /** Вопросы агента по опасным командам этого чата — живые и отвеченные. */
   approvals?: ChatApprovalEntry[];
-  onApprovalDecision?: (requestId: string, choice: ApprovalChoiceValue) => void;
+  onApprovalDecision?: (requestId: string, choice: ApprovalChoiceValue, answer?: string) => void;
 }) {
   // Mark the last assistant message as streaming so Markdown shows a caret.
   const lastIdx = messages.length - 1;
@@ -673,6 +673,7 @@ export function BubbleChatTranscript({
               <CommandApprovalCard
                 decisionKind={entry.request.decision_kind}
                 command={entry.request.command}
+                taskUrl={entry.request.task_url}
                 description={entry.request.description}
                 choices={entry.request.choices ?? ["once", "deny"]}
                 sending={entry.status === "sending"}
@@ -680,8 +681,8 @@ export function BubbleChatTranscript({
                 {...(entry.decision ? { decision: entry.decision } : {})}
                 {...(entry.error ? { error: entry.error } : {})}
                 {...(entry.note ? { note: entry.note } : {})}
-                onDecide={(choice) =>
-                  onApprovalDecision?.(entry.request.request_id, choice)
+                onDecide={(choice, answer) =>
+                  onApprovalDecision?.(entry.request.request_id, choice, answer)
                 }
               />
             </div>
@@ -1702,8 +1703,8 @@ export default function BubbleChatPage({
   // чат: ход агента заблокирован внутри вызова инструмента и новую реплику
   // он прочитает только следующим ходом — то есть никогда, пока стоит здесь.
   const handleApprovalDecision = useCallback(
-    (requestId: string, choice: ApprovalChoiceValue) => {
-      void resolveApproval(requestId, choice);
+    (requestId: string, choice: ApprovalChoiceValue, answer?: string) => {
+      void resolveApproval(requestId, choice, answer);
     },
     [resolveApproval],
   );

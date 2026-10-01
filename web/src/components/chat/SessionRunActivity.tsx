@@ -14,14 +14,15 @@ export function AgentRunBadge({ profile }: { profile: string }) {
   const unread = useStore($unreadChatRuns);
   const reachable = useStore($chatRunsReachable);
   const busy = runs.filter(run => run.profile === profile && isRunBusy(run));
+  const waiting = busy.some(run => run.status === "waiting_decision");
   const ready = unread.some(run => run.profile === profile);
   const stale = runs.some(run => run.profile === profile && run.status === "stale");
   const uncertain = (reachable === false && busy.length > 0) || stale;
   return <>
     {uncertain
       ? <span className="text-xs" title={stale ? "Статус задачи требует проверки" : "Не удалось обновить статус работы"}>?<span className="sr-only"> Статус требует проверки</span></span>
-      : busy.length > 0 && <span className="inline-flex min-w-5 justify-center rounded-full bg-[var(--neo-accent)] px-1 text-xs text-[#1f1f1f]" title={busy[0].status === "queued" ? "В очереди" : busy[0].status === "waiting_decision" ? "Ожидает решения" : `В работе: ${busy.length}`}>
-      <span aria-hidden>{busy.length}</span><span className="sr-only">{busy[0].status === "queued" ? "В очереди" : busy[0].status === "waiting_decision" ? "Ожидает решения" : "В работе"}</span>
+      : busy.length > 0 && <span className="inline-flex min-w-5 justify-center rounded-full bg-[var(--neo-accent)] px-1 text-xs text-[#1f1f1f]" title={waiting ? "Ждёт вас" : busy[0].status === "queued" ? "В очереди" : `В работе: ${busy.length}`}>
+      {waiting ? "Ждёт вас" : <><span aria-hidden>{busy.length}</span><span className="sr-only">{busy[0].status === "queued" ? "В очереди" : "В работе"}</span></>}
     </span>}
     {ready && <span className="inline-flex" title="Есть непрочитанный ответ"><span aria-hidden className="size-2 rounded-full bg-[var(--neo-accent-line)]" /><span className="sr-only">Ответ готов</span></span>}
 

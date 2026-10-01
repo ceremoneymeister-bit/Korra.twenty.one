@@ -55,6 +55,8 @@
     parents_not_done: "Сначала должны завершиться предыдущие шаги. Их список есть в карточке.",
     task_not_found: "Задача не найдена. Возможно, её удалили.",
     decision_required: "Здесь нужно явное решение: «Разрешить эти изменения» или «Не разрешать».",
+    assignee_required: "Назначьте исполнителя перед возвратом на доработку.",
+    use_request_changes: "Откройте результат и верните просмотренную версию с замечанием.",
     use_accept: "Этот результат принимается кнопкой «Принять» в карточке.",
   };
   function errorText(error) {
@@ -409,10 +411,13 @@
       h(ResultView, { task, runs, title: "Результат ждёт вашей проверки" }),
       rework && h(Field, { label: "Что исправить" }, h("textarea", { value: remark, onChange: e => setRemark(e.target.value), rows: 4, placeholder: "Например: добавьте вариант со словом «помощник»" })),
       error && h("p", { role: "alert", className: "k21-error" }, error),
+      task.submitted_version == null && h("p", { className: "k21-muted", role: "status" }, "Версия результата недоступна. Обновите карточку перед решением."),
+      rework && !remark.trim() && h("p", { className: "k21-muted", role: "status" }, "Напишите, что исправить, чтобы вернуть результат агенту."),
+      rework && !task.assignee && h("p", { className: "k21-muted", role: "status" }, "Исполнитель не назначен. Назначьте агента перед возвратом на доработку."),
       h("div", { className: "k21-actions" },
-        !rework && h(Button, { primary: true, disabled: busy, onClick: () => void send("/accept", {}, "Результат принят. Следующие шаги могут начаться.") }, busy ? "Сохраняем…" : "Принять"),
-        !rework && h(Button, { disabled: busy, onClick: () => { setRework(true); requestIdRef.current = null; } }, "Вернуть с замечанием"),
-        rework && h(Button, { primary: true, disabled: busy || !remark.trim(), onClick: () => void send("/request-changes", { comment: remark.trim() }, "Вернули агенту с вашим замечанием.") }, busy ? "Сохраняем…" : "Вернуть агенту"),
+        !rework && h(Button, { primary: true, disabled: busy || task.submitted_version == null, onClick: () => void send("/accept", {}, "Результат принят. Следующие шаги могут начаться.") }, busy ? "Сохраняем…" : "Принять"),
+        !rework && h(Button, { disabled: busy || task.submitted_version == null, onClick: () => { setRework(true); requestIdRef.current = null; } }, "Вернуть с замечанием"),
+        rework && h(Button, { primary: true, disabled: busy || !remark.trim() || !task.assignee || task.submitted_version == null, onClick: () => void send("/request-changes", { comment: remark.trim() }, "Вернули агенту с вашим замечанием.") }, busy ? "Сохраняем…" : "Вернуть агенту"),
         rework && h(Button, { disabled: busy, onClick: () => { setRework(false); setRemark(""); requestIdRef.current = null; } }, "Отмена")));
   }
 
@@ -645,6 +650,9 @@
     function move(task, target) {
       setDragged(null);
       if (!task || task.status === target) return;
+      if (task.status === "review" && task.acceptance === "owner" && ["ready", "todo", "triage", "scheduled"].includes(target)) {
+        setNotice("Верните результат с замечанием в карточке."); openTask(task.id); return;
+      }
       if (!ACTION[target]) { setNotice("Этот этап меняется автоматически. Для запуска передайте задачу в очередь агенту."); return; }
       setModal({ kind: "move", task, target });
     }

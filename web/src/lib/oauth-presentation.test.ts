@@ -13,3 +13,8 @@ describe("Команды подключения", () => {
     expect(presentOAuthProvider(provider)).toEqual(provider);
   });
 });
+
+
+it("объясняет подписку Claude Max без требования дополнительного баланса", () => {
+  expect(presentOAuthProvider({ id: "claude-code", name: "old", cli_command: "hermes auth" } as OAuthProvider).name).toBe("Claude Code — подписка Claude Max");
+});

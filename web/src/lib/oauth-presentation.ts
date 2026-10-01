@@ -7,7 +7,7 @@ const NAMES: Record<string, string> = {
   "xai-oauth": "Grok — подписка SuperGrok / Premium+",
   "copilot-acp": "GitHub Copilot",
   anthropic: "Anthropic — ключ API",
-  "claude-code": "Claude Code — требуется дополнительный баланс",
+  "claude-code": "Claude Code — подписка Claude Max",
 };
 
 /** Старые серверы возвращают прежнюю команду; исправляем и показ, и копирование. */

@@ -993,6 +993,13 @@ def update_task(task_id: str, payload: UpdateTaskBody, board: Optional[str] = Qu
         if task is None:
             raise HTTPException(status_code=404, detail=f"task {task_id} not found")
 
+        if (task.status == "review" and task.acceptance == "owner"
+                and payload.status in {"ready", "todo", "triage", "scheduled"}):
+            raise HTTPException(status_code=409, detail={
+                "code": "use_request_changes",
+                "message": "Верните просмотренную версию с замечанием через request-changes.",
+            })
+
         review_assignee_deferred = (
             payload.status == "review" and payload.assignee is not None
         )
@@ -1492,6 +1499,7 @@ _OWNER_REVIEW_REJECTIONS = {
     "not_waiting": (409, "not_waiting_acceptance"),
     "stale": (409, "result_changed"),
     "parents": (409, "parents_not_done"),
+    "assignee_required": (409, "assignee_required"),
 }
 
 
@@ -1698,6 +1706,12 @@ def bulk_update(payload: BulkTaskBody, board: Optional[str] = Query(None)):
                 task = kanban_db.get_task(conn, tid)
                 if task is None:
                     entry.update(ok=False, error="not found")
+                    results.append(entry)
+                    continue
+                if (task.status == "review" and task.acceptance == "owner"
+                        and payload.status in {"ready", "todo", "triage", "scheduled"}
+                        and not payload.archive):
+                    entry.update(ok=False, error="use_request_changes")
                     results.append(entry)
                     continue
                 if payload.archive:

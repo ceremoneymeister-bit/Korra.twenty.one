@@ -1056,9 +1056,7 @@ export default function EnvPage() {
             <CardTitle className="text-base">Сервисы ответов</CardTitle>
           </div>
           <CardDescription>
-            {t.env.providersConfigured
-              .replace("{configured}", String(configuredProviders))
-              .replace("{total}", String(totalProviders))}
+            Сохранены данные для {configuredProviders} из {totalProviders} сервисов. Это не проверка доступности моделей.
           </CardDescription>
         </CardHeader>
 

@@ -120,6 +120,17 @@ def test_decision_goes_to_the_engine_with_the_server_key(monkeypatch):
     assert call["headers"]["X-Korra-Attended"] == "1"
 
 
+def test_board_answer_reaches_the_same_version_through_panel_proxy(monkeypatch):
+    response = asyncio.run(_call(monkeypatch, "POST", "/api/chat/approval", {
+        "session_id": "origin", "choice": "once", "request_id": "kb_exact_version", "answer": "До пятницы",
+    }))
+    assert response.status_code == 200
+    assert _Recorder.calls[0]["url"].endswith("/api/sessions/origin/approval")
+    assert _Recorder.calls[0]["json"] == {
+        "choice": "once", "request_id": "kb_exact_version", "answer": "До пятницы",
+    }
+
+
 def test_decision_for_a_profile_keeps_the_profile_prefix(monkeypatch):
     asyncio.run(
         _call(

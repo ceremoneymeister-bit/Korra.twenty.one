@@ -20,7 +20,7 @@ SERVICE_SESSION_SOURCES: tuple[str, ...] = (MAINTENANCE_SESSION_SOURCE, "cron")
 #: чатов они вытесняли настоящие разговоры — у главной Нюры «Награды» 28.09
 #: было 11 запусков на один разговор, — и «последний разговор» открывал бы
 #: запуск исполнителя.
-WORKER_SESSION_SOURCES: tuple[str, ...] = ("kanban",)
+WORKER_SESSION_SOURCES: tuple[str, ...] = ("kanban", "agent_service")
 
 
 def hide_service_sources(
@@ -162,3 +162,14 @@ def format_gateway_session_listing(
     lines.append("Resume: `/resume <session id>` or `/resume <number>` from `/resume`.")
     lines.append("More: `/sessions all`, `/sessions full`, `/sessions search <query>`.")
     return "\n".join(lines)
+
+
+def agent_chat_source(explicit: str | None = None) -> str | None:
+    """Classify CLI chats launched by an agent's terminal, not human shells.
+
+    Internal spawn provenance affects listing only; it grants no owner rights.
+    An explicit --source still wins, as for existing integrations.
+    """
+    import os
+
+    return explicit or ("agent_service" if os.environ.get("KORRA_AGENT_SUBPROCESS") == "1" else None)

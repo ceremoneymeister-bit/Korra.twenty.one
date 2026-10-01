@@ -119,3 +119,61 @@ def test_retag_gate_is_per_board(db, tmp_path):
 
     assert db.retag_kanban_worker_sessions(str(board_a)) == 1
     assert db.retag_kanban_worker_sessions(str(board_b)) == 1
+
+
+def test_agent_terminal_chat_is_hidden_but_journal_remains(db, monkeypatch):
+    from korra_cli.session_listing import agent_chat_source, hide_service_sources
+    from tools.environments.local import _make_run_env, _sanitize_subprocess_env
+
+    assert agent_chat_source() is None  # a human shell
+    assert _make_run_env({})["KORRA_AGENT_SUBPROCESS"] == "1"
+    # The shared factory also serves human TUI/CLI processes.
+    assert "KORRA_AGENT_SUBPROCESS" not in _sanitize_subprocess_env({})
+    monkeypatch.setenv("KORRA_AGENT_SUBPROCESS", "1")
+    assert agent_chat_source() == "agent_service"
+    assert agent_chat_source("kanban") == "kanban"
+    db.create_session("service", source=agent_chat_source())
+    db.append_message("service", role="user", content="Подготовить договор")
+    db.create_session("owner", source="cli")
+    assert [r["id"] for r in db.list_sessions_rich(exclude_sources=hide_service_sources(None))] == ["owner"]
+    assert [r["id"] for r in db.list_sessions_rich(source="agent_service", exclude_sources=hide_service_sources(None, source="agent_service"))] == ["service"]
+    assert db.get_messages("service")[0]["content"] == "Подготовить договор"
+
+
+@pytest.mark.parametrize("pty", [False, True])
+def test_background_agent_process_carries_service_source(tmp_path, pty):
+    from tools.process_registry import ProcessRegistry
+    registry = ProcessRegistry()
+    session = registry.spawn_local("printenv KORRA_AGENT_SUBPROCESS", cwd=str(tmp_path), use_pty=pty)
+    try:
+        result = registry.wait(session.id, timeout=5)
+        assert result["exit_code"] == 0
+        assert result["output"].strip() == "1"
+    finally:
+        registry.kill_process(session.id)
+
+
+def test_real_agent_session_persists_card_title(db, monkeypatch):
+    import json
+    from run_agent import AIAgent
+    from korra_cli import kanban_db as kb
+    monkeypatch.setenv("HERMES_SESSION_SOURCE", "kanban")
+    with kb.connect_closing() as conn:
+        tid = kb.create_task(conn, title="Подготовить договор", assignee="lawyer")
+    monkeypatch.setenv("KORRA_KANBAN_TASK", tid)
+    agent = AIAgent.__new__(AIAgent)
+    agent._session_db = db
+    agent._session_db_created = False
+    agent._session_init_model_config = {"temperature": 0.3}
+    agent.session_id = "worker-title"
+    agent.platform = "cli"
+    agent.model = "test"
+    agent._cached_system_prompt = None
+    agent._parent_session_id = None
+    agent._ensure_db_session()
+    row = db.get_session(agent.session_id)
+    assert row["source"] == "kanban"
+    config = json.loads(row["model_config"])
+    assert config["_work_title"] == "Подготовить договор"
+    assert config["_kanban_task_id"] == tid
+    assert config["temperature"] == 0.3

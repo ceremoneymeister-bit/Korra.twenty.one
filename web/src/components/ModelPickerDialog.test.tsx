@@ -140,3 +140,13 @@ describe("DeleteConfirmDialog — безопасное удаление", () => 
     expect(onCancel).toHaveBeenCalledOnce();
   });
 });
+
+
+it("сохранённая модель без входа не выглядит доступной подпиской", async () => {
+  await render(<ModelPickerDialog alwaysGlobal loader={async () => ({ providers: [
+    { name: "Claude", slug: "anthropic", models: ["claude-test"], total_models: 1, authenticated: false, is_current: true },
+  ] })} onApply={vi.fn()} onClose={vi.fn()} />);
+  await flush();
+  expect(document.body.textContent).toContain("Нужны подписка Claude Max и вход в аккаунт");
+  expect(document.body.textContent).toContain("Бесплатного аккаунта недостаточно");
+});

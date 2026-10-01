@@ -251,3 +251,43 @@ def test_repeated_question_in_triage_is_still_owner_attention(client):
         "answer": "Доступ выдан", "request_id": "loop-api", "revision": task["block_revision"],
     })
     assert r.status_code == 200 and r.json()["status"] == "ready"
+
+
+@pytest.mark.parametrize("status", ["ready", "todo", "triage", "scheduled"])
+def test_owner_review_cannot_bypass_versioned_rework(client, status):
+    tid = _submitted_via_form(client)
+    before = client.get(f"{API}/tasks/{tid}").json()
+    response = client.patch(f"{API}/tasks/{tid}", json={"status": status, "assignee": "other"})
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "use_request_changes"
+    bulk = client.post(f"{API}/tasks/bulk", json={"ids": [tid], "status": status})
+    assert bulk.json()["results"][0]["ok"] is False
+    after = client.get(f"{API}/tasks/{tid}").json()
+    assert after["task"]["status"] == "review"
+    assert after["task"]["assignee"] == before["task"]["assignee"]
+    assert after["comments"] == before["comments"]
+
+
+def test_rework_retry_and_stale_leave_no_orphan_comment(client):
+    tid = _submitted_via_form(client)
+    version = client.get(f"{API}/tasks/{tid}").json()["task"]["submitted_version"]
+    url = f"{API}/tasks/{tid}/request-changes"
+    assert client.post(url, json={"version": version, "request_id": "empty", "comment": " "}).status_code == 400
+    assert client.post(url, json={"version": version + 1, "request_id": "stale", "comment": "wrong"}).status_code == 409
+    body = {"version": version, "request_id": "retry", "comment": "Исправить"}
+    assert client.post(url, json=body).status_code == 200
+    assert client.post(url, json=body).json()["duplicate"] is True
+    assert [c["body"] for c in client.get(f"{API}/tasks/{tid}").json()["comments"]] == ["Исправить"]
+
+
+def test_rework_without_assignee_is_explained_and_does_not_write_comment(client):
+    tid = _submitted_via_form(client)
+    with kb.connect_closing() as conn:
+        version = kb.submitted_version(conn, tid)
+        kb.assign_task(conn, tid, None)
+    response = client.post(f"{API}/tasks/{tid}/request-changes", json={
+        "version": version, "request_id": "no-assignee", "comment": "Исправить",
+    })
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "assignee_required"
+    assert client.get(f"{API}/tasks/{tid}").json()["comments"] == []

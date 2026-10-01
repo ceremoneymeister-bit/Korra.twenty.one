@@ -3646,6 +3646,8 @@ async def chat_approval_proxy(
 
     url, headers = _chat_approval_upstream(payload.session_id, profile, "/approval")
     body: dict[str, Any] = {"choice": choice}
+    if payload.answer is not None:
+        body["answer"] = payload.answer
     if request_id:
         body["request_id"] = request_id
     try:

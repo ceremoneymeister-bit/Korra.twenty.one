@@ -80,8 +80,10 @@ it("показывает ожидание решения и подтверждё
   const container = document.createElement("div"); document.body.append(container);
   const root = createRoot(container);
   await act(async () => root.render(<MemoryRouter>
+    <AgentRunBadge profile="lawyer" />
     <SessionRunActivity tabs={[{ profile: "lawyer", label: "Юрист" }]} />
   </MemoryRouter>));
+  expect(container.querySelector('[title="Ждёт вас"]')?.textContent).toBe("Ждёт вас");
   expect(container.textContent).toContain("Ожидает вашего решения");
   expect(container.textContent).toContain("Договор клиента");
   expect(container.textContent).toContain("telegram");

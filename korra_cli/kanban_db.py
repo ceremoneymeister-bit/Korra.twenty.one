@@ -7435,6 +7435,9 @@ def return_for_rework(
         reason, current = _owner_review_gate(conn, task_id, version)
         if reason:
             return {"ok": False, "duplicate": False, "reason": reason, "status": None}
+        assignee = conn.execute("SELECT assignee FROM tasks WHERE id=?", (task_id,)).fetchone()
+        if not assignee or not assignee["assignee"]:
+            return {"ok": False, "duplicate": False, "reason": "assignee_required", "status": "review"}
         add_comment(conn, task_id, author, text)
         landing = _landing_status_after_parents(conn, task_id)
         cur = conn.execute(
@@ -12018,6 +12021,7 @@ def add_notify_sub(
     notifier_profile: Optional[str] = None,
     delivery_mode: Optional[str] = None,
     delivery_metadata: Optional[Mapping[str, Any]] = None,
+    initial_event_id: Optional[int] = None,
 ) -> None:
     """Register a gateway source that wants terminal-state notifications
     for ``task_id``. Idempotent on (task, platform, chat, thread).
@@ -12047,6 +12051,10 @@ def add_notify_sub(
     messages (issue #29905). Subscribers only want events that occur
     AFTER they subscribe; the gateway/tool auto-subscribe paths run at
     task creation, where the snapshot is 0 anyway.
+
+    ``initial_event_id`` lets a newly mapped owner receive a currently
+    unresolved question after an update. It only affects a fresh INSERT;
+    re-subscribing never rewinds an existing subscriber's cursor.
     """
     insert_mode = delivery_mode if delivery_mode in _NOTIFY_DELIVERY_MODES else (
         # api_server is stateless: the adapter has no send() — the wake
@@ -12068,7 +12076,7 @@ def add_notify_sub(
                  chat_type, notifier_profile, delivery_mode, delivery_metadata,
                  created_at, last_event_id)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    COALESCE((SELECT MAX(id) FROM task_events WHERE task_id = ?), 0))
+                    COALESCE(?, (SELECT MAX(id) FROM task_events WHERE task_id = ?), 0))
             """,
             (
                 task_id,
@@ -12082,6 +12090,7 @@ def add_notify_sub(
                 insert_mode,
                 metadata_json,
                 now,
+                initial_event_id,
                 task_id,
             ),
         )

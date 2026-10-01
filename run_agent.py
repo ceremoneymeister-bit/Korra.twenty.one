@@ -679,6 +679,20 @@ class AIAgent:
                     _init_model_config["yolo_mode"] = True
             except Exception:
                 pass
+            if source == "kanban":
+                try:
+                    from korra_cli import kanban_db
+                    task_id = korra_env("KORRA_KANBAN_TASK", "")
+                    if task_id:
+                        with kanban_db.connect_closing() as board_conn:
+                            task = kanban_db.get_task(board_conn, task_id)
+                        if task:
+                            _init_model_config = dict(_init_model_config or {})
+                            _init_model_config["_work_title"] = task.title
+                            _init_model_config["_kanban_task_id"] = task.id
+                            _init_model_config["_kanban_board"] = kanban_db.get_current_board()
+                except Exception:
+                    logger.debug("Kanban activity title unavailable", exc_info=True)
             self._session_db.create_session(
                 session_id=self.session_id,
                 source=source,

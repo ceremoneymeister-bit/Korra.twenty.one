@@ -4,6 +4,7 @@ import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { MemoryRouter } from "react-router";
 import { CommandApprovalCard } from "./CommandApprovalCard";
 
 let container: HTMLDivElement;
@@ -232,4 +233,29 @@ describe("CommandApprovalCard — исход", () => {
     expect(container.querySelectorAll("button")).toHaveLength(0);
     expect(container.textContent).toContain("Агент больше не ждёт ответа");
   });
+});
+
+
+it("вопрос доски показывает ссылку и отправляет ответ для этой карточки", async () => {
+  const onDecide = vi.fn();
+  await render(<MemoryRouter><CommandApprovalCard decisionKind="kanban_question" command="Какой срок?"
+    taskUrl="/kanban?board=contracts&task=t_1" choices={["once"]} onDecide={onDecide} /></MemoryRouter>);
+  expect(container.textContent).toContain("Ждёт вас");
+  expect(container.querySelector("a")?.getAttribute("href")).toBe("/kanban?board=contracts&task=t_1");
+  const input = container.querySelector("textarea")!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input, "До пятницы");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await click(buttonByText("Ответить и продолжить"));
+  expect(onDecide).toHaveBeenCalledWith("once", "До пятницы");
+});
+
+it("приёмка в чате не возвращает результат без замечания", async () => {
+  const onDecide = vi.fn();
+  await render(<CommandApprovalCard decisionKind="kanban_accept" command="Результат" choices={["once", "deny"]} onDecide={onDecide} />);
+  expect(buttonByText("Вернуть с замечанием").disabled).toBe(true);
+  expect(container.textContent).toContain("Для возврата напишите, что исправить");
+  await click(buttonByText("Принять результат"));
+  expect(onDecide).toHaveBeenCalledWith("once", "");
 });

@@ -1091,3 +1091,41 @@ class TestServerRefusesPermanentScopeForExecuteCode:
 
         assert code.result is None
         assert ordinary.result == "always"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["needs_input", "approval", "accept"])
+async def test_chat_decides_board_version_without_model(auth_adapter, tmp_path, monkeypatch, kind):
+    from korra_cli import kanban_db as kb
+    from korra_state import SessionDB
+
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("KORRA_KANBAN_HOME", str(tmp_path))
+    kb.init_db()
+    db = SessionDB(tmp_path / "state.db")
+    db.create_session("s-board", source="api_server")
+    db.close()
+    with kb.connect_closing() as conn:
+        tid = kb.create_task(conn, title="Договор", assignee="lawyer", session_id="s-board", acceptance="owner")
+        kb.claim_task(conn, tid, claimer="worker")
+        if kind == "accept":
+            kb.complete_task(conn, tid, result="Текст договора", as_worker=True)
+        else:
+            kb.block_task(conn, tid, kind=kind, reason="Какой срок?")
+    async with TestClient(TestServer(_create_app(auth_adapter))) as client:
+        listed = await client.get("/api/sessions/s-board/approvals", headers=_AUTH)
+        data = await listed.json()
+        item = next(i for i in data["data"] if i["request_id"].startswith("kb_"))
+        assert item["command"].startswith("Договор")
+        assert tid in item["task_url"]
+        body = {"request_id": item["request_id"], "choice": "once", "answer": "Завтра"}
+        rejected = await client.post("/api/sessions/s-board/approval", json=body)
+        assert rejected.status == 401
+        with patch.object(auth_adapter, "_run_agent") as model:
+            reply = await client.post("/api/sessions/s-board/approval", headers=_AUTH, json=body)
+            assert reply.status == 200, await reply.text()
+            model.assert_not_called()
+        empty = await client.get("/api/sessions/s-board/approvals", headers=_AUTH)
+        assert (await empty.json())["data"] == []
+    with kb.connect_closing() as conn:
+        assert kb.get_task(conn, tid).status == ("done" if kind == "accept" else "ready")

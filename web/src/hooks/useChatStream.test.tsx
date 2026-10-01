@@ -525,6 +525,31 @@ describe("useChatStream — одобрение опасных команд", () 
 });
 
 describe("useChatStream — хозяин очереди вопросов остаётся на сервере", () => {
+  it("вопрос доски появляется в спокойном чате без запуска нового модельного хода", async () => {
+    let poll: (() => void) | undefined;
+    const realInterval = window.setInterval.bind(window);
+    vi.spyOn(window, "setInterval").mockImplementation((handler, delay) => {
+      if (delay === 5000) poll = handler as () => void;
+      return realInterval(handler, delay) as unknown as ReturnType<typeof window.setInterval>;
+    });
+    let pending = false;
+    const fetch = vi.fn(async (_url: RequestInfo | URL) => new Response(JSON.stringify({ data: pending ? [{
+      request_id: "kb-current-version", decision_kind: "kanban_question",
+      command: "Какой срок?", choices: ["once"], task_url: "/kanban?task=t_1",
+    }] : [] }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetch);
+    vi.spyOn(api, "getSessionMessages").mockResolvedValue({ session_id: "origin", messages: [] });
+    await act(async () => { await current.loadSession("origin"); });
+    expect(current.approvals).toHaveLength(0);
+    expect(poll).toBeDefined();
+    pending = true;
+    await act(async () => { poll!(); await new Promise(resolve => setTimeout(resolve, 0)); });
+    expect(current.approvals[0]).toMatchObject({ status: "pending", request: {
+      decision_kind: "kanban_question", command: "Какой срок?", task_url: "/kanban?task=t_1",
+    } });
+    expect(fetch.mock.calls.some(call => String(call[0]).includes("/api/chat/completions"))).toBe(false);
+  });
+
   it("вопрос, живой на сервере, возвращается в работу после конца потока", async () => {
     const live = {
       request_id: "req-live",
