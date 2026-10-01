@@ -35,6 +35,7 @@ LOCK_ROOT = Path("/run/lock")
 PYTHON = "/opt/hermes/.venv/bin/python"
 IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$")
 IMAGE_ID = re.compile(r"^sha256:[a-f0-9]{64}$")
+OFFICIAL_IMAGE = re.compile(r"^ghcr\.io/ceremoneymeister-bit/korra\.twenty\.one@sha256:[a-f0-9]{64}$")
 RUNTIME_IDENTITY_KEYS = ("ENGINE_UID", "ENGINE_GID", "AGENT_SUDO")
 # Launcher variable → the container variable it decides. KORRA_TIMEZONE is the
 # contour clock: agent "now", schedules, cron next_run. KORRA_OWNER_TIMEZONE is
@@ -176,7 +177,7 @@ from dotenv import load_dotenv
 home = Path(sys.argv[1])
 os.environ['HERMES_HOME'] = str(home)
 os.environ['HOME'] = str(home / 'home')
-load_dotenv(home / '.env', override=True)
+load_dotenv(home / '.env', override=True, interpolate=False)
 from gateway.config import load_gateway_config
 
 config = load_gateway_config()
@@ -306,7 +307,7 @@ CAPABILITY_CODE = r'''
 import hashlib, json
 from dotenv import load_dotenv
 from korra_constants import get_hermes_home
-load_dotenv(get_hermes_home() / '.env', override=False)
+load_dotenv(get_hermes_home() / '.env', override=False, interpolate=False)
 from korra_cli.auth import AuthError
 from korra_cli.runtime_provider import resolve_requested_provider, resolve_runtime_provider
 try:
@@ -340,7 +341,7 @@ print(json.dumps(result))
 FOUNDATION_SMOKE_CODE = r'''
 import json, os, urllib.request
 from dotenv import dotenv_values
-key = os.environ.get('API_SERVER_KEY') or dotenv_values('/opt/data/.env').get('API_SERVER_KEY')
+key = os.environ.get('API_SERVER_KEY') or dotenv_values('/opt/data/.env', interpolate=False).get('API_SERVER_KEY')
 if not key:
     raise RuntimeError('API authentication unavailable')
 payload = {'messages': [{'role': 'user', 'content': 'Привет!'}], 'max_tokens': 24, 'stream': True}
@@ -374,7 +375,7 @@ print('foundation-smoke-ok')
 MODEL_SMOKE_CODE = r'''
 import json, os, urllib.request
 from dotenv import dotenv_values
-key = os.environ.get('API_SERVER_KEY') or dotenv_values('/opt/data/.env').get('API_SERVER_KEY')
+key = os.environ.get('API_SERVER_KEY') or dotenv_values('/opt/data/.env', interpolate=False).get('API_SERVER_KEY')
 if not key:
     raise RuntimeError('API_SERVER_KEY missing; model smoke unavailable')
 request = urllib.request.Request('http://127.0.0.1:' + os.environ['API_SERVER_PORT'] + '/v1/chat/completions', data=json.dumps({'messages': [{'role': 'user', 'content': 'Reply with exactly KORRA_UPDATE_OK. Do not use tools.'}], 'max_tokens': 24, 'stream': False}).encode(), headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json', 'X-Korra-Session-Source': 'maintenance'})
@@ -1058,7 +1059,7 @@ class Updater:
         return info
 
     def initialize(self, job_id, reference, dry_run=False, expected_current=None,
-                   expected_target=None, expected_archive_sha256=None):
+                   expected_target=None, expected_archive_sha256=None, accept_custom_current=None):
         self.jobs.mkdir(mode=0o700, exist_ok=True)
         self.job = self.jobs / checked_identifier(job_id)
         self.job.mkdir(mode=0o700)
@@ -1067,8 +1068,77 @@ class Updater:
                             started_at=utc(), updated_at=utc(), name=self.name,
                             data=str(self.data), reference=reference, dry_run=bool(dry_run),
                             expected_current=expected_current, expected_target=expected_target,
-                            expected_archive_sha256=expected_archive_sha256)
+                            expected_archive_sha256=expected_archive_sha256,
+                            accept_custom_current=accept_custom_current)
         self.phase("pending")
+
+    def image_integrity(self, info=None):
+        """Host evidence, independent of image labels and inherited markers.
+
+        release-registry.json is the existing fleet registry (or its schema-1
+        releases/active_release projection), delivered by the operator with
+        the host kit. Missing/unreadable evidence means unknown, never official.
+        """
+        # Diagnosis must also explain a code overlay that the mutating
+        # updater's stricter mount contract would refuse before starting.
+        info = info if info is not None else json.loads(self.docker("inspect", self.name))[0]
+        image_id = info["Image"]
+        result = {"image_id": image_id, "origin": "unknown", "release": None,
+                  "stable_release": None, "registry_error": None,
+                  "changed_files": [], "diff_available": False}
+        try:
+            path = self.home / "release-registry.json"
+            trusted_control(path)
+            if not path.is_file() or path.stat().st_size > 4 * 1024 * 1024:
+                raise ValueError("registry size/type")
+            registry = json.loads(path.read_text())
+            if registry.get("schema") != 1 or not isinstance(registry.get("releases"), dict):
+                raise ValueError("registry schema")
+            accepted = {}
+            for key, record in registry["releases"].items():
+                if not isinstance(record, dict) or record.get("status") != "accepted":
+                    continue
+                artifact = record.get("artifact") or {}
+                image = artifact.get("image", "")
+                identity = artifact.get("image_id", "")
+                if not OFFICIAL_IMAGE.fullmatch(image) or not IMAGE_ID.fullmatch(identity):
+                    raise ValueError("accepted artifact identity")
+                # OCI store uses the manifest/index ID, classic Docker the
+                # config ID. Both are recorded publishing identities, never
+                # inferred from a label or a local tag/RepoDigests entry.
+                accepted[identity] = key
+                accepted[image.split("@", 1)[1]] = key
+            active = registry.get("active_release")
+            if not accepted or active not in registry["releases"] or registry["releases"][active].get("status") != "accepted":
+                raise ValueError("stable release unavailable")
+            result.update(origin="official" if image_id in accepted else "custom",
+                          release=accepted.get(image_id), stable_release=active)
+        except (OSError, ValueError, TypeError, AttributeError, UpdateError):
+            result["registry_error"] = "Реестр принятых выпусков недоступен или некорректен"
+        try:
+            changes = []
+            for line in self.docker("diff", self.name, timeout=30).splitlines():
+                kind, separator, path = line.partition(" ")
+                if separator and kind in {"A", "C", "D"} and path.startswith("/opt/hermes/"):
+                    changes.append({"change": kind, "path": path})
+            overlays = [mount.get("Destination") for mount in info.get("Mounts", [])
+                        if mount.get("Destination") == "/opt/hermes" or
+                        str(mount.get("Destination", "")).startswith("/opt/hermes/")]
+            result.update(changed_files=changes[:500], changed_count=len(changes),
+                          diff_available=True, code_mounts=overlays)
+        except (UpdateError, OSError, subprocess.TimeoutExpired):
+            result["diff_error"] = "Не удалось проверить изменения /opt/hermes"
+        return result
+
+    def check_current_image(self, info, *, dry_run=False):
+        integrity = self.image_integrity(info)
+        self.receipt["image_integrity"] = integrity
+        if (not dry_run and integrity["origin"] != "official"
+                and self.receipt.get("accept_custom_current") != info["Image"]):
+            self.receipt["error_code"] = "custom_current_confirmation_required"
+            raise UpdateError("Текущий образ не подтверждён реестром выпусков. "
+                              "Для замены явно передайте --accept-custom-current " + info["Image"])
+        return integrity
 
     def free_space(self, image_bytes=0):
         size = 0
@@ -2233,6 +2303,7 @@ print(json.dumps(changed))
             if self.receipt.get("expected_current") not in (None, old):
                 self.receipt["error_code"] = "expected_current_mismatch"
                 raise UpdateError("Expected current image differs from the running container; refresh installation state")
+            self.check_current_image(initial, dry_run=dry_run)
             configured = (self.home / "IMAGE").read_text().strip()
             configured_id = json.loads(self.docker("image", "inspect", configured))[0]["Id"]
             if configured_id != old:
@@ -2432,10 +2503,13 @@ def parse_args(argv=None):
     mode.add_argument("--warm-deps", action="store_true", help=argparse.SUPPRESS)
     mode.add_argument("--gc", action="store_true")
     mode.add_argument("--capabilities", action="store_true")
+    mode.add_argument("--diagnose", action="store_true", help="Проверить происхождение образа и изменения /opt/hermes")
     parser.add_argument("--job-id")
     parser.add_argument("--expected-current", metavar="SHA256_IMAGE_ID")
     parser.add_argument("--expected-target", metavar="SHA256_IMAGE_ID")
     parser.add_argument("--expected-archive-sha256", metavar="HEX_SHA256")
+    parser.add_argument("--accept-custom-current", metavar="SHA256_IMAGE_ID",
+                        help="Явно разрешить замену этого нестандартного текущего образа")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--detach", action="store_true")
     parser.add_argument("--lock-fd", type=int, help=argparse.SUPPRESS)
@@ -2445,6 +2519,8 @@ def parse_args(argv=None):
         parser.error("--job-id requires --update")
     if args.expected_current and (not args.update or not IMAGE_ID.fullmatch(args.expected_current)):
         parser.error("--expected-current requires --update and a full sha256 image ID")
+    if args.accept_custom_current and (not args.update or not IMAGE_ID.fullmatch(args.accept_custom_current)):
+        parser.error("--accept-custom-current requires --update and a full sha256 image ID")
     if args.expected_target and (not args.update or not IMAGE_ID.fullmatch(args.expected_target)):
         parser.error("--expected-target requires --update and a full sha256 image ID")
     if args.expected_archive_sha256:
@@ -2500,6 +2576,7 @@ def main(argv=None):
                           # K21-137/K21-136: the kit sizes its own readiness
                           # budget and bounds its own updates/* history.
                           "readiness_budget": True, "update_history": True,
+                          "image_integrity": True, "custom_current_confirmation": True,
                           "files": ["update.sh", "updater.py", "up.sh", "backup.sh", "dependencies.lock.json"]}))
         return 0
     if os.geteuid() != 0:
@@ -2511,6 +2588,9 @@ def main(argv=None):
         warm_dependencies()
         return 0
     updater = Updater()
+    if args.diagnose:
+        print(json.dumps(updater.image_integrity(), ensure_ascii=False))
+        return 0
     if updater.home == updater.data or updater.data in updater.home.parents or updater.home in updater.data.parents:
         # DATA is normally a sibling of deploy/, or a child of the deployment
         # root; the latter is safe provided updater control remains root-owned.
@@ -2559,7 +2639,7 @@ def main(argv=None):
                 if (updater.receipt.get("reference") == args.update
                         and bool(updater.receipt.get("dry_run")) == args.dry_run
                         and all(updater.receipt.get(key) == getattr(args, key) for key in
-                                ("expected_current", "expected_target", "expected_archive_sha256"))):
+                                ("expected_current", "expected_target", "expected_archive_sha256", "accept_custom_current"))):
                     print(json.dumps(updater.receipt))
                     return 0
             if args.rollback and (updater.jobs / checked_identifier(args.rollback) / "status.json").exists():
@@ -2584,12 +2664,14 @@ def main(argv=None):
                 if updater.receipt.get("expected_current") != args.expected_current:
                     raise UpdateError("Job ID belongs to a different expected-current image")
                 if (updater.receipt.get("expected_target") != args.expected_target
-                        or updater.receipt.get("expected_archive_sha256") != args.expected_archive_sha256):
+                        or updater.receipt.get("expected_archive_sha256") != args.expected_archive_sha256
+                        or updater.receipt.get("accept_custom_current") != args.accept_custom_current):
                     raise UpdateError("Job ID belongs to different artifact expectations")
                 print(json.dumps(updater.receipt))
                 return 0
             updater.initialize(job_id, args.update, dry_run=args.dry_run, expected_current=args.expected_current,
-                               expected_target=args.expected_target, expected_archive_sha256=args.expected_archive_sha256)
+                               expected_target=args.expected_target, expected_archive_sha256=args.expected_archive_sha256,
+                               accept_custom_current=args.accept_custom_current)
         if args.detach:
             # start_new_session severs the SSH/browser controlling terminal;
             # the inherited flock survives until the actual operation exits.

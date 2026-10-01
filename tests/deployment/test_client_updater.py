@@ -47,6 +47,11 @@ class FakeDockerUpdater(u.Updater):
     def free_space(self, *args):
         pass
 
+    def image_integrity(self, info=None):
+        # This transaction suite fakes host Docker/publishing evidence. The
+        # real integrity reader is exercised separately on synthetic files.
+        return {"image_id": self.image, "origin": "official", "changed_files": [], "diff_available": True}
+
     def capability(self, **kwargs):
         return {"mode": "configured", "provider_hash": "a" * 64}
 
@@ -64,6 +69,8 @@ class FakeDockerUpdater(u.Updater):
                 "Mounts": mounts,
                 "HostConfig": {"NetworkMode": "host"},
                 "Config": {"Cmd": ["gateway", "run"], "Env": [f"KORRA_DASHBOARD_PORT={self.panel}", f"API_SERVER_PORT={self.api}", *self.extra_env]}}])
+        if args[0] == "diff":
+            return getattr(self, "diff_output", "")
         if args[:2] == ("image", "inspect"):
             return json.dumps([{"Id": self.tags.get(args[2], OLD if args[2] == OLD else NEW), "Size": 1}])
         if args[:2] == ("image", "tag"):

@@ -2661,6 +2661,17 @@ def _deliver_to_bot_chat(job: dict, content: str, profile: str) -> Optional[str]
             return "bot-chat delivery failed: hermes CLI not resolvable"
 
     env = os.environ.copy()
+    # This is a delivery turn, not the scheduler's live/session identity.
+    # Bridge the exact job verdict without borrowing another gateway turn.
+    from gateway.principal import cron_job_acts_for_owner
+    from gateway.session_context import _VAR_MAP
+    from korra_constants import korra_env_pop
+
+    for name in _VAR_MAP:
+        korra_env_pop(env, name)
+    korra_env_pop(env, "KORRA_KANBAN_TASK")
+    korra_env_set(env, "KORRA_SESSION_PLATFORM", "local")
+    korra_env_set(env, "KORRA_SESSION_OWNER", "delegated" if cron_job_acts_for_owner(job) else "")
     if profile:
         argv += ["-p", profile]
         # -p resolves beneath the installation root. Dropping HOME entirely

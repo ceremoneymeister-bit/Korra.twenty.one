@@ -348,13 +348,13 @@ def _load_dotenv_with_fallback(path: Path, *, override: bool) -> None:
         # Set-Content -Encoding UTF8 / Notepad) and is a no-op for BOM-less
         # UTF-8. Plain "utf-8" would keep U+FEFF on the first key name and
         # silently drop it from os.environ under its canonical name.
-        load_dotenv(dotenv_path=path, override=override, encoding="utf-8-sig")
+        load_dotenv(dotenv_path=path, override=override, encoding="utf-8-sig", interpolate=False)
     except UnicodeDecodeError:
         # utf-8-sig can't strip a BOM once we fall back to latin-1 decode.
         raw = path.read_bytes()
         if raw.startswith(codecs.BOM_UTF8):
             raw = raw[len(codecs.BOM_UTF8) :]
-        load_dotenv(stream=io.StringIO(raw.decode("latin-1")), override=override)
+        load_dotenv(stream=io.StringIO(raw.decode("latin-1")), override=override, interpolate=False)
     # Strip non-ASCII characters from credential env vars that were just
     # loaded.  API keys must be pure ASCII since they're sent as HTTP
     # header values (httpx encodes headers as ASCII).  Non-ASCII chars

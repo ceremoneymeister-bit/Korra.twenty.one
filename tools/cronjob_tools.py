@@ -322,6 +322,29 @@ def _creator_is_owner() -> bool:
         return False
 
 
+def _may_see_job(job: Dict[str, Any]) -> bool:
+    """The owner sees all jobs; a visitor sees only their private-chat jobs."""
+    try:
+        from gateway.principal import cron_job_acts_for_owner, current_principal
+        from gateway.session_context import get_session_env
+
+        if current_principal().owner:
+            return True
+        if cron_job_acts_for_owner(job) or current_principal().kind != "outsider":
+            return False
+        origin = job.get("origin") or {}
+        platform = str(get_session_env("KORRA_SESSION_PLATFORM", "") or "").strip().lower()
+        speaker = str(get_session_env("KORRA_SESSION_USER_ID", "") or "").strip()
+        return bool(speaker and platform
+                    and get_session_env("KORRA_SESSION_CHAT_TYPE", "") == "dm"
+                    and str(origin.get("platform") or "").strip().lower() == platform
+                    and str(origin.get("user_id") or "").strip() == speaker
+                    and str(origin.get("chat_id") or "").strip() ==
+                        str(get_session_env("KORRA_SESSION_CHAT_ID", "") or "").strip())
+    except Exception:
+        return False
+
+
 def _refuse_change_of_owner_job(job: Dict[str, Any]) -> Optional[str]:
     """Only the owner changes, pauses, removes or triggers the owner's job.
 
@@ -1892,7 +1915,7 @@ def cronjob(
             return json.dumps(_result, indent=2)
 
         if normalized == "list":
-            jobs = [_format_job(job) for job in list_jobs(include_disabled=include_disabled)]
+            jobs = [_format_job(job) for job in list_jobs(include_disabled=include_disabled) if _may_see_job(job)]
             _result = {"success": True, "count": len(jobs), "jobs": jobs}
             # Same silent-inert-job class as create (#87033): an agent
             # inspecting existing jobs in a gateway-less environment must
@@ -1906,7 +1929,12 @@ def cronjob(
             return tool_error(f"job_id is required for action '{normalized}'", success=False)
 
         try:
-            job = resolve_job_ref(job_id)
+            from gateway.principal import current_principal
+
+            if current_principal().owner:
+                job = resolve_job_ref(job_id)
+            else:
+                job = resolve_job_ref(job_id, jobs=[job for job in list_jobs(include_disabled=True) if _may_see_job(job)])
         except AmbiguousJobReference as exc:
             return json.dumps(
                 {

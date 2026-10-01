@@ -261,7 +261,12 @@ def load_env_file(env_path: Path) -> Dict[str, str]:
     secrets: Dict[str, str] = {}
     try:
         text = env_path.read_text(encoding="utf-8-sig")
-    except (FileNotFoundError, OSError, UnicodeDecodeError):
+    except UnicodeDecodeError:
+        try:
+            text = env_path.read_bytes().removeprefix(b"\xef\xbb\xbf").decode("latin-1")
+        except OSError:
+            return secrets
+    except OSError:
         return secrets
 
     # Parse values with the canonical Hermes parser: save_env_value

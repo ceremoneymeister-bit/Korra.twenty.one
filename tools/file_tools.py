@@ -702,7 +702,19 @@ def _check_sensitive_path(filepath: str, task_id: str = "default") -> str | None
     # prompt-injected agent could silently disable exec approval by writing to
     # this file.
     hermes_config = _get_hermes_config_resolved()
-    if hermes_config and (resolved == hermes_config or normalized == hermes_config):
+    from korra_constants import get_default_hermes_root
+
+    root = get_default_hermes_root().resolve()
+    def is_profile_config(value):
+        try:
+            relative = Path(value).relative_to(root)
+        except ValueError:
+            return False
+        return (relative.parts == ("config.yaml",)
+                or len(relative.parts) == 3 and relative.parts[0] == "profiles"
+                and relative.parts[-1] == "config.yaml")
+    if ((hermes_config and (resolved == hermes_config or normalized == hermes_config))
+            or is_profile_config(resolved) or is_profile_config(normalized)):
         return (
             f"Refusing to write to Korra config file: {filepath}\n"
             "Agent cannot modify security-sensitive configuration. "

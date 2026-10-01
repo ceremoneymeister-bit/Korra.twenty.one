@@ -23,6 +23,10 @@ def build_doctor_parser(subparsers, *, cmd_doctor: Callable) -> None:
         "--fix", action="store_true", help='Попробовать исправить проблемы автоматически'
     )
     doctor_parser.add_argument(
+        "--deployment", metavar="HOST_KIT_DIR",
+        help='На хосте Docker: проверить текущий образ и /opt/hermes через updater этого контура',
+    )
+    doctor_parser.add_argument(
         "--live",
         action="store_true",
         help=(
