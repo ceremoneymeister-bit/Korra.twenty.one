@@ -3455,8 +3455,10 @@ def cmd_chat(args):
         korra_env_set(os.environ, "KORRA_IGNORE_RULES", "1")
 
     # --source: tag session source for filtering (e.g. 'tool' for third-party integrations)
-    if getattr(args, "source", None):
-        korra_env_set(os.environ, "KORRA_SESSION_SOURCE", args.source)
+    from korra_cli.session_listing import agent_chat_source
+    chat_source = agent_chat_source(getattr(args, "source", None))
+    if chat_source:
+        korra_env_set(os.environ, "KORRA_SESSION_SOURCE", chat_source)
 
     _pin_kanban_board_env()
     _confirm_startup_expensive_model_override(args)

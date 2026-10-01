@@ -119,3 +119,21 @@ def test_retag_gate_is_per_board(db, tmp_path):
 
     assert db.retag_kanban_worker_sessions(str(board_a)) == 1
     assert db.retag_kanban_worker_sessions(str(board_b)) == 1
+
+
+def test_agent_terminal_chat_is_hidden_but_journal_remains(db, monkeypatch):
+    from korra_cli.session_listing import agent_chat_source, hide_service_sources
+    from tools.environments.local import _make_run_env, _sanitize_subprocess_env
+
+    assert agent_chat_source() is None  # a human shell
+    for env in (_make_run_env({}), _sanitize_subprocess_env({})):
+        assert env["KORRA_AGENT_SUBPROCESS"] == "1"
+    monkeypatch.setenv("KORRA_AGENT_SUBPROCESS", "1")
+    assert agent_chat_source() == "agent_service"
+    assert agent_chat_source("kanban") == "kanban"
+    db.create_session("service", source=agent_chat_source())
+    db.append_message("service", role="user", content="Подготовить договор")
+    db.create_session("owner", source="cli")
+    assert [r["id"] for r in db.list_sessions_rich(exclude_sources=hide_service_sources(None))] == ["owner"]
+    assert [r["id"] for r in db.list_sessions_rich(source="agent_service", exclude_sources=hide_service_sources(None, source="agent_service"))] == ["service"]
+    assert db.get_messages("service")[0]["content"] == "Подготовить договор"

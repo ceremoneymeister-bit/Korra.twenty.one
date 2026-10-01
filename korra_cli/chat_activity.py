@@ -104,6 +104,15 @@ def _session_meta(row: dict[str, Any] | None) -> dict[str, Any]:
     source = str(row.get("source") or "").strip()
     title = str(row.get("title") or "").strip()
     preview = str(row.get("preview") or "").strip()
+    config = row.get("model_config") or {}
+    if isinstance(config, str):
+        try:
+            config = json.loads(config)
+        except ValueError:
+            config = {}
+    if source == "kanban" and isinstance(config, dict) and config.get("_work_title"):
+        title = str(config["_work_title"])
+        preview = title
     updated_at = float(row.get("last_active") or row.get("started_at") or 0)
     return {
         "source": source or None,

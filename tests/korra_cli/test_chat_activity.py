@@ -363,3 +363,14 @@ def test_gateway_heartbeat_pid_probe_never_signals_process(monkeypatch, tmp_path
 
     assert chat_activity._gateway_heartbeat_live(tmp_path, time.time()) is True
     assert observed == [4242]
+
+
+def test_work_title_and_service_activity_survive_hidden_history(monkeypatch, tmp_path):
+    _session(tmp_path, "service", source="agent_service", title="Подготовить договор", holder="service-run")
+    _session(tmp_path, "worker", source="kanban", title="Work kanban task t_1", holder="kanban-run")
+    db = SessionDB(tmp_path / "state.db")
+    db.update_session_meta("worker", json.dumps({"_work_title": "Проверить договор"}))
+    db.close()
+    monkeypatch.setattr(chat_activity, "_profile_targets", lambda _: [("", tmp_path)])
+    runs = chat_activity.project_chat_activity([], profile=None, session_id=None)
+    assert {r["session_id"]: r["title"] for r in runs} == {"service": "Подготовить договор", "worker": "Проверить договор"}
