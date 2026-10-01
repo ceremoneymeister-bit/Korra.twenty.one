@@ -3095,6 +3095,9 @@ def _strip_default_values(
     """
     preserve_keys = {("_config_version",)} | set(preserve_keys or ())
 
+    # None is an authored YAML value, not a removal marker.
+    dropped = object()
+
     def _strip(value: Any, default: Any, path: Tuple[str, ...]) -> Any:
         if path in preserve_keys:
             return copy.deepcopy(value)
@@ -3105,22 +3108,22 @@ def _strip_default_values(
             for key, child in value.items():
                 child_default = default_dict.get(key)
                 stripped_child = _strip(child, child_default, path + (key,))
-                if stripped_child is not None:
+                if stripped_child is not dropped:
                     stripped[key] = stripped_child
             if stripped:
                 return stripped
             # Entire subtree stripped — remove it
-            return None
+            return dropped
 
         if value == default:
-            return None
+            return dropped
 
         return copy.deepcopy(value)
 
     result: Dict[str, Any] = {}
     for key, value in config.items():
         stripped = _strip(value, defaults.get(key), (key,))
-        if stripped is not None:
+        if stripped is not dropped:
             result[key] = stripped
     return result
 
