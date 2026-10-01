@@ -60,6 +60,8 @@ agent-browser/
 # Private keys
 *.ppk
 *.pem
+# Public root certificate shipped with the MAX channel (not a key).
+!plugins/platforms/max/russian_trusted_root_ca.pem
 privvy*
 images/
 __pycache__/
