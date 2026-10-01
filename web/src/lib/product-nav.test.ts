@@ -6,6 +6,7 @@ import {
   selectProductNav,
   selectProductSettingsNav,
   selectProductSidebar,
+  CLIENT_CABINET_HIDDEN_PATHS,
   selectServiceNav,
   stripProductOnlyNav,
   type NavEntry,
@@ -157,6 +158,19 @@ describe("selectProductSidebar", () => {
       (item) => item.path,
     );
     expect(new Set(paths).size).toBe(paths.length);
+  });
+
+  it("в клиентском кабинете не показывает экраны, закрытые кабинетом (K21-253)", () => {
+    const client = selectProductSidebar(ADMIN_NAV, PLUGIN_NAV, "fleet", true);
+    const paths = client.service.map((item) => item.path);
+    for (const hidden of CLIENT_CABINET_HIDDEN_PATHS) {
+      expect(paths).not.toContain(hidden);
+    }
+    expect(paths).toEqual(expect.arrayContaining(["/sessions", "/achievements", "/skills", "/profiles"]));
+    // Режим администратора видит все экраны, как раньше.
+    expect(groups.service.map((item) => item.path)).toEqual(
+      expect.arrayContaining(CLIENT_CABINET_HIDDEN_PATHS),
+    );
   });
 
   it("не создаёт мёртвый пункт, когда плагина в контуре нет", () => {

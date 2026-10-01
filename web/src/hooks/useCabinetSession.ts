@@ -7,13 +7,15 @@ export function useCabinetSession() {
   const fallbackLogout = cabinetLogoutPath(HERMES_BASE_PATH);
   const [capabilities, setCapabilities] = useState<Record<string, unknown>>({});
   const [logout, setLogout] = useState(fallbackLogout);
+  const [mode, setMode] = useState<string | undefined>();
   useEffect(() => {
     if (!fallbackLogout) return;
     const controller = new AbortController();
-    void fetchJSON<{ kind: string; capabilities?: Record<string, unknown>; logout_url: string }>("/api/cabinet/session", { signal: controller.signal })
+    void fetchJSON<{ kind: string; mode?: string; capabilities?: Record<string, unknown>; logout_url: string }>("/api/cabinet/session", { signal: controller.signal })
       .then(session => {
         if (controller.signal.aborted || session.kind !== "cabinet") return;
         setCapabilities(session.capabilities ?? {});
+        setMode(session.mode);
         // Same-origin absolute path only. A failed/old cabinet keeps the safe
         // limited UI and its legacy logout rather than promising blocked ops.
         if (/^\/(?!\/)[a-zA-Z0-9_/-]+$/.test(session.logout_url)) setLogout(session.logout_url);
@@ -24,7 +26,8 @@ export function useCabinetSession() {
   // «Создать папку» — отдельная подсказка `files_mkdir`: кабинет открывает
   // владельцу ровно эту операцию. Старый кабинет ключа не присылает, и
   // кнопка остаётся скрытой, вместо того чтобы обещать закрытый маршрут.
-  return { logout, restrictedFiles: !allowed("files_manage"), canCreateFolders: allowed("files_mkdir"),
+  // Клиентский режим кабинета закрывает экраны оператора (K21-253).
+  return { logout, clientMode: mode === "client", restrictedFiles: !allowed("files_manage"), canCreateFolders: allowed("files_mkdir"),
     canManageSkills: allowed("skills_manage"), canBrowseSkillsHub: allowed("skills_hub"),
     canConfigureToolsets: allowed("toolsets_config") };
 }

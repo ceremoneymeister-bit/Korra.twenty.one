@@ -65,6 +65,7 @@ import { cn } from "@/lib/utils";
 import { SidebarFooter } from "@/components/SidebarFooter";
 import { SidebarStatusStrip, gatewayLine } from "@/components/SidebarStatusStrip";
 import { useBelowBreakpoint } from "@nous-research/ui/hooks/use-below-breakpoint";
+import { useCabinetSession } from "@/hooks/useCabinetSession";
 import { useSidebarStatus } from "@/hooks/useSidebarStatus";
 import { useStore } from "@nanostores/react";
 import { $activeAgentProfile } from "@/lib/active-agent";
@@ -582,6 +583,7 @@ export default function App() {
     () => partitionSidebarNav(builtinNav, manifests),
     [builtinNav, manifests],
   );
+  const { clientMode: cabinetClientMode } = useCabinetSession();
   // Продуктовый сайдбар собирается одним решением: главный список, «Настройки»
   // и «Служебное» приходят из product-nav готовыми, поэтому пункт плагина не
   // может остаться в двух группах сразу или потеряться между ними.
@@ -591,8 +593,8 @@ export default function App() {
       ? [CHAT_NAV_ITEM, ...BUILTIN_NAV_REST]
       : BUILTIN_NAV_REST;
     const { pluginItems } = partitionSidebarNav(source, manifests);
-    return selectProductSidebar(source, pluginItems, uiMode);
-  }, [bubbleChat, embeddedChat, manifests, uiMode]);
+    return selectProductSidebar(source, pluginItems, uiMode, cabinetClientMode);
+  }, [bubbleChat, cabinetClientMode, embeddedChat, manifests, uiMode]);
   const mainNav = productSidebar?.main ?? sidebarNav.coreItems;
   const productSettingsNav = productSidebar?.settings ?? [];
   const productServiceNav = productSidebar?.service ?? [];
