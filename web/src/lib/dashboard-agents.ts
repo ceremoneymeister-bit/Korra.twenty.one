@@ -68,10 +68,15 @@ function runActivity(run: ChatRun): AgentActivity {
 
 /** Самая важная работа агента: решение → работа → готовый ответ → сбой. */
 function leadingRun(runs: readonly ChatRun[]): ChatRun | null {
+  // «Сбой» значит «последняя работа не завершилась». Старый сбой в другом
+  // чате не перекрывает более позднюю завершённую работу (K21-254).
+  const newest = Math.max(...runs.map((run) => run.updated_at));
   let best: ChatRun | null = null;
   let bestRank = Number.POSITIVE_INFINITY;
   for (const run of runs) {
-    const rank = ACTIVITY_RANK[runActivity(run)];
+    const activity = runActivity(run);
+    if (activity === "failed" && run.updated_at < newest) continue;
+    const rank = ACTIVITY_RANK[activity];
     const newer = best === null || run.updated_at > best.updated_at;
     if (rank < bestRank || (rank === bestRank && newer)) {
       best = run;

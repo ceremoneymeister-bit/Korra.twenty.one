@@ -30,6 +30,20 @@ describe("карточка «Агенты»", () => {
     expect(agentRows({ profiles: "нет", runs: [] })).toEqual([]);
   });
 
+  it("старый сбой не перекрывает более позднюю завершённую работу (K21-254)", () => {
+    const rows = agentRows({
+      profiles: PROFILES,
+      runs: [
+        run({ profile: "default", session_id: "old", status: "failed", updated_at: 100 }),
+        run({ profile: "default", session_id: "new", status: "completed", updated_at: 200 }),
+        run({ profile: "designer", session_id: "d", status: "failed", updated_at: 300 }),
+      ],
+    });
+    expect(rows.find((row) => row.label === "Корра")?.activity).toBe("idle");
+    // Сбой последней работы по-прежнему виден.
+    expect(rows.find((row) => row.label === "Дизайнер")?.activity).toBe("failed");
+  });
+
   it("свободный агент остаётся видимым и честно назван готовым", () => {
     const rows = agentRows({ profiles: PROFILES, runs: [] });
     expect(rows.map((row) => row.label)).toEqual(["Корра", "Дизайнер", "Юрист"]);
