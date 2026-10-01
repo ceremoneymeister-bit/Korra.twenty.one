@@ -1586,10 +1586,48 @@ def check_macos_full_disk_access() -> None:
     )
 
 
+def _check_deployment_image(directory):
+    """Read-only host diagnosis; the in-container marker cannot prove a digest."""
+    import json
+
+    script = Path(directory).resolve() / "updater.py"
+    try:
+        result = subprocess.run([sys.executable, str(script), "--diagnose"],
+                                capture_output=True, text=True, timeout=60)
+        report = json.loads(result.stdout)
+        if result.returncode or report.get("error"):
+            raise ValueError("diagnosis failed")
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        check_warn("Не удалось проверить образ с хоста", "Проверьте каталог updater, NAME и DATA этого контура")
+        return
+    origin = report.get("origin")
+    if origin == "official":
+        check_ok("Образ совпадает с принятым выпуском", str(report.get("release") or ""))
+    elif origin == "custom":
+        check_warn("Нестандартный образ: digest отсутствует в реестре выпусков", str(report.get("image_id") or ""))
+    else:
+        check_warn("Происхождение образа не подтверждено", str(report.get("registry_error") or ""))
+    if not report.get("diff_available"):
+        check_warn("Изменения /opt/hermes не проверены")
+    else:
+        changes = report.get("changed_files") or []
+        if changes:
+            check_warn(f"В /opt/hermes изменены файлы: {report.get('changed_count', len(changes))}")
+            for item in changes:
+                check_info(f"{item['change']} {item['path']}")
+        else:
+            check_ok("Docker diff: изменений /opt/hermes нет")
+        for mount in report.get("code_mounts") or []:
+            check_warn("Код перекрыт отдельным mount; docker diff его не проверяет", mount)
+
+
 def run_doctor(args):
     """Run diagnostic checks."""
     should_fix = getattr(args, 'fix', False)
     ack_target = getattr(args, 'ack', None)
+    if getattr(args, "deployment", None):
+        _check_deployment_image(args.deployment)
+        return
 
     # Doctor runs from the interactive CLI, so CLI-gated tool availability
     # checks (like cronjob management) should see the same context as `hermes`.
