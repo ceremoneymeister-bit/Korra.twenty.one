@@ -66,7 +66,10 @@ export function normalizeApprovalRequest(
   const decisionKind =
     item.decision_kind === "outbound_message" ||
     item.decision_kind === "payment" ||
-    item.decision_kind === "automation_recipients"
+    item.decision_kind === "automation_recipients" ||
+    item.decision_kind === "kanban_question" ||
+    item.decision_kind === "kanban_approval" ||
+    item.decision_kind === "kanban_accept"
       ? item.decision_kind
       : undefined;
   const effectStatus = EFFECT_STATUSES.includes(item.effect_status as EffectDecisionStatus)
@@ -138,9 +141,10 @@ export async function sendApprovalDecision(options: {
   sessionId: string;
   requestId: string;
   choice: ApprovalChoiceValue;
+  answer?: string;
   profile?: string;
 }): Promise<ApprovalDecisionResult> {
-  const { sessionId, requestId, choice, profile } = options;
+  const { sessionId, requestId, choice, answer, profile } = options;
   if (!sessionId || !requestId) {
     return { ok: false, expired: true, error: "Запрос уже не адресуем." };
   }
@@ -153,6 +157,7 @@ export async function sendApprovalDecision(options: {
         session_id: sessionId,
         request_id: requestId,
         choice,
+        ...(answer !== undefined ? { answer } : {}),
       }),
     });
   } catch {
@@ -189,7 +194,9 @@ export async function sendApprovalDecision(options: {
     return {
       ok: false,
       expired: true,
-      error: "Агент больше не ждёт ответа: ход закончился или истекло время.",
+      error: requestId.startsWith("kb_")
+        ? "Вопрос уже решён или версия изменилась. Откройте текущую карточку."
+        : "Агент больше не ждёт ответа: ход закончился или истекло время.",
     };
   }
   let serverError = "";

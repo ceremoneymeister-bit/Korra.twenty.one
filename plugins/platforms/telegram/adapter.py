@@ -937,7 +937,8 @@ class TelegramAdapter(BasePlatformAdapter):
         self._model_picker_state: Dict[str, dict] = {}
         self._choice_picker_state: Dict[str, dict] = {}
         # Approval button state: message_id → session_key
-        self._approval_state: Dict[int, str] = {}
+        self._approval_state: Dict[int, Any] = {}
+        self._kanban_reply_state: Dict[tuple[str, str], dict] = {}
         # Slash-confirm button state: confirm_id → session_key (for /reload-mcp
         # and any other slash-confirm prompts; see GatewayRunner._request_slash_confirm).
         self._slash_confirm_state: Dict[str, str] = {}
@@ -6632,6 +6633,16 @@ class TelegramAdapter(BasePlatformAdapter):
         try:
             text = self._format_exec_approval(command, description, smart_denied)
 
+            if str((metadata or {}).get("request_id", "")).startswith("kb_"):
+                text = ("🟠 <b>Ждёт вас</b>\n\n" + self._ea_escape(self._truncate_preview(command, 3000))
+                        + "\n\n" + self._ea_escape(description))
+                from korra_cli.dashboard_auth.prefix import resolve_public_url
+                public_url = resolve_public_url()
+                task_url = (metadata or {}).get("task_url", "")
+                if public_url and task_url.startswith("/kanban?"):
+                    text += '\n<a href="' + self._ea_escape(public_url.rstrip("/") + task_url) + '">Карточка поручения</a>'
+                else:
+                    text += "\nКарточка поручения — в разделе «Канбан» вашего кабинета."
             # Resolve thread context for thread replies
             thread_id = self._metadata_thread_id(metadata)
 
@@ -6640,7 +6651,9 @@ class TelegramAdapter(BasePlatformAdapter):
             # Simpler: use a monotonic counter to generate short IDs.
             import itertools
             if not hasattr(self, "_approval_counter"):
-                self._approval_counter = itertools.count(1)
+                # Old buttons must never alias a new request after restart.
+                import secrets
+                self._approval_counter = itertools.count(secrets.randbits(48))
             approval_id = next(self._approval_counter)
 
             buttons = [
@@ -6654,7 +6667,14 @@ class TelegramAdapter(BasePlatformAdapter):
                     buttons.append(
                         InlineKeyboardButton('''✅ Всегда''', callback_data=f"ea:always:{approval_id}")
                     )
-            buttons.append(InlineKeyboardButton('''❌ Запретить''', callback_data=f"ea:deny:{approval_id}"))
+            board_kind = (metadata or {}).get("decision_kind", "")
+            if board_kind == "kanban_question":
+                buttons = [InlineKeyboardButton("Продолжить как предложено", callback_data=f"ea:once:{approval_id}")]
+            elif board_kind == "kanban_accept":
+                buttons = [InlineKeyboardButton("Принять результат", callback_data=f"ea:once:{approval_id}"),
+                           InlineKeyboardButton("Вернуть с замечанием", callback_data=f"ea:deny:{approval_id}")]
+            else:
+                buttons.append(InlineKeyboardButton("Не разрешать" if board_kind == "kanban_approval" else "❌ Запретить", callback_data=f"ea:deny:{approval_id}"))
             # Pair into rows (2x2 for the full set) so labels stay readable on
             # mobile — a single 4-button row truncates to "Allo… / Ses… / …".
             rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
@@ -6682,7 +6702,14 @@ class TelegramAdapter(BasePlatformAdapter):
             msg = await self._send_message_with_thread_fallback(**kwargs)
 
             # Store session_key keyed by approval_id for the callback handler
-            self._approval_state[approval_id] = session_key
+            exact_request = (metadata or {}).get("request_id")
+            if exact_request:
+                record = {**(metadata or {}), "session_key": session_key, "chat_id": str(chat_id)}
+                self._approval_state[approval_id] = record
+                if str(exact_request).startswith("kb_"):
+                    self._kanban_reply_state[(str(chat_id), str(msg.message_id))] = record
+            else:
+                self._approval_state[approval_id] = session_key
 
             return SendResult(success=True, message_id=str(msg.message_id))
         except Exception as e:
@@ -7616,7 +7643,31 @@ class TelegramAdapter(BasePlatformAdapter):
                     await query.answer(text='''⛔ У вас нет прав разрешать команды.''')
                     return
 
+                record = self._approval_state.get(approval_id)
+                if isinstance(record, dict) and str(record.get("request_id", "")).startswith("kb_"):
+                    if not self._kanban_owner_matches(record, caller_id, query_chat_id, query_chat_type):
+                        await query.answer(text="Только владелец может ответить на поручение.")
+                        return
+                    if choice == "deny" and record.get("decision_kind") == "kanban_accept":
+                        await query.answer(text="Ответьте на сообщение с результатом: что нужно исправить.", show_alert=True)
+                        return
+                    from korra_cli.kanban_decisions import resolve, KanbanDecisionConflict
+                    try:
+                        await asyncio.to_thread(resolve, record["request_id"], choice,
+                                                source_session_id=record["source_session_id"],
+                                                allowed_sessions={record["source_session_id"]})
+                    except KanbanDecisionConflict as exc:
+                        await query.answer(text=str(exc), show_alert=True)
+                        return
+                    self._approval_state.pop(approval_id, None)
+                    await query.answer(text="Решение сохранено на доске.")
+                    await query.edit_message_reply_markup(reply_markup=None)
+                    return
                 session_key = self._approval_state.pop(approval_id, None)
+                exact_request = None
+                if isinstance(session_key, dict):
+                    exact_request = session_key.get("request_id")
+                    session_key = session_key.get("session_key")
                 if not session_key:
                     await query.answer(text='''Этот запрос разрешения уже закрыт.''')
                     return
@@ -7631,7 +7682,8 @@ class TelegramAdapter(BasePlatformAdapter):
                 # regression follow-up: 60s waits made stale taps common).
                 try:
                     from tools.approval import resolve_gateway_approval
-                    count = resolve_gateway_approval(session_key, choice)
+                    count = (resolve_gateway_approval(session_key, choice, request_id=exact_request)
+                             if exact_request else resolve_gateway_approval(session_key, choice))
                     logger.info(
                         "Telegram button resolved %d approval(s) for session %s (choice=%s, user=%s)",
                         count, session_key, choice, user_display,
@@ -10095,6 +10147,57 @@ class TelegramAdapter(BasePlatformAdapter):
         """
         return getattr(update, "effective_message", None) or getattr(update, "message", None)
 
+    def _kanban_owner_matches(self, record, user_id, chat_id, chat_type) -> bool:
+        from gateway.credential_management import owner_matches
+        from korra_cli.config import read_raw_config_readonly
+        from korra_constants import set_hermes_home_override, reset_hermes_home_override
+
+        token = None
+        try:
+            profile = getattr(self, "_owner_profile", None)
+            if profile:
+                from korra_cli.profiles import resolve_profile_env
+                token = set_hermes_home_override(resolve_profile_env(profile))
+            config = read_raw_config_readonly()
+        except Exception:
+            return False
+        finally:
+            if token is not None:
+                reset_hermes_home_override(token)
+        return (str(chat_type) in {"private", "dm"}
+                and str(chat_id) == record.get("chat_id")
+                and str(user_id) == record.get("owner_id")
+                and owner_matches(config, "telegram", str(user_id)))
+
+    async def _answer_kanban_reply(self, msg) -> bool:
+        replied = getattr(msg, "reply_to_message", None)
+        if not replied:
+            return False
+        record = self._kanban_reply_state.get((str(msg.chat_id), str(replied.message_id)))
+        if not record:
+            # A pre-restart board prompt must not become ordinary text which a
+            # chat agent could relay to a different/newer board question.
+            if getattr(getattr(replied, "from_user", None), "is_bot", False) and "Ждёт вас. Ответьте на это сообщение" in (getattr(replied, "text", "") or ""):
+                await msg.reply_text("После перезапуска ответьте на текущий вопрос в карточке поручения в кабинете.")
+                return True
+            return False
+        if not self._kanban_owner_matches(record, msg.from_user.id, msg.chat_id, msg.chat.type):
+            await msg.reply_text("Только владелец может ответить на поручение.")
+            return True
+        if record.get("decision_kind") == "kanban_approval":
+            await msg.reply_text("Используйте «Один раз» или «Не разрешать» под этим вопросом: ответ относится к показанным изменениям.")
+            return True
+        from korra_cli.kanban_decisions import resolve, KanbanDecisionConflict
+        choice = "deny" if record.get("decision_kind") == "kanban_accept" else "once"
+        try:
+            await asyncio.to_thread(resolve, record["request_id"], choice,
+                                    source_session_id=record["source_session_id"], answer=msg.text,
+                                    allowed_sessions={record["source_session_id"]})
+            await msg.reply_text("Ответ сохранён на доске. Поручение снова в очереди.")
+        except KanbanDecisionConflict as exc:
+            await msg.reply_text(str(exc))
+        return True
+
     async def _handle_text_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle incoming text messages.
 
@@ -10119,6 +10222,8 @@ class TelegramAdapter(BasePlatformAdapter):
         if not self._should_process_message(msg):
             if self._should_observe_unmentioned_group_message(msg):
                 self._observe_unmentioned_group_message(msg, MessageType.TEXT, update_id=update.update_id)
+            return
+        if await self._answer_kanban_reply(msg):
             return
         await self._ensure_forum_commands(update.message)
 

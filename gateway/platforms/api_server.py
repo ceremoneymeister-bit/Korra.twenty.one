@@ -190,7 +190,9 @@ def _chat_approval_event(
     event.update({
         "event": "approval.request",
         "session_id": session_id,
-        "choices": _approval_event_choices(
+        "choices": (event.get("choices") if event.get("decision_kind") in {
+            "kanban_question", "kanban_approval", "kanban_accept",
+        } else None) or _approval_event_choices(
             smart_denied=bool(event.get("smart_denied")),
             allow_session=event.get("allow_session") is not False,
             allow_permanent=allow_permanent,
@@ -4733,6 +4735,9 @@ class APIServerAdapter(BasePlatformAdapter):
                 "[api_server] durable decisions could not be listed for session %s",
                 session_id,
             )
+        from korra_cli.kanban_decisions import list_pending, session_ids
+        data.extend(_chat_approval_event(item, session_id=session_id)
+                    for item in list_pending(session_ids(session_id)))
         return web.json_response({
             "object": "list",
             "session_id": session_id,
@@ -4857,6 +4862,18 @@ class APIServerAdapter(BasePlatformAdapter):
                 ),
                 status=400,
             )
+
+        if request_id.startswith("kb_"):
+            from korra_cli.kanban_decisions import KanbanDecisionConflict, resolve
+            answer = body.get("answer", "")
+            if not isinstance(answer, str) or len(answer) > 20000:
+                return web.json_response(_openai_error("Некорректный ответ"), status=400)
+            try:
+                outcome = await asyncio.to_thread(resolve, request_id, choice,
+                                                  source_session_id=session_id, answer=answer)
+            except KanbanDecisionConflict as exc:
+                return web.json_response(_openai_error(str(exc), code="kanban_decision_conflict"), status=409)
+            return web.json_response({"resolved": 1, **outcome})
 
         if request_id.startswith("effect_"):
             if choice not in {"once", "deny"}:

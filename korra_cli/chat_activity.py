@@ -168,6 +168,24 @@ def _load_profile_snapshot(profile: str, home: Path, now: float) -> dict[str, An
             stored = db.get_session(str(entry.get("session_id") or "")) or {}
             if stored.get("source") in SERVICE_SESSION_SOURCES:
                 del routing[key]
+        # Board questions can belong to a chat older than the first history
+        # page. Resolve its actual compression tip in this profile's store.
+        from korra_cli.kanban_decisions import list_pending
+        kanban_pending = []
+        pending_roots = {}
+        row_ids = {str(row.get("id")) for row in rows}
+        for item in list_pending():
+            origin = item["source_session_id"]
+            stored = db.get_session(origin)
+            if not stored or stored.get("source") in (*SERVICE_SESSION_SOURCES, *WORKER_SESSION_SOURCES, "subagent", "tool"):
+                continue
+            lineage = db.get_compression_lineage(origin)
+            tip = lineage[-1] if lineage else origin
+            pending_roots[origin] = tip
+            if tip not in row_ids:
+                rows.append(dict(db.get_session(tip) or stored))
+                row_ids.add(tip)
+            kanban_pending.append({**item, "source_session_id": tip})
     finally:
         db.close()
 
@@ -182,6 +200,7 @@ def _load_profile_snapshot(profile: str, home: Path, now: float) -> dict[str, An
         root = str(row.get("_lineage_root_id") or sid)
         roots[root] = sid
 
+    roots.update(pending_roots)
     activity: list[dict[str, Any]] = []
     lease_statuses: dict[str, str] = {}
     for lease in leases:
@@ -258,6 +277,7 @@ def _load_profile_snapshot(profile: str, home: Path, now: float) -> dict[str, An
         })
 
     decisions = _pending_decisions(home)
+    decisions.extend(kanban_pending)
     # One row per conversation keeps «работ» honest, but the owner must still
     # see how many decisions wait: four birthday greetings in one chat are
     # four answers, not one (Birukova, 27.09).

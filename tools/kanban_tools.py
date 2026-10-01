@@ -1667,9 +1667,8 @@ def _maybe_auto_subscribe(conn: Any, task_id: str) -> bool:
         if not cfg_get(cfg, "kanban", "auto_subscribe_on_create", default=True):
             return False
     except Exception:
-        # If config can't load we still default to True — this is the
-        # user-friendly behaviour that mirrors the pre-gate implementation.
-        pass
+        # Keep the source subscription; never guess a Telegram owner.
+        cfg = {}
 
     platform = ""
     chat_id = ""
@@ -1743,6 +1742,12 @@ def _maybe_auto_subscribe(conn: Any, task_id: str) -> bool:
             delivery_mode=delivery_mode,
             delivery_metadata=delivery_metadata or None,
         )
+        # The web origin has no push channel. Notify only explicitly mapped
+        # installation/profile owners in their direct Telegram chat.
+        if platform == "api_server":
+            from korra_cli.kanban_decisions import subscribe_telegram_owners
+            subscribe_telegram_owners(conn, task_id, notifier_profile, config=cfg,
+                                      board=_kb.get_current_board())
         return True
     except Exception as _exc:
         logger.warning(

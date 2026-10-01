@@ -120,7 +120,7 @@ export type EffectDecisionStatus =
  *  Собирает его `_chat_approval_event` в gateway/platforms/api_server.py:
  *  команда там уже отредактирована от секретов. */
 /** Durable exact-payload decisions the owner answers once. */
-export type EffectDecisionKind = "outbound_message" | "payment" | "automation_recipients";
+export type EffectDecisionKind = "outbound_message" | "payment" | "automation_recipients" | "kanban_question" | "kanban_approval" | "kanban_accept";
 
 export interface SSEApprovalRequestData {
   /** Адрес конкретного запроса в очереди одобрений. */
@@ -132,6 +132,7 @@ export interface SSEApprovalRequestData {
   effect_status?: EffectDecisionStatus;
   /** Origin chat stays authoritative even when shown in the profile center. */
   source_session_id?: string;
+  task_url?: string;
   updated_at?: number;
   /** Команда как её покажут человеку (секреты вырезаны на сервере). */
   command?: string;

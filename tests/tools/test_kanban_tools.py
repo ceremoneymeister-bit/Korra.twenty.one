@@ -1139,3 +1139,20 @@ def test_attach_url_happy_path_public_host(worker_env, default_url_guard, monkey
         assert Path(atts[0].stored_path).read_bytes() == payload
     finally:
         conn.close()
+
+
+def test_web_origin_adds_notification_only_for_configured_telegram_owner(monkeypatch, worker_env):
+    from tools import kanban_tools as kt
+
+    monkeypatch.setenv("HERMES_SESSION_PLATFORM", "api_server")
+    monkeypatch.setenv("HERMES_SESSION_CHAT_ID", "web-origin")
+    monkeypatch.setenv("HERMES_SESSION_USER_ID", "web-user")
+    monkeypatch.setattr(kt, "load_config", lambda: {
+        "gateway": {"credential_management": {"owners": {"telegram": ["111", "*"]}}},
+    })
+    monkeypatch.setattr("gateway.credential_management.installation_owners", lambda _: frozenset())
+    out = kt._handle_create({"title": "Договор", "assignee": "peer"})
+    data = json.loads(out)
+    assert data["subscribed"] is True
+    subs = _sub_index(_list_subs_for_task(data["task_id"]))
+    assert {(s["platform"], s["chat_id"]) for s in subs} == {("api_server", "web-origin"), ("telegram", "111")}

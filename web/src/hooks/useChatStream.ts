@@ -112,7 +112,7 @@ type StreamAction =
   | { type: "SET_ERROR"; error: string }
   | { type: "STOP_FAILED"; error: string }
   | { type: "APPROVAL_REQUESTED"; request: SSEApprovalRequestData }
-  | { type: "APPROVAL_RESTORED"; requests: SSEApprovalRequestData[] }
+  | { type: "APPROVAL_RESTORED"; requests: SSEApprovalRequestData[]; preserveLiveCommands?: boolean }
   | { type: "APPROVAL_SENDING"; requestId: string }
   | { type: "APPROVAL_SETTLED"; requestId: string; decision: ApprovalChoiceValue; note?: string }
   | { type: "APPROVAL_FAILED"; requestId: string; error: string; expired: boolean }
@@ -578,6 +578,9 @@ function reducer(state: StreamState, action: StreamAction): StreamState {
         const serverEntry = restored.get(entry.request.request_id);
         if (serverEntry?.status === "settled") return serverEntry;
         if (entry.status === "settled") return entry;
+        // SSE owns command questions during the live turn. A polling response
+        // may have started before that question reached the server's list.
+        if (action.preserveLiveCommands && !entry.request.decision_kind?.startsWith("kanban_")) return entry;
         const stillWaiting = alive.has(entry.request.request_id);
         if (stillWaiting && entry.status === "expired") {
           return serverEntry ?? { ...entry, status: "pending" as const, error: undefined };
@@ -692,6 +695,7 @@ export interface UseChatStreamReturn {
   resolveApproval: (
     requestId: string,
     choice: ApprovalChoiceValue,
+    answer?: string,
   ) => Promise<boolean>;
   retryPending: (target?: PendingMessageTarget) => Promise<boolean>;
   discardPending: (target?: PendingMessageTarget) => void;
@@ -1844,6 +1848,7 @@ export function useChatStream(
     async (
       requestId: string,
       choice: ApprovalChoiceValue,
+      answer?: string,
     ): Promise<boolean> => {
       const sessionId = state.sessionId;
       if (!sessionId || !requestId) return false;
@@ -1852,6 +1857,7 @@ export function useChatStream(
         sessionId,
         requestId,
         choice,
+        ...(answer !== undefined ? { answer } : {}),
         ...(profile ? { profile } : {}),
       });
       if (!mountedRef.current) return result.ok;
@@ -1887,17 +1893,15 @@ export function useChatStream(
     [state.sessionId, state.approvals, profile],
   );
 
-  // Восстановление вопроса после перезагрузки страницы. Живой поток SSE живёт
-  // только в открытой вкладке, а ход агента переживает F5 и продолжает стоять
-  // на вопросе — поэтому при отсутствии потока спрашиваем сервер напрямую.
-  // Пока вопрос висит, перепроверяем: у ожидания есть таймаут, и мёртвую
-  // карточку честнее погасить, чем оставить кнопку, которая ничего не сделает.
+  // Канбан может задать вопрос после завершения модельного хода. Опрос
+  // обнаруживает его в исходном чате и восстанавливает после F5; обычные
+  // вопросы команд во время живого хода остаются под управлением SSE.
   const hasWaitingApproval = state.approvals.some(
     (entry) => entry.status === "pending",
   );
   const { sessionId: currentSessionId, isStreaming } = state;
   useEffect(() => {
-    if (!currentSessionId || isStreaming) return;
+    if (!currentSessionId) return;
     let cancelled = false;
     const load = async () => {
       try {
@@ -1906,18 +1910,13 @@ export function useChatStream(
           profile || undefined,
         );
         if (cancelled || !mountedRef.current) return;
-        dispatch({ type: "APPROVAL_RESTORED", requests });
+        dispatch({ type: "APPROVAL_RESTORED", requests, preserveLiveCommands: streamingRef.current });
       } catch {
         // Не нашлось — не повод пугать человека: карточка либо появится на
         // следующей проверке, либо её и правда нет.
       }
     };
     void load();
-    if (!hasWaitingApproval) {
-      return () => {
-        cancelled = true;
-      };
-    }
     const timer = window.setInterval(() => void load(), APPROVAL_POLL_MS);
     return () => {
       cancelled = true;

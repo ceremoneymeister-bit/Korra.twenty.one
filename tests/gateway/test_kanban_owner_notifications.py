@@ -23,6 +23,42 @@ class RecordingAdapter:
         pass
 
 
+def test_existing_web_question_gets_exact_telegram_keyboard_after_update(tmp_path, monkeypatch):
+    from gateway.platforms.base import SendResult
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setattr("korra_cli.config.read_raw_config_readonly", lambda: {
+        "gateway": {"credential_management": {"owners": {"telegram": ["111"]}}},
+    })
+    monkeypatch.setattr("gateway.credential_management.installation_owners", lambda _: frozenset())
+    _board(tmp_path, monkeypatch, "catch-up")
+    with kb.connect_closing() as conn:
+        tid = kb.create_task(conn, title="Договор", assignee="lawyer", session_id="origin")
+        kb.add_notify_sub(conn, task_id=tid, platform="api_server", chat_id="origin", notifier_profile="default")
+        kb.claim_task(conn, tid, claimer="worker")
+        kb.block_task(conn, tid, kind="needs_input", reason="Какой срок?")
+        version = kb.block_revision(conn, tid)
+
+    class ButtonsAdapter(RecordingAdapter):
+        async def send_exec_approval(self, **kwargs):
+            self.sent.append(kwargs)
+            return SendResult(success=True, message_id="42")
+
+    adapter = ButtonsAdapter()
+    runner = _runner(adapter)
+    runner._kanban_notifier_profile = "default"
+    asyncio.run(_tick(monkeypatch, runner))
+    assert len(adapter.sent) == 1
+    prompt = adapter.sent[0]
+    assert prompt["chat_id"] == "111" and "Какой срок?" in prompt["command"]
+    assert prompt["metadata"]["board_version"] == version
+    assert prompt["metadata"]["source_session_id"] == "origin"
+    assert prompt["metadata"]["request_id"].startswith("kb_")
+    assert not prompt["allow_session"] and not prompt["allow_permanent"]
+    runner._running = True
+    asyncio.run(_tick(monkeypatch, runner))
+    assert len(adapter.sent) == 1  # cursor survives retries/reconciliation
+
+
 async def _tick(monkeypatch, runner):
     real_sleep = asyncio.sleep
 

@@ -20,6 +20,7 @@
  */
 
 import { useState } from "react";
+import { Link } from "react-router";
 import { Ban, Check, Clock, Infinity as InfinityIcon, ShieldCheck } from "lucide-react";
 import type { ComponentType } from "react";
 
@@ -78,6 +79,7 @@ export interface CommandApprovalCardProps {
   decisionKind?: EffectDecisionKind;
   /** Команда как её показывает движок: секреты уже вырезаны на сервере. */
   command?: string;
+  taskUrl?: string;
   /** Чем именно опасна команда. */
   description?: string;
   /** Варианты ответа, которые принимает движок для этого запроса. */
@@ -92,12 +94,13 @@ export interface CommandApprovalCardProps {
   error?: string;
   /** Пояснение к принятому решению — например, что ответ придёт в историю. */
   note?: string;
-  onDecide: (choice: ApprovalChoiceValue) => void;
+  onDecide: (choice: ApprovalChoiceValue, answer?: string) => void;
 }
 
 export function CommandApprovalCard({
   decisionKind,
   command,
+  taskUrl,
   description,
   choices,
   sending,
@@ -110,6 +113,11 @@ export function CommandApprovalCard({
   // Какой необратимый ответ ждёт подтверждения. Сбрасывается выбором другого.
   const [confirming, setConfirming] = useState<ApprovalChoiceValue | null>(null);
 
+  const [answer, setAnswer] = useState("");
+  const boardQuestion = decisionKind === "kanban_question";
+  const boardApproval = decisionKind === "kanban_approval";
+  const boardAccept = decisionKind === "kanban_accept";
+  const board = boardQuestion || boardApproval || boardAccept;
   const settled = decision !== undefined;
   const trimmedCommand = command?.trim() ?? "";
   // Движок описывает опасность по-английски (`DANGEROUS_PATTERNS`), а в двух
@@ -123,6 +131,13 @@ export function CommandApprovalCard({
   const exactEffect = outbound || payment || recipients;
 
   const choiceMeta = (choice: ApprovalChoiceValue): ChoiceMeta => {
+    if (board) return {
+      label: boardAccept ? (choice === "once" ? "Принять результат" : "Вернуть с замечанием")
+        : boardApproval ? (choice === "once" ? "Разрешить эти изменения" : "Не разрешать")
+          : answer.trim() ? "Ответить и продолжить" : "Продолжить как предложено",
+      hint: "Только показанная версия поручения",
+      icon: choice === "deny" ? Ban : Check,
+    };
     if (!exactEffect) return CHOICE_META[choice];
     if (choice === "once") {
       return {
@@ -146,7 +161,7 @@ export function CommandApprovalCard({
     return CHOICE_META[choice];
   };
 
-  const settledLabel = exactEffect
+  const settledLabel = board ? "Решение сохранено на доске" : exactEffect
     ? decision === "deny"
       ? payment ? "Не оплачено" : recipients ? "Получатели не подтверждены" : "Не отправлено"
       : payment
@@ -165,7 +180,7 @@ export function CommandApprovalCard({
       )}
       role="group"
       aria-label={
-        payment
+        board ? "Ждёт вас — поручение на доске" : payment
           ? "Решение по оплате"
           : recipients
             ? "Решение о получателях автоматизации"
@@ -180,7 +195,7 @@ export function CommandApprovalCard({
         />
         <div className="min-w-0">
           <p className="text-xs leading-snug font-medium text-[var(--neo-text-primary)]">
-            {payment
+            {board ? "Ждёт вас" : payment
               ? "Проверьте оплату"
               : recipients
                 ? "Подтвердите получателей автоматизации"
@@ -207,6 +222,17 @@ export function CommandApprovalCard({
         </pre>
       )}
 
+      {board && taskUrl && (
+        <Link className="mb-2 block text-xs underline" to={taskUrl}>Открыть карточку поручения</Link>
+      )}
+      {board && !settled && !expired && (
+        <label className="mb-2 block text-xs">
+          {boardAccept ? "Что исправить (для возврата)" : boardApproval ? "Комментарий (необязательно)" : "Ваш ответ"}
+          <textarea className="mt-1 w-full rounded border p-2" rows={3} value={answer}
+            disabled={sending} onChange={event => setAnswer(event.target.value)} />
+          {boardAccept && !answer.trim() && <span className="block text-[11px]">Для возврата напишите, что исправить.</span>}
+        </label>
+      )}
       {settled ? (
         <div>
           <p className="flex items-center gap-1.5 text-[11px] text-[var(--neo-text-secondary)]">
@@ -238,14 +264,15 @@ export function CommandApprovalCard({
               <button
                 key={choice}
                 type="button"
-                disabled={sending}
+                disabled={sending || (boardAccept && choice === "deny" && !answer.trim())}
                 onClick={() => {
                   if (meta.confirm && !awaiting) {
                     setConfirming(choice);
                     return;
                   }
                   setConfirming(null);
-                  onDecide(choice);
+                  if (board) onDecide(choice, answer);
+                  else onDecide(choice);
                 }}
                 className={cn(
                   "korra-approval__option",

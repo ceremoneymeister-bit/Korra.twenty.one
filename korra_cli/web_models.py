@@ -157,6 +157,7 @@ class ChatApprovalDecision(BaseModel):
     session_id: str
     choice: str
     request_id: Optional[str] = None
+    answer: Optional[str] = Field(None, max_length=20000)
 
 
 class ManagedDirectoryCreate(BaseModel):

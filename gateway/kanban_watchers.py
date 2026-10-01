@@ -493,6 +493,21 @@ class GatewayKanbanWatchersMixin:
                                 notifier_profiles=notifier_profiles,
                                 include_unowned=include_unowned,
                             )
+                            if "telegram" in active_platforms:
+                                from korra_cli.kanban_decisions import subscribe_telegram_owners
+                                for source_sub in subs:
+                                    if source_sub.get("platform") != "api_server" or not source_sub.get("notifier_profile"):
+                                        continue
+                                    source_task = _kb.get_task(conn, source_sub["task_id"])
+                                    if source_task and source_task.status in {"blocked", "triage", "review"}:
+                                        try:
+                                            subscribe_telegram_owners(conn, source_task.id, source_sub["notifier_profile"],
+                                                                      board=slug, catch_up_current=True)
+                                        except Exception:
+                                            logger.debug("kanban notifier: owner route unavailable for profile %s",
+                                                         source_sub["notifier_profile"], exc_info=True)
+                                subs = _kb.list_notify_subs(conn, notifier_profiles=notifier_profiles,
+                                                           include_unowned=include_unowned)
                             if not subs:
                                 logger.debug("kanban notifier: board %s has no subscriptions", slug)
                             for sub in subs:
@@ -789,9 +804,25 @@ class GatewayKanbanWatchersMixin:
                             # outcome there, not by skipping the send here.
                             continue
                         try:
-                            _send_res = await adapter.send(
-                                sub["chat_id"], msg, metadata=metadata,
-                            )
+                            board_decision = None
+                            if platform_str == "telegram" and task and kind in {"blocked", "block_loop_detected", "submitted"}:
+                                from korra_cli.kanban_decisions import project_task
+                                with _kb.connect_closing(board=board_slug) as decision_conn:
+                                    current_task = _kb.get_task(decision_conn, task.id)
+                                    if current_task:
+                                        board_decision = project_task(decision_conn, current_task, board_slug)
+                                if board_decision and board_decision["board_version"] != ev.id:
+                                    board_decision = None
+                            if board_decision and getattr(type(adapter), "send_exec_approval", None):
+                                _send_res = await adapter.send_exec_approval(
+                                    chat_id=sub["chat_id"], command=board_decision["command"],
+                                    session_key=board_decision["source_session_id"],
+                                    description="Ждёт вас. Ответьте на это сообщение или используйте кнопки.",
+                                    metadata={**metadata, **board_decision, "owner_id": sub.get("user_id") or sub["chat_id"]},
+                                    allow_session=False, allow_permanent=False,
+                                )
+                            else:
+                                _send_res = await adapter.send(sub["chat_id"], msg, metadata=metadata)
                             # A SendResult(success=False) without an exception
                             # (returned by push-capable adapters on a genuine
                             # transient failure) must count as a FAILED
