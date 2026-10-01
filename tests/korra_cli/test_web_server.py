@@ -1413,7 +1413,8 @@ class TestWebServerEndpoints:
 
         managed = _channel_managed_env_keys()
         assert "DISCORD_BOT_TOKEN" in managed
-        assert "MATTERMOST_TOKEN" in managed
+        assert "SLACK_BOT_TOKEN" in managed
+        assert "MATTERMOST_TOKEN" not in managed
         assert "GATEWAY_PROXY_URL" not in managed
         assert "GATEWAY_PROXY_URL" in _MESSAGING_KEYS_PAGE_KEYS
 

@@ -174,21 +174,23 @@ def test_secondary_open_policy_fails_startup_guard(monkeypatch):
 # Plugin-platform extra.allowed_users fallback (#98738 / #82871)
 # ─────────────────────────────────────────────────────────────────────
 
-# Buzz has no static Platform member: plugin platforms get a dynamic
-# member created on demand by Platform._missing_ (value lookup). Resolve
-# it that way — attribute access only works after an earlier lookup in
-# the same process, which a fresh CI shard cannot rely on.
-_BUZZ = Platform("buzz")
+# Exercise the gateway contract with a lightweight plugin normalizer.
+_PLUGIN = Platform("teams")
+USER_REF = "member:123"
+USER_ID = "123"
 
 
-def _make_buzz_multiplex_runner(monkeypatch, extra):
-    """Runner whose secondary 'coder' profile runs a live Buzz adapter."""
+def _normalize_user_ref(value):
+    return str(value).lower().removeprefix("member:")
+
+
+def _make_plugin_multiplex_runner(monkeypatch, extra):
+    """Runner whose secondary 'coder' profile runs a live plugin adapter."""
     from gateway.run import GatewayRunner
-    from tests.gateway.test_buzz_adapter import _normalize_user_ref
 
     for key in (
-        "BUZZ_ALLOWED_USERS",
-        "BUZZ_ALLOW_ALL_USERS",
+        "TEAMS_ALLOWED_USERS",
+        "TEAMS_ALLOW_ALL_USERS",
         "GATEWAY_ALLOWED_USERS",
         "GATEWAY_ALLOW_ALL_USERS",
     ):
@@ -199,20 +201,20 @@ def _make_buzz_multiplex_runner(monkeypatch, extra):
 
     adapter = SimpleNamespace(
         config=PlatformConfig(enabled=True, extra=extra),
-        # The Buzz adapter exposes this hook so npub allowlist entries match
-        # the hex-pubkey user ids the gateway authorizes.
+        # The plugin adapter exposes this hook so member: allowlist entries match
+        # the normalized user ids the gateway authorizes.
         normalize_user_id=_normalize_user_ref,
     )
     runner.adapters = {}
-    runner._profile_adapters = {"coder": {_BUZZ: adapter}}
+    runner._profile_adapters = {"coder": {_PLUGIN: adapter}}
     runner.pairing_store = MagicMock()
     runner.pairing_store.is_approved.return_value = False
     return runner
 
 
-def _buzz_source(user_id):
+def _plugin_source(user_id):
     return SessionSource(
-        platform=_BUZZ,
+        platform=_PLUGIN,
         user_id=user_id,
         chat_id="chat-1",
         user_name="member",
@@ -221,146 +223,98 @@ def _buzz_source(user_id):
     )
 
 
-def _patch_buzz_registry(monkeypatch, allowed_users_env="BUZZ_ALLOWED_USERS"):
+def _patch_plugin_registry(monkeypatch, allowed_users_env="TEAMS_ALLOWED_USERS"):
     from gateway.platform_registry import platform_registry
 
     real_get = platform_registry.get
 
     def _get(key):
-        if key == "buzz":
+        if key == "teams":
             return SimpleNamespace(allowed_users_env=allowed_users_env)
         return real_get(key)
 
     monkeypatch.setattr(platform_registry, "get", _get)
 
 
-def test_secondary_buzz_extra_allowed_users_authorizes_listed_user(monkeypatch):
+def test_secondary_plugin_extra_allowed_users_authorizes_listed_user(monkeypatch):
     """A secondary profile's extra.allowed_users must authorize its users when
     the env var only ever carried the default profile's list (#98738/#82871)."""
-    from tests.gateway.test_buzz_adapter import SELF_NPUB, SELF_PUBKEY
 
-    runner = _make_buzz_multiplex_runner(
-        monkeypatch, extra={"allowed_users": [SELF_NPUB]}
+    runner = _make_plugin_multiplex_runner(
+        monkeypatch, extra={"allowed_users": [USER_REF]}
     )
-    _patch_buzz_registry(monkeypatch)
+    _patch_plugin_registry(monkeypatch)
 
-    # user_id arrives as the hex pubkey while the allowlist entry is an npub.
-    assert runner._is_user_authorized(_buzz_source(SELF_PUBKEY)) is True
+    # user_id arrives as a normalized ID while the allowlist contains a reference.
+    assert runner._is_user_authorized(_plugin_source(USER_ID)) is True
 
 
-def test_secondary_buzz_extra_allowed_users_denies_unlisted_sender(monkeypatch):
+def test_secondary_plugin_extra_allowed_users_denies_unlisted_sender(monkeypatch):
     """Default-deny is preserved: a sender not in the profile's allowlist
     stays denied even though the adapter-level list admitted the message."""
-    from tests.gateway.test_buzz_adapter import SELF_PUBKEY
 
-    runner = _make_buzz_multiplex_runner(
-        monkeypatch, extra={"allowed_users": ["npub1" + "b" * 56]}
+    runner = _make_plugin_multiplex_runner(
+        monkeypatch, extra={"allowed_users": ["member:other"]}
     )
-    _patch_buzz_registry(monkeypatch)
+    _patch_plugin_registry(monkeypatch)
 
-    assert runner._is_user_authorized(_buzz_source(SELF_PUBKEY)) is False
+    assert runner._is_user_authorized(_plugin_source(USER_ID)) is False
 
 
-def test_secondary_buzz_without_extra_allowlist_stays_default_deny(monkeypatch):
+def test_secondary_plugin_without_extra_allowlist_stays_default_deny(monkeypatch):
     """No extra.allowed_users configured: nothing changes, the default-deny
     path applies (no fail-open via an empty list)."""
-    from tests.gateway.test_buzz_adapter import SELF_PUBKEY
 
-    runner = _make_buzz_multiplex_runner(monkeypatch, extra={})
-    _patch_buzz_registry(monkeypatch)
+    runner = _make_plugin_multiplex_runner(monkeypatch, extra={})
+    _patch_plugin_registry(monkeypatch)
 
-    assert runner._is_user_authorized(_buzz_source(SELF_PUBKEY)) is False
+    assert runner._is_user_authorized(_plugin_source(USER_ID)) is False
 
 
 def test_extra_allowed_users_not_consulted_without_registry_declaration(monkeypatch):
     """The fallback is gated on the platform's registry entry declaring
     allowed_users_env — a platform without that contract keeps the previous
     behavior even if its extra happens to hold an allowed_users key."""
-    from tests.gateway.test_buzz_adapter import SELF_PUBKEY
 
-    runner = _make_buzz_multiplex_runner(
+    runner = _make_plugin_multiplex_runner(
         monkeypatch, extra={"allowed_users": ["someone"]}
     )
-    _patch_buzz_registry(monkeypatch, allowed_users_env="")
+    _patch_plugin_registry(monkeypatch, allowed_users_env="")
 
-    assert runner._is_user_authorized(_buzz_source("someone")) is False
+    assert runner._is_user_authorized(_plugin_source("someone")) is False
 
 
 def test_extra_allowed_users_wildcard_authorizes_any_sender(monkeypatch):
     """\"*\" in the profile's extra.allowed_users keeps the env-var wildcard
     semantics: any sender is authorized (still gated on the registry
     declaration)."""
-    from tests.gateway.test_buzz_adapter import SELF_PUBKEY
 
-    runner = _make_buzz_multiplex_runner(monkeypatch, extra={"allowed_users": ["*"]})
-    _patch_buzz_registry(monkeypatch)
+    runner = _make_plugin_multiplex_runner(monkeypatch, extra={"allowed_users": ["*"]})
+    _patch_plugin_registry(monkeypatch)
 
-    assert runner._is_user_authorized(_buzz_source(SELF_PUBKEY)) is True
+    assert runner._is_user_authorized(_plugin_source(USER_ID)) is True
 
 
 def test_extra_allowed_users_blank_entries_are_dropped_not_denials(monkeypatch):
     """Blank/whitespace entries are dropped at parse; an otherwise-empty
     list behaves like the absent case (default-deny), not like a wildcard."""
-    from tests.gateway.test_buzz_adapter import SELF_PUBKEY
 
-    runner = _make_buzz_multiplex_runner(
+    runner = _make_plugin_multiplex_runner(
         monkeypatch, extra={"allowed_users": ["", "   ", ","]}
     )
-    _patch_buzz_registry(monkeypatch)
+    _patch_plugin_registry(monkeypatch)
 
-    assert runner._is_user_authorized(_buzz_source(SELF_PUBKEY)) is False
+    assert runner._is_user_authorized(_plugin_source(USER_ID)) is False
 
 
-def test_extra_allowed_users_case_insensitive_hex_and_uppercase_npub(monkeypatch):
-    """Entry spellings normalize to the same principal: upper-case hex and
-    upper-case npub entries both match the hex user id Buzz dispatches
-    (entries are normalized; the inbound id is already hex)."""
-    from tests.gateway.test_buzz_adapter import SELF_NPUB, SELF_PUBKEY
+def test_extra_allowed_users_case_insensitive_user_references(monkeypatch):
+    """Entry spellings normalize to the same principal: upper-case IDs and
+    upper-case member: entries both match the normalized user id the plugin dispatches
+    (entries are normalized; the inbound ID is already normalized)."""
 
-    runner = _make_buzz_multiplex_runner(
-        monkeypatch, extra={"allowed_users": [SELF_PUBKEY.upper(), SELF_NPUB.upper()]}
+    runner = _make_plugin_multiplex_runner(
+        monkeypatch, extra={"allowed_users": [USER_ID.upper(), USER_REF.upper()]}
     )
-    _patch_buzz_registry(monkeypatch)
+    _patch_plugin_registry(monkeypatch)
 
-    assert runner._is_user_authorized(_buzz_source(SELF_PUBKEY)) is True
-
-
-def test_adapter_intake_and_central_authz_agree_on_the_same_list(monkeypatch):
-    """Policy-layer agreement (#98738): a sender admitted by the adapter's
-    construction-time intake allowlist (extra.allowed_users normalized to
-    hex) is exactly the sender the central check authorizes, and an
-    unlisted sender is rejected at BOTH layers."""
-    from gateway.session import SessionSource as _SessionSource
-
-    from tests.gateway.test_buzz_adapter import SELF_NPUB, SELF_PUBKEY
-
-    monkeypatch.delenv("BUZZ_ALLOWED_USERS", raising=False)
-    monkeypatch.delenv("BUZZ_ALLOW_ALL_USERS", raising=False)
-
-    other_hex = "b" * 64
-    adapter_extra = {"allowed_users": [SELF_NPUB]}
-
-    # Layer 1 — adapter intake: construction normalizes npub entries to hex.
-    from tests.gateway.test_buzz_adapter import _make_adapter as _base_adapter
-
-    adapter = _base_adapter(adapter_extra)
-    assert adapter._allowed_pubkeys == {SELF_PUBKEY}
-
-    # Layer 2 — central authz over the same adapter config.
-    runner = _make_buzz_multiplex_runner(monkeypatch, extra=adapter_extra)
-    _patch_buzz_registry(monkeypatch)
-
-    for sender, admitted in ((SELF_PUBKEY, True), (other_hex, False)):
-        # Adapter layer: intake filter admits/denies...
-        assert (sender in adapter._allowed_pubkeys) is admitted
-        # ...and central authz returns the SAME verdict for that sender.
-        assert runner._is_user_authorized(
-            _SessionSource(
-                platform=_BUZZ,
-                user_id=sender,
-                chat_id="chat-1",
-                user_name="member",
-                chat_type="dm",
-                profile="coder",
-            )
-        ) is admitted
+    assert runner._is_user_authorized(_plugin_source(USER_ID)) is True

@@ -127,30 +127,6 @@ class TestAuthzAuthEnv:
 
 # ── Cluster B: matrix startup reads (Slack pattern) ────────────────────────
 
-class TestMatrixStartupSecret:
-    def _helper(self):
-        mod = pytest.importorskip("plugins.platforms.matrix.adapter")
-        return mod._startup_env_secret
-
-    def test_scoped_value_wins(self, monkeypatch):
-        helper = self._helper()
-        monkeypatch.setenv("MATRIX_ACCESS_TOKEN", "env-token")
-        ss.set_multiplex_active(True)
-        with _Scope({"MATRIX_ACCESS_TOKEN": "scoped-token"}):
-            assert helper("MATRIX_ACCESS_TOKEN") == "scoped-token"
-
-    def test_scoped_miss_no_borrow(self, monkeypatch):
-        helper = self._helper()
-        monkeypatch.setenv("MATRIX_ACCESS_TOKEN", "other-profile")
-        ss.set_multiplex_active(True)
-        with _Scope({"UNRELATED": "x"}):
-            assert helper("MATRIX_ACCESS_TOKEN") == ""
-
-    def test_unscoped_multiplex_falls_back(self, monkeypatch):
-        helper = self._helper()
-        monkeypatch.setenv("MATRIX_PASSWORD", "own-env-pass")
-        ss.set_multiplex_active(True)
-        assert helper("MATRIX_PASSWORD") == "own-env-pass"
 
 
 # ── Cluster C: managed tool gateway token override ─────────────────────────

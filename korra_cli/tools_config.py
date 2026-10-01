@@ -107,7 +107,6 @@ CONFIGURABLE_TOOLSETS = [
     ("vision", "👁️  Анализ изображений", "Распознавание и анализ изображений"),
     ("video", "🎬 Анализ видео", "Анализ видео при поддержке выбранной моделью"),
     ("image_gen", "🎨 Создание изображений", "Генерация изображений"),
-    ("video_gen", "🎬 Создание видео", "Генерация видео по тексту, изображению или референсу"),
     ("x_search", "🐦 Поиск в X (Twitter)", "Поиск через xAI OAuth или XAI_API_KEY"),
     ("google_workspace", "🔑 Подключение Google Workspace",
      "Владелец подключает Gmail, Календарь, Диск и Таблицы прямо из переписки"),
@@ -128,8 +127,6 @@ CONFIGURABLE_TOOLSETS = [
     ("clarify", "❓ Уточняющие вопросы", "Запрос уточнений у пользователя"),
     ("delegation", "👥 Делегирование задач", "Передача подзадач другим агентам"),
     ("cronjob", "⏰ Задачи по расписанию", "Создание и управление задачами с подключаемыми навыками"),
-    ("homeassistant", "🏠 Умный дом", "Управление устройствами Home Assistant"),
-    ("spotify", "🎵 Spotify", "Воспроизведение, поиск, плейлисты и медиатека"),
     ("discord", "💬 Discord", "Чтение сообщений, поиск участников и создание веток"),
     ("discord_admin", "🛡️  Администрирование Discord", "Каналы, роли, закрепление сообщений и назначение ролей"),
     ("yuanbao", "🤖 Yuanbao", "Группы, участники и личные сообщения"),
@@ -156,13 +153,9 @@ def gui_toolset_label(label: str) -> str:
 # They're still in _HERMES_CORE_TOOLS (available at runtime if enabled),
 # but the setup checklist won't pre-select them for first-time users.
 #
-# Video gen is off by default — it's a niche, paid, slow feature. Users
-# who want it opt in via `hermes tools` → Video Generation, which walks
-# them through provider + model selection.
-#
 # X search is off by default for users without xAI credentials, but
 # auto-enables when SuperGrok OAuth tokens are stored OR XAI_API_KEY is
-# set — mirroring the HASS_TOKEN → homeassistant auto-enable below. The
+# set. The
 # `hermes tools` → X (Twitter) Search setup walks users through credential
 # setup. The tool's check_fn means the schema still won't appear to the
 # model if the credential later goes missing or expires.
@@ -175,8 +168,8 @@ def gui_toolset_label(label: str) -> str:
 # toolset, so leaving this off costs the owner nothing until they deliberately
 # want the connection driven from chat.
 _DEFAULT_OFF_TOOLSETS = {
-    "homeassistant", "spotify", "discord", "discord_admin", "video",
-    "video_gen", "image_gen", "google_workspace", "x_search", "a2a",
+    "discord", "discord_admin", "video",
+    "image_gen", "google_workspace", "x_search",
 }
 
 
@@ -220,15 +213,6 @@ def _xai_credentials_present() -> bool:
         return bool(str(os.environ.get("XAI_API_KEY") or "").strip())
     return bool(str(get_secret("XAI_API_KEY") or "").strip())
 
-
-def _homeassistant_credentials_present() -> bool:
-    """Return whether the active profile has a Home Assistant token."""
-    try:
-        from agent.secret_scope import get_secret
-
-        return bool((get_secret("HASS_TOKEN", "") or "").strip())
-    except Exception:
-        return False
 
 def _toolset_configuration_platform(ts_key: str, default: str = "cli") -> str:
     """Return the platform a platform-less configuration UI should target.
@@ -548,30 +532,6 @@ TOOL_CATEGORIES = {
             },
         ],
     },
-    "video_gen": {
-        "name": "Video Generation",
-        "icon": "🎬",
-        # "Nous Subscription" row mirrors the image_gen pattern — managed
-        # FAL video generation billed via the Nous Portal.  Plugin-backed
-        # provider rows (FAL BYOK, xAI, …) are injected at runtime by
-        # ``_plugin_video_gen_providers()`` in ``_visible_providers``.
-        "providers": [
-            {
-                "name": "Nous Subscription",
-                "badge": 'по подписке',
-                "tag": 'Создание видео FAL с оплатой по вашей подписке',
-                "env_vars": [],
-                "requires_nous_auth": True,
-                "managed_nous_feature": "video_gen",
-                "override_env_vars": ["FAL_KEY"],
-                # The underlying plugin backend — when the user picks
-                # "Nous Subscription" we set video_gen.provider = "fal"
-                # and video_gen.use_gateway = True so the FAL plugin
-                # routes through the managed queue gateway.
-                "video_gen_plugin_name": "fal",
-            },
-        ],
-    },
     "x_search": {
         "name": "X (Twitter) Search",
         "setup_title": 'Выберите источник входа xAI',
@@ -685,32 +645,6 @@ TOOL_CATEGORIES = {
             },
         ],
     },
-    "homeassistant": {
-        "name": "Smart Home",
-        "icon": "🏠",
-        "providers": [
-            {
-                "name": "Home Assistant",
-                "tag": 'Подключение через REST API',
-                "env_vars": [
-                    {"key": "HASS_TOKEN", "prompt": 'Долгосрочный токен доступа Home Assistant'},
-                    {"key": "HASS_URL", "prompt": 'Адрес Home Assistant', "default": "http://homeassistant.local:8123"},
-                ],
-            },
-        ],
-    },
-    "spotify": {
-        "name": "Spotify",
-        "icon": "🎵",
-        "providers": [
-            {
-                "name": "Spotify Web API",
-                "tag": 'Вход OAuth с PKCE: открывает мастер настройки',
-                "env_vars": [],
-                "post_setup": "spotify",
-            },
-        ],
-    },
     "computer_use": {
         "name": "Computer Use (macOS/Windows/Linux)",
         "icon": "🖱️",
@@ -732,31 +666,6 @@ TOOL_CATEGORIES = {
                 ],
                 "computer_use_backend": "cua",
                 "post_setup": "cua_driver",
-            },
-        ],
-    },
-    "langfuse": {
-        "name": "Langfuse Observability",
-        "icon": "📊",
-        "providers": [
-            {
-                "name": "Langfuse Cloud",
-                "tag": 'Облачный Langfuse на cloud.langfuse.com',
-                "env_vars": [
-                    {"key": "HERMES_LANGFUSE_PUBLIC_KEY", "prompt": 'Публичный ключ Langfuse: pk-lf-...', "url": "https://cloud.langfuse.com"},
-                    {"key": "HERMES_LANGFUSE_SECRET_KEY", "prompt": 'Секретный ключ Langfuse: sk-lf-...', "url": "https://cloud.langfuse.com"},
-                ],
-                "post_setup": "langfuse",
-            },
-            {
-                "name": "Langfuse Self-Hosted",
-                "tag": 'Langfuse на своём сервере',
-                "env_vars": [
-                    {"key": "HERMES_LANGFUSE_PUBLIC_KEY", "prompt": 'Публичный ключ Langfuse: pk-lf-...'},
-                    {"key": "HERMES_LANGFUSE_SECRET_KEY", "prompt": 'Секретный ключ Langfuse: sk-lf-...'},
-                    {"key": "HERMES_LANGFUSE_BASE_URL", "prompt": 'Адрес сервера Langfuse, например http://localhost:3000', "default": "http://localhost:3000"},
-                ],
-                "post_setup": "langfuse",
             },
         ],
     },
@@ -2288,64 +2197,7 @@ def _run_post_setup(post_setup_key: str):
         _print_info('    Ключ API не нужен. DuckDuckGo ограничивает частоту запросов на своей стороне.')
         _print_info('    Если нужно также читать веб-страницы через web_extract, подключите провайдера извлечения текста.')
 
-    elif post_setup_key == "spotify":
-        # Run the full `hermes auth spotify` flow — if the user has no
-        # client_id yet, this drops them into the interactive wizard
-        # (opens the Spotify dashboard, prompts for client_id, persists
-        # to ~/.hermes/.env), then continues straight into PKCE. If they
-        # already have an app, it skips the wizard and just does OAuth.
-        from types import SimpleNamespace
-        try:
-            from korra_cli.auth import login_spotify_command
-        except Exception as exc:
-            _print_warning(f'    Не удалось загрузить вход Spotify: {exc}')
-            _print_info('    Выполните вручную: korra auth spotify')
-            return
-        _print_info('    Открываем вход Spotify…')
-        try:
-            login_spotify_command(SimpleNamespace(
-                client_id=None, redirect_uri=None, scope=None,
-                no_browser=False, timeout=None,
-            ))
-            _print_success('    Вход Spotify выполнен')
-        except SystemExit as exc:
-            # User aborted the wizard, or OAuth failed — don't fail the
-            # toolset enable; they can retry with `hermes auth spotify`.
-            _print_warning(f'    Вход Spotify не завершён: {exc}')
-            _print_info('    Войти позже: korra auth spotify')
-        except Exception as exc:
-            _print_warning(f'    Не удалось войти в Spotify: {exc}')
-            _print_info('    Выполните вручную: korra auth spotify')
 
-    elif post_setup_key == "langfuse":
-        # Install the langfuse SDK.
-        try:
-            __import__("langfuse")
-            _print_success('    SDK Langfuse уже установлен')
-        except ImportError:
-            _print_info('    Устанавливаем SDK Langfuse…')
-            result = _pip_install(["langfuse", "--quiet"], timeout=120)
-            if result.returncode == 0:
-                _print_success('    SDK Langfuse установлен')
-            else:
-                _print_warning('    Не удалось установить SDK Langfuse. Выполните вручную: uv pip install langfuse')
-        # Opt the bundled observability/langfuse plugin into plugins.enabled.
-        # The plugin ships in the repo but doesn't load until the user enables
-        # it (standalone plugins are opt-in).
-        try:
-            from korra_cli.plugins_cmd import _get_enabled_set, _save_enabled_set
-            enabled = _get_enabled_set()
-            if "observability/langfuse" in enabled or "langfuse" in enabled:
-                _print_success('    Плагин observability/langfuse уже включён')
-            else:
-                enabled.add("observability/langfuse")
-                _save_enabled_set(enabled)
-                _print_success('    Плагин observability/langfuse включён')
-        except Exception as exc:
-            _print_warning(f'    Не удалось автоматически включить плагин: {exc}')
-            _print_info('    Выполните вручную: korra plugins enable observability/langfuse')
-        _print_info('    Перезапустите Корру, чтобы включить трассировку.')
-        _print_info('    Проверка: korra plugins list')
 
     elif post_setup_key == "xai_grok":
         # Shared credential bootstrap for any picker entry that talks to xAI
@@ -2604,7 +2456,7 @@ def _exempt_explicit_platform_native(
 #:
 #: A ``check_fn``-gated toolset costs nothing here for users who cannot call
 #: it: an enabled toolset still ships zero schemas when its check fails — the
-#: same split Home Assistant uses. Probing a remote service from this path
+#: runtime availability gate remains authoritative. Probing here
 #: would put a network call on every CLI start, gateway session and cron tick.
 #:
 #: 0.21.13: ``google_calendar`` and ``icloud_calendar`` — Dmitry's decision (23.09): a connected
@@ -2741,8 +2593,6 @@ def _get_platform_tools(
             default_off = set(_DEFAULT_OFF_TOOLSETS)
             if platform in default_off and platform not in _TOOLSET_PLATFORM_RESTRICTIONS:
                 default_off.remove(platform)
-            if "homeassistant" in default_off and _homeassistant_credentials_present():
-                default_off.remove("homeassistant")
             _exempt_explicit_platform_native(
                 default_off, platform, explicitly_configured=explicitly_configured
             )
@@ -2772,15 +2622,8 @@ def _get_platform_tools(
                 enabled_toolsets.add(ts_key)
 
         # Auto-enable ``x_search`` when xAI credentials are configured.
-        # Unlike ``homeassistant`` (whose ``ha_*`` tools live inside the
-        # platform composite and thus pass the subset check above),
-        # ``x_search`` is its own one-tool toolset that the composite does
-        # NOT include, so the subset loop never picks it up. Inject it
-        # directly here, mirroring the HASS_TOKEN → ``homeassistant`` rule
-        # below: once you have working creds, you don't have to also click
-        # through ``hermes tools`` to flip the toolset on. Only fires when
-        # the user has not yet saved an explicit toolset list — once they
-        # do, the saved list is authoritative.
+        # x_search is absent from the platform composite, so add it when
+        # credentials exist and the user has not saved an explicit toolset list.
         x_search_auto_enabled = (
             _toolset_allowed_for_platform("x_search", platform)
             and _xai_credentials_present()
@@ -2790,21 +2633,12 @@ def _get_platform_tools(
 
         default_off = set(_DEFAULT_OFF_TOOLSETS)
         # Legacy safety: if the platform's own name matches a default-off
-        # toolset (e.g. `homeassistant` platform + `homeassistant` toolset),
+        # toolset,
         # keep that toolset enabled on first install.  Skip this dodge for
         # platform-restricted toolsets — those are always opt-in even on
         # their own platform (e.g. `discord` + `discord` should stay OFF).
         if platform in default_off and platform not in _TOOLSET_PLATFORM_RESTRICTIONS:
             default_off.remove(platform)
-        # Home Assistant is already runtime-gated by its check_fn (requires
-        # HASS_TOKEN to register any tools). When a user has configured
-        # HASS_TOKEN, they've explicitly opted in — don't also strip it via
-        # _DEFAULT_OFF_TOOLSETS, which would silently drop HA from platforms
-        # (e.g. cron) that run through _get_platform_tools without an
-        # explicit saved toolset list. Without this, Norbert's HA cron jobs
-        # regressed after #14798 made cron honor per-platform tool config.
-        if "homeassistant" in default_off and _homeassistant_credentials_present():
-            default_off.remove("homeassistant")
         # Symmetric carve-out for x_search auto-enable (see the inject
         # block above). Without this, the default_off subtraction would
         # strip the entry we just added.
@@ -2815,8 +2649,8 @@ def _get_platform_tools(
         )
         enabled_toolsets -= default_off
 
-    # Recover non-configurable platform toolsets (e.g. discord, feishu_doc,
-    # feishu_drive).  These are part of the platform's default composite but
+    # Recover non-configurable platform toolsets. These belong to the
+    # platform's default composite but
     # absent from CONFIGURABLE_TOOLSETS, so they can't appear in the TUI
     # checklist or in a user-saved config.  Must run in BOTH branches —
     # otherwise saving via `hermes tools` (which flips has_explicit_config
@@ -3738,7 +3572,6 @@ _RESTORABLE_PYTHON_TOOL_DEPENDENCIES: dict[str, tuple[str, tuple[str, ...]]] = {
     ),
     "piper": ("piper", ("-U", "piper-tts")),
     "ddgs": ("ddgs", ("-U", "ddgs")),
-    "langfuse": ("langfuse", ("langfuse",)),
 }
 
 
@@ -3799,7 +3632,6 @@ _POST_SETUP_READY: dict = {
     "piper": lambda: _module_installed("piper"),
     "faster_whisper": lambda: _module_installed("faster_whisper"),
     "ddgs": lambda: _module_installed("ddgs"),
-    "langfuse": lambda: _module_installed("langfuse"),
     "agent_browser": lambda: _agent_browser_installed(),
     "browserbase": lambda: _cloud_agent_browser_installed(),
     "camofox": lambda: _camofox_installed(),

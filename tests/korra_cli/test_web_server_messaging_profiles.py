@@ -220,10 +220,12 @@ class TestMultiplexPortBindingGuard:
         self, client, isolated_profiles
     ):
         from gateway.config import PORT_BINDING_PLATFORM_VALUES
+        from korra_cli.web_server import _messaging_platform_catalog
 
         _enable_multiplex(isolated_profiles["default"])
         assert PORT_BINDING_PLATFORM_VALUES  # guard set must not be empty
-        for platform_id in sorted(PORT_BINDING_PLATFORM_VALUES):
+        available = {row["id"] for row in _messaging_platform_catalog()}
+        for platform_id in sorted(PORT_BINDING_PLATFORM_VALUES & available):
             resp = client.put(
                 f"/api/messaging/platforms/{platform_id}",
                 params={"profile": "worker_alpha"},
@@ -266,4 +268,3 @@ class TestMultiplexPortBindingGuard:
                 json={"clear_env": [api_server["env_vars"][0]["key"]]},
             )
             assert resp.status_code == 200
-

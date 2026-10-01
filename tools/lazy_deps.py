@@ -224,29 +224,6 @@ LAZY_DEPS: dict[str, tuple[str, ...]] = {
         "slack-sdk==3.43.0",
         "aiohttp==3.14.3",  # prior CVEs + GHSA-cq5v-8q36-5273/GHSA-mfx4-hv73-q22v/GHSA-mq44-7p77-q5h7
     ),
-    "platform.matrix": (
-        "mautrix[encryption]==0.21.1",
-        "aiosqlite==0.22.1",
-        "asyncpg==0.31.0",
-        "aiohttp-socks==0.11.0",
-        # mautrix (aiohttp>=3,<4) and aiohttp-socks (aiohttp>=3.10.0) only cap
-        # aiohttp transitively, so a vulnerable already-installed aiohttp still
-        # satisfies both — pin the patched floor here too, like platform.discord.
-        "aiohttp==3.14.3",  # prior CVEs + GHSA-cq5v-8q36-5273/GHSA-mfx4-hv73-q22v/GHSA-mq44-7p77-q5h7
-    ),
-    "platform.dingtalk": (
-        "dingtalk-stream==0.24.3",
-        "alibabacloud-dingtalk==2.2.42",
-        "qrcode==7.4.2",
-    ),
-    "platform.feishu": (
-        "lark-oapi==1.6.8",
-        "qrcode==7.4.2",
-    ),
-    # WeCom callback-mode adapter — parses untrusted XML POST bodies. Pulls
-    # defusedxml only; aiohttp/httpx are core dependencies of every messaging
-    # adapter and ship via `platform.discord` / `platform.slack` / etc.
-    "platform.wecom_callback": ("defusedxml==0.7.1",),
     # Microsoft Teams adapter — microsoft-teams-apps pulls a heavy tree
     # (microsoft-teams-api/cards/common, dependency-injector, msal). Lazy-
     # installed on demand like every other messaging platform; also exposed
@@ -535,22 +512,6 @@ def _allow_lazy_installs() -> bool:
         return _lazy_install_target() is not None
 
     return True
-
-
-def _unsupported_feature_reason(feature: str) -> Optional[str]:
-    """Return why a lazy feature cannot work on this host, or ``None``.
-
-    This is a platform capability gate, not a security policy gate. It keeps
-    known-impossible installs out of both first-use lazy installation and the
-    ``hermes update`` lazy-refresh pass.
-    """
-    if sys.platform == "win32" and feature == "platform.matrix":
-        return (
-            "unsupported on Windows: Matrix E2EE depends on python-olm, "
-            "which has no Windows wheel and requires make + libolm to build "
-            "from sdist. Run Korra under WSL to use Matrix on Windows."
-        )
-    return None
 
 
 def _spec_is_safe(spec: str) -> bool:
@@ -864,10 +825,6 @@ def ensure(feature: str, *, prompt: bool = True) -> None:
     if not missing:
         return
 
-    unsupported = _unsupported_feature_reason(feature)
-    if unsupported:
-        raise FeatureUnavailable(feature, missing, unsupported)
-
     # Package-manager installs (NixOS, and any other distro that ships Hermes
     # from a read-only store) cannot receive lazy pip installs: the venv's
     # site-packages lives in the store, so the uv -> pip -> ensurepip ladder
@@ -1107,9 +1064,8 @@ def active_features() -> list[str]:
     A feature counts as "active" if its anchor package (the first declared
     spec) is currently installed in the venv (presence check, ignoring
     version). We intentionally do NOT treat shared helper packages as proof
-    that a backend was enabled: for example ``platform.matrix`` depends on
-    generic packages like ``asyncpg``/``aiosqlite`` that can be installed for
-    unrelated reasons, while the actual Matrix adapter anchor is ``mautrix``.
+    that a backend was enabled: ``platform.slack`` depends on ``aiohttp``
+    too, but its anchor package is ``slack-bolt``.
     Features the user has never enabled stay quiet.
 
     Used by ``hermes update`` to figure out which lazy backends need a
@@ -1159,11 +1115,6 @@ def _refresh_features(
         missing = feature_missing(feature)
         if not missing:
             results[feature] = "current"
-            continue
-
-        unsupported = _unsupported_feature_reason(feature)
-        if unsupported:
-            results[feature] = f"skipped: {unsupported}"
             continue
 
         try:

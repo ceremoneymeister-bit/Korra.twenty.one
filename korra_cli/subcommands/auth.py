@@ -70,29 +70,4 @@ def build_auth_parser(subparsers, *, cmd_auth: Callable) -> None:
         "logout", help='Выйти из учётной записи провайдера и удалить сохранённые данные входа'
     )
     auth_logout.add_argument("provider", help='ID провайдера')
-    auth_spotify = auth_subparsers.add_parser(
-        "spotify", help='Подключить Spotify к Корре через PKCE'
-    )
-    auth_spotify.add_argument(
-        "spotify_action",
-        nargs="?",
-        choices=["login", "status", "logout"],
-        default="login",
-    )
-    auth_spotify.add_argument(
-        "--client-id", help='client_id приложения Spotify; также задаётся через HERMES_SPOTIFY_CLIENT_ID'
-    )
-    auth_spotify.add_argument(
-        "--redirect-uri",
-        help='Разрешённый адрес перенаправления localhost для приложения Spotify',
-    )
-    auth_spotify.add_argument("--scope", help='Заменить запрашиваемые права Spotify')
-    auth_spotify.add_argument(
-        "--no-browser",
-        action="store_true",
-        help='Не открывать браузер автоматически',
-    )
-    auth_spotify.add_argument(
-        "--timeout", type=float, help='Время ожидания обратного вызова и обмена токенами в секундах'
-    )
     auth_parser.set_defaults(func=cmd_auth)

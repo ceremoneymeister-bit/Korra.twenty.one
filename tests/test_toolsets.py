@@ -207,11 +207,16 @@ class TestToolsetConsistency:
         on hermes-discord, gated on DISCORD_BOT_TOKEN) are allowed on top —
         the invariant is that the core set is identical across platforms.
         """
-        platforms = ["hermes-cli", "hermes-telegram", "hermes-discord", "hermes-whatsapp", "hermes-slack", "hermes-signal", "hermes-homeassistant"]
+        from korra_cli.platforms import PLATFORMS
+
+        platforms = sorted({
+            info.default_toolset for key, info in PLATFORMS.items()
+            if key not in {"cron", "api_server", "webhook"}
+        })
         tool_sets = [set(TOOLSETS[p]["tools"]) for p in platforms]
         # All platforms must contain the shared core; platform-specific
         # extras are OK (subset check, not equality).
-        core = set.intersection(*tool_sets)
+        core = set(toolsets_mod._HERMES_CORE_TOOLS)
         for name, ts in zip(platforms, tool_sets):
             assert core.issubset(ts), f"{name} is missing core tools: {core - ts}"
         # Sanity: the shared core must be non-trivial (i.e. we didn't

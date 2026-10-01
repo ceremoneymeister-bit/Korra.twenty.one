@@ -49,8 +49,12 @@ def test_all_builtins_have_checker_or_generic_token_path():
     except Exception:
         pass
 
-    # Every built-in should be in one of the sets
-    all_builtins = set(_BUILTIN_PLATFORM_VALUES)
+    # Historical enum members still deserialize saved data. Check platforms
+    # offered by the installed catalog, whose adapters can actually connect.
+    from korra_cli.web_server import _messaging_platform_catalog
+
+    installed = {row["id"] for row in _messaging_platform_catalog()}
+    all_builtins = set(_BUILTIN_PLATFORM_VALUES) & installed
     missing = (
         all_builtins
         - generic_token_values
@@ -64,5 +68,4 @@ def test_all_builtins_have_checker_or_generic_token_path():
         f"{sorted(missing)}.  "
         f"Add them to _PLATFORM_CONNECTED_CHECKERS or generic_token_platforms."
     )
-
 

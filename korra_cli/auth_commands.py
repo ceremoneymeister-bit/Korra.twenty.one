@@ -633,7 +633,7 @@ def auth_reset_command(args) -> None:
 def auth_status_command(args) -> None:
     provider = _normalize_provider(getattr(args, "provider", "") or "")
     if not provider:
-        raise SystemExit('Укажите провайдера, например korra auth status spotify.')
+        raise SystemExit('Укажите провайдера, например korra auth status openai-codex.')
     status = auth_mod.get_auth_status(provider)
     if not status.get("logged_in"):
         reason = status.get("error")
@@ -654,18 +654,6 @@ def auth_logout_command(args) -> None:
     auth_mod.logout_command(SimpleNamespace(provider=getattr(args, "provider", None)))
 
 
-def auth_spotify_command(args) -> None:
-    action = str(getattr(args, "spotify_action", "") or "login").strip().lower()
-    if action in {"", "login"}:
-        auth_mod.login_spotify_command(args)
-        return
-    if action == "status":
-        auth_status_command(SimpleNamespace(provider="spotify"))
-        return
-    if action == "logout":
-        auth_logout_command(SimpleNamespace(provider="spotify"))
-        return
-    raise SystemExit(f'Неизвестное действие входа Spotify: {action}')
 
 
 def _interactive_auth() -> None:
@@ -918,9 +906,6 @@ def auth_command(args) -> None:
         return
     if action == "logout":
         auth_logout_command(args)
-        return
-    if action == "spotify":
-        auth_spotify_command(args)
         return
     # No subcommand — launch interactive mode
     _interactive_auth()

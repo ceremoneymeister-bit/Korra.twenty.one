@@ -30,29 +30,6 @@ def loop_probe():
     return seen, probe
 
 
-def test_cron_fire_profile_lookup_off_loop(monkeypatch, loop_probe):
-    seen, probe = loop_probe
-
-    def fake_find(job_id):
-        probe("find")
-        return None
-
-    monkeypatch.setattr(web_server, "_find_cron_job_profile", fake_find)
-
-    import plugins.cron_providers.chronos.verify as chv
-    monkeypatch.setattr(chv, "get_fire_verifier", lambda: (lambda **kw: {"sub": "t"}))
-
-    client = TestClient(web_server.app)
-    resp = client.post(
-        "/api/cron/fire",
-        json={"job_id": "missing-job"},
-        headers={"Authorization": "Bearer x"},
-    )
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "gone"
-    assert ("find", False) in seen, (
-        f"_find_cron_job_profile must run off the event loop; proof: {seen}"
-    )
 
 
 def test_blueprint_instantiate_create_job_off_loop(monkeypatch, loop_probe):

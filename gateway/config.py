@@ -321,6 +321,12 @@ def _getenv_int(name: str, default: int) -> int:
 # enum so it doesn't become an accidental enum member).
 _Platform__bundled_plugin_names: Optional[set] = None
 
+# These plugins no longer ship, but saved sessions/configs still use their IDs.
+# Accepting an ID does not register an adapter or expose a setup card.
+_LEGACY_PLUGIN_PLATFORMS = frozenset({
+    "a2a", "buzz", "google_chat", "irc", "line", "ntfy", "photon", "raft", "simplex",
+})
+
 
 class Platform(Enum):
     """Supported messaging platforms.
@@ -370,12 +376,11 @@ class Platform(Enum):
         if value in cls._value2member_map_:
             return cls._value2member_map_[value]
 
-        # Only create pseudo-members for bundled plugin platforms (discovered
-        # via filesystem scan) or runtime-registered plugin platforms.
+        # Preserve historical IDs as well as bundled/runtime plugin platforms.
         global _Platform__bundled_plugin_names
         if _Platform__bundled_plugin_names is None:
             _Platform__bundled_plugin_names = cls._scan_bundled_plugin_platforms()
-        if value in _Platform__bundled_plugin_names:
+        if value in _Platform__bundled_plugin_names or value in _LEGACY_PLUGIN_PLATFORMS:
             pseudo = object.__new__(cls)
             pseudo._value_ = value
             pseudo._name_ = value.upper().replace("-", "_").replace(" ", "_")

@@ -154,10 +154,8 @@ class TestGetConnectedPlatforms:
         assert Platform.SLACK not in connected
 
 
-    def test_dingtalk_recognised_via_env_vars(self, monkeypatch):
-        """DingTalk configured via env vars (no extras) should still be
-        recognised as connected — covers the case where _apply_env_overrides
-        hasn't populated extras yet."""
+    def test_retired_channel_credentials_do_not_report_connected(self, monkeypatch):
+        """Saved credentials cannot connect a channel whose plugin is absent."""
         monkeypatch.setenv("DINGTALK_CLIENT_ID", "env_cid")
         monkeypatch.setenv("DINGTALK_CLIENT_SECRET", "env_sec")
         config = GatewayConfig(
@@ -165,7 +163,7 @@ class TestGetConnectedPlatforms:
                 Platform.DINGTALK: PlatformConfig(enabled=True, extra={}),
             },
         )
-        assert Platform.DINGTALK in config.get_connected_platforms()
+        assert Platform.DINGTALK not in config.get_connected_platforms()
 
 
 class TestSessionResetPolicy:
@@ -912,13 +910,8 @@ class TestLoadGatewayConfig:
         assert os.environ.get("DISCORD_THREAD_REQUIRE_MENTION") == "true"
 
 
-    def test_bridges_nested_gateway_platforms_dingtalk_allowed_users_to_env(self, tmp_path, monkeypatch):
-        """gateway.platforms.dingtalk.extra.allowed_users must reach
-        DINGTALK_ALLOWED_USERS — it's the documented config.yaml alternative
-        to the env var (website/docs/user-guide/messaging/dingtalk.md), the
-        adapter reads it from PlatformConfig.extra, but gateway auth
-        (_is_user_authorized) only consults the env var.
-        """
+    def test_preserves_retired_channel_settings_without_running_its_config_hook(self, tmp_path, monkeypatch):
+        """Legacy settings survive even though their plugin no longer ships."""
         hermes_home = tmp_path / ".hermes"
         hermes_home.mkdir()
         config_path = hermes_home / "config.yaml"
@@ -943,7 +936,7 @@ class TestLoadGatewayConfig:
             "user-id-1",
             "user-id-2",
         ]
-        assert os.environ.get("DINGTALK_ALLOWED_USERS") == "user-id-1,user-id-2"
+        assert os.environ.get("DINGTALK_ALLOWED_USERS") is None
 
 
     def test_top_level_platforms_override_nested_gateway_platforms(self, tmp_path, monkeypatch):

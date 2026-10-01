@@ -584,29 +584,6 @@ def _print_setup_summary(config: dict, hermes_home):
         else:
             tool_status.append(('Создание изображений', False, 'FAL_KEY или OPENAI_API_KEY'))
 
-    # Video generation — opt-in via `hermes tools` → Video Generation.
-    # Only show the row when a plugin reports available so we don't badger
-    # users who don't care about video gen with a "missing" status line.
-    if subscription_features.video_gen.managed_by_nous:
-        tool_status.append(('Создание видео (FAL по подписке Nous)', True, None))
-    else:
-        try:
-            from agent.video_gen_registry import list_providers as _list_video_providers
-            from korra_cli.plugins import _ensure_plugins_discovered as _ensure_plugins
-            _ensure_plugins()
-            _video_backend = None
-            for _vp in _list_video_providers():
-                try:
-                    if _vp.is_available():
-                        _video_backend = _vp.display_name
-                        break
-                except Exception:
-                    continue
-        except Exception:
-            _video_backend = None
-        if _video_backend:
-            tool_status.append((f'Создание видео ({_video_backend})', True, None))
-
     # TTS — show configured provider
     tts_provider = cfg_get(config, "tts", "provider", default="edge")
     if subscription_features.tts.managed_by_nous:
@@ -682,19 +659,6 @@ def _print_setup_summary(config: dict, hermes_home):
             tool_status.append(('Выполнение команд Modal', False, 'настроить: korra setup terminal'))
     elif managed_nous_tools_enabled() and subscription_features.nous_auth_present:
         tool_status.append(('Выполнение команд Modal (можно подключить по подписке Nous)', True, None))
-
-    # Home Assistant
-    if get_env_value("HASS_TOKEN"):
-        tool_status.append(('Умный дом (Home Assistant)', True, None))
-
-    # Spotify (OAuth via hermes auth spotify — check auth.json, not env vars)
-    try:
-        from korra_cli.auth import get_provider_auth_state
-        _spotify_state = get_provider_auth_state("spotify") or {}
-        if _spotify_state.get("access_token") or _spotify_state.get("refresh_token"):
-            tool_status.append(("Spotify (PKCE OAuth)", True, None))
-    except Exception:
-        pass
 
     # Skills Hub
     if get_env_value("GITHUB_TOKEN"):

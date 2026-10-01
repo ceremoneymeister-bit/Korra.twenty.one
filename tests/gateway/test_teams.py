@@ -10,7 +10,6 @@ import httpx
 import pytest
 
 from gateway.config import Platform, PlatformConfig, HomeChannel
-from plugins.teams_pipeline.models import TeamsMeetingRef, TeamsMeetingSummaryPayload
 from tests.gateway._plugin_adapter_loader import load_plugin_adapter
 
 
@@ -420,8 +419,8 @@ class TestTeamsSend:
 
 
 def _make_summary_payload():
-    return TeamsMeetingSummaryPayload(
-        meeting_ref=TeamsMeetingRef(meeting_id="meeting-123"),
+    return SimpleNamespace(
+        meeting_ref=SimpleNamespace(meeting_id="meeting-123"),
         title="Weekly Sync",
         summary="Discussed launch readiness.",
         key_decisions=["Proceed with staged rollout."],
@@ -1104,5 +1103,4 @@ class TestTeamsMediaAttachments:
         result = await adapter.send_document("19:abc@thread.v2", str(doc))
         assert result.success
         adapter._app.send.assert_awaited_once()
-
 

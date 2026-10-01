@@ -1,11 +1,10 @@
 """Unit tests for _print_loopback_ssh_hint() in korra_cli/auth.py.
 
-The helper warns users that loopback OAuth flows (Spotify) don't work over
+The helper warns users that loopback OAuth flows don't work over
 SSH unless they set up an `ssh -L` port forward between their laptop's
 browser and the remote host's loopback listener.
 
-xAI Grok OAuth no longer uses this helper — its login is device-code-only —
-but the Spotify integration still relies on it.
+xAI Grok OAuth is device-code-only.
 """
 
 from __future__ import annotations
@@ -28,7 +27,7 @@ def _cap(fn):
 def test_loopback_ssh_hint_silent_when_not_remote(monkeypatch):
     monkeypatch.setattr(auth_mod, "_is_remote_session", lambda: False)
     out = _cap(lambda: auth_mod._print_loopback_ssh_hint(
-        "http://127.0.0.1:43827/spotify/callback", docs_url=auth_mod.SPOTIFY_DOCS_URL
+        "http://127.0.0.1:43827/callback", docs_url="https://example.invalid/oauth"
     ))
     assert out == ""
 

@@ -6722,55 +6722,6 @@ _PLATFORMS = [
     # Matrix moved to plugins/platforms/matrix/ — setup metadata discovered
     # dynamically via the platform registry entry registered by
     # plugins/platforms/matrix/adapter.py::register(). #41112.
-    {
-        "key": "mattermost",
-        "label": "Mattermost",
-        "emoji": "💬",
-        "token_var": "MATTERMOST_TOKEN",
-        "setup_instructions": [
-            '1. В Mattermost откройте Integrations → Bot Accounts → Add Bot Account.',
-            '   В System Console → Integrations должны быть разрешены Bot Accounts.',
-            '2. Задайте имя, например korra, и скопируйте токен бота.',
-            '3. Подходит ваш собственный сервер Mattermost. Укажите его адрес.',
-            '4. Чтобы узнать ваш ID, нажмите на аватар слева вверху и откройте Profile.',
-            '   Нажмите на показанный ID, чтобы скопировать его.',
-            '   ⚠ Нужен ID из 26 букв и цифр, а не имя пользователя.',
-            '5. ID канала: нажмите на его имя → View Info и скопируйте ID.',
-        ],
-        "vars": [
-            {
-                "name": "MATTERMOST_URL",
-                "prompt": 'Адрес сервера, например https://mm.example.com',
-                "password": False,
-                "help": 'Адрес вашего сервера Mattermost.',
-            },
-            {
-                "name": "MATTERMOST_TOKEN",
-                "prompt": 'Токен бота',
-                "password": True,
-                "help": 'Вставьте токен бота из шага 2.',
-            },
-            {
-                "name": "MATTERMOST_ALLOWED_USERS",
-                "prompt": 'ID разрешённых пользователей через запятую',
-                "password": False,
-                "is_allowlist": True,
-                "help": 'Ваш ID пользователя Mattermost из шага 4.',
-            },
-            {
-                "name": "MATTERMOST_HOME_CHANNEL",
-                "prompt": 'ID основного чата для задач и уведомлений; можно настроить позже через /set-home',
-                "password": False,
-                "help": 'ID чата для результатов задач по расписанию и уведомлений Корры.',
-            },
-            {
-                "name": "MATTERMOST_REPLY_MODE",
-                "prompt": 'Режим ответов: off — в общий чат, thread — в ветку сообщения; по умолчанию off',
-                "password": False,
-                "help": 'off — обычные сообщения в чате; thread — ответы в ветке вашего сообщения.',
-            },
-        ],
-    },
     # WhatsApp moved to plugins/platforms/whatsapp/ — setup metadata discovered
     # dynamically via the platform registry entry registered by
     # plugins/platforms/whatsapp/adapter.py::register(). #41112.

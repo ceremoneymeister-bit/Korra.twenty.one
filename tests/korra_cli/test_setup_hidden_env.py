@@ -85,7 +85,7 @@ class TestCliWizard:
 
         from korra_cli import gateway as gw
 
-        platform = next(p for p in gw._PLATFORMS if p["key"] == "mattermost")
+        platform = next(p for p in gw._PLATFORMS if p["key"] == "bluebubbles")
         monkeypatch.setattr("sys.stdin", io.StringIO("\n".join(answers) + "\n"))
         gw._setup_standard_platform(dict(platform))
 
@@ -105,24 +105,23 @@ class TestCliWizard:
         # Only the three real answers. If the wizard still prompted for the
         # home channel it would read past them.
         self._run(
-            ["https://mm.example.com", "tok-abc", "user26charid"], monkeypatch
+            ["https://bb.example.com", "test-password", "+15550001111"], monkeypatch
         )
 
         written = self._env(home)
-        assert written.get("MATTERMOST_URL") == "https://mm.example.com"
-        assert written.get("MATTERMOST_TOKEN") == "tok-abc"
-        assert "MATTERMOST_HOME_CHANNEL" not in written
-        assert "MATTERMOST_REPLY_MODE" not in written
+        assert written.get("BLUEBUBBLES_SERVER_URL") == "https://bb.example.com"
+        assert written.get("BLUEBUBBLES_PASSWORD") == "test-password"
+        assert "BLUEBUBBLES_HOME_CHANNEL" not in written
+        assert "BLUEBUBBLES_REPLY_TO_MODE" not in written
 
         out = capsys.readouterr().out
-        assert "Home channel" not in out
-        assert "Reply mode" not in out
+        assert "Основной чат" not in out
 
-    def test_required_token_still_gates_setup(self, home, monkeypatch):
-        """Proves the token wasn't swept out along with the knobs."""
-        self._run(["https://mm.example.com", ""], monkeypatch)
+    def test_required_connection_still_gates_setup(self, home, monkeypatch):
+        """The server address remains required after hiding optional knobs."""
+        self._run([""], monkeypatch)
 
-        assert "MATTERMOST_TOKEN" not in self._env(home)
+        assert "BLUEBUBBLES_SERVER_URL" not in self._env(home)
 
 
 class TestStillConfigurable:

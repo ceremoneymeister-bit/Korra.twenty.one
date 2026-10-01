@@ -75,7 +75,7 @@ def build_tools_parser(subparsers, *, cmd_tools: Callable) -> None:
         "post-setup",
         help='Выполнить установку зависимостей провайдера: npm, pip или программу',
         description=(
-            'Выполнить установщик зависимостей инструмента, как после выбора провайдера в korra tools. Для Chromium, Camofox, cua-driver, KittenTTS, Piper, ddgs, Spotify, Langfuse и xAI. Команда работает без меню и используется веб-панелью. Ключи: agent_browser, camofox, cua_driver, kittentts, piper, ddgs, spotify, langfuse, xai_grok.'
+            'Выполнить установщик зависимостей инструмента, как после выбора провайдера в korra tools. Для Chromium, Camofox, cua-driver, KittenTTS, Piper, ddgs и xAI. Команда работает без меню и используется веб-панелью. Ключи: agent_browser, camofox, cua_driver, kittentts, piper, ddgs, xai_grok.'
         ),
     )
     tools_postsetup_p.add_argument(

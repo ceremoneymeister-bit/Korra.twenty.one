@@ -5431,12 +5431,9 @@ _PORT_BINDING_PLATFORM_PORTS: Dict[str, Tuple[str, int]] = {
     "webhook": ("port", 8644),
     "api_server": ("port", 8642),
     "msgraph_webhook": ("port", 8646),
-    "feishu": ("webhook_port", 8765),
-    "wecom_callback": ("port", 8645),
     "bluebubbles": ("webhook_port", 8645),
     "sms": ("webhook_port", 8080),
     "whatsapp_cloud": ("webhook_port", 8090),
-    "line": ("port", 8646),
 }
 
 # Platform states that mean the adapter is NOT serving its port right now.
@@ -11237,25 +11234,6 @@ _PLATFORM_OVERRIDES: dict[str, dict[str, Any]] = {
         "env_vars": ("SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "SLACK_ALLOWED_USERS"),
         "required_env": ("SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"),
     },
-    "mattermost": {
-        "name": "Mattermost",
-        "description": "Подключение Korra к каналам и личным сообщениям Mattermost.",
-        "docs_url": "https://mattermost.com/deploy/",
-        "env_vars": ("MATTERMOST_URL", "MATTERMOST_TOKEN", "MATTERMOST_ALLOWED_USERS"),
-        "required_env": ("MATTERMOST_URL", "MATTERMOST_TOKEN"),
-    },
-    "matrix": {
-        "name": "Matrix",
-        "description": "Работа с Korra в комнатах и личных сообщениях Matrix.",
-        "docs_url": "https://matrix.org/ecosystem/servers/",
-        "env_vars": (
-            "MATRIX_HOMESERVER",
-            "MATRIX_ACCESS_TOKEN",
-            "MATRIX_USER_ID",
-            "MATRIX_ALLOWED_USERS",
-        ),
-        "required_env": ("MATRIX_HOMESERVER", "MATRIX_ACCESS_TOKEN", "MATRIX_USER_ID"),
-    },
     "signal": {
         "name": "Signal",
         "description": "Подключение через REST-мост signal-cli.",
@@ -11274,13 +11252,6 @@ _PLATFORM_OVERRIDES: dict[str, dict[str, Any]] = {
             "WHATSAPP_ALLOWED_USERS",
         ),
         "required_env": (),
-    },
-    "homeassistant": {
-        "name": "Home Assistant",
-        "description": "Управление умным домом из Korra через Home Assistant.",
-        "docs_url": "https://www.home-assistant.io/docs/authentication/",
-        "env_vars": ("HASS_URL", "HASS_TOKEN"),
-        "required_env": ("HASS_URL", "HASS_TOKEN"),
     },
     "email": {
         "name": "Почта",
@@ -11305,54 +11276,6 @@ _PLATFORM_OVERRIDES: dict[str, dict[str, Any]] = {
         "docs_url": "https://www.twilio.com/console",
         "env_vars": ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN"),
         "required_env": ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN"),
-    },
-    "dingtalk": {
-        "name": "DingTalk",
-        "description": "Подключение Korra к группам DingTalk (钉钉).",
-        "docs_url": "https://open.dingtalk.com/document/orgapp/the-robot-development-process",
-        "env_vars": ("DINGTALK_CLIENT_ID", "DINGTALK_CLIENT_SECRET"),
-        "required_env": ("DINGTALK_CLIENT_ID", "DINGTALK_CLIENT_SECRET"),
-    },
-    "feishu": {
-        "name": "Feishu / Lark",
-        "description": "Работа с Korra в Feishu / Lark.",
-        "docs_url": "https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/intro",
-        "env_vars": (
-            "FEISHU_APP_ID",
-            "FEISHU_APP_SECRET",
-            "FEISHU_ENCRYPT_KEY",
-            "FEISHU_VERIFICATION_TOKEN",
-        ),
-        "required_env": ("FEISHU_APP_ID", "FEISHU_APP_SECRET"),
-    },
-    "google_chat": {
-        "name": "Google Chat",
-        "description": "Подключение Korra к Google Chat через Cloud Pub/Sub.",
-        "docs_url": "https://hermes-agent.nousresearch.com/docs/user-guide/messaging/google_chat",
-    },
-    "wecom": {
-        "name": "WeCom (групповой бот)",
-        "description": "Групповой бот WeCom для исходящих сообщений через вебхук.",
-        "docs_url": "https://developer.work.weixin.qq.com/document/path/91770",
-        "env_vars": ("WECOM_BOT_ID", "WECOM_SECRET"),
-        "required_env": ("WECOM_BOT_ID",),
-    },
-    "wecom_callback": {
-        "name": "WeCom (приложение)",
-        "description": "Двусторонняя интеграция WeCom через callback-приложение.",
-        "docs_url": "https://developer.work.weixin.qq.com/document/path/90930",
-        "env_vars": (
-            "WECOM_CALLBACK_CORP_ID",
-            "WECOM_CALLBACK_CORP_SECRET",
-            "WECOM_CALLBACK_AGENT_ID",
-            "WECOM_CALLBACK_TOKEN",
-            "WECOM_CALLBACK_ENCODING_AES_KEY",
-        ),
-        "required_env": (
-            "WECOM_CALLBACK_CORP_ID",
-            "WECOM_CALLBACK_CORP_SECRET",
-            "WECOM_CALLBACK_AGENT_ID",
-        ),
     },
     "weixin": {
         "name": "Weixin / WeChat (личный)",
@@ -11389,30 +11312,6 @@ _PLATFORM_OVERRIDES: dict[str, dict[str, Any]] = {
     # Bundled platform plugins: name comes from the plugin registry label;
     # give each a human description (the registry's install_hint is a
     # dependency note, not a description) and a docs link.
-    "irc": {
-        "description": "Обмен сообщениями между Korra и каналом либо личными сообщениями IRC.",
-        "docs_url": "https://hermes-agent.nousresearch.com/docs/user-guide/messaging/irc",
-    },
-    "line": {
-        "description": "Работа с Korra в LINE через вебхук LINE Messaging API.",
-        "docs_url": "https://hermes-agent.nousresearch.com/docs/user-guide/messaging/line",
-    },
-    "ntfy": {
-        "description": "Общение с Korra через push-темы ntfy (ntfy.sh или свой сервер).",
-        "docs_url": "https://hermes-agent.nousresearch.com/docs/user-guide/messaging/ntfy",
-    },
-    "photon": {
-        "description": "Работа с Korra в iMessage через управляемую платформу Photon Spectrum.",
-        "docs_url": "https://hermes-agent.nousresearch.com/docs/user-guide/messaging/photon",
-    },
-    "raft": {
-        "description": "Подключение к рабочему пространству Raft в роли внешнего агента.",
-        "docs_url": "https://hermes-agent.nousresearch.com/docs/user-guide/messaging/raft",
-    },
-    "simplex": {
-        "description": "Общение с Korra в SimpleX Chat через локальный демон simplex-chat.",
-        "docs_url": "https://hermes-agent.nousresearch.com/docs/user-guide/messaging/simplex",
-    },
     "yuanbao": {
         "name": "Yuanbao (元宝)",
         "description": "Подключение Korra к Tencent Yuanbao.",
@@ -11465,19 +11364,11 @@ _PLATFORM_ORDER: tuple[str, ...] = (
     "max",
     "discord",
     "slack",
-    "mattermost",
-    "matrix",
     "whatsapp",
     "signal",
     "bluebubbles",
-    "homeassistant",
     "email",
     "sms",
-    "dingtalk",
-    "feishu",
-    "google_chat",
-    "wecom",
-    "wecom_callback",
     "weixin",
     "qqbot",
     "yuanbao",
@@ -11521,15 +11412,6 @@ _MESSAGING_ENV_FALLBACKS: dict[str, dict[str, Any]] = {
         "description": "Пользователи WhatsApp с доступом к боту, через запятую",
         "prompt": "Разрешённые пользователи WhatsApp",
     },
-    "HASS_URL": {
-        "description": "Базовый адрес Home Assistant, например https://homeassistant.local:8123",
-        "prompt": "Адрес Home Assistant",
-    },
-    "HASS_TOKEN": {
-        "description": "Долгосрочный токен Home Assistant из раздела «Профиль → Безопасность»",
-        "prompt": "Токен доступа Home Assistant",
-        "password": True,
-    },
     "EMAIL_ADDRESS": {
         "description": "Адрес электронной почты для отправки и получения сообщений",
         "prompt": "Адрес электронной почты",
@@ -11557,34 +11439,6 @@ _MESSAGING_ENV_FALLBACKS: dict[str, dict[str, Any]] = {
         "prompt": "Токен авторизации Twilio",
         "password": True,
     },
-    "WECOM_BOT_ID": {"description": "Идентификатор группового бота WeCom", "prompt": "Идентификатор бота WeCom"},
-    "WECOM_SECRET": {
-        "description": "Секрет группового бота WeCom",
-        "prompt": "Секрет WeCom",
-        "password": True,
-    },
-    "WECOM_CALLBACK_CORP_ID": {
-        "description": "Идентификатор организации WeCom",
-        "prompt": "Идентификатор организации WeCom",
-    },
-    "WECOM_CALLBACK_CORP_SECRET": {
-        "description": "Корпоративный секрет приложения WeCom",
-        "prompt": "Корпоративный секрет WeCom",
-        "password": True,
-    },
-    "WECOM_CALLBACK_AGENT_ID": {
-        "description": "Идентификатор агента приложения WeCom",
-        "prompt": "Идентификатор агента WeCom",
-    },
-    "WECOM_CALLBACK_TOKEN": {
-        "description": "Токен проверки обратного вызова WeCom",
-        "prompt": "Токен WeCom",
-    },
-    "WECOM_CALLBACK_ENCODING_AES_KEY": {
-        "description": "Ключ AES для обратного вызова WeCom",
-        "prompt": "Ключ AES WeCom",
-        "password": True,
-    },
     "WEIXIN_ACCOUNT_ID": {
         "description": "Идентификатор учётной записи iLink Bot, полученный после входа по QR-коду",
         "prompt": "Идентификатор учётной записи iLink Bot",
@@ -11597,31 +11451,6 @@ _MESSAGING_ENV_FALLBACKS: dict[str, dict[str, Any]] = {
     "WEIXIN_BASE_URL": {
         "description": "Базовый адрес API iLink, сохранённый после входа по QR-коду; по умолчанию https://ilinkai.weixin.qq.com",
         "prompt": "Базовый адрес API iLink",
-    },
-    "FEISHU_APP_ID": {"description": "Идентификатор приложения Feishu или Lark", "prompt": "Идентификатор приложения"},
-    "FEISHU_APP_SECRET": {
-        "description": "Секрет приложения Feishu или Lark",
-        "prompt": "Секрет приложения",
-        "password": True,
-    },
-    "FEISHU_ENCRYPT_KEY": {
-        "description": "Ключ шифрования Feishu или Lark",
-        "prompt": "Ключ шифрования",
-        "password": True,
-    },
-    "FEISHU_VERIFICATION_TOKEN": {
-        "description": "Токен проверки Feishu или Lark",
-        "prompt": "Токен проверки",
-        "password": True,
-    },
-    "DINGTALK_CLIENT_ID": {
-        "description": "Идентификатор клиента DingTalk — ключ приложения",
-        "prompt": "Идентификатор клиента",
-    },
-    "DINGTALK_CLIENT_SECRET": {
-        "description": "Секрет клиента DingTalk — секрет приложения",
-        "prompt": "Секрет клиента",
-        "password": True,
     },
 }
 
@@ -11665,6 +11494,10 @@ def _messaging_platform_catalog() -> tuple[dict[str, Any], ...]:
 
     for member in Platform.__members__.values():
         if member.value == "local":
+            continue
+        # The enum also retains historical channel IDs for saved sessions and
+        # config. Only offer adapters that still ship or are installed plugins.
+        if member.value not in _PLATFORM_OVERRIDES and member.value not in plugin_map:
             continue
         if member.value in seen:
             continue
@@ -15395,7 +15228,6 @@ from korra_cli.web_routers.cron import (  # noqa: E402,F401 — legacy re-export
     resume_cron_job,
     trigger_cron_job,
     delete_cron_job,
-    cron_fire_webhook,
     list_cron_blueprints,
     instantiate_blueprint,
 )
@@ -17714,7 +17546,6 @@ from korra_cli.web_routers.tools import (  # noqa: E402,F401 — legacy re-expor
 # `_configure_videogen_model_for_plugin` in tools_config.py).
 _MODEL_CATALOG_TOOLSETS = {
     "image_gen": "image_gen",
-    "video_gen": "video_gen",
 }
 
 

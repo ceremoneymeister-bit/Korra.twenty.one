@@ -62,7 +62,6 @@ jobs:
             ghcr.io/google/osv-scanner:v2.3.8 scan source \
             --lockfile=uv.lock \
             --lockfile=package-lock.json \
-            --lockfile=plugins/platforms/photon/sidecar/package-lock.json \
             --lockfile=scripts/whatsapp-bridge/package-lock.json \
             || scan_status=$?
           # Preserve hard failure of the former job-container startup. Only

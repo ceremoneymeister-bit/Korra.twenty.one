@@ -172,33 +172,6 @@ class TestImageFalStrictSelection:
 # ---------------------------------------------------------------------------
 
 
-class TestVideoFalStrictSelection:
-    def test_nous_selection_routes_managed_even_with_fal_key(self):
-        from plugins.video_gen import fal as vf
-
-        with patch("tools.tool_backend_helpers.read_selection", return_value="nous"), \
-             patch("tools.tool_backend_helpers.fal_key_is_configured", return_value=True), \
-             patch("tools.managed_tool_gateway.resolve_managed_tool_gateway", return_value=MANAGED):
-            assert vf._resolve_managed_fal_video_gateway() is MANAGED
-
-    def test_fal_selection_missing_key_errors_without_managed_call(self):
-        from plugins.video_gen import fal as vf
-
-        with patch("tools.tool_backend_helpers.read_selection", return_value="fal"), \
-             patch("tools.tool_backend_helpers.fal_key_is_configured", return_value=False), \
-             patch("tools.managed_tool_gateway.resolve_managed_tool_gateway") as gw:
-            with pytest.raises(ValueError) as exc:
-                vf._resolve_managed_fal_video_gateway()
-        gw.assert_not_called()
-        assert "video_gen is configured to use fal" in str(exc.value)
-        assert "FAL_KEY" in str(exc.value)
-
-    def test_never_configured_autodetect_unchanged(self):
-        from plugins.video_gen import fal as vf
-
-        with patch("tools.tool_backend_helpers.read_selection", return_value=None), \
-             patch("tools.tool_backend_helpers.fal_key_is_configured", return_value=True):
-            assert vf._resolve_managed_fal_video_gateway() is None
 
 
 # ---------------------------------------------------------------------------

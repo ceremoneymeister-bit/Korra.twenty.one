@@ -108,7 +108,6 @@ def test_base_adapter_defaults_to_not_owning_access_policy():
 @pytest.mark.parametrize(
     "module_path, class_name",
     [
-        ("plugins.platforms.wecom.adapter", "WeComAdapter"),
         ("gateway.platforms.weixin", "WeixinAdapter"),
         ("gateway.platforms.yuanbao", "YuanbaoAdapter"),
         ("gateway.platforms.qqbot.adapter", "QQAdapter"),
@@ -243,7 +242,6 @@ def test_own_policy_open_group_not_authorized_without_allowlist(monkeypatch, pla
     "module_path, class_name, dm_helper",
     [
         ("plugins.platforms.whatsapp.adapter", "WhatsAppAdapter", "_is_dm_allowed"),
-        ("plugins.platforms.wecom.adapter", "WeComAdapter", "_is_dm_allowed"),
         ("gateway.platforms.weixin", "WeixinAdapter", "_is_dm_allowed"),
         ("gateway.platforms.qqbot.adapter", "QQAdapter", "_is_dm_allowed"),
     ],
