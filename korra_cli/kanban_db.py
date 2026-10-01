@@ -7435,6 +7435,9 @@ def return_for_rework(
         reason, current = _owner_review_gate(conn, task_id, version)
         if reason:
             return {"ok": False, "duplicate": False, "reason": reason, "status": None}
+        assignee = conn.execute("SELECT assignee FROM tasks WHERE id=?", (task_id,)).fetchone()
+        if not assignee or not assignee["assignee"]:
+            return {"ok": False, "duplicate": False, "reason": "assignee_required", "status": "review"}
         add_comment(conn, task_id, author, text)
         landing = _landing_status_after_parents(conn, task_id)
         cur = conn.execute(

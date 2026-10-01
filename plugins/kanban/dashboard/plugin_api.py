@@ -1499,6 +1499,7 @@ _OWNER_REVIEW_REJECTIONS = {
     "not_waiting": (409, "not_waiting_acceptance"),
     "stale": (409, "result_changed"),
     "parents": (409, "parents_not_done"),
+    "assignee_required": (409, "assignee_required"),
 }
 
 

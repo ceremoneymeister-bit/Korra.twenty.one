@@ -278,3 +278,16 @@ def test_rework_retry_and_stale_leave_no_orphan_comment(client):
     assert client.post(url, json=body).status_code == 200
     assert client.post(url, json=body).json()["duplicate"] is True
     assert [c["body"] for c in client.get(f"{API}/tasks/{tid}").json()["comments"]] == ["Исправить"]
+
+
+def test_rework_without_assignee_is_explained_and_does_not_write_comment(client):
+    tid = _submitted_via_form(client)
+    with kb.connect_closing() as conn:
+        version = kb.submitted_version(conn, tid)
+        kb.assign_task(conn, tid, None)
+    response = client.post(f"{API}/tasks/{tid}/request-changes", json={
+        "version": version, "request_id": "no-assignee", "comment": "Исправить",
+    })
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "assignee_required"
+    assert client.get(f"{API}/tasks/{tid}").json()["comments"] == []
