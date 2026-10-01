@@ -472,12 +472,18 @@ def test_connections_route_adds_labels_and_what_each_agent_can_use(install, monk
     skill = install / "skills" / "productivity" / "google-workspace"
     skill.mkdir(parents=True)
     (skill / "SKILL.md").write_text("---\nname: google-workspace\n---\n", encoding="utf-8")
+    (skill / "scripts").mkdir()
+    (skill / "scripts/google_api.py").write_text("# fake script")
 
+    _write_token(install, ("drive", "sheets"), access="fake-default")
     payload = asyncio.run(connections.connections_overview())
     rows = {row["profile"]: row for row in payload["google"]["profiles"]}
     assert rows["designer"]["label"] == "Дизайнер"
-    assert rows["default"]["tools"] == {"calendar": True, "workspace_skill": True}
-    assert rows["designer"]["tools"] == {"calendar": True, "workspace_skill": False}
+    assert rows["default"]["tools"]["calendar"] is True
+    assert rows["default"]["tools"]["workspace_skill"] is True
+    assert rows["default"]["tools"]["workspace"]["execution_path"].endswith("scripts/google_api.py")
+    assert rows["designer"]["tools"]["calendar"] is True
+    assert rows["designer"]["tools"]["workspace_skill"] is False
 
 
 # ---------------------------------------------------------------------------

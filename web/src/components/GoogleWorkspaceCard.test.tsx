@@ -12,6 +12,9 @@ const scope = vi.hoisted(() => ({ profile: "writer", currentProfile: "default", 
 const apiMocks = vi.hoisted(() => ({
   getGoogleWorkspaceStatus: vi.fn(),
   revokeGoogleWorkspace: vi.fn(),
+  startGoogleWorkspace: vi.fn(),
+  cancelGoogleWorkspace: vi.fn(),
+  enableGoogleWorkspaceSkill: vi.fn(),
 }));
 
 vi.mock("@/contexts/useProfileScope", () => ({
@@ -22,6 +25,9 @@ vi.mock("@/lib/api", () => ({
   api: {
     getGoogleWorkspaceStatus: apiMocks.getGoogleWorkspaceStatus,
     revokeGoogleWorkspace: apiMocks.revokeGoogleWorkspace,
+    startGoogleWorkspace: apiMocks.startGoogleWorkspace,
+    cancelGoogleWorkspace: apiMocks.cancelGoogleWorkspace,
+    enableGoogleWorkspaceSkill: apiMocks.enableGoogleWorkspaceSkill,
   },
 }));
 
@@ -39,6 +45,9 @@ beforeEach(() => {
     completion_mode: "manual_localhost_url",
   });
   apiMocks.revokeGoogleWorkspace.mockReset();
+  apiMocks.startGoogleWorkspace.mockReset().mockResolvedValue({ authorization_url: "https://accounts.google.com/fake" });
+  apiMocks.cancelGoogleWorkspace.mockReset().mockResolvedValue({ status: "cancelled" });
+  apiMocks.enableGoogleWorkspaceSkill.mockReset().mockResolvedValue({ ok: true, enabled: true });
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -177,11 +186,13 @@ it("shows only the proven services for a compatible legacy grant", async () => {
   expect(host.textContent).toContain("Работает с текущими правами");
   expect(host.textContent).toContain("Доступны сейчас");
   expect(host.textContent).not.toContain("Нужно переподключить");
-  expect(host.textContent).not.toContain("Gmail");
-  expect(host.textContent).toContain("Google Drive");
-  expect(host.textContent).toContain("Google Docs");
-  expect(host.querySelector('input[type="checkbox"]')).toBeNull();
-  expect(host.textContent).not.toContain("Какие сервисы разрешить этому агенту");
+  const checks = Array.from(host.querySelectorAll('button[title^="Проверить доступ"]')).map(button => button.textContent);
+  expect(checks).toHaveLength(2);
+  expect(checks.join(" ")).toContain("Google Drive");
+  expect(checks.join(" ")).toContain("Google Docs");
+  expect(checks.join(" ")).not.toContain("Gmail");
+  expect(host.querySelector('input[type="checkbox"]')).not.toBeNull();
+  expect(host.textContent).toContain("Добавить сервисы");
 });
 
 it("ignores the previous agent's slow status after switching", async () => {
@@ -261,4 +272,48 @@ it("does not offer to revoke a grant that is open to all agents", async () => {
   expect(host.textContent).toContain("открыто всем агентам");
   const revoke = Array.from(host.querySelectorAll("button")).find((node) => node.textContent?.includes("Отключить Google"));
   expect(revoke?.disabled).toBe(true);
+});
+
+it("offers Tasks consent while preserving selected existing services", async () => {
+  apiMocks.getGoogleWorkspaceStatus.mockResolvedValue({
+    app: { configured: true }, connection: { state: "connected", services: ["drive"] },
+    pending: { active: false }, available_services: ["drive", "tasks"],
+  });
+  vi.spyOn(window, "open").mockReturnValue(null);
+  await renderCard();
+  const inputs = host.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
+  expect(inputs[0].checked).toBe(true);
+  expect(inputs[0].disabled).toBe(true);
+  await act(async () => inputs[1].click());
+  const start = Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Добавить сервисы")!;
+  await act(async () => start.click());
+  expect(apiMocks.startGoogleWorkspace).toHaveBeenCalledWith(["drive", "tasks"], "writer");
+  expect(apiMocks.revokeGoogleWorkspace).not.toHaveBeenCalled();
+});
+
+it("allows cancelling extension while current Google access remains visible", async () => {
+  apiMocks.getGoogleWorkspaceStatus.mockResolvedValue({
+    app: { configured: true }, connection: { state: "connected", services: ["drive"] },
+    pending: { active: true, services: ["drive", "tasks"] }, available_services: ["drive", "tasks"],
+  });
+  await renderCard();
+  expect(host.textContent).toContain("Текущий доступ сохранён");
+  const cancel = Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Отменить подключение")!;
+  await act(async () => cancel.click());
+  expect(apiMocks.cancelGoogleWorkspace).toHaveBeenCalledWith("writer");
+  expect(apiMocks.revokeGoogleWorkspace).not.toHaveBeenCalled();
+});
+
+it("explains disabled Google execution and enables only the selected profile skill", async () => {
+  apiMocks.getGoogleWorkspaceStatus.mockResolvedValue({
+    app: { configured: true }, connection: { state: "connected", services: ["drive"] },
+    pending: { active: false }, available_services: ["drive"],
+    workspace_skill: { available: true, ready: false, reason: "skill_disabled", enabled_for_channel: { api_server: false } },
+  });
+  await renderCard();
+  expect(host.textContent).toContain("Доступ выдан, навык выключен");
+  const enable = Array.from(host.querySelectorAll("button")).find(button => button.textContent === "Включить навык")!;
+  await act(async () => enable.click());
+  expect(apiMocks.enableGoogleWorkspaceSkill).toHaveBeenCalledWith("writer");
+  expect(apiMocks.revokeGoogleWorkspace).not.toHaveBeenCalled();
 });

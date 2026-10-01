@@ -10,6 +10,7 @@ SERVICE_SCOPES: dict[str, tuple[str, ...]] = {
     "contacts": ("https://www.googleapis.com/auth/contacts.readonly",),
     "sheets": ("https://www.googleapis.com/auth/spreadsheets",),
     "docs": ("https://www.googleapis.com/auth/documents",),
+    "tasks": ("https://www.googleapis.com/auth/tasks",),
 }
 MINIMUM_SCOPES = tuple(
     scope for service_scopes in SERVICE_SCOPES.values() for scope in service_scopes
@@ -65,6 +66,7 @@ API_SERVICE_NAMES = {
     "people": "contacts",
     "sheets": "sheets",
     "docs": "docs",
+    "tasks": "tasks",
 }
 
 
@@ -121,7 +123,11 @@ def tracked_scope_contract(payload: dict) -> tuple[tuple[str, ...], list[str]] |
         raise ValueError(f"{TOKEN_SERVICES_KEY} must be a non-empty list")
     if not all(isinstance(name, str) and name for name in raw_services):
         raise ValueError(f"{TOKEN_SERVICES_KEY} contains an invalid service")
-    services = parse_services(",".join(raw_services))
+    if raw_services == ["all"] and isinstance(raw_scopes, list):
+        # Historical "all" means the recorded grant, never newly shipped scopes.
+        services = tuple(name for name, scopes in SERVICE_SCOPES.items() if set(scopes).issubset(raw_scopes))
+    else:
+        services = parse_services(",".join(raw_services))
     expected_scopes = scopes_for_services(services)
     if raw_scopes != expected_scopes:
         raise ValueError(f"{TOKEN_REQUESTED_SCOPES_KEY} does not match selected services")
@@ -149,6 +155,7 @@ def _legacy_services(granted: set[str]) -> tuple[str, ...]:
         },
         "sheets": {"https://www.googleapis.com/auth/spreadsheets"},
         "docs": {"https://www.googleapis.com/auth/documents"},
+        "tasks": {"https://www.googleapis.com/auth/tasks"},
     }
     return tuple(
         service for service in SERVICE_SCOPES if granted & service_grants[service]
@@ -218,7 +225,7 @@ def require_selected_service(payload: dict, api_name: str) -> None:
     if services != ("all",) and service not in services:
         raise ValueError(
             f"service '{service}' was not selected during OAuth setup; "
-            "revoke before changing services"
+            "extend access with owner consent in Settings → Keys → Google Workspace"
         )
 
 

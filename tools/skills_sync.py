@@ -12,10 +12,10 @@ Old v1 manifests (plain names without hashes) are auto-migrated.
 Update logic:
   - NEW skills (not in manifest): copied to user dir, origin hash recorded.
   - EXISTING skills (in manifest, present in user dir):
-      * If bundled still matches origin hash: no update → skip without reading
-        the user copy.
-      * If bundled changed and user copy matches origin hash: safe to update.
-      * If bundled changed and user copy differs: user customized it → SKIP.
+      * If the copy matches the new delivery: adopt its official hash.
+      * If the copy matches origin: safe to update the whole skill.
+      * Otherwise keep instructional/user files, and refresh platform scripts
+        with content-addressed backups under skills/.bundled-backups/.
   - DELETED by user (in manifest, absent from user dir): respected, not re-added.
   - REMOVED from bundled (in manifest, gone from repo): cleaned from manifest.
 
@@ -714,7 +714,7 @@ def _reject_sync_symlinks(path: Path) -> None:
             raise OSError(f"Refusing skill sync through symlink: {component}")
 
 
-def _sync_platform_files(src: Path, dest: Path) -> bool:
+def _sync_platform_files(src: Path, dest: Path, *, install: bool = True) -> bool:
     """Bundled executable resources belong to the platform, even in edited skills.
 
     Keep content-addressed backups outside the skill tree before replacing a
@@ -757,8 +757,9 @@ def _sync_platform_files(src: Path, dest: Path) -> bool:
                 atomic_copy(target, backup)
             elif backup.read_bytes() != old:
                 raise OSError(f"Invalid platform backup: {backup}")
-        atomic_copy(source, target)
-        changed = True
+        if install:
+            atomic_copy(source, target)
+            changed = True
     return changed
 
 
@@ -805,13 +806,14 @@ def sync_skills(quiet: bool = False, *, only: Optional[Set[str]] = None) -> dict
             (name, src) for name, src in bundled_skills
             if name in _essential_names()
         ]
-    bundled_names = {name for name, _ in bundled_skills}
+    from collections import Counter
+    bundled_counts = Counter(name for name, _ in bundled_skills)
+    bundled_names = set(bundled_counts)
     suppressed = _read_suppressed_names()
     # Index of skills already provided by external_dirs (skip writing them)
     external_index = _build_external_skill_index()
     shadowed_by_external: List[str] = []
-    # Rename recovery indexes are expensive on host bind mounts. Build them
-    # only if a tracked skill is actually missing from its canonical path.
+    # Resolve ownership before any write, including targeted provisioning.
     active_index = _index_active_skills()
     hub_paths = _read_hub_install_paths()
 
@@ -843,7 +845,10 @@ def sync_skills(quiet: bool = False, *, only: Optional[Set[str]] = None) -> dict
             logger.warning("Skipped unsafe skill path: %s", dest)
             skipped += 1
             continue
-        if len(active_index.get(skill_name, [])) > 1 or dest.relative_to(_skills_dir()).as_posix() in hub_paths:
+        matches = active_index.get(skill_name, [])
+        if (bundled_counts[skill_name] > 1 or len(matches) > 1 or
+                (skill_name not in manifest and matches and dest not in matches) or
+                dest.relative_to(_skills_dir()).as_posix() in hub_paths):
             logger.warning("Bundled skill %s is ambiguous or hub-owned; kept", skill_name)
             skipped += 1
             continue
@@ -873,9 +878,6 @@ def sync_skills(quiet: bool = False, *, only: Optional[Set[str]] = None) -> dict
         # "in manifest but not on disk" branch below misreads the skill as
         # user-deleted, stranding the old copy at its stale path forever.
         if not dest.exists() and skill_name in manifest:
-            if active_index is None:
-                active_index = _index_active_skills()
-                hub_paths = _read_hub_install_paths()
             _moved_from = _recover_renamed_skill(
                 skill_name,
                 manifest.get(skill_name, ""),
@@ -958,8 +960,10 @@ def sync_skills(quiet: bool = False, *, only: Optional[Set[str]] = None) -> dict
                 continue
 
             try:
-                platform_updated = (False if origin_hash and user_hash == origin_hash
-                                    else _sync_platform_files(skill_src, dest))
+                pristine = bool(origin_hash and user_hash == origin_hash)
+                # Archive old executables before a pristine whole-tree update,
+                # without changing the tree that its rollback must restore.
+                platform_updated = _sync_platform_files(skill_src, dest, install=not pristine)
             except OSError:
                 logger.warning("Could not update platform files in %s", dest, exc_info=True)
                 skipped += 1
@@ -1060,7 +1064,7 @@ def sync_skills(quiet: bool = False, *, only: Optional[Set[str]] = None) -> dict
     _essential_cat_dirs = {
         _compute_relative_dest(src, bundled_dir).parent
         for _, src in bundled_skills
-    } if essential_only else None
+    } if essential_only or only is not None else None
     for desc_md in bundled_dir.rglob("DESCRIPTION.md"):
         rel = desc_md.relative_to(bundled_dir)
         dest_desc = _skills_dir() / rel
@@ -1074,7 +1078,16 @@ def sync_skills(quiet: bool = False, *, only: Optional[Set[str]] = None) -> dict
                 logger.debug("Could not copy %s: %s", desc_md, e)
 
     _write_manifest(manifest)
-    optional_provenance_backfilled = _backfill_optional_provenance(quiet=quiet)
+    optional_provenance_backfilled = (_backfill_optional_provenance(quiet=quiet)
+                                     if only is None else [])
+
+    if only is None:
+        # Covers existing --no-skills profiles during the regular updater.
+        from korra_cli.google_workspace import ensure_workspace_skill
+        google_result = ensure_workspace_skill(_hermes_home())
+        if google_result:
+            copied.extend(name for name in google_result["copied"] if name not in copied)
+            updated.extend(name for name in google_result["updated"] if name not in updated)
 
     return {
         "copied": copied,

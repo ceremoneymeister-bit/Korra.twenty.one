@@ -34,7 +34,7 @@ Gmail, Calendar, Drive, Contacts, Sheets, and Docs — through Korra-managed OAu
 ## Scripts
 
 - `google_workspace_auth` — owner-only connection tool for status, start, and cancel
-- `scripts/google_api.py` — compatibility wrapper CLI. It prefers `gws` for operations when available, while preserving Korra's existing JSON output contract.
+- [scripts/google_api.py](scripts/google_api.py) — compatibility wrapper CLI. It prefers `gws` for operations when available, while preserving Korra's existing JSON output contract.
 
 ## First-Time Setup
 
@@ -78,7 +78,7 @@ read-only file mount. This remains valid when the separately managed
 write through that mount or replace its host source.
 
 Unknown names, empty items, duplicates, and combining `all` with another name
-are rejected before an OAuth URL is created. `all` expands to the same six
+are rejected before an OAuth URL is created. `all` expands to the same seven
 least-privilege service scopes listed below:
 
 | Service | OAuth scopes |
@@ -89,14 +89,22 @@ least-privilege service scopes listed below:
 | `contacts` | `https://www.googleapis.com/auth/contacts.readonly` |
 | `sheets` | `https://www.googleapis.com/auth/spreadsheets` |
 | `docs` | `https://www.googleapis.com/auth/documents` |
-| `all` | Expands to all six rows above; no broader legacy scopes are added |
+| `tasks` | `https://www.googleapis.com/auth/tasks` |
+| `all` | Expands to all seven rows above; no broader legacy scopes are added |
 
 Existing recognized legacy grants remain usable only within the services their
 recorded scopes actually grant. Status marks them `reauthorization_required`;
-unknown scopes remain unusable. Revoke before requesting a different service
-set, then start a fresh consent flow.
+unknown scopes remain unusable. Use **Добавить сервисы** to request additional
+owner consent. Existing access stays available during this flow and after cancellation.
+An extended Tasks grant is stored separately; rollback reads the previous grant.
+A new Tasks connection without a previous grant requires reconnect after rollback to 0.21.15.
 
 ## Usage
+
+Run the installed script directly with `terminal`:
+`python "$HERMES_HOME/skills/productivity/google-workspace/scripts/google_api.py" <service> <action> ...`.
+The skill response includes its installed absolute directory; for an external or
+relocated skill use that directory plus `scripts/google_api.py`. No file search is needed.
 
 All commands go through the API script. Set `GAPI` as a shorthand:
 
@@ -240,10 +248,19 @@ All commands return JSON. Parse with `jq` or read directly. Key fields:
 - **Docs create**: `{status: "created", documentId, title, url}`
 - **Docs append**: `{status: "appended", documentId, inserted_at, characters}`
 
+## Google Tasks
+
+Use the same installed script with `tasks tasklists`, `tasks list --tasklist ID`,
+`tasks get TASK_ID --tasklist ID`, `tasks create --tasklist ID --title "Title"`,
+or `tasks complete TASK_ID --tasklist ID`. Lists return `items` and `nextPageToken`;
+pass `--page-token` to continue. `--show-completed` includes completed/hidden tasks.
+Tasks create/complete require user approval. Adding Tasks/Docs requires new owner
+consent through **Добавить сервисы**, never editing token metadata.
+
 ## Rules
 
 1. **Never send email, create/delete calendar events, delete Drive files, share files, or modify Docs/Sheets without confirming with the user first.** Show what will be done (recipients, file IDs, content, share role) and ask for approval. For `drive delete`, prefer the default trash (reversible) over `--permanent`.
-2. **Check auth before first use** — call `google_workspace_auth` with `action=status`. If it fails, guide the owner to Settings → Keys.
+2. **Verify read access with the service command.** Use [scripts/google_api.py](scripts/google_api.py) for the requested read before claiming Google is disconnected. A small read-only probe is `drive search "" --max 1`, `calendar list`, or `gmail labels`; for Sheets/Docs read the requested document/range. `owner_required` from `google_workspace_auth` means connection management is unavailable to this principal, not that a shared grant is absent. `not_authenticated` means this agent has no grant; `service_not_selected` means the service needs additional owner consent. File permission errors, disabled APIs, network and refresh failures are separate problems, not a missing connection. Manage the connection only in a verified owner context; extend access in Settings → Keys → Google Workspace without disconnecting existing access.
 3. **Use the Gmail search syntax reference** for complex queries — load it with `skill_view("google-workspace", file_path="references/gmail-search-syntax.md")`.
 4. **Calendar times must include timezone** — always use ISO 8601 with offset (e.g., `2026-03-01T10:00:00-06:00`) or UTC (`Z`).
 5. **Respect rate limits** — avoid rapid-fire sequential API calls. Batch reads when possible.

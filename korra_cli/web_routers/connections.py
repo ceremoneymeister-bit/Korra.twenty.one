@@ -85,7 +85,8 @@ def _connections_snapshot() -> dict[str, Any]:
             # The calendar tool needs the installation app and the profile's
             # toolset lists to include it; who may use it is decided per call.
             "calendar": app_ready and _calendar_tool_enabled(home),
-            "workspace_skill": _has_workspace_skill(home),
+            "workspace_skill": google.workspace_skill_status(home, services=row["services"])["ready"],
+            "workspace": google.workspace_skill_status(home, services=row["services"]),
         }
     return {"google": snapshot}
 

@@ -1373,6 +1373,10 @@ export const api = {
   // runs under. Omitted/empty profile = the dashboard's own profile.
   getSkills: (profile?: string) =>
     fetchJSON<SkillInfo[]>(`/api/skills${profileQuery(profile)}`),
+  enableGoogleWorkspaceSkill: (profile: string) => fetchJSON<{ ok: boolean; enabled: boolean }>(
+    `/api/google-workspace/sharing?profile=${encodeURIComponent(profile)}`,
+    { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ skill_enabled: true }) },
+  ),
   toggleSkill: (name: string, enabled: boolean, profile?: string) =>
     fetchJSON<{ ok: boolean }>("/api/skills/toggle", {
       method: "PUT",
@@ -2721,6 +2725,7 @@ export interface GoogleWorkspaceStatus {
     state: "connected" | "not_connected" | "reauthorization_required";
     services?: string[];
     expires_at?: number | null;
+    rollback_requires_reconnect?: boolean;
     reason?: string;
     legacy_scope_count?: number;
     unknown_scope_count?: number;
@@ -2733,6 +2738,14 @@ export interface GoogleWorkspaceStatus {
     /** Это подключение открыто всем агентам. */
     shared_with_all?: boolean;
     action?: string | null;
+  };
+  workspace_skill?: {
+    available: boolean;
+    ready: boolean;
+    enabled_for_channel: Record<string, boolean>;
+    execution_path?: string | null;
+    reason?: string | null;
+    enable_hint?: string | null;
   };
   pending: { active: boolean; services?: string[]; expires_at?: number };
   available_services: string[];

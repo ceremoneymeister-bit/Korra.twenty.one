@@ -37,6 +37,7 @@ class GoogleSharingBody(BaseModel):
 
     # None keeps the explicit list as it is; all_profiles opens (True) or
     # closes (False) this grant for every profile, including later ones.
+    skill_enabled: Optional[bool] = None
     profiles: Optional[list[str]] = None
     all_profiles: Optional[bool] = None
 
@@ -128,6 +129,11 @@ async def google_revoke(body: GoogleProfileBody, profile: Optional[str] = None):
 @router.put("/api/google-workspace/sharing")
 async def google_configure_sharing(body: GoogleSharingBody, profile: Optional[str] = None):
     try:
+        if body.skill_enabled is not None:
+            if body.profiles is not None or body.all_profiles is not None:
+                raise HTTPException(status_code=400, detail="Change skill or sharing separately")
+            return await asyncio.to_thread(google.set_workspace_skill_enabled,
+                                          body.skill_enabled, profile_home=_profile_home(profile))
         return await asyncio.to_thread(
             google.configure_sharing,
             source_profile=_profile_name(profile),

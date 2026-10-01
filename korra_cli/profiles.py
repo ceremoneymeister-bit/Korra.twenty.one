@@ -972,6 +972,11 @@ def _seed_runtime_credentials(profile_dir: Path, source_dir: Path) -> None:
         from korra_cli.providers import resolve_provider_full
 
         source_env = load_env_file(source_dir / ".env")
+        # Voice is an installation capability copied with the STT config.
+        # Channel tokens remain private to their original profile.
+        deepgram_key = source_env.get("DEEPGRAM_API_KEY", "").strip()
+        if deepgram_key:
+            selected["DEEPGRAM_API_KEY"] = deepgram_key
         gateway_key = source_env.get("API_SERVER_KEY", "").strip()
         if gateway_key:
             selected["API_SERVER_KEY"] = gateway_key
@@ -1731,6 +1736,9 @@ def create_profile(
             )
         except Exception:
             pass  # non-fatal — user can describe later with `hermes profile describe`
+
+    from korra_cli.google_workspace import ensure_workspace_skill
+    ensure_workspace_skill(profile_dir)
 
     # Phase 4: when running inside a container under s6, register the
     # new profile's gateway as a runtime s6 service so

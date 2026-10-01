@@ -506,3 +506,63 @@ def test_api_refresh_rejects_scope_expansion(api_module, monkeypatch):
         api_module.get_credentials()
 
     assert json.loads(token_path.read_text(encoding="utf-8"))["token"] == "ya29.old"
+
+
+@pytest.mark.parametrize('action,method,path_suffix,body', [
+    ('tasklists', 'GET', '/users/@me/lists', None),
+    ('list', 'GET', '/lists/list-1/tasks', None),
+    ('get', 'GET', '/lists/list-1/tasks/task-1', None),
+    ('create', 'POST', '/lists/list-1/tasks', {'title': 'Тест', 'notes': 'Заметка'}),
+    ('complete', 'PATCH', '/lists/list-1/tasks/task-1', {'status': 'completed'}),
+])
+def test_tasks_python_uses_real_discovery_and_fake_transport(api_module, monkeypatch, capsys, action, method, path_suffix, body):
+    import httplib2
+    from urllib.parse import urlsplit, parse_qs
+    from googleapiclient.discovery import build
+    calls = []
+    class FakeHTTP:
+        def request(self, uri, method='GET', body=None, headers=None, **kwargs):
+            calls.append((uri, method, json.loads(body) if body else None))
+            return httplib2.Response({'status': '200', 'content-type': 'application/json'}), b'{"id":"task-1","items":[],"nextPageToken":"page-2"}'
+    service = build('tasks', 'v1', http=FakeHTTP(), static_discovery=True)
+    monkeypatch.setattr(api_module, '_gws_binary', lambda: None)
+    monkeypatch.setattr(api_module, 'build_service', lambda name, version: service)
+    args = SimpleNamespace(action=action, tasklist='list-1', task_id='task-1', max=7,
+                           page_token='page-1', show_completed=True, title='Тест', notes='Заметка', due='')
+    api_module._require_selected_service('tasks')
+    api_module.tasks_command(args)
+    uri, actual_method, actual_body = calls[0]
+    assert actual_method == method and urlsplit(uri).path.endswith(path_suffix)
+    assert actual_body == body
+    if action in {'list', 'tasklists'}:
+        params = parse_qs(urlsplit(uri).query)
+        assert params['pageToken'] == ['page-1'] and params['maxResults'] == ['7']
+        assert json.loads(capsys.readouterr().out)['nextPageToken'] == 'page-2'
+
+
+@pytest.mark.parametrize('action,resource,method', [
+    ('tasklists', 'tasklists', 'list'), ('list', 'tasks', 'list'),
+    ('get', 'tasks', 'get'), ('create', 'tasks', 'insert'), ('complete', 'tasks', 'patch'),
+])
+def test_tasks_gws_transport_contract(api_module, monkeypatch, capsys, action, resource, method):
+    calls = []
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        return SimpleNamespace(returncode=0, stdout='{"id":"task-1"}', stderr='')
+    monkeypatch.setattr(api_module.subprocess, 'run', fake_run)
+    args = SimpleNamespace(action=action, tasklist='list-1', task_id='task-1', max=5,
+                           page_token='', show_completed=False, title='Task', notes='', due='')
+    api_module.tasks_command(args)
+    assert calls[0][1:4] == ['tasks', resource, method]
+    if action == 'complete':
+        assert json.loads(calls[0][calls[0].index('--json') + 1]) == {'status': 'completed'}
+    assert json.loads(capsys.readouterr().out)['id'] == 'task-1'
+
+
+def test_tasks_cli_rejects_missing_scope_before_transport(api_module, monkeypatch):
+    scopes = ['https://www.googleapis.com/auth/drive']
+    _write_token(api_module.TOKEN_PATH, scopes=scopes, korra_services=['drive'], korra_requested_scopes=scopes)
+    monkeypatch.setattr(api_module.sys, 'argv', ['google_api.py', 'tasks', 'complete', 'task-1'])
+    monkeypatch.setattr(api_module.subprocess, 'run', lambda *_args, **_kwargs: pytest.fail('No request without Tasks consent'))
+    with pytest.raises(SystemExit):
+        api_module.main()

@@ -148,6 +148,7 @@ class TestCreateProfile:
             "ANTHROPIC_API_KEY=model-key\n"
             "TELEGRAM_BOT_TOKEN=channel-secret\n"
             "EXA_API_KEY=tool-secret\n"
+            "DEEPGRAM_API_KEY=stt-secret\n"
         )
 
         profile_dir = create_profile("coder", no_alias=True)
@@ -155,6 +156,7 @@ class TestCreateProfile:
         assert load_env_file(profile_dir / ".env") == {
             "API_SERVER_KEY": "gateway-key-0123456789abcdef",
             "ANTHROPIC_API_KEY": "model-key",
+            "DEEPGRAM_API_KEY": "stt-secret",
         }
 
 

@@ -1042,6 +1042,50 @@ class TestPlatformOwnedFiles:
         sync.sync_skills(quiet=True)
         assert sync._read_manifest()['google-workspace'] == sync._dir_hash(source)
 
+    def test_pristine_upgrade_also_keeps_previous_platform_file(self, tmp_path, monkeypatch):
+        sync, source, dest = self.setup_tree(tmp_path, monkeypatch)
+        previous = dest.joinpath('scripts/api.py').read_text()
+        source.joinpath('scripts/api.py').write_text('newer platform')
+        source.joinpath('SKILL.md').write_text('---\nname: google-workspace\n---\nnewer instructions')
+        sync.sync_skills(quiet=True)
+        assert dest.joinpath('SKILL.md').read_text() == source.joinpath('SKILL.md').read_text()
+        assert dest.joinpath('scripts/api.py').read_text() == 'newer platform'
+        backups = list((sync._skills_dir() / '.bundled-backups').rglob('api.py'))
+        assert len(backups) == 1 and backups[0].read_text() == previous
+
+    def test_targeted_sync_preserves_other_tracking_and_skips_other_categories(self, tmp_path, monkeypatch):
+        sync, source, dest = self.setup_tree(tmp_path, monkeypatch)
+        other = source.parents[1] / 'unrelated/other-skill'
+        other.mkdir(parents=True)
+        other.joinpath('SKILL.md').write_text('---\nname: other-skill\n---\nother')
+        other.parent.joinpath('DESCRIPTION.md').write_text('other category')
+        manifest = sync._read_manifest()
+        manifest['other-skill'] = 'previous-hash'
+        sync._write_manifest(manifest)
+        sync.sync_skills(quiet=True, only={'google-workspace'})
+        assert sync._read_manifest()['other-skill'] == 'previous-hash'
+        assert not (sync._skills_dir() / 'unrelated').exists()
+
+    def test_untracked_local_name_is_not_duplicated_at_canonical_path(self, tmp_path, monkeypatch):
+        sync, source, dest = self.setup_tree(tmp_path, monkeypatch)
+        moved = sync._skills_dir() / 'custom/google-workspace'
+        moved.parent.mkdir()
+        dest.rename(moved)
+        sync._write_manifest({})
+        result = sync.sync_skills(quiet=True, only={'google-workspace'})
+        assert not dest.exists()
+        assert moved.joinpath('scripts/api.py').read_text() == 'new platform'
+        assert not result['copied']
+
+    def test_ambiguous_bundled_names_are_not_installed(self, tmp_path, monkeypatch):
+        sync, source, dest = self.setup_tree(tmp_path, monkeypatch)
+        other = source.parents[1] / 'other/google-workspace'
+        shutil.copytree(source, other)
+        dest.joinpath('scripts/api.py').write_text('old platform')
+        sync.sync_skills(quiet=True, only={'google-workspace'})
+        assert dest.joinpath('scripts/api.py').read_text() == 'old platform'
+        assert not (sync._skills_dir() / 'other/google-workspace').exists()
+
     def test_symlink_script_cannot_escape(self, tmp_path, monkeypatch):
         sync, source, dest = self.setup_tree(tmp_path, monkeypatch)
         outside = tmp_path / 'outside'
@@ -1050,3 +1094,21 @@ class TestPlatformOwnedFiles:
         dest.joinpath('scripts/api.py').symlink_to(outside)
         sync.sync_skills(quiet=True)
         assert outside.read_text() == 'untouched'
+
+    def test_failed_platform_write_can_retry_without_losing_previous_file(self, tmp_path, monkeypatch):
+        sync, source, dest = self.setup_tree(tmp_path, monkeypatch)
+        dest.joinpath('SKILL.md').write_text('custom instructions')
+        dest.joinpath('scripts/api.py').write_text('old platform')
+        copy = sync.shutil.copy2
+        def fail_new(source_path, target, *args, **kwargs):
+            if Path(source_path) == source / 'scripts/api.py':
+                raise OSError('fake disk full')
+            return copy(source_path, target, *args, **kwargs)
+        monkeypatch.setattr(sync.shutil, 'copy2', fail_new)
+        sync.sync_skills(quiet=True)
+        assert dest.joinpath('scripts/api.py').read_text() == 'old platform'
+        monkeypatch.setattr(sync.shutil, 'copy2', copy)
+        sync.sync_skills(quiet=True)
+        assert dest.joinpath('scripts/api.py').read_text() == 'new platform'
+        assert dest.joinpath('SKILL.md').read_text() == 'custom instructions'
+        assert len(list((sync._skills_dir() / '.bundled-backups').rglob('api.py'))) == 1
