@@ -24,6 +24,7 @@ import subprocess
 import sys
 import threading
 import time
+import tempfile
 import uuid
 from datetime import datetime, timezone
 
@@ -3142,6 +3143,59 @@ def _is_owner_side_chat(job: dict, platform_name: str, chat_id) -> bool:
         return False
 
 
+def _prepare_required_file_result(job: dict, content: str) -> tuple[str, Optional[str]]:
+    """Validate a mandatory artifact before booking success or sending text."""
+    from cron.jobs import required_result_extensions
+    from gateway.platforms.base import BasePlatformAdapter
+    from gateway.media_policy import apply_media_policy_env
+
+    extensions = required_result_extensions(job)
+    if extensions is None:
+        return content, None
+    apply_media_policy_env(load_config())
+    explicit, _ = BasePlatformAdapter.extract_media(content)
+    candidates, _ = BasePlatformAdapter.extract_media(content, result_links=True)
+    safe = BasePlatformAdapter.filter_media_delivery_paths(candidates)
+    explicit_safe = {p for p, _ in BasePlatformAdapter.filter_media_delivery_paths(explicit)}
+    home = get_hermes_home().resolve()
+    profiles_root = get_default_hermes_root().resolve() / "profiles"
+    roots = [home, Path(tempfile.gettempdir()).resolve()]
+    if job.get("workdir"):
+        roots.append(Path(job["workdir"]).resolve())
+    accepted = []
+    for path, _ in safe:
+        resolved = Path(path)
+        if extensions and resolved.suffix.lower() not in extensions:
+            continue
+        if path not in explicit_safe:
+            # Fallback references must point to this run's output in its
+            # profile/workdir/temp area, never a pre-existing or sibling file.
+            if not any(resolved.is_relative_to(root) for root in roots):
+                continue
+            if resolved.is_relative_to(home / "profiles") or (
+                resolved.is_relative_to(profiles_root) and not resolved.is_relative_to(home)
+            ):
+                continue
+            try:
+                if resolved.stat().st_mtime < float(job.get("_result_started_at", time.time())) - 1:
+                    continue
+            except OSError:
+                continue
+        if path not in accepted:
+            accepted.append(path)
+    if not accepted:
+        format_note = ", ".join(extensions) if extensions else "файл"
+        return content, (
+            f"Задание требует файл результата ({format_note}), но доступного вложения нет. "
+            "Создайте файл и укажите в финальном ответе MEDIA:/полный/путь/к/файлу."
+        )
+    # Preserve explicit directives; append only validated fallback references.
+    for path in accepted:
+        if path not in explicit_safe:
+            content += f"\nMEDIA:{path}"
+    return content, None
+
+
 def _deliver_result(
     job: dict,
     content: str,
@@ -3162,6 +3216,10 @@ def _deliver_result(
 
     Returns None on success, or an error string on failure.
     """
+    if not failure_notice:
+        content, file_error = _prepare_required_file_result(job, content)
+        if file_error:
+            return file_error
     from cron.reminders import validate_reminder_delivery
     try:
         validate_reminder_delivery(job)
@@ -4874,6 +4932,9 @@ def _build_job_prompt(
             fire only — never persisted to the job definition.
     """
     user_prompt = str(job.get("prompt") or "")
+    from cron.jobs import required_result_extensions
+    if required_result_extensions(job) is not None:
+        user_prompt += "\n\nОбязательный результат — файл. Создайте его и завершите ответ директивой MEDIA:/полный/путь/к/файлу. Текст без доступного файла считается ошибкой."
     if extra_prompt:
         user_prompt = f"{user_prompt}\n\n## Run Context\n{extra_prompt}"
     from cron.recipients import audience_run_note
@@ -7558,6 +7619,7 @@ def _run_one_job_body(
     job = {**job, "execution_id": execution_id, "_result_started_at": time.time()}
     delivery_attempted = False
     delivery_error = None
+    file_error = None
     delivery_waiting_decision = False
     delivery_unknown = False
     # Durable failure-incident bookkeeping for this run (see cron.incidents):
@@ -7701,6 +7763,13 @@ def _run_one_job_body(
                     "(tool subprocess was killed mid-flight)."
                 )
 
+            if success:
+                final_response, file_error = _prepare_required_file_result(job, final_response)
+                if file_error:
+                    success = False
+                    error = file_error
+                    delivery_error = file_error
+
             # Deliver the final response to the origin/target chat.
             # If the agent responded with [SILENT], skip delivery (but
             # output is already saved above).  Failed jobs always deliver.
@@ -7725,7 +7794,9 @@ def _run_one_job_body(
             drift_skip = drift_skip_silent or (
                 bool(error) and DRIFT_SKIP_MARKER in str(error)
             )
-            if blocked_config and not success:
+            if file_error:
+                deliver_content = f"⚠️ {job.get('name') or job['id']}: {file_error}"
+            elif blocked_config and not success:
                 # Blocked-config alert: bypass the generic failure summarizer
                 # (whose auth/timeout heuristics would mislabel this as a
                 # provider runtime failure) — say plainly that config
@@ -7811,7 +7882,7 @@ def _run_one_job_body(
                         if not owns_delivery:
                             raise _FireClaimLostDuringSideEffect
                         delivery_attempted = True
-                        delivery_error = _deliver_result(
+                        send_error = _deliver_result(
                             job,
                             deliver_content,
                             adapters=adapters,
@@ -7824,6 +7895,7 @@ def _run_one_job_body(
                             # уведомлению о сбое: оно уходит только владельцу.
                             **({"execution_id": str(execution_id)} if success and execution_id else {}),
                         )
+                        delivery_error = send_error or file_error
                         if delivery_error and delivery_error.startswith(
                             _WAITING_DECISION_PREFIX
                         ):

@@ -5224,7 +5224,7 @@ class BasePlatformAdapter(ABC):
         return ''.join(chars)
 
     @staticmethod
-    def extract_media(content: str) -> Tuple[List[Tuple[str, bool]], str]:
+    def extract_media(content: str, *, result_links: bool = False) -> Tuple[List[Tuple[str, bool]], str]:
         """
         Extract MEDIA:<path> tags and [[audio_as_voice]] directives from response text.
 
@@ -5245,6 +5245,8 @@ class BasePlatformAdapter(ABC):
 
         Args:
             content: The response text to scan.
+            result_links: Cron may also extract sandbox links / backticked
+                absolute paths. The caller must validate their scope and age.
 
         Returns:
             Tuple of (list of (path, is_voice) pairs, cleaned content with tags removed).
@@ -5311,6 +5313,21 @@ class BasePlatformAdapter(ABC):
                 _safe_ext = os.path.splitext(safe)[1].lower()
                 media.append((safe, has_voice_tag and _safe_ext in _AUDIO_EXTS))
                 seen_paths.add(safe)
+
+        if result_links:
+            # Cron-only fallback for final artifact references. Ignore fenced
+            # examples/quotes/JSON; inline absolute paths are intentionally
+            # read here because models put result filenames in backticks.
+            scan = re.sub(r"```.*?```", "", content, flags=re.DOTALL)
+            scan = re.sub(r"(?m)^\s*>.*$", "", scan)
+            scan = re.sub(r'"(?:[^"\\]|\\.)*"', "", scan)
+            candidates = re.findall(r"\[[^\]\n]*\]\(sandbox:([^\n)]+)\)", scan)
+            candidates += re.findall(r"`((?:/|~/)[^`\n]+)`", scan)
+            for candidate in candidates:
+                expanded = os.path.expanduser(candidate.strip())
+                if expanded not in seen_paths:
+                    seen_paths.add(expanded)
+                    media.append((expanded, False))
 
         # Remove the delivered MEDIA tags from the user-visible text. Mask a
         # length-equal copy of ``cleaned`` (same union of protected regions) to
