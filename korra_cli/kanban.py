@@ -948,9 +948,9 @@ def build_parser(parent_subparsers: argparse._SubParsersAction) -> argparse.Argu
         "gc", help='Очистить рабочие папки архивных задач, старые события и журналы',
     )
     p_gc.add_argument("--event-retention-days", type=int, default=30,
-                      help='Удалить task_events завершённых задач старше N дней (по умолчанию 30)')
+                      help='Удалить task_events завершённых задач старше N дней (по умолчанию 30; 0 отключает удаление)')
     p_gc.add_argument("--log-retention-days", type=int, default=30,
-                      help='Удалить журналы исполнителей старше N дней (по умолчанию 30)')
+                      help='Удалить журналы исполнителей старше N дней (по умолчанию 30; 0 отключает удаление)')
 
     # --- repair ---
     p_repair = sub.add_parser(
@@ -3188,6 +3188,11 @@ def _cmd_decompose(args: argparse.Namespace) -> int:
 def _cmd_gc(args: argparse.Namespace) -> int:
     """Remove scratch workspaces of archived tasks, prune old events, and
     delete old worker logs."""
+    event_days = getattr(args, "event_retention_days", 30)
+    log_days = getattr(args, "log_retention_days", 30)
+    if event_days < 0 or log_days < 0:
+        print('Срок хранения должен быть >= 0; 0 отключает удаление событий или журналов.', file=sys.stderr)
+        return 2
     import shutil
     scratch_root = kb.workspaces_root()
     removed_ws = 0
@@ -3223,8 +3228,6 @@ def _cmd_gc(args: argparse.Namespace) -> int:
             shutil.rmtree(path, ignore_errors=True)
             removed_ws += 1
 
-    event_days = getattr(args, "event_retention_days", 30)
-    log_days = getattr(args, "log_retention_days", 30)
     with kb.connect_closing() as conn:
         removed_events = kb.gc_events(
             conn, older_than_seconds=event_days * 24 * 3600,
