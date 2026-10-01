@@ -615,7 +615,9 @@ class TestCronRunSend:
                         path = ("" if name == "default" else "/p/" + name) + recipients.SEND_ROUTE
                         for key, token, target, expected in [
                             (keys[name], tokens[name], "telegram:555", 200),
-                            (keys[name], tokens[name], "telegram:777", 409),
+                            # K21-204: an owner's job asks the owner once about a
+                            # new recipient instead of a bare 409; nothing is sent.
+                            (keys[name], tokens[name], "telegram:777", 200),
                             ("", tokens[name], "telegram:555", 401),
                             (keys[other], tokens[name], "telegram:555", 401),
                             (keys[name], "invented", "telegram:555", 404),
@@ -626,7 +628,12 @@ class TestCronRunSend:
                                 headers={"Authorization": "Bearer " + key} if key else {})
                             assert response.status == expected, (name, target, expected)
                             if expected == 200:
-                                assert (await response.json())["success"] is True
+                                body = await response.json()
+                                if target == "telegram:777":
+                                    assert body["success"] is False
+                                    assert body["status"] == "pending_decision"
+                                else:
+                                    assert body["success"] is True
                     # A restarted gateway has forgotten every secret it issued.
                     recipients._LIVE_RUNS.clear()
                     response = await cli.post(
