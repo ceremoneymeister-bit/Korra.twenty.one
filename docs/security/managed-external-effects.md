@@ -1,9 +1,30 @@
 # Managed external effects
 
-Korra 0.21.10 separates ordinary autonomous work from two effects that need an
-exact owner decision: sending a message to a third party and paying money. The
-decision is bound to one immutable payload and cannot become a session-wide or
-permanent grant.
+Ordinary work and owner-configured automations run autonomously. One-off
+third-party messages and payments require an exact owner decision, bound to
+one immutable payload rather than a session-wide grant.
+
+For an automation, the owner confirms recipients or a changing source once
+at setup. An explicit choice in chat or the cabinet already counts. In chat,
+`cronjob(..., recipients_confirmed=true)` records that choice in the existing
+job fields; this is accepted only in a live owner turn. If the agent proposes
+recipients itself, the existing `automation_recipients` card asks the owner.
+Use `deliver` for fixed delivery targets and `audience` for a source such as
+"clients with birthdays today, from Bitrix".
+
+Inside that job, `send_message` and `korra send` send to confirmed recipients
+without per-message decisions and still mask secrets. A new recipient outside
+the fixed list pauses the job and creates one recipient card shared across
+attempts and texts. Approval permits future sends, without sending the held
+text itself. A denial keeps the job paused. An unrelated owner pause is
+preserved. Jobs belonging to non-owners and one-off sends retain their guards.
+
+Source membership is still selected by the agent under the confirmed
+`audience` instruction; there is no independently verified source snapshot.
+The agent must report successful send results separately from failed/unknown
+outcomes. This is not a durable, system-generated receipt summary. Direct
+Telethon or other custom senders must be connected to a managed transport;
+setting `audience` alone does not mediate their network calls.
 
 ## Covered routes
 

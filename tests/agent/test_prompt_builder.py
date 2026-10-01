@@ -466,7 +466,7 @@ class TestBuildContextFilesPrompt:
         (sub / "AGENTS.md").write_text("Only file.")
         assert _load_agents_md(sub) == "## AGENTS.md\n\nOnly file."
 
-    def test_agents_md_no_git_root_stays_cwd_only(self, tmp_path):
+    def test_agents_md_no_git_root_stays_cwd_only(self, tmp_path, monkeypatch):
         # Without a git root, parents are never consulted (no picking up an
         # AGENTS.md planted in /tmp or $HOME).
         (tmp_path / "AGENTS.md").write_text("Planted in parent.")
@@ -474,6 +474,9 @@ class TestBuildContextFilesPrompt:
         sub.mkdir()
         from agent.prompt_builder import _load_agents_md
 
+        # Some sandboxes place /tmp itself inside a repository. Exercise the
+        # no-repository branch independently of the host's parent directories.
+        monkeypatch.setitem(_load_agents_md.__globals__, "_find_git_root", lambda path: None)
         assert _load_agents_md(sub) == ""
 
     # --- AGENTS.override.md personal override (port of pi#7681) ---
@@ -1002,11 +1005,14 @@ class TestOpenAIModelExecutionGuidance:
     def test_guidance_limits_confirmation_to_exact_external_effects(self):
         text = OPENAI_MODEL_EXECUTION_GUIDANCE.lower()
         assert "ordinary work is autonomous" in text
-        assert "sending a message" in text
-        assert "paying money" in text
+        assert "one-off third-party messages require an exact decision" in text
+        assert "payments require recipient/amount/currency" in text
         assert "recipient/account/text/attachments" in text
         assert "recipient/amount/currency" in text
-        assert "current chat is not a third-party send" in text
+        assert "replies to the owner" in text
+        assert "owner-configured automations do not require per-message decisions" in text
+        assert "once at setup" in text and "recipients_confirmed=true" in text
+        assert "only message the confirmed recipients/source" in text
         assert "never blindly replay" in text
         assert "managed routes" in text
         assert "send_message" in text
