@@ -274,9 +274,9 @@ def send_message_tool(args, **kw):
 def send_for_running_job(args):
     """Send for the cron run bound in this process (cron.recipients.send_for_live_run).
 
-    Used by the gateway on behalf of a run's terminal: a recipient the job has
-    not confirmed is refused with ``not_confirmed`` instead of a decision card,
-    because the card belongs to the terminal's session, which asks for it.
+    Used by the gateway on behalf of a run's terminal. An owner's job asks
+    once about a new recipient here; other jobs return ``not_confirmed`` so
+    the terminal retains its existing exact-message decision path.
     """
     return _handle_send(args, for_running_job=True)
 
@@ -980,6 +980,11 @@ def _handle_send(args, *, owner_initiated: bool = False, for_running_job: bool =
     try:
         decision = None
         if not owner_initiated and not _confirmed_by_running_job(platform_name, chat_id, thread_id):
+            from cron.recipients import request_recipient_in_run
+
+            recipient_question = request_recipient_in_run(platform_name, chat_id, thread_id)
+            if recipient_question is not None:
+                return json.dumps(recipient_question, ensure_ascii=False)
             if for_running_job:
                 return json.dumps({"success": False, "status": "not_confirmed"})
             # In a cron run's terminal the gateway that runs the job decides and

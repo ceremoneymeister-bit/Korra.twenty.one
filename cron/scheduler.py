@@ -3426,11 +3426,18 @@ def _deliver_result(
             continue
 
         if not failure_notice:
-            from cron.recipients import delivery_allowed, target_label
+            from cron.recipients import delivery_allowed, request_recipient_in_run, target_label
 
             if not delivery_allowed(job, platform_name, chat_id, thread_id):
                 # Recipients other than the owner are confirmed once, when the
                 # automation is set up (Dmitry, 28.09.2026; cron.recipients).
+                question = request_recipient_in_run(
+                    platform_name, chat_id, thread_id,
+                    job={**job, "execution_id": execution_id or job.get("execution_id")},
+                )
+                if question and question.get("status") == "pending_decision":
+                    pending_decision_ids.append(question["decision_id"])
+                    continue
                 delivery_errors.append(
                     "Получатель ещё не подтверждён: "
                     f"{target_label(platform_name, chat_id, thread_id)}"
