@@ -1601,7 +1601,7 @@ def _make_run_env(env: dict) -> dict:
     # cross-session leak guard — strips _UNSET vars when a concurrent host is
     # engaged so a sibling session's os.environ mirror can't leak in).
     _inject_session_context_env(run_env)
-    run_env["KORRA_AGENT_SUBPROCESS"] = "1"
+    korra_env_set(run_env, "KORRA_AGENT_SUBPROCESS", "1")
 
     _strip_hermes_owned_pythonpath_and_runtime_markers(run_env)
 
