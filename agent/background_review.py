@@ -266,26 +266,27 @@ def _review_input_token_budget(
 def load_background_review_settings() -> tuple[bool, Dict[str, Any]]:
     """Single config read for the automatic-review gate + task block.
 
-    Returns ``(enabled, task_cfg)``. Fail-open on config errors (``enabled=True``)
-    so a broken config file does not silently disable reviews — but log at
-    WARNING so the cost-incurring path is visible.
+    Returns ``(enabled, task_cfg)``. Automatic review requires opt-in;
+    config errors leave it disabled.
     """
     try:
-        from korra_cli.config import load_config_readonly
+        from korra_cli.config import load_config_readonly, ensure_background_review_opt_in
         from utils import is_truthy_value
+
+        ensure_background_review_opt_in()
 
         cfg = load_config_readonly()
         aux = cfg.get("auxiliary", {}) if isinstance(cfg.get("auxiliary"), dict) else {}
         task = aux.get("background_review", {})
         task = task if isinstance(task, dict) else {}
-        return is_truthy_value(task.get("enabled"), default=True), task
+        return is_truthy_value(task.get("enabled"), default=False), task
     except Exception:
         logger.warning(
             "Failed to read background_review.enabled; leaving automatic "
-            "review enabled (fail-open)",
+            "review disabled (fail-closed)",
             exc_info=True,
         )
-        return True, {}
+        return False, {}
 
 
 def is_background_review_enabled(
@@ -293,8 +294,8 @@ def is_background_review_enabled(
 ) -> bool:
     """Return whether automatic post-turn background review may spawn.
 
-    Controlled by ``auxiliary.background_review.enabled`` (default ``true``).
-    Explicit ``/refine`` (``focus`` set) bypasses this gate — same contract as
+    Controlled by ``auxiliary.background_review.enabled`` (default ``false``).
+    Explicit ``/refine`` (``manual=True``) bypasses this gate — same contract as
     zeroing the nudge intervals, which stops automatic forks but leaves manual
     refine working (issue #87250).
 
@@ -305,14 +306,14 @@ def is_background_review_enabled(
         try:
             from utils import is_truthy_value
 
-            return is_truthy_value(task_cfg.get("enabled"), default=True)
+            return is_truthy_value(task_cfg.get("enabled"), default=False)
         except Exception:
             logger.warning(
                 "Failed to interpret background_review.enabled; leaving "
-                "automatic review enabled (fail-open)",
+                "automatic review disabled (fail-closed)",
                 exc_info=True,
             )
-            return True
+            return False
     enabled, _ = load_background_review_settings()
     return enabled
 
@@ -1035,7 +1036,19 @@ def build_memory_write_metadata(
 
 def _snapshot_review_usage(review_agent: Any) -> Dict[str, Any]:
     """Snapshot in-memory usage counters from a review fork (pre-close)."""
+    status = getattr(review_agent, "session_cost_status", None)
+    provider = getattr(review_agent, "provider", None)
+    # Classify the fork's own connection, never borrow the parent's route.
+    from agent.anthropic_credentials import _is_oauth_token
+    included = provider == "openai-codex" or (
+        provider == "anthropic" and _is_oauth_token(getattr(review_agent, "api_key", "") or "")
+    )
+    if included:
+        status = "included"
     return {
+        "cost_status": status,
+        "cost_source": "none" if included else getattr(review_agent, "session_cost_source", None),
+        "billing_mode": "subscription_included" if status == "included" else None,
         "model": getattr(review_agent, "model", None),
         "provider": getattr(review_agent, "provider", None),
         "base_url": getattr(review_agent, "base_url", None),
@@ -1051,7 +1064,7 @@ def _snapshot_review_usage(review_agent: Any) -> Dict[str, Any]:
             getattr(review_agent, "session_reasoning_tokens", 0) or 0
         ),
         "api_calls": int(getattr(review_agent, "session_api_calls", 0) or 0),
-        "estimated_cost_usd": getattr(review_agent, "session_estimated_cost_usd", None),
+        "estimated_cost_usd": 0.0 if included else getattr(review_agent, "session_estimated_cost_usd", None),
     }
 
 
@@ -1111,6 +1124,9 @@ def _record_review_usage_to_parent(
             reasoning_tokens=reasoning,
             estimated_cost_usd=usage.get("estimated_cost_usd"),
             api_call_count=api_calls,
+            billing_mode=usage.get("billing_mode"),
+            cost_status=usage.get("cost_status"),
+            cost_source=usage.get("cost_source"),
         )
     except Exception as e:
         logger.debug(
@@ -1769,11 +1785,12 @@ def _run_review_in_thread(
         # action the fork DID complete before the crash. Coerce an
         # exception into an empty actions list so the partial valid
         # actions from earlier in the messages are returned instead.
+        notification_mode = str(getattr(agent, "memory_notifications", "on") or "on").lower()
         try:
             actions = summarize_background_review_actions(
                 review_messages,
                 messages_snapshot,
-                notification_mode=getattr(agent, "memory_notifications", "on"),
+                notification_mode="on" if notification_mode == "off" else notification_mode,
             )
         except Exception as e:
             logger.warning(
@@ -1788,7 +1805,7 @@ def _run_review_in_thread(
             review_usage, _classify_review_result(actions)
         )
 
-        if actions:
+        if actions and notification_mode != "off":
             summary = " · ".join(dict.fromkeys(actions))
             agent._safe_print(
                 f"  💾 Self-improvement review: {summary}"

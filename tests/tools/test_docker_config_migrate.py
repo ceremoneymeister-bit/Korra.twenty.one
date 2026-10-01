@@ -111,10 +111,11 @@ def test_docker_config_migrate_stamps_minimal_seed_and_preserves_comments(tmp_pa
     assert first.returncode == 0, first.stderr
     raw = yaml.safe_load(config_path.read_text())
     assert raw.pop("_config_version", None) == DEFAULT_CONFIG["_config_version"]
+    assert raw.pop("auxiliary") == {"background_review": {"enabled": False}}
     assert raw == yaml.safe_load(original)
     for comment in (line for line in original.splitlines() if line.lstrip().startswith("#")):
         assert comment in config_path.read_text()
-    assert len(config_path.read_text()) < len(original) + 60
+    assert len(config_path.read_text()) < len(original) + 130
     assert (env_path.read_bytes(), env_path.stat().st_ino) == env_before
     stamped = (config_path.read_bytes(), config_path.stat().st_ino)
     assert _run_migration(tmp_path).returncode == 0

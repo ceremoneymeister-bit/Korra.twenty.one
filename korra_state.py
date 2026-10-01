@@ -9653,6 +9653,9 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
         reasoning_tokens: int = 0,
         estimated_cost_usd: Optional[float] = None,
         api_call_count: int = 1,
+        billing_mode: Optional[str] = None,
+        cost_status: Optional[str] = None,
+        cost_source: Optional[str] = None,
     ) -> None:
         """Record an auxiliary LLM call's usage against *session_id* (issue #23270).
 
@@ -9687,7 +9690,7 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                 model=model,
                 billing_provider=billing_provider,
                 billing_base_url=billing_base_url,
-                billing_mode=None,
+                billing_mode=billing_mode,
                 input_tokens=input_tokens or 0,
                 output_tokens=output_tokens or 0,
                 cache_read_tokens=cache_read_tokens or 0,
@@ -9695,8 +9698,8 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                 reasoning_tokens=reasoning_tokens or 0,
                 estimated_cost_usd=estimated_cost_usd,
                 actual_cost_usd=None,
-                cost_status=None,
-                cost_source=None,
+                cost_status=cost_status,
+                cost_source=cost_source,
                 api_call_count=(
                     1 if api_call_count is None else int(api_call_count)
                 ),

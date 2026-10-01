@@ -2996,14 +2996,17 @@ class GatewaySlashCommandsMixin:
 
         review_skills = "skill_manage" in getattr(agent, "valid_tool_names", set())
         try:
-            agent._spawn_background_review(
+            started = agent._spawn_background_review(
                 messages_snapshot=snapshot,
                 review_memory=True,
                 review_skills=review_skills,
                 focus=args or None,
+                manual=True,
             )
         except Exception as exc:
             return f'''Не удалось запустить /refine: {exc}'''
+        if started is False:
+            return "Разбор уже выполняется. Дождитесь его завершения."
         tail = f''' (тема: {args})''' if args else ""
         return (
             f'''⚗ Изучаю диалог в фоне{tail}. Сообщу об изменениях памяти и навыков после завершения.'''
