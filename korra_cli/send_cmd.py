@@ -273,7 +273,7 @@ def _load_hermes_env() -> None:
             # BOM-less UTF-8. Plain "utf-8" would keep U+FEFF on the first
             # key name and silently drop it from os.environ under its
             # canonical name.
-            load_dotenv(str(env_path), override=True, encoding="utf-8-sig")
+            load_dotenv(str(env_path), override=True, encoding="utf-8-sig", interpolate=False)
         except UnicodeDecodeError:
             try:
                 # utf-8-sig can't strip a BOM once we fall back to latin-1.
@@ -283,7 +283,7 @@ def _load_hermes_env() -> None:
                 raw = env_path.read_bytes()
                 if raw.startswith(codecs.BOM_UTF8):
                     raw = raw[len(codecs.BOM_UTF8) :]
-                load_dotenv(stream=io.StringIO(raw.decode("latin-1")), override=True)
+                load_dotenv(stream=io.StringIO(raw.decode("latin-1")), override=True, interpolate=False)
             except Exception:
                 pass
         except Exception:

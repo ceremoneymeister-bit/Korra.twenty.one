@@ -176,7 +176,7 @@ from dotenv import load_dotenv
 home = Path(sys.argv[1])
 os.environ['HERMES_HOME'] = str(home)
 os.environ['HOME'] = str(home / 'home')
-load_dotenv(home / '.env', override=True)
+load_dotenv(home / '.env', override=True, interpolate=False)
 from gateway.config import load_gateway_config
 
 config = load_gateway_config()
@@ -306,7 +306,7 @@ CAPABILITY_CODE = r'''
 import hashlib, json
 from dotenv import load_dotenv
 from korra_constants import get_hermes_home
-load_dotenv(get_hermes_home() / '.env', override=False)
+load_dotenv(get_hermes_home() / '.env', override=False, interpolate=False)
 from korra_cli.auth import AuthError
 from korra_cli.runtime_provider import resolve_requested_provider, resolve_runtime_provider
 try:
@@ -340,7 +340,7 @@ print(json.dumps(result))
 FOUNDATION_SMOKE_CODE = r'''
 import json, os, urllib.request
 from dotenv import dotenv_values
-key = os.environ.get('API_SERVER_KEY') or dotenv_values('/opt/data/.env').get('API_SERVER_KEY')
+key = os.environ.get('API_SERVER_KEY') or dotenv_values('/opt/data/.env', interpolate=False).get('API_SERVER_KEY')
 if not key:
     raise RuntimeError('API authentication unavailable')
 payload = {'messages': [{'role': 'user', 'content': 'Привет!'}], 'max_tokens': 24, 'stream': True}
@@ -374,7 +374,7 @@ print('foundation-smoke-ok')
 MODEL_SMOKE_CODE = r'''
 import json, os, urllib.request
 from dotenv import dotenv_values
-key = os.environ.get('API_SERVER_KEY') or dotenv_values('/opt/data/.env').get('API_SERVER_KEY')
+key = os.environ.get('API_SERVER_KEY') or dotenv_values('/opt/data/.env', interpolate=False).get('API_SERVER_KEY')
 if not key:
     raise RuntimeError('API_SERVER_KEY missing; model smoke unavailable')
 request = urllib.request.Request('http://127.0.0.1:' + os.environ['API_SERVER_PORT'] + '/v1/chat/completions', data=json.dumps({'messages': [{'role': 'user', 'content': 'Reply with exactly KORRA_UPDATE_OK. Do not use tools.'}], 'max_tokens': 24, 'stream': False}).encode(), headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json', 'X-Korra-Session-Source': 'maintenance'})

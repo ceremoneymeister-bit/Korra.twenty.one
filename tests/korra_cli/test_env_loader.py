@@ -176,12 +176,12 @@ def test_latin1_fallback_stream_honors_override(tmp_path, monkeypatch):
     assert os.getenv("OVERRIDE_PROBE") == "from-file"
     assert os.getenv("LATIN1_VALUE") == "café"
 
-def test_latin1_fallback_stream_preserves_interpolation(tmp_path, monkeypatch):
-    """Stream/latin-1 path must still expand ${VAR} like the dotenv_path form."""
+def test_latin1_fallback_stream_preserves_literal_references(tmp_path, monkeypatch):
+    """Stream/latin-1 path must preserve ${VAR} like the dotenv_path form."""
     home = tmp_path / "hermes"
     home.mkdir()
     env_file = home / ".env"
-    # 0xE9 forces latin-1 fallback; ${FOO} must still expand.
+    # 0xE9 forces latin-1 fallback; ${FOO} remains literal.
     env_file.write_bytes(b"FOO=bar\nBAR=${FOO}\nLATIN1_VALUE=caf\xe9\n")
 
     monkeypatch.delenv("FOO", raising=False)
@@ -192,7 +192,7 @@ def test_latin1_fallback_stream_preserves_interpolation(tmp_path, monkeypatch):
 
     assert loaded == [env_file]
     assert os.getenv("FOO") == "bar"
-    assert os.getenv("BAR") == "bar"
+    assert os.getenv("BAR") == "${FOO}"
     assert os.getenv("LATIN1_VALUE") == "café"
 
 # ---------------------------------------------------------------------------
