@@ -51,7 +51,7 @@ import time
 from contextlib import contextmanager
 from typing import Any, Dict, Iterator, List, Optional
 
-from korra_constants import get_hermes_home
+from korra_constants import get_process_hermes_home
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +88,11 @@ _RUNTIME_RETRYABLE_ERRORS = frozenset({"send_path_degraded"})
 
 
 def _db_path():
-    return get_hermes_home() / "state.db"
+    # Launch home, not get_hermes_home(): a served profile's adapter records its
+    # replies under that profile's home override, while the boot sweep runs in
+    # the launch context. One shared store (rows carry adapter_profile) keeps a
+    # secondary bot's cut-off reply from being invisible to the sweep.
+    return get_process_hermes_home() / "state.db"
 
 
 def _connect() -> sqlite3.Connection:
