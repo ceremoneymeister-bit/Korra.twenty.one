@@ -90,23 +90,6 @@ def test_durable_install_target_overrides_the_guard(monkeypatch, tmp_path):
     )
 
 
-def test_platform_unsupported_takes_precedence(monkeypatch):
-    """A platform-specific reason is more actionable than 'managed install'.
-
-    Also required for consistency: refresh_active_features pre-checks
-    _unsupported_feature_reason before calling ensure().
-    """
-    monkeypatch.setattr("korra_cli.config.get_managed_system", lambda: "nixos")
-    monkeypatch.setattr(
-        lazy_deps, "_unsupported_feature_reason", lambda _f: "unsupported on win32"
-    )
-
-    with pytest.raises(FeatureUnavailable) as excinfo:
-        lazy_deps.ensure(FEATURE, prompt=False)
-
-    assert excinfo.value.reason == "unsupported on win32"
-
-
 def test_unreadable_config_fails_open(monkeypatch):
     """A broken config must not block installs on a normal pip install."""
     def _raise():

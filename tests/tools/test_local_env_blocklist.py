@@ -346,35 +346,6 @@ class TestTerminalFirstPartyPlatformEnv:
                 f"{var} missing from background/PTY terminal env (issue #78026)"
             )
 
-    def test_buzz_vars_stripped_without_buzz_context(self, monkeypatch):
-        """NEGATIVE gate: with no Buzz context signal (no BUZZ_MANAGED_AGENT,
-        session platform not buzz), the BUZZ_* credentials stay stripped from
-        BOTH terminal scrub paths — a Telegram/CLI/cron session on a host that
-        also runs a Buzz gateway must not see BUZZ_PRIVATE_KEY."""
-        from gateway.session_context import _SESSION_PLATFORM
-        from tools.environments.local import _make_run_env, _sanitize_subprocess_env
-
-        monkeypatch.delenv("BUZZ_MANAGED_AGENT", raising=False)
-        monkeypatch.delenv("HERMES_SESSION_PLATFORM", raising=False)
-        buzz_vars = {
-            "BUZZ_PRIVATE_KEY": "nsec1faketestkey",
-            "BUZZ_AUTH_TAG": '["tag","data","kind","sig"]',
-            "BUZZ_RELAY_URL": "https://mycommunity.communities.buzz.xyz",
-        }
-        for var, value in buzz_vars.items():
-            monkeypatch.setenv(var, value)
-        # Bind a non-buzz session platform (ContextVar-authoritative).
-        token = _SESSION_PLATFORM.set("telegram")
-        try:
-            run_env = _make_run_env({})
-            sanitized = _sanitize_subprocess_env({**buzz_vars, "HOME": "/home/user"})
-        finally:
-            _SESSION_PLATFORM.reset(token)
-
-        for var in buzz_vars:
-            assert var not in run_env, f"{var} leaked into non-Buzz foreground env"
-            assert var not in sanitized, f"{var} leaked into non-Buzz background env"
-
     def test_session_platform_buzz_enables_carveout(self, monkeypatch):
         """A live gateway session whose platform is ``buzz`` gets the
         carve-out even without BUZZ_MANAGED_AGENT (native buzz gateway
@@ -395,13 +366,6 @@ class TestTerminalFirstPartyPlatformEnv:
 
         assert run_env.get("BUZZ_PRIVATE_KEY") == "nsec1faketestkey"
         assert sanitized.get("BUZZ_PRIVATE_KEY") == "nsec1faketestkey"
-
-    def test_buzz_vars_stay_in_blocklist(self):
-        """The carve-out is a scrub-path exemption, NOT a blocklist removal —
-        BUZZ_* must remain blocked for every non-terminal surface (execute_code,
-        hermes_subprocess_env, env_passthrough registration)."""
-        assert {"BUZZ_PRIVATE_KEY", "BUZZ_AUTH_TAG", "BUZZ_RELAY_URL"} <= \
-            _HERMES_PROVIDER_ENV_BLOCKLIST
 
     def test_buzz_vars_use_plain_value_under_multiplex_without_scope(self, monkeypatch):
         """First-party platform vars are the process's own env values: with

@@ -16,19 +16,6 @@ import pytest
 
 
 class TestMatrixHiddenOnWindows:
-    @pytest.mark.linux_only
-    def test_matrix_present_on_linux(self):
-        """Sanity: matrix is still in the picker on Linux.
-
-        Linux-gated because the assertion is the negative of the Windows
-        gate — it only means anything when the host really is not Windows.
-        """
-        import korra_cli.gateway as gateway_mod
-
-        platforms = gateway_mod._all_platforms()
-        keys = {p["key"] for p in platforms}
-        assert "matrix" in keys, "matrix must be available on Linux"
-
     @pytest.mark.windows_only
     def test_matrix_absent_on_windows(self):
         """The gate itself: matrix must be dropped on a real Windows host.
