@@ -38,16 +38,11 @@ def _fake_cli(tmp_path, body):
 
 
 class TestModeDetection:
-    def test_default_on_when_cli_available(self, monkeypatch):
-        """Backend unset: Browser Use mode is the default when the CLI runs."""
+    def test_default_is_builtin_tools_even_when_cli_runs(self, monkeypatch):
+        """K21-271: uvx is in the image but no browser it could drive is, so an
+        unset backend must keep the built-in browser_* tools."""
         monkeypatch.setattr("korra_cli.config.read_raw_config", lambda: {})
-        monkeypatch.setattr(bu_cli, "_find_cli", lambda: ["/usr/bin/browser-use"])
-        assert bu_cli.is_browser_use_cli_mode() is True
-
-    def test_default_off_when_cli_unavailable(self, monkeypatch):
-        """Backend unset + no runnable CLI: keep the built-in browser tools."""
-        monkeypatch.setattr("korra_cli.config.read_raw_config", lambda: {})
-        monkeypatch.setattr(bu_cli, "_find_cli", lambda: None)
+        monkeypatch.setattr(bu_cli, "_find_cli", lambda: ["/usr/local/bin/uvx", "browser-use"])
         assert bu_cli.is_browser_use_cli_mode() is False
 
     def test_explicit_off_wins_over_default(self, monkeypatch):
@@ -230,6 +225,24 @@ class TestToolSurfaceSwap:
         )
         names = {t["function"]["name"] for t in defs}
         assert "browser_exec" in names
+
+    def test_default_config_exposes_builtin_tools_not_browser_exec(self, monkeypatch):
+        """K21-271: image has uvx + packaged Chromium, config has no backend.
+        The model must get browser_navigate & co., not a broken browser_exec."""
+        from tools import browser_tool
+
+        monkeypatch.setattr("korra_cli.config.read_raw_config", lambda: {})
+        monkeypatch.setattr(bu_cli, "_find_cli", lambda: ["/usr/local/bin/uvx", "browser-use"])
+        monkeypatch.setattr(browser_tool, "_find_agent_browser", lambda validate=True: "/usr/local/bin/agent-browser")
+        monkeypatch.setattr(browser_tool, "_chromium_installed", lambda: True)
+        import model_tools
+
+        defs = model_tools.get_tool_definitions(
+            enabled_toolsets=["browser", "terminal"], quiet_mode=False
+        )
+        names = {t["function"]["name"] for t in defs}
+        assert {"browser_navigate", "browser_snapshot", "browser_click"} <= names
+        assert "browser_exec" not in names
 
 
 class TestFindCli:
@@ -634,19 +647,17 @@ class TestProviderPickerIntegration:
         assert _is_provider_active(local_row, cli_config) is True
 
         # Explicit off: the CLI row must not highlight even with the CLI
-        # installed (default-on only applies while backend is unset).
+        # installed (an unset backend is not Browser Use either).
         monkeypatch.setattr(bu_cli, "_find_cli", lambda: ["/usr/bin/browser-use"])
         off_config = {"browser": {"cloud_provider": "local", "backend": "off"}}
         assert _is_provider_active(cli_row, off_config) is False
         assert _is_provider_active(local_row, off_config) is True
 
-        # Backend unset: default-on — the CLI row highlights when the CLI
-        # is runnable, and not when it isn't.
+        # Backend unset: built-in tools are the default — the CLI row stays
+        # dark even when uvx/browser-use is runnable.
         default_config = {"browser": {"cloud_provider": "local"}}
-        assert _is_provider_active(cli_row, default_config) is True
-        assert _is_provider_active(local_row, default_config) is True
-        monkeypatch.setattr(bu_cli, "_find_cli", lambda: None)
         assert _is_provider_active(cli_row, default_config) is False
+        assert _is_provider_active(local_row, default_config) is True
 
 
 class TestBrowserUseSlashCommand:
@@ -1059,39 +1070,6 @@ class TestInstallCli:
         ok, msg = bu_cli.install_cli()
         assert ok is False
         assert "no network" in msg
-
-
-class TestDefaultDowngradeNotice:
-    def _isolate(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path / "home"))
-        monkeypatch.setattr("korra_cli.config.read_raw_config", lambda: {})
-
-    def test_notice_when_default_and_cli_missing(self, tmp_path, monkeypatch):
-        self._isolate(tmp_path, monkeypatch)
-        monkeypatch.setattr(bu_cli, "_find_cli", lambda: None)
-        notice = bu_cli.default_downgrade_notice()
-        assert notice is not None
-        assert "hermes tools" in notice
-
-    def test_rate_limited_within_24h(self, tmp_path, monkeypatch):
-        self._isolate(tmp_path, monkeypatch)
-        monkeypatch.setattr(bu_cli, "_find_cli", lambda: None)
-        assert bu_cli.default_downgrade_notice() is not None
-        assert bu_cli.default_downgrade_notice() is None
-
-    def test_no_notice_when_cli_runnable(self, tmp_path, monkeypatch):
-        self._isolate(tmp_path, monkeypatch)
-        monkeypatch.setattr(bu_cli, "_find_cli", lambda: ["/usr/bin/browser-use"])
-        assert bu_cli.default_downgrade_notice() is None
-
-    def test_no_notice_on_explicit_backend(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path / "home"))
-        monkeypatch.setattr(
-            "korra_cli.config.read_raw_config",
-            lambda: {"browser": {"backend": bu_cli.BACKEND_DISABLED}},
-        )
-        monkeypatch.setattr(bu_cli, "_find_cli", lambda: None)
-        assert bu_cli.default_downgrade_notice() is None
 
 
 class TestLightpandaBackendResolution:

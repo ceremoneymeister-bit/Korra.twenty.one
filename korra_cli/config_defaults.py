@@ -578,15 +578,13 @@ DEFAULT_CONFIG = {
 
     "browser": {
         # Browser tool implementation.
-        # ""            — DEFAULT: Browser Use mode when the browser-use CLI
-        #                 (or uvx) is available; otherwise the built-in
-        #                 browser tools. Camofox setups always keep the
-        #                 built-in tools (no CDP surface).
-        # "browser-use" — force Browser Use mode: one browser_exec tool
-        #                 driving the Browser Use CLI 3.0 over any CDP
-        #                 backend (local Chrome, cloud browsers)
-        # "off"         — force the built-in browser tools
-        #                 (browser_navigate, browser_click, …)
+        # ""            — DEFAULT: the built-in browser tools
+        #                 (browser_navigate, browser_click, …) on the Chromium
+        #                 packaged in the image
+        # "browser-use" — one browser_exec tool driving the Browser Use CLI
+        #                 over a CDP browser you run yourself (installed
+        #                 Chrome, cloud); not available out of the box
+        # "off"         — same as the default, stated explicitly
         "backend": "",
         "inactivity_timeout": 120,
         "command_timeout": 30,  # Timeout for browser commands in seconds (screenshot, navigate, etc.)
@@ -595,7 +593,7 @@ DEFAULT_CONFIG = {
         "headed": False,  # Local mode: launch Chromium with a visible window (also skips per-turn cleanup so the window persists between turns; idle reaper still applies)
         "allow_private_urls": False,  # Allow navigating to private/internal IPs (localhost, 192.168.x.x, etc.)
         # Local browser engine, for both drivers:
-        #   Browser Use mode (default) — "lightpanda" makes Hermes spawn
+        #   Browser Use mode (backend: browser-use) — "lightpanda" makes Hermes spawn
         #     ``lightpanda serve`` per session and point browser_exec at it.
         #   Built-in tools (backend: off) — passed as ``--engine <value>`` to
         #     agent-browser v0.25.3+ (with automatic Chrome fallback).

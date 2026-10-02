@@ -4077,26 +4077,13 @@ def _is_provider_active(
             return False  # explicit other choice ("off", …) wins
         if provider["browser_backend"] != "browser-use":
             return False
-        # Backend unset: Browser Use mode is the default — the row is active
-        # whenever the effective mode resolves on (legacy direct-API cloud
-        # config, or CLI runnable and no Camofox).
+        # Backend unset: the built-in tools are the default; the row is
+        # active only for a legacy direct-API Browser Use cloud config.
         browser_cfg = config.get("browser") if isinstance(config, dict) else None
         try:
-            from tools.browser_use_cli import (
-                _find_cli,
-                is_legacy_browser_use_cloud_config,
-            )
+            from tools.browser_use_cli import is_legacy_browser_use_cloud_config
 
-            if is_legacy_browser_use_cloud_config(browser_cfg or {}):
-                return True
-            try:
-                from tools.browser_camofox import is_camofox_mode
-
-                if is_camofox_mode():
-                    return False
-            except Exception:
-                pass
-            return _find_cli() is not None
+            return is_legacy_browser_use_cloud_config(browser_cfg or {})
         except Exception:
             return False
     if provider.get("web_backend"):
