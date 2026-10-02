@@ -4,6 +4,7 @@ All functions are stateless. AIAgent._build_system_prompt() calls these to
 assemble pieces, then combines them with memory and ephemeral prompts.
 """
 
+import hashlib
 import json
 import logging
 import os
@@ -1665,7 +1666,7 @@ def drain_truncation_warnings() -> list:
 # miss = full os.walk manifest rebuild). ~32 costs low single-digit MB worst
 # case.
 _SKILLS_PROMPT_CACHE_MAX = 32
-_SKILLS_PROMPT_CACHE: OrderedDict[tuple, str] = OrderedDict()
+_SKILLS_PROMPT_CACHE: OrderedDict[tuple, tuple[str, str]] = OrderedDict()
 _SKILLS_PROMPT_CACHE_LOCK = threading.Lock()
 # v2: entries gained org provenance fields (org_id/org_author/rel_dir) for M2
 # org-shared skills; older snapshots are discarded and rebuilt.
@@ -1730,6 +1731,20 @@ def _build_skills_manifest(skills_dir: Path) -> dict[str, list[int]]:
                 continue
             manifest[path[prefix_len:]] = [st.st_mtime_ns, st.st_size]
     return manifest
+
+
+def _skills_tree_fingerprint(skills_dir: Path, external_dirs: "list[Path]") -> str:
+    """Cheap digest of the skill files the index is built from.
+
+    The in-process prompt cache is per process, while skills are added by
+    other processes (dashboard, CLI, agent in another session). Comparing this
+    digest on lookup makes a new session see them without a restart.
+    """
+    manifests = [_build_skills_manifest(skills_dir)]
+    manifests.extend(_build_skills_manifest(d) for d in external_dirs)
+    return hashlib.sha1(
+        json.dumps(manifests, sort_keys=True).encode("utf-8")
+    ).hexdigest()
 
 
 def _load_skills_snapshot(skills_dir: Path) -> Optional[dict]:
@@ -1925,7 +1940,9 @@ def build_skills_system_prompt(
     """Build a compact skill index for the system prompt.
 
     Two-layer cache:
-      1. In-process LRU dict keyed by (skills_dir, tools, toolsets, hidden)
+      1. In-process LRU dict keyed by (skills_dir, tools, toolsets, hidden),
+         revalidated against a digest of the SKILL.md/DESCRIPTION.md files
+         (skills added by another process show up in the next new session)
       2. Disk snapshot (``.skills_prompt_snapshot.json``) validated by
          mtime/size manifest — survives process restarts
 
@@ -2003,11 +2020,12 @@ def _build_skills_system_prompt_inner(
         tuple(sorted(disabled)),
         tuple(sorted(compact_categories or ())),
     )
+    tree_fingerprint = _skills_tree_fingerprint(skills_dir, external_dirs)
     with _SKILLS_PROMPT_CACHE_LOCK:
         cached = _SKILLS_PROMPT_CACHE.get(cache_key)
-        if cached is not None:
+        if cached is not None and cached[0] == tree_fingerprint:
             _SKILLS_PROMPT_CACHE.move_to_end(cache_key)
-            return cached
+            return cached[1]
 
     # ── Layer 2: disk snapshot ────────────────────────────────────────
     snapshot = _load_skills_snapshot(skills_dir)
@@ -2293,7 +2311,7 @@ def _build_skills_system_prompt_inner(
 
     # ── Store in LRU cache ────────────────────────────────────────────
     with _SKILLS_PROMPT_CACHE_LOCK:
-        _SKILLS_PROMPT_CACHE[cache_key] = result
+        _SKILLS_PROMPT_CACHE[cache_key] = (tree_fingerprint, result)
         _SKILLS_PROMPT_CACHE.move_to_end(cache_key)
         while len(_SKILLS_PROMPT_CACHE) > _SKILLS_PROMPT_CACHE_MAX:
             _SKILLS_PROMPT_CACHE.popitem(last=False)

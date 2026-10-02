@@ -387,6 +387,69 @@ class TestBuildSkillsSystemPrompt:
         second = build_skills_system_prompt()
         assert "cached-skill" not in second
 
+    @staticmethod
+    def _write_skill(home, name, desc, category="tools"):
+        d = home / "skills" / category / name
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: {desc}\n---\n"
+        )
+        return d
+
+    def test_skill_added_by_another_process_reaches_next_build(
+        self, monkeypatch, tmp_path
+    ):
+        """K21-268: the dashboard/CLI writes the file; no cache clear in this process."""
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        self._write_skill(tmp_path, "old-skill", "Old one")
+        first = build_skills_system_prompt()
+        assert "old-skill" in first and "fresh-skill" not in first
+
+        self._write_skill(tmp_path, "fresh-skill", "Fresh one")
+        assert "fresh-skill: Fresh one" in build_skills_system_prompt()
+
+    def test_skill_edit_and_removal_reach_next_build(self, monkeypatch, tmp_path):
+        import shutil
+
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        d = self._write_skill(tmp_path, "editable", "Before")
+        gone = self._write_skill(tmp_path, "doomed", "Doomed")
+        assert "editable: Before" in build_skills_system_prompt()
+
+        self._write_skill(tmp_path, "editable", "After the edit")
+        shutil.rmtree(gone)
+        again = build_skills_system_prompt()
+        assert "editable: After the edit" in again
+        assert "doomed" not in again
+
+    def test_unchanged_tree_is_served_from_cache(self, monkeypatch, tmp_path):
+        from unittest.mock import patch
+
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        self._write_skill(tmp_path, "stable", "Stable")
+        first = build_skills_system_prompt()
+        with patch(
+            "agent.prompt_builder._load_skills_snapshot",
+            side_effect=AssertionError("cache must be hit"),
+        ):
+            assert build_skills_system_prompt() == first
+
+    def test_skill_added_to_one_profile_does_not_leak_to_another(
+        self, monkeypatch, tmp_path
+    ):
+        default_home = tmp_path / "default"
+        other_home = tmp_path / "profiles" / "other"
+        monkeypatch.setenv("HERMES_HOME", str(default_home))
+        self._write_skill(default_home, "shared", "Shared")
+        self._write_skill(other_home, "shared", "Shared")
+        other_dir = other_home / "skills"
+        before = build_skills_system_prompt(skills_dir_override=other_dir)
+
+        self._write_skill(default_home, "default-only", "Default only")
+        assert "default-only" in build_skills_system_prompt()
+        assert build_skills_system_prompt(skills_dir_override=other_dir) == before
+        assert "default-only" not in before
+
 
 # =========================================================================
 # Context files prompt builder

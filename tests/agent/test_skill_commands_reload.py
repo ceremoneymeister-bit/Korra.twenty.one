@@ -109,3 +109,16 @@ class TestReloadSkillsHelper:
             "prompt cache snapshot should be preserved — skills don't live "
             "in the system prompt so there's no reason to invalidate it"
         )
+
+    def test_drops_in_process_prompt_cache(self, hermes_home):
+        """K21-268: /reload-skills makes the next new session rebuild its index."""
+        from agent.prompt_builder import _SKILLS_PROMPT_CACHE, build_skills_system_prompt
+        from agent.skill_commands import reload_skills
+
+        _write_skill(hermes_home / "skills", "demo", "indexed")
+        build_skills_system_prompt()
+        assert _SKILLS_PROMPT_CACHE
+
+        reload_skills()
+
+        assert not _SKILLS_PROMPT_CACHE
