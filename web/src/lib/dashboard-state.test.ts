@@ -153,6 +153,22 @@ describe("полоса «Требует внимания»", () => {
     expect(view.calm).toBe(false);
   });
 
+  it("вопрос доски, уже показанный строкой чата, не повторяется строкой доски (K21-265)", () => {
+    const href = "/kanban?board=default&task=t_1";
+    const board = (task: string, url: string): AttentionItem => ({
+      ...ITEM, id: `kanban:default:${task}:question`, source: "kanban", kind: "kanban_question", href: url, title: task,
+    });
+    const section: DashboardAttention = {
+      ...SECTION, items: [board("t_1", href), board("t_2", "/kanban?board=default&task=t_2")], count: 2,
+    };
+    const view = attentionView(section, "ready", chat([
+      run({ session_id: "s1", status: "waiting_decision", kanban_task_urls: [href] }),
+    ]));
+    expect(view.rows.map((row) => [row.origin, row.title])).toEqual([["chat", "Корра ждёт вашего решения"], ["server", "t_2"]]);
+    // Чат ещё не ответил — строка доски остаётся единственным источником.
+    expect(attentionView(section, "ready", chat([], false, null)).rows).toHaveLength(2);
+  });
+
   it("«всё спокойно» — только когда все источники ответили", () => {
     const empty = { ...SECTION, items: [], count: 0 };
     expect(attentionView(empty, "ready", chat([])).calm).toBe(true);
