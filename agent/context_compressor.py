@@ -1295,6 +1295,9 @@ _IMAGE_TOKEN_ESTIMATE = 1600
 # for tail-cut decisions.
 _IMAGE_CHAR_EQUIVALENT = _IMAGE_TOKEN_ESTIMATE * _CHARS_PER_TOKEN
 _SUMMARY_FAILURE_COOLDOWN_SECONDS = 600
+# Consecutive provider-overload summary failures tolerated before the
+# deterministic fallback summary is allowed to replace the middle window.
+_OVERLOAD_ABORT_BUDGET = 3
 
 # Hard ceiling for the deterministic summary-failure handoff.  The fallback is
 # only meant to preserve continuity anchors from the dropped window, not to
@@ -2287,6 +2290,7 @@ class ContextCompressor(ContextEngine):
         self._summary_has_user_turn = None
         self._last_summary_error = None
         self._consecutive_timeout_failures = 0
+        self._consecutive_overload_failures = 0
         self._last_summary_dropped_count = 0
         self._last_summary_fallback_used = False
         self._last_feasibility_skip = False
@@ -2591,6 +2595,7 @@ class ContextCompressor(ContextEngine):
         self._summary_has_user_turn = None
         self._last_summary_error = None
         self._consecutive_timeout_failures = 0
+        self._consecutive_overload_failures = 0
         self._last_summary_dropped_count = 0
         self._last_summary_fallback_used = False
         self._last_feasibility_skip = False
@@ -2628,6 +2633,7 @@ class ContextCompressor(ContextEngine):
         self._cooldown_persist_failed = False
         self._last_summary_error = None
         self._consecutive_timeout_failures = 0
+        self._consecutive_overload_failures = 0
         self._fallback_compression_streak = 0
         self._ineffective_compression_count = 0
         self._prellm_skip_count = 0
@@ -3080,6 +3086,7 @@ class ContextCompressor(ContextEngine):
         self._summary_failure_cooldown_until = 0.0
         self._last_summary_error = None
         self._consecutive_timeout_failures = 0
+        self._consecutive_overload_failures = 0
         self._cooldown_persist_failed = False
 
         session_db = getattr(self, "_session_db", None)
@@ -5465,6 +5472,10 @@ This compaction should PRIORITISE preserving all information related to the focu
             # transient network events; treat them like a timeout so we fall
             # back to the main model instead of entering a 60-second cooldown.
             # See issue #18458.
+            # Provider overload (Anthropic 529 / "overloaded_error") is a
+            # momentary capacity signal, not a reason to replace the middle of
+            # the conversation with a placeholder.
+            _is_overloaded = _status == 529 or "overloaded" in _err_str
             _is_connection = _is_connection_error(e)
             _is_streaming_closed = _is_connection and not _is_timeout
             # Provider returned HTTP 200 with empty or whitespace body (e.g.
@@ -5581,7 +5592,7 @@ This compaction should PRIORITISE preserving all information related to the focu
                     min(self._consecutive_timeout_failures,
                         len(_TIMEOUT_COOLDOWN_LADDER)) - 1
                 ]
-            elif _is_json_decode or _is_streaming_closed or _is_empty_content or _is_truncated_summary:
+            elif _is_json_decode or _is_streaming_closed or _is_empty_content or _is_truncated_summary or _is_overloaded:
                 _transient_cooldown = 30
             else:
                 _transient_cooldown = 60
@@ -5598,7 +5609,17 @@ This compaction should PRIORITISE preserving all information related to the focu
             # marker — retrying once the provider recovers is strictly better
             # than dropping context (#29559, #25585, #94448). Mirrors the
             # auth-failure carve-out; independent of abort_on_summary_failure.
-            if _is_timeout and _is_connection:
+            if _is_overloaded and not _is_timeout:
+                # Keep the transcript and retry after the cooldown; only a
+                # sustained outage (3 overloads in a row) degrades once to
+                # the deterministic fallback instead of growing until reset.
+                self._consecutive_overload_failures = (
+                    getattr(self, "_consecutive_overload_failures", 0) + 1
+                )
+                self._last_summary_network_failure = (
+                    self._consecutive_overload_failures < _OVERLOAD_ABORT_BUDGET
+                )
+            elif _is_timeout and _is_connection:
                 # First hang: keep the transcript and retry after the
                 # cooldown. A repeated hang means the summary route cannot
                 # finish this window, so degrade once to the deterministic

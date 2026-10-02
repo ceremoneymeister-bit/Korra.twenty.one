@@ -115,3 +115,66 @@ def test_aborted_summary_is_reported_as_transient_block(tmp_path: Path):
     out, _ = compress_context(agent, live, "sys", approx_tokens=500_000)
     assert out == before
     assert compression_blocked_transiently(agent) is True
+
+
+# ---------------------------------------------------------------------------
+# K21-276 (3): provider overload keeps the transcript until it is sustained
+# ---------------------------------------------------------------------------
+
+
+class _Overloaded(Exception):
+    status_code = 529
+
+    def __init__(self):
+        super().__init__("Error code: 529 - {'type': 'overloaded_error', 'message': 'Overloaded'}")
+
+
+def test_overload_preserves_transcript_then_degrades_after_three_in_a_row():
+    c = _compressor()
+    msgs = _history()
+    with patch("agent.context_compressor.call_llm", side_effect=_Overloaded()):
+        for attempt in (1, 2):
+            out = c.compress(copy.deepcopy(msgs), current_tokens=999999)
+            assert out == msgs, f"attempt {attempt} must keep the transcript"
+            assert c._last_compress_aborted is True
+            c._summary_failure_cooldown_until = 0.0
+        third = c.compress(copy.deepcopy(msgs), current_tokens=999999)
+    assert c._last_compress_aborted is False
+    assert c._last_summary_fallback_used is True
+    assert third != msgs
+
+
+def test_successful_summary_resets_overload_budget():
+    ok = MagicMock()
+    ok.choices = [MagicMock()]
+    ok.choices[0].message.content = "a real summary"
+    c = _compressor()
+    msgs = _history()
+    with patch("agent.context_compressor.call_llm", side_effect=_Overloaded()):
+        c.compress(copy.deepcopy(msgs), current_tokens=999999)
+    c._summary_failure_cooldown_until = 0.0
+    assert getattr(c, "_consecutive_overload_failures", 0) == 1
+    with patch("agent.context_compressor.call_llm", return_value=ok):
+        c.compress(copy.deepcopy(msgs), current_tokens=999999)
+    assert getattr(c, "_consecutive_overload_failures", 0) == 0
+
+
+def test_overload_on_aux_model_retries_on_main_first():
+    ok = MagicMock()
+    ok.choices = [MagicMock()]
+    ok.choices[0].message.content = "summary via main model"
+    c = _compressor(summary_model_override="aux-model")
+    with patch("agent.context_compressor.call_llm", side_effect=[_Overloaded(), ok]) as call:
+        result = c._generate_summary(_turns())
+    assert call.call_count == 2
+    assert "summary via main model" in result
+    assert getattr(c, "_consecutive_overload_failures", 0) == 0
+
+
+def test_abort_on_summary_failure_still_hard_aborts_overload():
+    c = _compressor(abort_on_summary_failure=True)
+    msgs = _history()
+    with patch("agent.context_compressor.call_llm", side_effect=_Overloaded()):
+        for _ in range(4):
+            c._summary_failure_cooldown_until = 0.0
+            assert c.compress(copy.deepcopy(msgs), current_tokens=999999) == msgs
