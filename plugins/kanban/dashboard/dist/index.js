@@ -32,6 +32,36 @@
     paused: ["На паузе", "Открыть"],
   };
   const OWNER = "Владелец";
+  // Куда владелец может перенести карточку: одна таблица для перетаскивания и кнопок
+  // карточки; повторяет правила сервера (пауза — из очереди, работы и ожидания;
+  // «Готово» принимает сдачу только в карточке). Ответ: { dialog } — открыть окно
+  // действия (в целевую колонку), { explain } — карточка откроется с пояснением.
+  function moveRule(task, target) {
+    const from = task.status;
+    if (from === target) return null;
+    const kind = attentionOf(task);
+    const ownerReview = from === "review" && task.acceptance === "owner";
+    if (target === "running" && from === "ready") return { explain: "Задача уже в очереди: агент возьмёт её в работу сам, как только освободится." };
+    if (target === "ready" || target === "running") {
+      if (ownerReview) return { explain: "Результат ждёт вашей проверки. Верните его с замечанием кнопкой в этой карточке — так агент увидит, что исправить." };
+      if (kind === "question") return { explain: "Агент ждёт вашего ответа. Ответьте в этой карточке — после ответа задача сама вернётся в очередь." };
+      return { dialog: "ready" };
+    }
+    if (target === "blocked") {
+      if (["ready", "running", "todo"].includes(from)) return { dialog: "blocked" };
+      if (from === "review") return { explain: "Результат на проверке не приостанавливают. Примите его или верните с замечанием в этой карточке." };
+      if (from === "done") return { explain: "Готовую задачу нельзя приостановить. Чтобы продолжить над ней работу, нажмите «Доработать»." };
+      return { explain: "Приостановить можно задачу, которая в очереди или в работе. Эта задача сейчас в другом состоянии." };
+    }
+    if (target === "done") {
+      if (ownerReview) return { explain: "Принять результат можно в этой карточке: здесь видно, какую именно версию вы принимаете." };
+      if (["ready", "running", "blocked", "review"].includes(from)) return { dialog: "done" };
+      return { explain: "Завершить можно задачу, которая в очереди, в работе или ждёт вас. Эта задача ещё ждёт предыдущих шагов или уточнения." };
+    }
+    if (target === "archived") return { dialog: "archived" };
+    if (target === "review") return { explain: "На проверку результат приходит, когда агент его сдаёт. Здесь вы можете принять его или вернуть с замечанием." };
+    return { explain: "Этот этап меняется автоматически. Чтобы запустить работу, передайте задачу в очередь агенту." };
+  }
   // Превью карточки — простой текст: разметку показывает только открытая карточка.
   function plainPreview(text) { return String(text || "").replace(/\*\*|__|`/g, "").replace(/^#+\s*/gm, ""); }
   function newRequestId() { return "ui-" + (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random()); }
@@ -68,6 +98,7 @@
     if (code && ERROR_CODES[code]) return ERROR_CODES[code];
     if (/parent|dependenc|prerequisite/i.test(text)) return "Сначала должны завершиться предыдущие шаги. Их список есть в карточке.";
     if (/claim|running|active run/i.test(text)) return "Агент уже работает над задачей. Сначала приостановите её, затем меняйте назначение.";
+    if (/not valid from current state/i.test(text)) return "Такой перенос сейчас недоступен: состояние карточки изменилось. Откройте карточку и выберите доступное действие.";
     if (status === 409 || /^409|already exists/i.test(raw)) return "Данные изменились. Обновите карточку и повторите действие.";
     if (status === 404 || /^404/.test(raw)) return "Задача не найдена на этой доске. Возможно, её удалили или она на другой доске — проверьте выбор доски.";
     if (status === 401 || status === 403 || /^40[13]/.test(raw)) return "Не удалось подтвердить доступ. Перезагрузите страницу.";
@@ -168,10 +199,15 @@
     const key = useRef(null);
     if (!key.current) key.current = "panel-" + crypto.randomUUID();
     const saving = useRef(false);
-    async function submit(event) {
-      event.preventDefault();
+    // Правка задания не отвечает агенту, который ждёт: говорим об этом и даём ответить сразу.
+    const waiting = task ? attentionOf(task) === "question" : false;
+    const asksPermission = waiting && !!task.needs_approval;
+    const asksQuestion = waiting && !asksPermission;
+    async function submit(event, resume) {
+      if (event) event.preventDefault();
       if (saving.current || !title.trim() || !body.trim() || !assignee) return;
       saving.current = true; setBusy(true); setError("");
+      let textSaved = false;
       try {
         if (handoffStarted.current && draftId.current) {
           const current = await request("/tasks/" + encodeURIComponent(draftId.current), board);
@@ -212,13 +248,26 @@
           handoffStarted.current = true;
           await request("/tasks/" + encodeURIComponent(draftId.current), board, "PATCH", { assignee });
         }
-        onSaved(result.warning ? "Задача сохранена, но автоматический запуск сейчас недоступен. Проверьте настройки выполнения." : task ? "Изменения сохранены." : "Поручение добавлено в очередь. Агент может начать его автоматически.", draftId.current || result.task && result.task.id);
-      } catch (err) { setError((handoffStarted.current ? "Не удалось подтвердить передачу. Повторите запрос или откройте сохранённую карточку. " : draftId.current ? "Поручение сохранено без запуска. " : "") + errorText(err)); }
+        if (task) textSaved = true;
+        if (task && resume) {
+          // Ответ на вопрос по той версии вопроса, что показана в загруженной карточке.
+          const answer = await request("/tasks/" + encodeURIComponent(task.id) + "/respond", board, "POST",
+            { answer: "Я уточнил задание. Продолжайте с учётом новой формулировки.", revision: task.block_revision == null ? null : task.block_revision, request_id: newRequestId(), author: OWNER, decision: null });
+          onSaved(answer && answer.status === "todo"
+            ? "Задание сохранено и передано агенту как ответ. Шаг продолжится, когда завершатся предыдущие шаги."
+            : "Задание сохранено и передано агенту как ответ. Он продолжит работу, как только освободится.", task.id);
+          return;
+        }
+        onSaved(result.warning ? "Задача сохранена, но автоматический запуск сейчас недоступен. Проверьте настройки выполнения." : asksQuestion ? "Изменения сохранены. Агент по-прежнему ждёт ответа на вопрос: ответьте в этой карточке, чтобы он продолжил." : asksPermission ? "Изменения сохранены. Агент по-прежнему ждёт вашего разрешения: решите в этой карточке, чтобы он продолжил." : task ? "Изменения сохранены." : "Поручение добавлено в очередь. Агент может начать его автоматически.", draftId.current || result.task && result.task.id);
+      } catch (err) { setError((textSaved ? "Изменения задания сохранены, но агенту ответить не удалось. Ответьте в карточке. " : "") + (handoffStarted.current ? "Не удалось подтвердить передачу. Повторите запрос или откройте сохранённую карточку. " : draftId.current ? "Поручение сохранено без запуска. " : "") + errorText(err)); }
       finally { saving.current = false; setBusy(false); }
     }
     function close() { if (draftId.current) onSaved(handoffStarted.current ? "Проверьте состояние передачи в карточке поручения." : "Поручение сохранено без исполнителя. Его можно дополнить и передать агенту позже.", draftId.current); else onClose(); }
     return h(Modal, { title: task ? "Изменить поручение" : "Новое поручение", description: task ? "Уточните задание и ожидаемый результат." : "Агент получит задание вместе с исходными файлами. После передачи он сможет начать работу автоматически.", busy, onClose: close },
       h("form", { onSubmit: event => void submit(event), className: "k21-form" },
+        waiting && h("p", { className: "k21-note", role: "status", "data-waiting": asksPermission ? "approval" : "question" },
+          asksPermission ? "Агент ждёт вашего разрешения на изменения. Сохранение задания его не даёт и работу не продолжает: решение принимается в карточке."
+            : "Агент ждёт ответа на вопрос. Если уточнённое задание отвечает на него, нажмите «Сохранить и продолжить»; «Только сохранить» оставит агента ждать."),
         h(Field, { label: "Что нужно сделать" }, h("input", { value: title, onChange: e => setTitle(e.target.value), required: true, maxLength: 300, placeholder: "Например, сравнить предложения трёх поставщиков" })),
         h(Field, { label: "Задание и ожидаемый результат", hint: "Укажите исходные данные, ограничения и что вы хотите получить. Ссылки можно вставить прямо сюда." },
           h("textarea", { value: body, onChange: e => setBody(e.target.value), required: true, rows: 5, placeholder: "Сравни цену, сроки и условия. Результат — таблица и рекомендация с объяснением." })),
@@ -243,7 +292,8 @@
         !task && !(boardMeta && boardMeta.default_workdir) && h("p", { className: "k21-muted" }, "Текст результата и вложения сохранятся в карточке поручения."),
         error && h("p", { role: "alert", className: "k21-error" }, error),
         h("div", { className: "k21-actions" }, h(Button, { onClick: close, disabled: busy }, "Отмена"),
-          h(Button, { type: "submit", primary: true, disabled: busy || !title.trim() || !body.trim() || !assignee }, busy ? "Сохраняем…" : task ? "Сохранить" : "Передать агенту"))));
+          asksQuestion && h(Button, { primary: true, disabled: busy || !title.trim() || !body.trim() || !assignee, onClick: () => void submit(null, true) }, busy ? "Сохраняем…" : "Сохранить и продолжить"),
+          h(Button, { type: "submit", primary: !asksQuestion, disabled: busy || !title.trim() || !body.trim() || !assignee }, busy ? "Сохраняем…" : asksQuestion ? "Только сохранить" : task ? "Сохранить" : "Передать агенту"))));
   }
 
   function MoveDialog({ task, target, profiles, board, onClose, onSaved }) {
@@ -258,7 +308,9 @@
       : target === "ready" && task.status === "done" ? "Доработать" : ACTION[target];
     const explanation = {
       ready: "Задача вернётся в очередь, агент возьмёт её в течение минуты. Если он уже работает над ней, текущая попытка будет остановлена.",
-      blocked: "Агент будет остановлен, задача подождёт вас. Изменения, которые он уже сделал во внешних сервисах, не отменяются.",
+      blocked: task.status === "running"
+        ? "Агент будет остановлен, задача подождёт вас. Изменения, которые он уже сделал во внешних сервисах, не отменяются."
+        : "Задача подождёт вас: агент не начнёт её, пока вы не продолжите.",
       done: "Итог сохранится в карточке, и следующие шаги смогут начаться.",
       archived: "Карточка уйдёт в архив, работающий над ней агент будет остановлен. Если задача не завершена, шаги, которые её ждут, не начнутся.",
     }[target];
@@ -493,6 +545,8 @@
       error && h("div", { role: "alert", className: "k21-error" }, error, " ", h(Button, { onClick: () => { setError(""); setVersion(v => v + 1); } }, "Повторить")),
       (notice || outerNotice) && h("div", { role: "status", className: "k21-note" }, notice || outerNotice),
       task && h("div", { className: "k21-task-detail" },
+        task.acceptance === "owner" && ["triage", "todo", "scheduled", "ready", "running", "blocked"].includes(task.status) && task.actor_kind !== "human" && h("p", { className: "k21-muted", "data-owner-review": "true" },
+          "Результат проверяете вы: агент пришлёт его на проверку, а «Готово» появится только после вашего «Принять»."),
         data.plan && h(PlanStrip, { plan: data.plan, current: task.id, onOpenTask }),
         (attention === "question" || attention === "paused" || attention === "problem") && h(DecisionPanel, { key: task.block_revision || attention, task, board, agentName, runs: data.runs, onDone: decided }),
         attention === "accept" && h(AcceptPanel, { key: task.submitted_version || "accept", task, board, runs: data.runs, onDone: decided }),
@@ -649,12 +703,10 @@
     }
     function move(task, target) {
       setDragged(null);
-      if (!task || task.status === target) return;
-      if (task.status === "review" && task.acceptance === "owner" && ["ready", "todo", "triage", "scheduled"].includes(target)) {
-        setNotice("Верните результат с замечанием в карточке."); openTask(task.id); return;
-      }
-      if (!ACTION[target]) { setNotice("Этот этап меняется автоматически. Для запуска передайте задачу в очередь агенту."); return; }
-      setModal({ kind: "move", task, target });
+      const rule = task && moveRule(task, target);
+      if (!rule) return;
+      if (rule.explain) { openTask(task.id); setCardNotice({ task: task.id, text: rule.explain }); return; }
+      setModal({ kind: "move", task, target: rule.dialog });
     }
     function openTask(id) {
       setModal(null); setCardNotice(null);
@@ -722,10 +774,13 @@
       data && h("div", { className: "k21-board-scroll", tabIndex: 0, "aria-label": "Колонки доски; прокрутка по горизонтали" },
         h("div", { className: "k21-columns", style: { "--k21-columns": columns.length } }, columns.map(status => {
           const cards = visible.filter(task => task.status === status);
+          // Любая колонка принимает карточку: допустимые подсвечены, остальные объяснят отказ.
+          const dragTask = dragged && tasks.find(task => task.id === dragged);
+          const rule = dragTask && moveRule(dragTask, status);
           return h("section", { key: status, className: "k21-column", "data-status": status,
-            onDragOver: e => { if (ACTION[status]) e.preventDefault(); },
+            onDragOver: e => { e.preventDefault(); },
             onDrop: e => { e.preventDefault(); const id = e.dataTransfer.getData("text/x-korra-task"); move(tasks.find(task => task.id === id), status); },
-            "data-drop-available": dragged && ACTION[status] ? "true" : undefined },
+            "data-drop-available": rule && rule.dialog ? "true" : undefined },
             h("div", { className: "k21-column-title" }, h("h3", null, statusLabel(status)), h("span", null, cards.length)),
             h("p", { className: "k21-column-hint" }, STATUS[status][1]),
             !cards.length && h("p", { className: "k21-column-empty" }, "Пока нет задач"),

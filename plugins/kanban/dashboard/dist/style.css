@@ -22,7 +22,8 @@
 .k21-board-scroll { overflow-x: auto; padding: 8px 8px 20px; margin: 0 -8px; overscroll-behavior-x: contain; }
 .k21-columns { display: grid; grid-template-columns: repeat(var(--k21-columns), minmax(196px, 1fr)); gap: 24px; align-items: start; }
 .k21-column { min-width: 0; display: flex; flex-direction: column; gap: 16px; border-radius: 20px; }
-.k21-column[data-drop-available=true] { background: var(--neo-surface); box-shadow: var(--neo-inset-compact); }
+.k21-column[data-drop-available=true] { background: var(--neo-surface); box-shadow: var(--neo-inset-compact);  outline: 2px dashed var(--neo-accent); outline-offset: 4px; }
+.k21-column[data-drop-available=true]:hover { box-shadow: var(--neo-inset); }
 .k21-column-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .k21-column-title > span { min-width: 25px; padding: 2px 7px; text-align: center; border-radius: 999px; box-shadow: var(--neo-inset-compact); }
 .k21-column-hint { color: var(--neo-text-secondary); font-size: 12px; min-height: 54px; }
