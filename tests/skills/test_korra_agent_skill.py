@@ -116,3 +116,30 @@ def test_skill_files_do_not_invent_a_korra_home(path: Path):
     assert "~/.korra" not in text, (
         f"{path.relative_to(SKILL_DIR)} обещает каталог ~/.korra, которого нет в коде"
     )
+
+
+def test_documented_limits_match_the_defaults_in_code():
+    """Числа в навыке, которые агент пересказывает клиенту, должны совпадать с кодом."""
+    from agent.skill_utils import SKILL_PROMPT_DESC_LIMIT
+    from korra_cli.config_defaults import DEFAULT_CONFIG as cfg
+
+    skill = SKILL_MD.read_text(encoding="utf-8")
+    learning = (SKILL_DIR / "references" / "learning.md").read_text(encoding="utf-8")
+    background = (SKILL_DIR / "references" / "background-systems.md").read_text(encoding="utf-8")
+
+    memory, curator = cfg["memory"], cfg["curator"]
+    delegation = cfg["delegation"]
+
+    for number in (memory["memory_char_limit"], memory["user_char_limit"]):
+        assert str(number) in skill and str(number) in learning
+    assert f"≤{SKILL_PROMPT_DESC_LIMIT} символов" in skill
+    assert f"≤ {SKILL_PROMPT_DESC_LIMIT} chars" in learning
+    assert f"`memory.nudge_interval` user turns ({memory['nudge_interval']})" in learning
+    assert 'skills_config.get("creation_nudge_interval", 10)' in (REPO / "agent" / "agent_init.py").read_text(encoding="utf-8")
+    assert "`skills.creation_nudge_interval` tool iterations (10)" in learning
+    assert f"{curator['stale_after_days']} days" in learning
+    assert str(curator["archive_after_days"]) in learning
+    assert curator["prune_builtins"] is True and "prune_builtins` (true)" in learning
+    assert f"default **{delegation['max_concurrent_children']}**" in background
+    assert f"`max_iterations` {delegation['max_iterations']}" in background
+    assert f"{delegation['max_concurrent_children']} параллельных" in skill

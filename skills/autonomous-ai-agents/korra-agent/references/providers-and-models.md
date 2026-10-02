@@ -1,75 +1,35 @@
-# Providers & Model Aliases
+# Models and subscriptions
 
-Set via `korra model` (picker) or `korra setup`. 35+ provider profiles ship as
-plugins under `plugins/model-providers/`; user plugins of the same name override.
-Source of truth: `korra model --help`, `korra setup --help`, and
-`plugins/model-providers/` in the installed build.
+Korra 21 uses models **only through subscriptions**: ChatGPT/Codex
+(`openai-codex`) and Claude Max (`anthropic`). Paid API keys and paid fallback
+are not used. A free ChatGPT/Claude account is not enough — Claude needs Claude Max.
 
-### Providers
+### Connecting
+- **Web cabinet (client mode):** «Настройки» → «Ключи и доступы» → card of the
+  subscription → sign in (OAuth). The model is chosen in «Настройки» → «Модель»
+  (and per agent on its page).
+- **CLI:** `korra auth add openai-codex` / `korra auth add anthropic`,
+  then `korra model` (picker) or `/model <name> [--global]` in a chat.
+- **Check:** `korra auth status`, `korra auth list`, `korra status`.
+  Several credentials of one provider form a pool and rotate automatically.
 
-| Provider | Auth | Key env var(s) |
-|----------|------|----------------|
-| openrouter | API key | `OPENROUTER_API_KEY` |
-| anthropic | API key | `ANTHROPIC_API_KEY` (also `CLAUDE_CODE_OAUTH_TOKEN`) |
-| nous | OAuth device code | `korra auth add nous` (or `NOUS_API_KEY`) |
-| openai-codex | OAuth | `korra auth add openai-codex` |
-| qwen-oauth | OAuth | `korra auth add qwen-oauth` |
-| minimax-oauth | OAuth | `korra auth add minimax-oauth` |
-| copilot | Token | `COPILOT_GITHUB_TOKEN` / `GH_TOKEN` (Copilot device flow — `gh auth login` tokens do NOT work) |
-| copilot-acp | External CLI | Copilot CLI on PATH or `COPILOT_CLI_PATH` |
-| gemini | API key | `GOOGLE_API_KEY` or `GEMINI_API_KEY` |
-| xai | API key | `XAI_API_KEY` (SuperGrok OAuth also supported) |
-| deepseek | API key | `DEEPSEEK_API_KEY` |
-| zai (GLM) | API key | `GLM_API_KEY` / `ZAI_API_KEY` |
-| minimax / minimax-cn | API key | `MINIMAX_API_KEY` / `MINIMAX_CN_API_KEY` |
-| kimi-coding / -cn | API key | `KIMI_API_KEY` / `KIMI_CN_API_KEY` |
-| alibaba (+coding-plan) | API key | `DASHSCOPE_API_KEY` / `ALIBABA_CODING_PLAN_API_KEY` |
-| xiaomi | API key | `XIAOMI_API_KEY` |
-| huggingface | Token | `HF_TOKEN` |
-| fireworks / novita / nvidia / deepinfra / gmi / arcee / stepfun / upstage / kilocode / ai-gateway / opencode-zen / opencode-go / ollama-cloud | API key | `<NAME>_API_KEY` |
-| bedrock / vertex / azure-foundry | Cloud SDK / key | AWS SDK creds / Vertex ADC / `AZURE_FOUNDRY_API_KEY` |
-| custom | Config | `model.base_url` + `model.api_key` in config.yaml |
+Connections belong to the platform, not to one agent: every profile uses the
+same connected subscription unless its own config says otherwise.
+The client cabinet hides the raw provider/key pages — if a client asks for
+another provider or an API key, say that Korra 21 works on subscriptions and
+suggest the closest of the two.
 
-Multiple credentials per provider pool and rotate automatically (`korra auth`).
-Fallback chain when the primary fails: `korra fallback add|remove|list`.
-
-### User-defined model aliases
-
-Work with `/model <name>` in CLI and every gateway platform. Resolved by
-`korra_cli/model_switch.py::resolve_alias()`; user aliases are checked BEFORE
-the built-in table, so a user `sonnet`/`grok` shadows the built-in.
+### Model aliases
+`/model <alias>` works in the CLI and every chat. User aliases are checked
+before the built-in ones (`sonnet`, `opus`, `haiku`, `claude`, `gpt5`, `codex`, …):
 
 ```yaml
-# Full form
 model_aliases:
   fav:
     model: claude-sonnet-4.6
     provider: anthropic
-  local-qwen:
-    model: qwen3.5:397b
-    provider: custom
-    base_url: "https://ollama.com/v1"
-  theta:
-    model: theta-1
-    provider: custom
-    base_url: "https://theta.example.com/v1"
-    key_env: THETA_API_KEY        # or: api_key: "${THETA_API_KEY}"
-
-# Short form ("provider/model"), also via CLI:
-#   korra config set model.aliases.fav openrouter/anthropic/claude-sonnet-4.6
-model:
-  aliases:
-    fav: openrouter/anthropic/claude-sonnet-4.6
 ```
+Set with `korra config set model.aliases.fav anthropic/claude-sonnet-4.6`.
+`/model fav` is session-scoped; add `--global` to make it the default.
 
-`/model fav` — session-scoped; add `--global` to persist as default.
-
-An alias with its own `base_url` authenticates with its own credential
-(`api_key`, which also accepts a `"${VAR}"` reference, or `key_env`). With
-neither set the key is resolved from the alias HOST, never carried over from
-the provider that was active before the switch.
-
-Built-in aliases (catalog-resolved against the active provider): `sonnet`,
-`opus`, `haiku`, `claude`, `gpt5`, `gpt`, `codex`, `o3`, `o4`, `gemini`,
-`deepseek`, `grok`, `llama`, `qwen`, `minimax`, `nemotron`, `kimi`, `glm`,
-`step`, `mimo`, `trinity`.
+Source of truth: `korra model --help`, `korra auth --help`, `korra_cli/auth.py`.

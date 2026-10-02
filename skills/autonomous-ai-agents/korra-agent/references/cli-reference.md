@@ -78,7 +78,7 @@ Details (transport, tool discovery, catalog): `references/native-mcp.md`.
 korra gateway run|install|start|stop|restart|status|setup
 ```
 
-20+ platforms: Telegram, Discord, Slack, WhatsApp (Baileys + Business Cloud API), iMessage (Photon — `korra photon setup`), Signal, Email, SMS, Matrix, Mattermost, Teams, LINE, SimpleX, ntfy, Google Chat, Home Assistant, DingTalk, Feishu, WeCom, Weixin, API Server, Webhooks. Open WebUI connects via the API Server adapter. Most adapters ship under `plugins/platforms/`.
+Клиентам подключаем Telegram (и веб-кабинет); остальные адаптеры есть в сборке, но не включены по умолчанию.
 Source of truth: `korra gateway --help` and the installed platform adapters.
 
 ### Sessions
@@ -107,7 +107,7 @@ korra profile rename A B | alias NAME | export NAME | import FILE
 
 ```
 korra auth                 Interactive credential manager
-korra auth add [PROVIDER]  Add OAuth or API-key credential (nous, openai-codex, qwen-oauth, …)
+korra auth add [PROVIDER]  Подключить подписку (OAuth): openai-codex (ChatGPT), anthropic (Claude Max)
 korra auth list|remove P IDX|reset PROVIDER|status
 ```
 Multiple credentials per provider form a pool that rotates automatically and skips exhausted keys.
@@ -115,14 +115,12 @@ Multiple credentials per provider form a pool that rotates automatically and ski
 ### Other
 
 ```
-korra desktop / gui        Native desktop app
 korra dashboard            Web admin panel + embedded chat (--stop / --status)
 korra proxy                OpenAI-compatible local proxy backed by an OAuth provider
-korra portal               Quick setup / sign in via Nous Portal
 korra kanban <verb>        Multi-agent work-queue board
+korra curator <verb>       Skill lifecycle (see references/background-systems.md)
+korra journey list|delete|edit   Learned skills and memories
 korra project              Named multi-folder workspaces
-korra skin list|use|set    Switch/tweak skins (see references/themes.md)
-korra pets <verb>          Pet mascots (see references/petdex.md)
 korra memory setup|status|off|reset   Memory provider
 korra secrets bitwarden|onepassword   External secret stores
 korra moa                  Mixture-of-Agents slots

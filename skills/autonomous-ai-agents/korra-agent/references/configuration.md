@@ -12,15 +12,18 @@ installed build.
 | `agent` | `max_turns` (90), `tool_use_enforcement`, `service_tier`, `verify_on_stop` |
 | `terminal` | `backend` (local/docker/ssh/modal/daytona/singularity), `cwd`, `timeout` (180) |
 | `compression` | `enabled`, `threshold` (0.50), `target_ratio` (0.20) |
-| `display` | `skin`, `interface` (cli/tui), `language`, `show_reasoning`, `show_cost`, `pet` |
+| `display` | `interface` (cli/tui), `language`, `show_reasoning`, `show_cost`, `memory_notifications` |
 | `approvals` | `mode` (smart/manual/off), `timeout`, `cron_mode` |
 | `stt` | `enabled`, `provider` (local/groq/openai/mistral/elevenlabs/deepinfra) |
 | `tts` | `provider` (edge/elevenlabs/openai/minimax/mistral/neutts/gemini/piper/kittentts/deepinfra/xai) |
-| `memory` | `memory_enabled`, `user_profile_enabled`, `provider`, `write_approval` |
+| `memory` | `memory_enabled`, `user_profile_enabled`, `memory_char_limit` (2200), `user_char_limit` (1375), `nudge_interval` (10), `write_approval` (false), `provider` |
+| `skills` | `creation_nudge_interval` (10) |
+| `auxiliary.background_review` | `enabled` (true), `model`, `max_input_tokens` |
 | `security` | `redact_secrets`, `tirith_enabled`, `website_blocklist` |
-| `delegation` | `model`, `provider`, `max_concurrent_children`, `max_iterations` (50), `max_spawn_depth` |
+| `delegation` | `model`, `provider`, `max_concurrent_children` (10), `max_iterations` (250), `max_spawn_depth` (1) |
 | `checkpoints` | `enabled`, `max_snapshots` (50) |
-| `curator` | `enabled`, `consolidate` (false, opt-in aux-model consolidation), `interval_hours`, `stale_after_days` |
+| `curator` | `enabled`, `consolidate` (false), `prune_builtins` (true), `interval_hours` (168), `stale_after_days` (30), `archive_after_days` (90) |
+| `kanban` | `chat_tools` (main), `dispatch_in_gateway`, `dispatch_interval_seconds` (60), `failure_limit` (2) |
 
 `korra config check` reports sections missing from an older config.
 
@@ -37,11 +40,9 @@ Full enumeration: `TOOLSETS` dict in `toolsets.py` (`_HERMES_CORE_TOOLS` is the 
 | `file` | File read/write/search/patch |
 | `code_execution` | Sandboxed Python execution |
 | `coding` | Code-editing helpers (LSP-backed) |
-| `computer_use` | Desktop GUI control (cua-driver) |
 | `vision` | Image analysis |
 | `image_gen` | Image generation and image-to-image editing |
 | `video` / `video_gen` | Video analysis / video generation |
-| `x_search` | X (Twitter) search (X OAuth or API key) |
 | `tts` | Text-to-speech |
 | `skills` | Skill browsing and management |
 | `memory` | Persistent cross-session memory |
@@ -55,7 +56,6 @@ Full enumeration: `TOOLSETS` dict in `toolsets.py` (`_HERMES_CORE_TOOLS` is the 
 | `kanban` | Multi-agent work-queue tools (gated to workers) |
 | `debugging` | Extra introspection tools (off by default) |
 | `safe` | Minimal low-risk toolset for locked-down sessions |
-| `spotify`, `homeassistant`, `discord`, `discord_admin`, `feishu_doc`, `feishu_drive`, `yuanbao` | Service integrations (gated on their credentials) |
 
 Tool changes take effect on `/reset` (new session) — never mid-conversation, to preserve prompt caching.
 

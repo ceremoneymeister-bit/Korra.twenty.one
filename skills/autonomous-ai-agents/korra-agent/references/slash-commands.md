@@ -30,7 +30,6 @@ it. New commands land often; `/help` in-session is always authoritative.
 /sessions                Browse and resume previous sessions
 /handoff <platform>      Hand live session off to a messaging platform (CLI)
 /status                  Session, model, token, and context info
-/redraw                  Force full UI repaint (CLI)
 ```
 
 ### Configuration
@@ -44,13 +43,7 @@ it. New commands land often; `/help` in-session is always authoritative.
 /voice [on|off|tts]      Voice mode
 /yolo                    Toggle approval bypass
 /busy [queue|steer|interrupt] How messages behave while working (CLI + gateway)
-/indicator [style]       TUI busy indicator: kaomoji|emoji|unicode|ascii (CLI)
 /footer [on|off]         Gateway runtime-metadata footer on replies
-/skin [name]             Change theme (CLI)
-/statusbar (/sb)         Toggle status bar (CLI)
-/battery [on|off]        Battery indicator in status bar (CLI)
-/timestamps (/ts) [on|off] Message timestamps (CLI)
-/codex-runtime [auto|codex_app_server] Codex runtime toggle
 ```
 
 ### Tools & Skills
@@ -59,10 +52,9 @@ it. New commands land often; `/help` in-session is always authoritative.
 /toolsets                List toolsets (CLI)
 /skills                  Search/install/manage skills (CLI)
 /bundles                 List skill bundles (/<name> loads several skills)
-/learn <source>          Learn a reusable skill from dirs/URLs/this chat
+/learn <source>          Learn a reusable skill from dirs/URLs/this chat (CLI, messengers, web chat)
+/refine [topic]          Review this chat now and save lessons to memory/skills (CLI, messengers, web chat)
 /memory [pending|approve|reject] Review pending memory writes / approval gate
-/pet [toggle|list|<slug>] Petdex mascot control (CLI)
-/hatch [description]     Generate a new pet from a description (CLI)
 /cron [sub]              Manage scheduled tasks (CLI)
 /suggestions (/suggest)  Review suggested automations
 /blueprint (/bp) [name]  Set up an automation from a blueprint
@@ -73,7 +65,6 @@ it. New commands land often; `/help` in-session is always authoritative.
 /reload-mcp              Reload MCP servers
 /reload-skills           Re-scan skills directory
 /browser [connect|status] CDP connection to your live browser (CLI)
-/plugins                 List plugins (CLI)
 ```
 
 ### Gateway
@@ -95,15 +86,12 @@ it. New commands land often; `/help` in-session is always authoritative.
 /whoami                  Slash-command access level (admin/user)
 /profile                 Active profile info
 /platforms (/gateway)    Platform connection status (CLI)
-/journey (/learning)     Learned skills + memories timeline (CLI)
-/subscription (/upgrade) Nous plan info (CLI)
-/topup                   Nous balance / billing
+/journey (/learning)     Learned skills + memories timeline (CLI/TUI only)
 /copy [N]                Copy last response to clipboard (CLI)
 /paste                   Attach clipboard image (CLI)
 /image <path>            Attach a local image file (CLI)
 /update                  Update Korra to latest
 /version (/v)            Show version
-/debug [nous|local]      Upload debug report, get shareable links
 ```
 
 ### Exit

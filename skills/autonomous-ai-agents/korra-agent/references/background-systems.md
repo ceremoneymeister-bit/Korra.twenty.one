@@ -1,101 +1,59 @@
-# Durable & Background Systems
+# Delegation, cron, kanban
 
-Four systems run alongside the main conversation loop. Quick reference
-here; full developer notes live in `AGENTS.md`. Verify live behavior with
-`korra <command> --help` and the installed source tree.
+Values below are the 0.21.16 defaults. Live check: `korra <command> --help`,
+`korra config get <key>`. For memory, skills, curator and background review
+see `references/learning.md`.
 
 ### Delegation (`delegate_task`)
 
-Spawn a subagent with an isolated context + terminal session.
+A subagent with its own context and terminal.
 
-- **Single:** `delegate_task(goal, context)`.
-- **Batch:** `delegate_task(tasks=[{goal, ...}, ...])` runs children in
-  parallel, capped by `delegation.max_concurrent_children` (default 3).
-- **Background:** `delegate_task(background=true)` returns a handle
-  immediately and keeps the parent loop going; the child's result
-  re-enters the conversation as a new turn when it finishes.
-- **Roles:** `leaf` (default; cannot re-delegate) vs `orchestrator`
-  (can spawn its own workers, bounded by `delegation.max_spawn_depth`).
-- **Not durable.** A backgrounded child is still process-local — if the
-  parent process exits, the child is lost. For work that must outlive
-  the process, use `cronjob` or
-  `terminal(background=True, notify_on_complete=True)`.
+- **Single:** `delegate_task(goal, context)`. **Batch:** `tasks=[{goal, ...}, ...]`
+  runs in parallel, capped by `delegation.max_concurrent_children` (default **10**).
+- **Background:** `background=true` returns a handle; the result re-enters the chat
+  as a new turn. Not durable — if the parent process exits the child is lost.
+  For work that must outlive the process use `cronjob`.
+- **Roles:** `leaf` (default) cannot re-delegate; `orchestrator` can, up to
+  `delegation.max_spawn_depth` (default 1, `orchestrator_enabled` true).
+- **Limits:** `max_iterations` 250, `child_timeout_seconds` 0 (none),
+  `max_summary_chars` 24000. Children inherit the parent's model unless
+  `delegation.model`/`provider` is set; they do not auto-approve dangerous
+  commands (`subagent_auto_approve` false).
+- A "capped at N" report is usually the model limiting itself: check the
+  config value above before believing it.
 
-Config: `delegation.*` in `config.yaml`.
+### Cron (`cronjob` tool, «Задачи» in the cabinet, `korra cron`)
 
-### Cron (scheduled jobs)
+Actions: create, list, update, pause, resume, remove, run.
 
-Durable scheduler — `cron/jobs.py` + `cron/scheduler.py`. Drive it via
-the `cronjob` tool, the `korra cron` CLI (`list`, `add`, `edit`,
-`pause`, `resume`, `run`, `remove`), or the `/cron` slash command.
+- **Schedules:** interval (`30m`, `every 2h`), one-off (`in 30m`, ISO time),
+  `every monday 9am`, 5-field cron (`0 9 * * *`).
+- **Kinds:** a normal job runs the agent with a prompt (optional `skills`,
+  `model`, `workdir`, `context_from`); `reminder` sends exact text with no model;
+  `script` with `no_agent=true` runs only a script.
+- **Delivery (`deliver`):** `origin` (where it was created), `local`, `all`,
+  a bot chat, or `platform:chat_id:thread`. A recipient chosen while the job
+  runs has to be confirmed by the owner.
+- **Limits:** a run is interrupted after `KORRA_CRON_TIMEOUT` seconds
+  (default 600). Cron runs keep memory on but never start background review.
+  `.tick.lock` prevents duplicate ticks across processes.
+- **CLI:** `korra cron list|create|edit|pause|resume|run|remove|status|runs|incidents|notepad|doctor`.
+  `/cron` works in the CLI only; in chats ask the agent to use the tool.
 
-- **Schedules:** duration (`"30m"`, `"2h"`), "every" phrase
-  (`"every monday 9am"`), 5-field cron (`"0 9 * * *"`), or ISO timestamp.
-- **Per-job knobs:** `skills`, `model`/`provider` override, `script`
-  (pre-run data collection; `no_agent=True` makes the script the whole
-  job), `context_from` (chain job A's output into job B), `workdir`
-  (run in a specific dir with its `AGENTS.md` / `CLAUDE.md` loaded),
-  multi-platform delivery.
-- **Invariants:** 3-minute hard interrupt per run, `.tick.lock` file
-  prevents duplicate ticks across processes, cron sessions pass
-  `skip_memory=True` by default, and cron deliveries are framed with a
-  header/footer instead of being mirrored into the target gateway
-  session (keeps role alternation intact).
+### Kanban (board for several agents)
 
-Source of truth: `korra cron --help` and `cron/` in the installed build.
+Durable board; the cabinet shows it as «Канбан-доска», CLI `korra kanban <verb>`,
+chat `/kanban`.
 
-### Curator (skill lifecycle)
+- The main chat gets the `kanban_*` tools when `kanban.chat_tools: "main"`
+  (`kanban_show/list/create/link/comment/attach/unblock`, and for workers
+  `complete/block/request_review/request_changes/heartbeat`).
+- The dispatcher runs inside the gateway (`kanban.dispatch_in_gateway: true`,
+  every `dispatch_interval_seconds` = 60): claims ready tasks and starts the
+  assigned profile. After `failure_limit` (2) failed starts the task is blocked.
+  With `review_dispatch` a finished task goes to review before it is done.
+  `auto_subscribe_on_create` subscribes the creator to updates.
+- The board is the hard boundary; a tenant is a soft namespace inside it.
 
-Background maintenance for agent-created skills. Tracks usage, marks
-idle skills stale, archives stale ones, keeps a pre-run tar.gz backup
-so nothing is lost.
-
-- **CLI:** `korra curator <verb>` — `status`, `usage`, `run`, `pause`,
-  `resume`, `pin`, `unpin`, `archive`, `restore`, `list-archived`, `prune`,
-  `backup`, `rollback`.
-- **Slash:** `/curator <subcommand>` mirrors the CLI.
-- **Scope:** only touches skills with `created_by: "agent"` provenance.
-  Bundled + hub-installed skills are off-limits. **Never deletes** —
-  max destructive action is archive. Pinned skills are exempt from
-  every auto-transition and every LLM review pass.
-- **Cost:** the deterministic inactivity/prune sweep runs for free. The
-  aux-model "consolidate overlapping skills into umbrellas" pass is
-  **off by default** — opt in with `curator.consolidate: true` or
-  `korra curator run --consolidate`. Routine background curation costs
-  zero tokens.
-- **Telemetry:** sidecar at `$HERMES_HOME/skills/.usage.json` holds
-  per-skill `use_count`, `view_count`, `patch_count`,
-  `last_activity_at`, `state`, `pinned`.
-
-Config: `curator.*` (`enabled`, `interval_hours`, `min_idle_hours`,
-`stale_after_days`, `archive_after_days`, `backup.*`).
-Source of truth: `korra curator --help` and the installed curator code.
-
-### Kanban (multi-agent work queue)
-
-Durable SQLite board for multi-profile / multi-worker collaboration.
-Users drive it via `korra kanban <verb>`; dispatcher-spawned workers
-see a focused `kanban_*` toolset gated by `HERMES_KANBAN_TASK`, and
-orchestrator profiles can opt into the broader `kanban` toolset. Normal
-sessions still have zero `kanban_*` schema footprint unless configured.
-
-- **CLI verbs (common):** `init`, `create`, `list` (alias `ls`),
-  `show`, `assign`, `link`, `unlink`, `comment`, `complete`, `block`,
-  `unblock`, `archive`, `tail`. Less common: `watch`, `stats`, `runs`,
-  `log`, `dispatch`, `daemon`, `gc`.
-- **Worker/orchestrator toolset:** `kanban_show`, `kanban_complete`,
-  `kanban_block`, `kanban_heartbeat`, `kanban_comment`, `kanban_create`,
-  `kanban_link`; profiles that explicitly enable the `kanban` toolset
-  outside a dispatcher-spawned task also get `kanban_list` and
-  `kanban_unblock` for board routing.
-- **Dispatcher** runs inside the gateway by default
-  (`kanban.dispatch_in_gateway: true`) — reclaims stale claims,
-  promotes ready tasks, atomically claims, spawns assigned profiles.
-  Auto-blocks a task after `failure_limit` consecutive spawn failures
-  (default 2; configurable via `kanban.failure_limit` or per-task
-  `max_retries`).
-- **Isolation:** board is the hard boundary (workers get
-  `HERMES_KANBAN_BOARD` pinned in env); tenant is a soft namespace
-  within a board for workspace-path + memory-key isolation.
-
-Source of truth: `korra kanban --help` and the installed kanban plugin code.
+Source of truth: `korra kanban --help`, `korra cron --help`, the `delegation`
+and `kanban` sections of `config_defaults.py`.
