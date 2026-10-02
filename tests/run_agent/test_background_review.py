@@ -194,7 +194,9 @@ def _install_relay_recorder(monkeypatch, review_run=None):
     return calls
 
 
-def test_background_review_shuts_down_memory_provider_before_close(monkeypatch):
+def test_background_review_releases_clients_without_closing_shared_session(monkeypatch):
+    """K21-279: the fork shares the foreground session id, so close() would
+    kill that chat's terminal, background processes and browser."""
     events = []
 
     class FakeReviewAgent:
@@ -211,6 +213,9 @@ def test_background_review_shuts_down_memory_provider_before_close(monkeypatch):
         def close(self):
             events.append(("close", None))
 
+        def release_clients(self):
+            events.append(("release_clients", None))
+
     monkeypatch.setattr(run_agent_module, "AIAgent", FakeReviewAgent)
     monkeypatch.setattr(run_agent_module.threading, "Thread", ImmediateThread)
 
@@ -225,9 +230,38 @@ def test_background_review_shuts_down_memory_provider_before_close(monkeypatch):
     assert [name for name, _payload in events] == [
         "init",
         "run_conversation",
-        "shutdown_memory_provider",
-        "close",
+        "release_clients",
     ]
+
+
+@pytest.mark.parametrize("manual, attended", [(True, True), (False, False)])
+def test_review_fork_is_attended_only_for_manual_refine(monkeypatch, manual, attended):
+    """K21-279: /refine is started by a person, so its fork may edit memory;
+    the fork still runs under the background_review origin."""
+    seen = {}
+
+    class FakeReviewAgent:
+        def __init__(self, **kwargs):
+            self._session_messages = []
+
+        def run_conversation(self, **kwargs):
+            seen["attended"] = self._review_attended
+            seen["origin"] = self._memory_write_origin
+
+        def release_clients(self):
+            pass
+
+    monkeypatch.setattr(run_agent_module, "AIAgent", FakeReviewAgent)
+    monkeypatch.setattr(run_agent_module.threading, "Thread", ImmediateThread)
+
+    AIAgent._spawn_background_review(
+        _bare_agent(),
+        messages_snapshot=[{"role": "user", "content": "hello"}],
+        review_memory=True,
+        manual=manual,
+    )
+
+    assert seen == {"attended": attended, "origin": "background_review"}
 
 
 def test_parallel_review_threads_keep_profile_memory_isolated(
@@ -256,6 +290,7 @@ def test_parallel_review_threads_keep_profile_memory_isolated(
         task_cfg=None,
         review_run=None,
         review_memory=False,
+        attended=False,
     ):
         try:
             assert review_memory is True
@@ -815,7 +850,7 @@ def test_stale_review_cleanup_cannot_clear_or_signal_newer_review(monkeypatch):
             self.index = instance_count
             instance_count += 1
 
-        def shutdown_memory_provider(self):
+        def release_clients(self):
             if self.index == 0:
                 first_cleanup_entered.set()
                 assert allow_first_cleanup.wait(2.0)

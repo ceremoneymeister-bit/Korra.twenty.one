@@ -3794,10 +3794,14 @@ def _deliver_result(
                 route_metadata = {
                     "direct_messages_topic_id": str(thread_id),
                     "job_id": job["id"],
+                    "notify": True,
                 }
                 # Media metadata mirrors the text routing so attachments land in
                 # the same DM topic instead of the General lane (#22773).
-                media_metadata = {"direct_messages_topic_id": str(thread_id)}
+                media_metadata = {
+                    "direct_messages_topic_id": str(thread_id),
+                    "notify": True,
+                }
             else:
                 # Forum-style topic (private chat / supergroup) or non-topic
                 # target: route via message_thread_id (#52060).  Put thread_id in
@@ -3808,10 +3812,12 @@ def _deliver_result(
                 # anchor, so the metadata key bypasses that check and lets the
                 # adapter route via a plain message_thread_id.
                 route_thread_id = str(thread_id) if thread_id is not None else None
-                route_metadata = {"job_id": job["id"]}
+                route_metadata = {"job_id": job["id"], "notify": True}
                 if route_thread_id:
                     route_metadata["thread_id"] = route_thread_id
-                media_metadata = {"thread_id": thread_id} if thread_id else None
+                media_metadata = {"notify": True}
+                if thread_id:
+                    media_metadata["thread_id"] = thread_id
 
             # Relay egress needs a tenant discriminator on the frame: the
             # connector's fail-closed guard resolves the workspace/guild from
@@ -6734,17 +6740,15 @@ def _run_job_inner(
                 )
                 if _finite_oneshot:
                     _remediation = (
-                        "This finite one-shot job is consumed by this attempted run; "
-                        "create a new one-shot job at a future time with an explicit "
-                        "provider and model."
+                        "Это разовое задание уже израсходовано этой попыткой: "
+                        "создайте новое на будущее время и сразу укажите в нём "
+                        "провайдера и модель."
                     )
                 else:
                     _remediation = (
-                        "To run on the new config, on the host running Korra "
-                        "pin it explicitly: "
-                        f"`hermes cron edit {job_id} --provider <provider> "
-                        "--model <model>` (or pin the original values to keep "
-                        "them)."
+                        "Чтобы задание шло на новой модели, попросите своего агента "
+                        "закрепить за ним модель и провайдера (можно закрепить и "
+                        "прежние значения)."
                     )
                 logger.warning(
                     "Job '%s': SKIPPED — global inference config drifted since "
@@ -6770,12 +6774,11 @@ def _run_job_inner(
                     else DRIFT_SKIP_MARKER
                 )
                 raise RuntimeError(
-                    f"{_drift_marker} Skipped to prevent unintended spend: global "
-                    f"inference config drifted since this job was created "
-                    f"({_changes}), and this job is unpinned. No inference call "
-                    f"was made. {_remediation} "
-                    f"This alert is sent once; the job stays skipped until the "
-                    f"config is pinned or restored. See #44585."
+                    f"{_drift_marker} Запуск пропущен: общая модель агента изменилась "
+                    f"после создания задания ({_changes}), а у задания модель не "
+                    f"закреплена. Обращения к модели не было. {_remediation} "
+                    f"Сообщение приходит один раз; задание остаётся пропущенным, "
+                    f"пока модель не закреплена или настройки не возвращены."
                 )
 
         fallback_model = get_fallback_chain(_cfg) or None
@@ -7872,7 +7875,7 @@ def _run_one_job_body(
                         r"\[drift_skip[^\]]*\]\s*", "", str(error)
                     ).strip()
                     deliver_content = (
-                        f"⚠️ Cron '{job.get('name') or job['id']}' skipped: "
+                        f"⚠️ Задание «{job.get('name') or job['id']}» пропущено: "
                         f"{_drift_text}"
                     )
             # Treat whitespace-only final responses the same as empty

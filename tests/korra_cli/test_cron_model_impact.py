@@ -24,45 +24,49 @@ def _job(**overrides: Any) -> dict[str, Any]:
     return job
 
 
+GUARD_ON = {"cron": {"model_drift_guard": True}}
+
+
 def _impact(jobs: object, **config: Any) -> dict[str, Any]:
+    # The guard is off by default (K21-273): these tests opt in explicitly.
     return build_cron_model_impact(
         current_provider="nous",
         current_model="new/model",
-        config=config,
+        config=config or GUARD_ON,
         jobs=jobs,
     )
 
 
 def test_drift_axes_match_unpinned_guard_semantics() -> None:
     assert cron_model_drift_axes(
-        _job(), current_provider=" NOUS ", current_model="NEW/MODEL", config={}
+        _job(), current_provider=" NOUS ", current_model="NEW/MODEL", config=GUARD_ON
     ) == ["provider", "model"]
     assert cron_model_drift_axes(
         _job(provider="openrouter"),
         current_provider="nous",
         current_model="new/model",
-        config={},
+        config=GUARD_ON,
     ) == ["model"]
     assert cron_model_drift_axes(
         _job(model="old/model", provider="openrouter"),
         current_provider="nous",
         current_model="new/model",
-        config={},
+        config=GUARD_ON,
     ) == []
 
 
-def test_fleet_defaults_and_literal_false_guard_suppress_only_intended_axes() -> None:
+def test_fleet_defaults_and_non_true_guard_suppress_only_intended_axes() -> None:
     assert cron_model_drift_axes(
         _job(),
         current_provider="nous",
         current_model="new/model",
-        config={"cron": {"model": "fleet/model"}},
+        config={"cron": {"model": "fleet/model", "model_drift_guard": True}},
     ) == ["provider"]
     assert cron_model_drift_axes(
         _job(),
         current_provider="nous",
         current_model="new/model",
-        config={"cron": {"model_provider": "openrouter"}},
+        config={"cron": {"model_provider": "openrouter", "model_drift_guard": True}},
     ) == ["model"]
     assert cron_model_drift_axes(
         _job(),
@@ -74,8 +78,14 @@ def test_fleet_defaults_and_literal_false_guard_suppress_only_intended_axes() ->
         _job(),
         current_provider="nous",
         current_model="new/model",
-        config={"cron": {"model_drift_guard": "false"}},
-    ) == ["provider", "model"]
+        config={"cron": {"model_drift_guard": "true"}},
+    ) == []
+    assert cron_model_drift_axes(
+        _job(),
+        current_provider="nous",
+        current_model="new/model",
+        config={},
+    ) == []
 
 
 def test_summary_filters_disabled_no_agent_and_mixed_pins() -> None:
@@ -162,8 +172,8 @@ def test_fallback_name_respects_the_desktop_code_point_limit() -> None:
     assert impact["jobs"][0]["name"] == (f"Задача {job_id}")[:120]
 
 
-def test_guard_disabled_summary_is_available_but_empty() -> None:
-    assert _impact([_job()], cron={"model_drift_guard": False}) == {
+def test_guard_off_by_default_summary_is_available_but_empty() -> None:
+    assert _impact([_job()], cron={}) == {
         "available": True,
         "guard_enabled": False,
         "affected_count": 0,
@@ -194,7 +204,7 @@ def test_loader_exception_returns_unavailable(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(cron.jobs, "load_jobs", fail)
 
     impact = build_cron_model_impact(
-        current_provider="nous", current_model="new/model", config={}
+        current_provider="nous", current_model="new/model", config=GUARD_ON
     )
 
     assert impact["available"] is False

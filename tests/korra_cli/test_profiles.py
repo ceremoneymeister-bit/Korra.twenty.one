@@ -1443,3 +1443,112 @@ class TestMultiplexSeedsApiServerOff:
         profile_dir = create_profile("voice", no_alias=True)
         cfg = yaml.safe_load((profile_dir / "config.yaml").read_text())
         assert cfg["stt"]["provider"] == "deepgram"
+
+
+class TestCloneLeavesChannelsBehind:
+    """K21-266: клон профиля не забирает чужого бота, но сохраняет модель, ключи, навыки и память."""
+
+    _ENV = (
+        "# ключи\n"
+        "TELEGRAM_BOT_TOKEN=123:secret\n"
+        "TELEGRAM_ALLOWED_USERS=42,43\n"
+        "TELEGRAM_HOME_CHANNEL=-100500\n"
+        "DISCORD_BOT_TOKEN=discord-secret\n"
+        "WHATSAPP_ENABLED=true\n"
+        "SLACK_BOT_TOKEN=xoxb-1\n"
+        "EMAIL_ADDRESS=bot@example.com\n"
+        "export HASS_TOKEN=ha-secret\n"
+        "API_SERVER_KEY=gateway-key-0123456789abcdef\n"
+        "OPENAI_API_KEY=sk-keep\n"
+        "FIRECRAWL_API_KEY=fc-keep\n"
+    )
+    _CONFIG = (
+        "model:\n  provider: openai-codex\n  default: gpt-6.1-sol\n"
+        "platforms:\n"
+        "  telegram:\n    enabled: true\n    token: 123:secret\n"
+        "  api_server:\n    enabled: true\n"
+        "telegram:\n  require_mention: true\n"
+        "gateway:\n  platforms:\n    discord:\n      enabled: true\n"
+        "toolsets:\n  - web\n"
+    )
+
+    def _source(self, home):
+        (home / ".env").write_text(self._ENV)
+        (home / "config.yaml").write_text(self._CONFIG)
+        (home / "SOUL.md").write_text("soul")
+        (home / "memories").mkdir()
+        (home / "memories" / "MEMORY.md").write_text("fact")
+        skill = home / "skills" / "mine"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("skill")
+        pairing = home / "platforms" / "pairing"
+        pairing.mkdir(parents=True)
+        (pairing / "telegram-approved.json").write_text("{}")
+        (home / "whatsapp" / "session").mkdir(parents=True)
+        (home / "whatsapp" / "session" / "creds.json").write_text("{}")
+
+    def _assert_channels_gone(self, profile_dir):
+        env = (profile_dir / ".env").read_text()
+        for needle in (
+            "TELEGRAM_", "DISCORD_", "WHATSAPP_", "SLACK_", "EMAIL_", "HASS_TOKEN",
+        ):
+            assert needle not in env
+        cfg = yaml.safe_load((profile_dir / "config.yaml").read_text())
+        assert "telegram" not in cfg
+        assert "telegram" not in cfg.get("platforms", {})
+        assert "platforms" not in cfg.get("gateway", {})
+
+    def _assert_kept(self, profile_dir):
+        env = (profile_dir / ".env").read_text()
+        for kept in (
+            "# ключи", "API_SERVER_KEY=gateway-key-0123456789abcdef",
+            "OPENAI_API_KEY=sk-keep", "FIRECRAWL_API_KEY=fc-keep",
+        ):
+            assert kept in env
+        cfg = yaml.safe_load((profile_dir / "config.yaml").read_text())
+        assert cfg["model"]["default"] == "gpt-6.1-sol"
+        assert cfg["toolsets"] == ["web"]
+        assert cfg["platforms"]["api_server"]["enabled"] is True
+        assert (profile_dir / "skills" / "mine" / "SKILL.md").read_text() == "skill"
+        assert (profile_dir / "memories" / "MEMORY.md").read_text() == "fact"
+
+    def test_clone_config_drops_channels_and_keeps_the_rest(self, profile_env):
+        home = profile_env / ".hermes"
+        self._source(home)
+        profile_dir = create_profile("clone", clone_from="default", clone_config=True, no_alias=True)
+        self._assert_channels_gone(profile_dir)
+        self._assert_kept(profile_dir)
+        assert not (profile_dir / "platforms" / "pairing").exists()
+
+    def test_clone_all_also_drops_pairing_and_whatsapp_session(self, profile_env):
+        home = profile_env / ".hermes"
+        self._source(home)
+        profile_dir = create_profile("full", clone_from="default", clone_all=True, no_alias=True)
+        self._assert_channels_gone(profile_dir)
+        self._assert_kept(profile_dir)
+        assert not (profile_dir / "platforms").exists()
+        assert not (profile_dir / "whatsapp").exists()
+
+    def test_source_profile_is_untouched(self, profile_env):
+        home = profile_env / ".hermes"
+        self._source(home)
+        create_profile("clone", clone_from="default", clone_config=True, no_alias=True)
+        create_profile("full", clone_from="default", clone_all=True, no_alias=True)
+        assert (home / ".env").read_text() == self._ENV
+        assert (home / "config.yaml").read_text() == self._CONFIG
+        assert (home / "platforms" / "pairing" / "telegram-approved.json").exists()
+        assert (home / "whatsapp" / "session" / "creds.json").exists()
+
+    def test_fresh_profile_gets_no_channels(self, profile_env):
+        home = profile_env / ".hermes"
+        self._source(home)
+        profile_dir = create_profile("fresh", no_alias=True)
+        env = (profile_dir / ".env").read_text()
+        assert "TELEGRAM_" not in env and "DISCORD_" not in env
+
+    def test_strip_channel_env_file_keeps_provider_and_tool_keys(self, tmp_path):
+        env = tmp_path / ".env"
+        env.write_text("TELEGRAM_BOT_TOKEN=1:x\nOPENAI_API_KEY=k\nAPI_SERVER_PORT=8642\nWEBHOOK_SECRET=s\n")
+        removed = profiles.strip_channel_env_file(env)
+        assert removed == ["TELEGRAM_BOT_TOKEN"]
+        assert env.read_text() == "OPENAI_API_KEY=k\nAPI_SERVER_PORT=8642\nWEBHOOK_SECRET=s\n"

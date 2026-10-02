@@ -916,6 +916,113 @@ def _seed_model_config(
         pass
 
 
+# Не личные каналы: служебные входы шлюза, у них нет «своего бота» источника.
+_NON_CHANNEL_PLATFORMS = frozenset({"local", "api_server", "webhook", "msgraph_webhook", "relay"})
+
+# Платформы, чьи переменные окружения не начинаются с имени платформы.
+_CHANNEL_ENV_PREFIX_ALIASES = {
+    "email": ("EMAIL_",),
+    "homeassistant": ("HASS_", "HOMEASSISTANT_"),
+    "qqbot": ("QQ_", "QQBOT_"),
+    "sms": ("TWILIO_", "SMS_"),
+}
+
+# Состояние каналов, которое clone_all не должен переносить: одобренные
+# пары и сессия WhatsApp принадлежат боту источника.
+_CHANNEL_STATE_ENTRIES = ("platforms", "pairing", "whatsapp", "channel_directory.json")
+
+_ENV_LINE_KEY_RE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")
+
+
+def _channel_platform_ids() -> set:
+    """Идентификаторы каналов: встроенные платформы шлюза и зарегистрированные плагины."""
+    from gateway.config import Platform
+
+    ids = {m.value for m in Platform.__members__.values()}
+    try:
+        from gateway.platform_registry import platform_registry
+
+        ids.update(platform_registry.registered_names())
+    except Exception:
+        pass
+    return ids - _NON_CHANNEL_PLATFORMS
+
+
+def strip_channel_env_file(env_path: Path, platform_ids: Optional[set] = None) -> List[str]:
+    """Убрать из ``.env`` переменные каналов (токены, allowlist, домашний чат, флаги включения).
+
+    Остальные строки (ключи провайдеров и инструментов, комментарии) остаются как есть.
+    """
+    if not env_path.is_file():
+        return []
+    ids = platform_ids if platform_ids is not None else _channel_platform_ids()
+    prefixes = tuple(
+        prefix
+        for pid in ids
+        for prefix in _CHANNEL_ENV_PREFIX_ALIASES.get(pid, (pid.upper().replace("-", "_") + "_",))
+    )
+    text = env_path.read_text(encoding="utf-8", errors="replace")
+    kept: List[str] = []
+    removed: List[str] = []
+    for line in text.splitlines():
+        match = _ENV_LINE_KEY_RE.match(line)
+        if match and match.group(1).startswith(prefixes):
+            removed.append(match.group(1))
+        else:
+            kept.append(line)
+    if removed:
+        env_path.write_text("\n".join(kept) + "\n" if kept else "", encoding="utf-8")
+    return removed
+
+
+def _strip_channel_config(config_path: Path, platform_ids: set) -> bool:
+    """Убрать из ``config.yaml`` разделы каналов: ``platforms.<канал>`` и ``<канал>:`` (в корне и в ``gateway``)."""
+    if not config_path.is_file():
+        return False
+    import yaml
+
+    from korra_cli.config import read_user_config_raw
+
+    cfg = read_user_config_raw(config_path)
+    changed = False
+    gateway = cfg.get("gateway")
+    for container in (cfg, gateway):
+        if not isinstance(container, dict):
+            continue
+        platforms = container.get("platforms")
+        if isinstance(platforms, dict):
+            for pid in [k for k in platforms if k in platform_ids]:
+                del platforms[pid]
+                changed = True
+            if not platforms:
+                del container["platforms"]
+        for pid in [k for k in container if k in platform_ids]:
+            del container[pid]
+            changed = True
+    if changed:
+        config_path.write_text(
+            yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True), encoding="utf-8"
+        )
+    return changed
+
+
+def _strip_channel_settings(profile_dir: Path, *, include_state: bool) -> None:
+    """Клон профиля не наследует каналы источника: тот же бот у двух профилей — конфликт.
+
+    Модель, ключи провайдеров и инструментов, навыки, память и SOUL.md не трогаем.
+    """
+    ids = _channel_platform_ids()
+    strip_channel_env_file(profile_dir / ".env", ids)
+    _strip_channel_config(profile_dir / "config.yaml", ids)
+    if include_state:
+        for name in _CHANNEL_STATE_ENTRIES:
+            entry = profile_dir / name
+            if entry.is_dir() and not entry.is_symlink():
+                shutil.rmtree(entry, ignore_errors=True)
+            else:
+                entry.unlink(missing_ok=True)
+
+
 def _pin_api_server_off_under_multiplex(profile_dir: Path, source_dir: Optional[Path]) -> None:
     """Прописать ``platforms.api_server.enabled: false`` профилю, если источник мультиплексирует."""
     if source_dir is None:
@@ -1658,9 +1765,12 @@ def create_profile(
                     dst.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(src, dst)
 
+    if source_dir is not None:
+        _strip_channel_settings(profile_dir, include_state=clone_all)
+
     # Seed a profile-scoped .env from day one. A fresh profile gets only the
     # gateway + selected-model dependencies required for its first turn;
-    # clones keep the source .env. Without a file, dashboard/CLI writes had no
+    # clones keep the source .env without its channels. Without a file, dashboard/CLI writes had no
     # profile target and the process environment could blur the isolation
     # boundary.
     env_path = profile_dir / ".env"

@@ -39,6 +39,14 @@ _write_origin: contextvars.ContextVar[str] = contextvars.ContextVar(
     default="foreground",
 )
 
+# A review fork started by a person (``/refine``) keeps the "background_review"
+# origin -- every other review guard still applies -- but is attended, so the
+# memory delete gate must not treat it as an unattended run.
+_review_attended: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "review_attended",
+    default=False,
+)
+
 # The sentinel value the background review fork uses; mirrors
 # run_agent.py's AIAgent._memory_write_origin override in
 # _spawn_background_review().
@@ -76,3 +84,17 @@ def is_background_review() -> bool:
     """Convenience: True iff the current write origin is the background
     review fork."""
     return get_current_write_origin() == BACKGROUND_REVIEW
+
+
+def set_current_review_attended(attended: bool) -> contextvars.Token[bool]:
+    """Bind whether the active review fork was started by a person."""
+    return _review_attended.set(bool(attended))
+
+
+def reset_current_review_attended(token: contextvars.Token[bool]) -> None:
+    _review_attended.reset(token)
+
+
+def is_unattended_review() -> bool:
+    """True iff this is an automatic review fork (not a manual ``/refine``)."""
+    return is_background_review() and not _review_attended.get()

@@ -5269,22 +5269,24 @@ def cron_model_drift_guard_enabled(
 ) -> bool:
     """Return whether cron must fail closed on unpinned inference drift.
 
-    Only the literal YAML boolean ``false`` disables this spend-safety guard.
-    Missing, malformed, or non-boolean values stay fail-closed. When *config*
-    is omitted, load the active merged configuration so CLI warnings honor the
-    same user/managed setting as the scheduler.
+    OFF by default (K21-273): Korra runs on subscriptions, so a changed global
+    model cannot start paid spend, and silently skipping every unpinned job
+    after a model switch hurts people more. Only the literal YAML boolean
+    ``true`` enables the guard. When *config* is omitted, load the active
+    merged configuration so CLI warnings honor the same user/managed setting
+    as the scheduler.
     """
     if config is None:
         try:
             config = load_config()
         except Exception:
-            return True
+            return False
     if not isinstance(config, dict):
-        return True
+        return False
     cron_config = config.get("cron")
     if not isinstance(cron_config, dict):
-        return True
-    return cron_config.get("model_drift_guard", True) is not False
+        return False
+    return cron_config.get("model_drift_guard", False) is True
 
 
 def _cron_fleet_default_covers_axis(

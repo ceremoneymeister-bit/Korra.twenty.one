@@ -551,6 +551,58 @@ class TestDeliverResultWrapping:
         voice_call = adapter.send_voice.call_args
         assert voice_call[1]["audio_path"] == str(media_path)
 
+    @pytest.mark.parametrize("thread_id", [None, "77"])
+    def test_live_delivery_marks_text_and_media_as_notifying(self, tmp_path, monkeypatch, thread_id):
+        """K21-272: Telegram's default "important" mode sends silently unless
+        metadata["notify"] is set, so a scheduled result must carry it."""
+        from gateway.config import Platform
+        from concurrent.futures import Future
+        media_path = self._safe_media_path(tmp_path, monkeypatch, "cron-notify.mp3")
+
+        adapter = AsyncMock()
+        adapter.send.return_value = MagicMock(success=True)
+        adapter.send_voice.return_value = MagicMock(success=True)
+
+        pconfig = MagicMock()
+        pconfig.enabled = True
+        mock_cfg = MagicMock()
+        mock_cfg.platforms = {Platform.TELEGRAM: pconfig}
+
+        loop = MagicMock()
+        loop.is_running.return_value = True
+
+        def fake_run_coro(coro, _loop):
+            import asyncio as _asyncio
+            future = Future()
+            try:
+                future.set_result(_asyncio.run(coro))
+            except BaseException as _e:  # noqa: BLE001
+                future.set_exception(_e)
+            return future
+
+        origin = {"platform": "telegram", "chat_id": "-100123"}
+        if thread_id:
+            origin["thread_id"] = thread_id
+        job = {"id": "notify-job", "deliver": "origin", "origin": origin}
+
+        with patch("gateway.config.load_gateway_config", return_value=mock_cfg), \
+             patch("cron.scheduler.load_config", return_value={"cron": {"wrap_response": False}}), \
+             patch("asyncio.run_coroutine_threadsafe", side_effect=fake_run_coro):
+            _deliver_result(
+                job,
+                f"Reminder\nMEDIA:{media_path}",
+                adapters={Platform.TELEGRAM: adapter},
+                loop=loop,
+            )
+
+        adapter.send.assert_called_once()
+        assert adapter.send.call_args.kwargs["metadata"]["notify"] is True
+        adapter.send_voice.assert_called_once()
+        voice_meta = adapter.send_voice.call_args.kwargs["metadata"]
+        assert voice_meta["notify"] is True
+        if thread_id:
+            assert voice_meta["thread_id"] == thread_id
+
 
 class TestDeliverResultErrorReturns:
     """Verify _deliver_result returns error strings on failure, None on success."""

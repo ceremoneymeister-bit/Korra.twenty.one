@@ -45,7 +45,11 @@ def _job(**overrides):
 
 
 def _tick(job, tmp_path, current_provider, deliveries):
-    """Run one run_one_job tick with the provider resolution pinned."""
+    """Run one run_one_job tick with the provider resolution pinned.
+
+    The guard is off by default (K21-273), so this module opts in.
+    """
+    (tmp_path / "config.yaml").write_text("cron:\n  model_drift_guard: true\n")
     fake_db = MagicMock()
 
     def fake_deliver(
@@ -92,12 +96,11 @@ class TestDriftAlertOnce:
 
         assert len(deliveries) == 1, f"expected 1 alert, got {len(deliveries)}: {deliveries}"
         blob = deliveries[0].lower()
-        assert "drift" in blob
-        assert "pin" in blob
-        assert "host running korra" in blob
-        # The single alert must carry the complete supported remediation
-        # command — the generic summarizer's 180-char truncation must not eat it.
-        assert "hermes cron edit drift-once-test" in deliveries[0]
+        assert "пропущено" in blob
+        assert "закрепить" in blob
+        # The single alert is Russian and names no CLI command the owner
+        # cannot run; the summarizer's truncation must not eat the remediation.
+        assert "hermes" not in blob
         assert "cronjob action=update" not in deliveries[0]
         assert "[drift_skip" not in deliveries[0]
 
@@ -122,7 +125,7 @@ class TestDriftAlertOnce:
             fresh = [j for j in cron_jobs.load_jobs() if j["id"] == job["id"]][0]
             _tick(fresh, tmp_path, "nous", deliveries)
 
-        drift_alerts = [d for d in deliveries if "drift" in d.lower()]
+        drift_alerts = [d for d in deliveries if "пропущено" in d.lower()]
         assert len(drift_alerts) == 2, f"expected re-alert after heal: {deliveries}"
 
     def test_non_drift_failures_untouched_by_the_bit(self, tmp_path):

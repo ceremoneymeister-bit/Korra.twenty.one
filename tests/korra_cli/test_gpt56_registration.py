@@ -86,6 +86,21 @@ class TestGpt56CodexCompaction:
                 == 0.85
             ), slug
 
+    def test_autoraise_applies_to_gpt_6_sol_on_codex(self):
+        """K21-280: the fleet moves to gpt-6.1-sol, a 272K Codex model that
+        must compact no earlier than the 5.x family."""
+        from agent.auxiliary_client import _compression_threshold_for_model
+
+        for slug in ("gpt-6.1-sol", "gpt-6.1-sol-pro", "gpt-6-sol"):
+            assert (
+                _compression_threshold_for_model(slug, provider="openai-codex")
+                == 0.85
+            ), slug
+        assert (
+            _compression_threshold_for_model("gpt-6.1-sol", provider="openai")
+            is None
+        )
+
     def test_no_autoraise_on_direct_api_route(self):
         from agent.auxiliary_client import _compression_threshold_for_model
 

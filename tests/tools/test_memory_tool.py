@@ -10,7 +10,9 @@ from tools.memory_tool import (
     _scan_memory_content,
 )
 from tools.skill_provenance import (
+    reset_current_review_attended,
     reset_current_write_origin,
+    set_current_review_attended,
     set_current_write_origin,
 )
 
@@ -512,8 +514,82 @@ class TestWholeEntryMatchBeatsSubstring:
         assert MemoryStore._read_file(tmp_path / "MEMORY.md") == [self.LONG]
 
 
+class TestReplaceIsWholeEntry:
+    """K21-279: replace overwrites the whole matched entry and says so."""
+
+    ENTRY = "RULE A: gate merges. RULE B: ci per HEAD. RULE C: never squash."
+
+    def test_single_replace_returns_overwritten_entry(self, store):
+        store.add("memory", self.ENTRY)
+        result = json.loads(memory_tool(
+            action="replace", old_text="RULE B: ci per HEAD.",
+            content="RULE B: CI is per-head.", store=store,
+        ))
+        assert result["success"] is True
+        assert store._entries_for("memory") == ["RULE B: CI is per-head."]
+        assert result["replaced_entry"] == self.ENTRY
+        assert "whole entry" in result["message"]
+
+    def test_batch_replace_returns_overwritten_entries(self, store):
+        store.add("memory", self.ENTRY)
+        store.add("memory", "other fact")
+        result = json.loads(memory_tool(
+            operations=[
+                {"action": "add", "content": "new fact"},
+                {"action": "replace", "old_text": "RULE B", "content": "RULE B only"},
+            ],
+            store=store,
+        ))
+        assert result["success"] is True
+        assert result["replaced_entries"] == {"1": self.ENTRY}
+
+    def test_batch_without_replace_has_no_replaced_entries(self, store):
+        result = json.loads(memory_tool(
+            operations=[{"action": "add", "content": "a fact"}], store=store,
+        ))
+        assert "replaced_entries" not in result
+
+    def test_schema_describes_replace_as_whole_entry_not_patch(self):
+        from tools.memory_tool import MEMORY_SCHEMA
+
+        props = MEMORY_SCHEMA["parameters"]["properties"]
+        for text in (
+            props["content"]["description"],
+            props["new_text"]["description"],
+            props["operations"]["items"]["properties"]["content"]["description"],
+        ):
+            assert "COMPLETE new entry" in text
+        assert "mirrors old_text" not in props["content"]["description"]
+
+    def test_missing_old_text_error_explains_whole_entry_contract(self, store):
+        store.add("memory", "some entry")
+        result = json.loads(memory_tool(action="replace", content="x", store=store))
+        assert "COMPLETE new entry" in result["error"]
+
+
 class TestBackgroundReviewDeleteGate:
     """Unattended review may append memory, never replace or remove it."""
+
+    def test_manual_refine_keeps_replace_and_remove(self, store):
+        """K21-279: a review the person started (/refine) is attended, so a
+        full memory can still be consolidated."""
+        store.add("memory", "old rule that is too long")
+        store.add("memory", "stale rule")
+        token = set_current_write_origin("background_review")
+        attended = set_current_review_attended(True)
+        try:
+            replaced = json.loads(memory_tool(
+                action="replace", old_text="old rule", content="short rule", store=store,
+            ))
+            removed = json.loads(memory_tool(
+                action="remove", old_text="stale rule", store=store,
+            ))
+        finally:
+            reset_current_review_attended(attended)
+            reset_current_write_origin(token)
+
+        assert replaced["success"] is True and removed["success"] is True
+        assert store._entries_for("memory") == ["short rule"]
 
     def test_remove_denied_and_store_untouched(self, store):
         standing_rule = "never create records without permission"

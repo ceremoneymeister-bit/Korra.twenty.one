@@ -577,7 +577,7 @@ class TestCodexOAuthContextLength:
             )
         assert ctx == 272_000
 
-    @pytest.mark.parametrize("slug", ["gpt-6-sol", "gpt-6-luna"])
+    @pytest.mark.parametrize("slug", ["gpt-6-sol", "gpt-6-luna", "gpt-6.1-sol"])
     def test_new_codex_models_use_272k_when_live_catalog_is_unavailable(self, slug):
         from agent.model_metadata import get_model_context_length
 

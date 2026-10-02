@@ -259,3 +259,19 @@ def test_curator_consolidates_by_distilling():
 # ---------------------------------------------------------------------------
 # _MEMORY_REVIEW_PROMPT — unchanged, still memory-focused
 # ---------------------------------------------------------------------------
+
+
+def test_review_prompts_route_each_lesson_to_one_store():
+    """K21-279: one lesson must not be written to a skill AND to memory, nor
+    to both memory files."""
+    for label, prompt in (
+        ("_MEMORY_REVIEW_PROMPT", AIAgent._MEMORY_REVIEW_PROMPT),
+        ("_COMBINED_REVIEW_PROMPT", AIAgent._COMBINED_REVIEW_PROMPT),
+    ):
+        assert "target='user'" in prompt and "target='memory'" in prompt, label
+        assert "ONE store, never both" in prompt, label
+
+    combined = AIAgent._COMBINED_REVIEW_PROMPT
+    assert "Both should carry user-preference lessons" not in combined
+    assert "memory alone isn't enough" not in combined
+    assert "exactly ONE place" in combined and "never both" in combined

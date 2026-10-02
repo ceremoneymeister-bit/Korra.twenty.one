@@ -848,8 +848,14 @@ _CODEX_GPT54_GPT55_COMPACTION_THRESHOLD = 0.85
 _CODEX_SPARK_COMPACTION_THRESHOLD = 0.70
 
 
+# GPT-6 Sol on Codex OAuth: same 272K window as the 5.x family, so it gets the
+# same compaction autoraise. ``gpt-6.1-sol`` is the slug the subscription
+# catalog serves; it is the same line as ``gpt-6-sol``.
+_CODEX_GPT6_SOL_SLUGS = ("gpt-6-sol", "gpt-6.1-sol")
+
+
 def _is_codex_gpt54_or_gpt55(model: Optional[str], provider: Optional[str] = None) -> bool:
-    """True for gpt-5.4 / gpt-5.5 / gpt-5.6 on the ChatGPT Codex OAuth backend.
+    """True for gpt-5.4 / gpt-5.5 / gpt-5.6 / gpt-6 Sol on the ChatGPT Codex OAuth backend.
 
     Matches only the Codex OAuth route (provider ``openai-codex``), not the
     direct OpenAI API, OpenRouter, or GitHub Copilot paths — those expose a
@@ -885,6 +891,8 @@ def _is_codex_gpt54_or_gpt55(model: Optional[str], provider: Optional[str] = Non
         or bare.startswith("gpt-5.6-")
         or bare.startswith("gpt-5.6.")
         or bare == "gpt-daybreak-blue-latest"
+        or bare in _CODEX_GPT6_SOL_SLUGS
+        or any(bare.startswith(f"{slug}-") for slug in _CODEX_GPT6_SOL_SLUGS)
     )
 
 

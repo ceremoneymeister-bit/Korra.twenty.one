@@ -44,11 +44,14 @@ def _base_job(**overrides):
     return job
 
 
-def _run_with_current_provider(job, current_provider, tmp_path):
+def _run_with_current_provider(job, current_provider, tmp_path, *, drift_guard=False):
     """Drive run_job with resolve_runtime_provider pinned to ``current_provider``.
 
+    The drift guard is off by default (K21-273); ``drift_guard=True`` opts in.
     Returns (success, output, final_response, error, agent_constructed).
     """
+    if drift_guard:
+        (tmp_path / "config.yaml").write_text("cron:\n  model_drift_guard: true\n")
     fake_db = MagicMock()
     with patch("cron.scheduler._hermes_home", tmp_path), \
          patch("cron.scheduler._resolve_origin", return_value=None), \
@@ -96,26 +99,36 @@ class TestProviderDriftGuard:
         """
         job = _base_job(provider_snapshot="openrouter")
         success, output, final_response, error, agent_constructed = \
-            _run_with_current_provider(job, "nous", tmp_path)
+            _run_with_current_provider(job, "nous", tmp_path, drift_guard=True)
 
         # Fail closed: no agent constructed, no inference call.
         assert agent_constructed is False
         assert success is False
         assert error is not None
 
-        # Loud + actionable: names both providers, mentions spend + pinning.
+        # Russian, actionable, no CLI command the owner cannot run.
         blob = f"{error}\n{output}".lower()
         assert "openrouter" in blob
         assert "nous" in blob
-        assert "spend" in blob
-        assert "hermes cron edit pin-test --provider <provider> --model <model>" in blob
+        assert "запуск пропущен" in blob
+        assert "попросите своего агента" in blob
+        assert "hermes" not in blob
         assert "cronjob action=update" not in blob
-        assert "44585" in blob
 
         delivered = _summarize_cron_failure_for_delivery(job, error).lower()
-        assert "host running korra" in delivered
-        assert "hermes cron edit pin-test --provider <provider> --model <model>" in delivered
+        assert "hermes" not in delivered
         assert "cronjob action=update" not in delivered
+
+    def test_guard_is_off_by_default_so_drifted_job_still_runs(self, tmp_path):
+        """K21-273: a model/provider switch must not silence unpinned jobs."""
+        job = _base_job(provider_snapshot="openrouter")
+        success, _output, final_response, error, agent_constructed = \
+            _run_with_current_provider(job, "nous", tmp_path)
+
+        assert agent_constructed is True
+        assert success is True
+        assert final_response == "ok"
+        assert error is None
 
     def test_c_no_snapshot_runs_backcompat(self, tmp_path):
         """(c) Pre-existing job with NO provider_snapshot → runs (back-compat).
@@ -292,14 +305,28 @@ class TestModelDriftGuard:
         )
         success, output, final_response, error, agent_constructed = \
             _run_with_current_provider_and_model(
-                job, "openrouter", "claude-fable-5", tmp_path
+                job, "openrouter", "claude-fable-5", tmp_path,
+                model_drift_guard=True,
             )
         assert agent_constructed is False, "paid call must not be made on model drift"
         assert success is False
         blob = f"{error}\n{output}".lower()
         assert "claude-fable-5" in blob
         assert "llama-3.3-70b-instruct:free" in blob
-        assert "44585" in blob
+        assert "hermes" not in blob
+
+    def test_model_drift_runs_when_guard_is_default_off(self, tmp_path):
+        job = _base_job(
+            provider_snapshot="openrouter",
+            model_snapshot="llama-3.3-70b-instruct:free",
+        )
+        success, _output, _final, error, agent_constructed = \
+            _run_with_current_provider_and_model(
+                job, "openrouter", "gpt-6.1-sol", tmp_path
+            )
+        assert agent_constructed is True
+        assert success is True
+        assert error is None
 
 
     def test_finite_oneshot_model_drift_explains_that_recreation_is_required(self, tmp_path):
@@ -312,18 +339,14 @@ class TestModelDriftGuard:
         )
         success, _output, _final_response, error, agent_constructed = \
             _run_with_current_provider_and_model(
-                job, "openrouter", "new-model", tmp_path
+                job, "openrouter", "new-model", tmp_path, model_drift_guard=True
             )
 
         assert success is False
         assert agent_constructed is False
         assert error is not None
-        assert "create a new one-shot job" in error.lower()
+        assert "создайте новое" in error.lower()
         assert "cronjob action=update" not in error.lower()
-
-        delivered = _summarize_cron_failure_for_delivery(job, error).lower()
-        assert "create a new one-shot job" in delivered
-        assert "cronjob action=update" not in delivered
 
     def test_no_model_snapshot_backcompat(self, tmp_path):
         # Pre-existing job without model_snapshot → no model-drift skip.

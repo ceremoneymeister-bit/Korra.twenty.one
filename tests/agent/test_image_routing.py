@@ -665,3 +665,63 @@ class TestProbeApiKeyForwarding:
         ) as detect:
             _lookup_supports_vision("custom", "llava", {"model": {"api_key": key}})
         assert detect.call_args.kwargs.get("api_key") == key
+
+
+class TestCodexVisionLookup:
+    """K21-275: the main Codex model gets the photo itself, not a vision_analyze retelling."""
+
+    def test_valid_900k_variant_resolves_against_base_slug(self, monkeypatch):
+        from types import SimpleNamespace
+        import agent.models_dev as models_dev
+
+        seen = []
+
+        def fake_caps(provider, model, allow_network=False):
+            seen.append(model)
+            return SimpleNamespace(supports_vision=True) if model == "gpt-5.6-sol" else None
+
+        monkeypatch.setattr(models_dev, "get_model_capabilities", fake_caps)
+        assert _lookup_supports_vision("openai-codex", "gpt-5.6-sol-900k", {}) is True
+        assert seen == ["gpt-5.6-sol"]
+        assert decide_image_input_mode("openai-codex", "gpt-5.6-sol-900k", {}) == "native"
+
+    def test_ineligible_900k_variant_gains_nothing(self, monkeypatch):
+        import agent.models_dev as models_dev
+
+        seen = []
+
+        def fake_caps(provider, model, allow_network=False):
+            seen.append(model)
+            return None
+
+        monkeypatch.setattr(models_dev, "get_model_capabilities", fake_caps)
+        assert _lookup_supports_vision("openai-codex", "gpt-5.5-900k", {}) is None
+        assert seen == ["gpt-5.5-900k"]
+
+    def test_variant_suffix_is_not_stripped_for_other_providers(self, monkeypatch):
+        import agent.models_dev as models_dev
+
+        seen = []
+        monkeypatch.setattr(
+            models_dev, "get_model_capabilities",
+            lambda provider, model, allow_network=False: seen.append(model),
+        )
+        _lookup_supports_vision("openrouter", "gpt-5.6-sol-900k", {})
+        assert seen == ["gpt-5.6-sol-900k"]
+
+    def test_gpt_6_1_sol_sees_images_when_catalog_lags(self):
+        with patch("agent.models_dev.get_model_capabilities", return_value=None):
+            assert _lookup_supports_vision("openai-codex", "gpt-6.1-sol", {}) is True
+            assert decide_image_input_mode("openai-codex", "gpt-6.1-sol", {}) == "native"
+            # Only the Codex route and only the known slugs.
+            assert _lookup_supports_vision("custom", "gpt-6.1-sol", {}) is None
+            assert _lookup_supports_vision("openai-codex", "gpt-6.1-unknown", {}) is None
+
+    def test_catalog_answer_wins_for_gpt_6_1_sol(self):
+        from types import SimpleNamespace
+
+        with patch(
+            "agent.models_dev.get_model_capabilities",
+            return_value=SimpleNamespace(supports_vision=False),
+        ):
+            assert _lookup_supports_vision("openai-codex", "gpt-6.1-sol", {}) is False

@@ -2442,16 +2442,12 @@ DEFAULT_CONFIG = {
         # this for a single invocation.
         "consolidate": False,
         # Also prune (archive) bundled built-in skills after the inactivity
-        # period, not just agent-created ones. ON by default. Built-ins are
-        # normally restored on every `hermes update`, so pruning them only
-        # sticks because a suppression list tells the re-seeder to leave them
-        # archived. Hub-installed skills are NEVER pruned here — they have an
-        # external upstream owner. Built-ins accrue usage telemetry and their
-        # inactivity clock starts the first time the curator sees them, so a
-        # long-unused built-in is archived only after archive_after_days of
-        # genuine non-use (never a mass-prune on the first run). Set to false
-        # to keep all bundled built-ins permanently.
-        "prune_builtins": True,
+        # period, not just agent-created ones. OFF by default (K21-270): a
+        # built-in that people rarely call (google-workspace, docx, pdf, xlsx)
+        # must not disappear after archive_after_days. Set to true to opt in;
+        # an explicit true is respected. Hub-installed skills are NEVER pruned
+        # here — they have an external upstream owner.
+        "prune_builtins": False,
         # TTL purge of skills/.archive/. 0 (default) = never purge — archived
         # skills are kept forever. When > 0, `hermes curator purge` deletes
         # archived skills older than this many days (explicit command only,
@@ -2812,10 +2808,10 @@ DEFAULT_CONFIG = {
         # Set to false to restore the old behavior (fail during the run).
         "preflight": True,
         # Fail closed when an unpinned job's current global model/provider
-        # differs from its creation-time snapshot. This prevents unattended
-        # jobs from silently inheriting a paid default. Set to false only when
-        # jobs should deliberately track changing global inference defaults.
-        "model_drift_guard": True,
+        # differs from its creation-time snapshot. OFF by default (K21-273):
+        # models are subscription-only, so jobs follow the global model and
+        # keep running after a switch. Set to true to skip drifted jobs.
+        "model_drift_guard": False,
         # Default inference model for cron jobs (Axis A — WHAT model an
         # agent job runs on). Resolution at fire time: per-job user pin >
         # cron.model > global model.default. When set, unpinned jobs follow

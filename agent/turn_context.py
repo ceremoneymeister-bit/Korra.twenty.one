@@ -596,6 +596,8 @@ def build_turn_context(
 
     # Bind the skill write-origin ContextVar for this thread.
     set_current_write_origin(getattr(agent, "_memory_write_origin", "assistant_tool"))
+    from tools.skill_provenance import set_current_review_attended
+    set_current_review_attended(getattr(agent, "_review_attended", False) is True)
 
     # Restore the primary runtime if the previous turn activated fallback.
     agent._restore_primary_runtime()
