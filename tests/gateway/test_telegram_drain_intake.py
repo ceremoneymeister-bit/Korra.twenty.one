@@ -226,18 +226,19 @@ async def test_resume_intake_does_not_revive_a_disconnected_adapter():
 
 
 @pytest.mark.asyncio
-async def test_resume_intake_restarts_the_webhook_server():
+async def test_webhook_bot_is_not_paused_so_a_cancelled_drain_cannot_leave_it_deaf():
     adapter, _app, updater = _paused_adapter()
     adapter._webhook_mode = True
-    adapter._webhook_start_kwargs = {"port": 8443, "url_path": "/telegram"}
-    updater.start_webhook = AsyncMock()
-    await adapter.pause_intake()
+    updater.start_webhook = AsyncMock(side_effect=RuntimeError("listener failed"))
 
+    await adapter.pause_intake()
     await adapter.resume_intake()
 
-    updater.start_webhook.assert_awaited_once_with(port=8443, url_path="/telegram")
-    adapter._start_polling_resilient.assert_not_awaited()
-    adapter._bot_identity_refresh_task.cancel()
+    updater.stop.assert_not_awaited()
+    updater.start_webhook.assert_not_awaited()
+    assert updater.running is True
+    assert adapter._intake_paused is False
+    assert adapter._polling_teardown_started is False
 
 
 @pytest.mark.asyncio
