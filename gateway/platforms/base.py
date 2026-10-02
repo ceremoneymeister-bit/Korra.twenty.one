@@ -6507,11 +6507,26 @@ class BasePlatformAdapter(ABC):
                     return
 
             if self._busy_session_handler is not None:
+                handled = False
+                failed = False
                 try:
-                    if await self._busy_session_handler(event, session_key):
-                        return
+                    handled = bool(await self._busy_session_handler(event, session_key))
                 except Exception as e:
+                    failed = True
                     logger.error("[%s] Busy-session handler failed: %s", self.name, e, exc_info=True)
+                # The handler awaits. If the turn ended meanwhile it released the
+                # guard, so whatever is queued now has no task to run it.
+                if session_key not in self._active_sessions:
+                    orphan = self._pending_messages.pop(session_key, None)
+                    if orphan is not None:
+                        self._start_session_processing(orphan, session_key)
+                        if handled or failed:
+                            return
+                    elif not handled:
+                        self._start_session_processing(event, session_key)
+                        return
+                if handled:
+                    return
 
             # Special case: photo bursts/albums frequently arrive as multiple near-
             # simultaneous messages. Queue them without interrupting the active run,
