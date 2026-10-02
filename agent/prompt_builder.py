@@ -650,8 +650,6 @@ OPENAI_MODEL_EXECUTION_GUIDANCE = (
     "- 'Is port 443 open?' → check THIS machine (don't ask 'open where?')\n"
     "- 'What OS am I running?' → check the live system (don't use user profile)\n"
     "- 'What time is it?' → run `date` (don't guess)\n"
-    "Only ask for clarification when the ambiguity genuinely changes what tool "
-    "you would call.\n"
     "</act_dont_ask>\n"
     "\n"
     "<prerequisite_checks>\n"
