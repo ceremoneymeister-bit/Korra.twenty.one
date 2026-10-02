@@ -453,6 +453,113 @@ def test_learning_receipt_is_anonymised_versioned_and_deduplicated(ledger_env):
     assert len(candidates[0]["mutation_ids"]) == 2
 
 
+@pytest.mark.parametrize(
+    ("written_separator", "supplied_separator"),
+    [
+        (" ", " "),
+        ("\n    ", " "),
+        ("\n    ", "\n    "),
+        ("\n\t  ", "  \t "),
+        (" ", "\n  "),
+    ],
+    ids=["single-line", "wrapped-target", "both-wrapped", "tabs", "wrapped-request"],
+)
+def test_learning_receipt_matches_written_rule_across_whitespace(
+    ledger_env, written_separator, supplied_separator
+):
+    from tools import skill_ledger
+    from tools.skill_learning import project_candidates
+    from tools.skill_manager_tool import skill_manage
+
+    assert _create()["success"] is True
+    rule = "Связывай оплату с приёмкой и проверяй взаимность ответственности сторон."
+    written_rule = rule.replace("приёмкой и", f"приёмкой{written_separator}и")
+    supplied_rule = rule.replace("приёмкой и", f"приёмкой{supplied_separator}и")
+    result = json.loads(skill_manage(
+        action="patch",
+        name="my-skill",
+        old_string="Original body.",
+        new_string=written_rule,
+        learning=_contract_learning(supplied_rule),
+    ))
+
+    assert result["success"] is True
+    assert result["ledger"]["status"] == "recorded"
+    skill_md = ledger_env["skills"] / "my-skill" / "SKILL.md"
+    assert skill_md.read_text(encoding="utf-8") == VALID_SKILL_CONTENT.replace(
+        "Original body.", written_rule
+    )
+    assert result["learning"]["status"] == "saved_unverified"
+    candidates = project_candidates(skill_ledger.list_entries())
+    assert len(candidates) == 1
+    assert candidates[0]["id"] == result["learning"]["candidate_id"]
+    assert candidates[0]["rule"] == written_rule
+    assert candidates[0]["verification"]["status"] == "pending"
+
+
+@pytest.mark.parametrize(
+    "written_rule",
+    [
+        "Проверяй другой порядок действий.",
+        "Связывай оплату с отгрузкой\n    и проверяй взаимность ответственности сторон.",
+        "связывай оплату с приёмкой\n    и проверяй взаимность ответственности сторон.",
+        "Связывай оплату с приёмкой,\n    и проверяй взаимность ответственности сторон.",
+    ],
+    ids=["absent", "changed-meaning", "changed-case", "changed-punctuation"],
+)
+def test_learning_receipt_rejects_rule_not_written_exactly(ledger_env, written_rule):
+    from tools import skill_ledger
+    from tools.skill_learning import project_candidates
+    from tools.skill_manager_tool import skill_manage
+
+    assert _create()["success"] is True
+    rule = "Связывай оплату с приёмкой и проверяй взаимность ответственности сторон."
+    result = json.loads(skill_manage(
+        action="patch",
+        name="my-skill",
+        old_string="Original body.",
+        new_string=written_rule,
+        learning=_contract_learning(rule),
+    ))
+
+    assert result["success"] is True
+    assert result["ledger"]["status"] == "recorded"
+    assert result["learning"]["status"] == "failed"
+    assert "learning.rule must exactly match" in result["learning"]["message"]
+    assert project_candidates(skill_ledger.list_entries()) == []
+
+
+@pytest.mark.parametrize(
+    ("request_update", "message"),
+    [
+        ({"scope": "one_off"}, "learning.scope must be"),
+        ({"private_markers": ["приёмкой и проверяй"]}, "client-specific marker"),
+    ],
+    ids=["one-off-scope", "private-marker-across-newline"],
+)
+def test_learning_receipt_wrapping_does_not_bypass_guards(
+    ledger_env, request_update, message
+):
+    from tools import skill_ledger
+    from tools.skill_learning import project_candidates
+    from tools.skill_manager_tool import skill_manage
+
+    assert _create()["success"] is True
+    rule = "Связывай оплату с приёмкой\n    и проверяй взаимность ответственности сторон."
+    result = json.loads(skill_manage(
+        action="patch",
+        name="my-skill",
+        old_string="Original body.",
+        new_string=rule,
+        learning={**_contract_learning(rule), **request_update},
+    ))
+
+    assert result["success"] is True
+    assert result["learning"]["status"] == "failed"
+    assert message in result["learning"]["message"]
+    assert project_candidates(skill_ledger.list_entries()) == []
+
+
 def test_learning_receipt_rejects_specific_marker_without_persisting_raw_data(ledger_env):
     from tools import skill_ledger
     from tools.skill_manager_tool import skill_manage
@@ -487,8 +594,9 @@ def test_learning_receipt_rejects_specific_marker_without_persisting_raw_data(le
     assert "ООО Альфа" not in skill_ledger.ledger_path().read_text(encoding="utf-8")
 
 
+@pytest.mark.parametrize("written_separator", [" ", "\n    "], ids=["single-line", "wrapped"])
 def test_learning_approval_queue_persists_only_anonymised_receipt(
-    ledger_env, monkeypatch
+    ledger_env, monkeypatch, written_separator
 ):
     from types import SimpleNamespace
 
@@ -512,6 +620,7 @@ def test_learning_approval_queue_persists_only_anonymised_receipt(
 
     monkeypatch.setattr(write_approval, "stage_write", stage_write)
     rule = "Проверяй связь оплаты с приёмкой и взаимность ответственности сторон."
+    written_rule = rule.replace("приёмкой и", f"приёмкой{written_separator}и")
     staged = json.loads(
         skill_manage(
             action="batch",
@@ -520,7 +629,7 @@ def test_learning_approval_queue_persists_only_anonymised_receipt(
                 "action": "patch",
                 "name": "my-skill",
                 "old_string": "Original body.",
-                "new_string": rule,
+                "new_string": written_rule,
                 "learning": _contract_learning(rule),
             }],
         )
@@ -535,6 +644,10 @@ def test_learning_approval_queue_persists_only_anonymised_receipt(
     applied = json.loads(apply_skill_pending(captured["payload"]))
     assert applied["success"] is True
     assert applied["results"][0]["learning"]["status"] == "saved_unverified"
+    from tools.skill_learning import project_candidates
+    from tools.skill_ledger import list_entries
+
+    assert project_candidates(list_entries())[0]["rule"] == written_rule
 
 
 def test_version_safe_rollback_refuses_to_erase_newer_skill_work(ledger_env):

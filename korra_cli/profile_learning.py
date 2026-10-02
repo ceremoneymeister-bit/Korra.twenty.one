@@ -177,6 +177,9 @@ def revise_learning_lesson(
         raise ValueError(f"Правило должно содержать от 10 до {MAX_RULE_CHARS} знаков.")
     if not applies_to or len(applies_to) > MAX_APPLIES_TO_CHARS:
         raise ValueError("Укажите короткую область применения правила.")
+    current_rule = str(candidate.get("rule") or "")
+    if rule == " ".join(current_rule.split()):
+        rule = current_rule
     if rule == candidate.get("rule") and applies_to == candidate.get("applies_to"):
         raise ValueError("Правило не изменилось.")
 

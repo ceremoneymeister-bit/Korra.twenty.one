@@ -46,6 +46,13 @@ class ProfileLearningRevision(BaseModel):
     rule: str = Field(min_length=10, max_length=1_000)
     applies_to: str = Field(min_length=1, max_length=240)
 
+    @field_validator("rule", mode="before")
+    @classmethod
+    def normalise_rule(cls, value: Any) -> Any:
+        # Receipts retain file whitespace; length limits apply to the text,
+        # just as they do when creating a learning candidate.
+        return " ".join(value.split()) if isinstance(value, str) else value
+
 
 class ProfileLearningCancel(BaseModel):
     revision: str

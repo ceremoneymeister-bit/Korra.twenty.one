@@ -38,7 +38,7 @@ def change(client, action, content="", old_text="", target="memory", profile="le
     })
 
 
-def create_contract_lesson(profile="learning-one"):
+def create_contract_lesson(profile="learning-one", *, written_separator=" "):
     from korra_cli.web_server import _profile_scope
     from tools.skill_manager_tool import skill_manage
 
@@ -52,6 +52,7 @@ description: Review contracts against owner-approved rules.
 Review the supplied contract.
 """
     rule = "Связывай оплату с приёмкой и проверяй симметрию ответственности обеих сторон."
+    written_rule = rule.replace("приёмкой и", f"приёмкой{written_separator}и")
     learning = {
         "scope": "reusable_method",
         "applies_to": "проверка договоров поставки",
@@ -74,11 +75,12 @@ Review the supplied contract.
             action="patch",
             name="contract-review",
             old_string="Review the supplied contract.",
-            new_string=rule,
+            new_string=written_rule,
             learning=learning,
         ))
     assert result["success"] is True, result
-    return result["learning"]["candidate_id"], rule, learning
+    assert result["learning"]["status"] == "saved_unverified", result
+    return result["learning"]["candidate_id"], written_rule, learning
 
 
 def test_memory_is_profile_owned_and_frozen_for_existing_conversation(client):
@@ -221,9 +223,14 @@ def test_learning_lesson_deferred_contract_rubric_is_profile_owned_and_durable(c
     assert "275 000 рублей" not in ledger
 
 
-def test_learning_lesson_revision_then_addressed_cancel_restores_pre_lesson(client):
-    candidate_id, old_rule, _learning = create_contract_lesson()
+@pytest.mark.parametrize("written_separator", [" ", "\n    "], ids=["single-line", "wrapped"])
+def test_learning_lesson_revision_then_addressed_cancel_restores_pre_lesson(
+    client, written_separator
+):
+    candidate_id, old_rule, _learning = create_contract_lesson(written_separator=written_separator)
     lesson = client.get("/api/profiles/learning-one/learning-lessons").json()["lessons"][0]
+    skill_md = home() / "skills" / "contract-review" / "SKILL.md"
+    original = skill_md.read_text(encoding="utf-8")
     new_rule = "Связывай оплату с документированной приёмкой и устанавливай взаимный предел ответственности."
     revised = client.put(
         f"/api/profiles/learning-one/learning-lessons/{candidate_id}",
@@ -234,6 +241,7 @@ def test_learning_lesson_revision_then_addressed_cancel_restores_pre_lesson(clie
         },
     )
     assert revised.status_code == 200, revised.text
+    assert skill_md.read_text(encoding="utf-8") == original.replace(old_rule, new_rule)
     lesson = client.get("/api/profiles/learning-one/learning-lessons").json()["lessons"][0]
     assert lesson["rule"] == new_rule
     assert lesson["status"] == "saved_unverified"
@@ -247,17 +255,23 @@ def test_learning_lesson_revision_then_addressed_cancel_restores_pre_lesson(clie
     assert cancelled.status_code == 200, cancelled.text
     lesson = client.get("/api/profiles/learning-one/learning-lessons").json()["lessons"][0]
     assert lesson["status"] == "cancelled"
-    skill_md = home() / "skills" / "contract-review" / "SKILL.md"
     text = skill_md.read_text(encoding="utf-8")
     assert old_rule not in text and new_rule not in text
     assert "Review the supplied contract." in text
 
 
-def test_learning_scope_only_revision_is_versioned_and_cancelled(client):
-    candidate_id, rule, _learning = create_contract_lesson()
+@pytest.mark.parametrize(
+    "written_separator",
+    [" ", "\n    ", "\n" + " " * 1_000],
+    ids=["single-line", "wrapped", "raw-span-over-limit"],
+)
+def test_learning_scope_only_revision_is_versioned_and_cancelled(client, written_separator):
+    candidate_id, rule, _learning = create_contract_lesson(written_separator=written_separator)
     lesson = client.get("/api/profiles/learning-one/learning-lessons").json()[
         "lessons"
     ][0]
+    skill_md = home() / "skills" / "contract-review" / "SKILL.md"
+    original = skill_md.read_bytes()
     revised = client.put(
         f"/api/profiles/learning-one/learning-lessons/{candidate_id}",
         json={
@@ -267,6 +281,7 @@ def test_learning_scope_only_revision_is_versioned_and_cancelled(client):
         },
     )
     assert revised.status_code == 200, revised.text
+    assert skill_md.read_bytes() == original
     lesson = client.get("/api/profiles/learning-one/learning-lessons").json()[
         "lessons"
     ][0]
@@ -285,6 +300,43 @@ def test_learning_scope_only_revision_is_versioned_and_cancelled(client):
     )
     assert rule not in text
     assert "Review the supplied contract." in text
+
+
+def test_learning_rule_whitespace_only_edit_does_not_mutate_skill(client):
+    candidate_id, _rule, learning = create_contract_lesson(written_separator="\n    ")
+    lesson = client.get("/api/profiles/learning-one/learning-lessons").json()["lessons"][0]
+    skill_md = home() / "skills" / "contract-review" / "SKILL.md"
+    original = skill_md.read_bytes()
+    revised = client.put(
+        f"/api/profiles/learning-one/learning-lessons/{candidate_id}",
+        json={
+            "revision": lesson["revision"],
+            "rule": learning["rule"],
+            "applies_to": learning["applies_to"],
+        },
+    )
+    assert revised.status_code == 400, revised.text
+    assert "не изменилось" in revised.json()["detail"]
+    assert skill_md.read_bytes() == original
+    assert client.get("/api/profiles/learning-one/learning-lessons").json()["lessons"] == [lesson]
+
+
+def test_learning_revision_rejects_rule_over_normalised_length_limit(client):
+    candidate_id, _rule, learning = create_contract_lesson()
+    lesson = client.get("/api/profiles/learning-one/learning-lessons").json()["lessons"][0]
+    skill_md = home() / "skills" / "contract-review" / "SKILL.md"
+    original = skill_md.read_bytes()
+    revised = client.put(
+        f"/api/profiles/learning-one/learning-lessons/{candidate_id}",
+        json={
+            "revision": lesson["revision"],
+            "rule": "слово\n    " * 200,
+            "applies_to": learning["applies_to"],
+        },
+    )
+    assert revised.status_code == 422, revised.text
+    assert skill_md.read_bytes() == original
+    assert client.get("/api/profiles/learning-one/learning-lessons").json()["lessons"] == [lesson]
 
 
 def test_learning_cancel_refuses_concurrent_skill_change(client):

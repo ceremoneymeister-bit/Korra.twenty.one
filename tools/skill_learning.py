@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import re
 from typing import Any, Iterable, Mapping, Optional
 
 from korra_constants import get_hermes_home
@@ -159,9 +160,9 @@ def prepare_candidate(
 ) -> dict[str, Any]:
     """Validate and anonymise model-supplied learning metadata.
 
-    The reusable ``rule`` must occur verbatim in the resulting target file.
-    That invariant makes later owner edits precise instead of turning a lesson
-    card into metadata disconnected from the actual skill.
+    The reusable ``rule`` must occur in the resulting target file, allowing
+    only whitespace differences. Retain the exact written text so later owner
+    edits address the actual skill instruction.
     """
     if not isinstance(request, Mapping):
         raise LearningReceiptError("learning must be an object")
@@ -255,10 +256,14 @@ def prepare_candidate(
         target_text = target.read_text(encoding="utf-8") if target else ""
     except (OSError, UnicodeError):
         target_text = ""
-    if rule not in target_text:
+    rule_match = re.search(
+        r"\s+".join(re.escape(part) for part in rule.split()), target_text
+    )
+    if rule_match is None:
         raise LearningReceiptError(
             "learning.rule must exactly match reusable guidance written to the target skill file"
         )
+    rule = rule_match.group(0)
 
     pair_hash = hashlib.sha256(
         f"{source_hash}:{approved_hash}".encode("ascii")
