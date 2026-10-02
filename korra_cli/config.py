@@ -137,7 +137,8 @@ def _warn_config_parse_failure(
         return
     _CONFIG_PARSE_WARNED.add(key)
 
-    backup_path = _backup_corrupt_config(config_path)
+    # A read error (EMFILE/EIO) leaves an intact file: no ".corrupt" copy of a good file.
+    backup_path = None if isinstance(exc, OSError) else _backup_corrupt_config(config_path)
 
     if fallback == "last-known-good":
         msg = (
@@ -163,6 +164,8 @@ def _warn_config_parse_failure(
     logger.warning(msg)
     try:
         user_message = f"Не удалось прочитать {config_path}: {exc}. "
+        if isinstance(exc, OSError):
+            user_message += "Файл цел, ошибка чтения временная: повторите попытку. "
         if fallback == "last-known-good":
             user_message += (
                 "Используются ранее загруженные настройки. Изменения config.yaml "
@@ -3478,6 +3481,27 @@ def resolve_ephemeral_system_prompt_from_config(cfg: Optional[Dict[str, Any]]) -
     return resolve_ephemeral_system_prompt(cfg)
 
 
+class FailedConfigRead(dict):
+    """Stand-in a reader serves when an existing config.yaml could not be read ({} or defaults).
+
+    Readers use it like any dict; ``save_config`` and ``atomic_config_write`` refuse to persist it,
+    so a transient read error cannot turn into a config.yaml rewritten from the stand-in. A dict
+    subclass, so the refusal survives the load -> mutate -> save round trip at every call site.
+    """
+
+    def __init__(self, data: Any = (), *, error: Exception):
+        super().__init__(data)
+        self.read_error = error
+
+
+def _refuse_failed_read(config_path: Path, data: Any) -> None:
+    if isinstance(data, FailedConfigRead):
+        raise RuntimeError(
+            f'Файл {config_path} не изменён: config.yaml не удалось прочитать '
+            f'({data.read_error}). Повторите попытку; если ошибка повторяется, проверьте файл.'
+        ) from data.read_error
+
+
 def read_raw_config() -> Dict[str, Any]:
     """Read ~/.hermes/config.yaml as-is, without merging defaults or migrating.
 
@@ -3495,8 +3519,10 @@ def read_raw_config() -> Dict[str, Any]:
             config_path = get_config_path()
             st = config_path.stat()
             cache_key = (st.st_mtime_ns, st.st_size)
-        except (FileNotFoundError, OSError):
+        except FileNotFoundError:
             return {}
+        except OSError as e:
+            return FailedConfigRead(error=e)
 
         path_key = str(config_path)
         cached = _RAW_CONFIG_CACHE.get(path_key)
@@ -3508,7 +3534,7 @@ def read_raw_config() -> Dict[str, Any]:
                 data = fast_safe_load(f) or {}
         except Exception as e:
             _warn_config_parse_failure(config_path, e)
-            return {}
+            return FailedConfigRead(error=e)
 
         if not isinstance(data, dict):
             data = {}
@@ -3585,8 +3611,10 @@ def read_raw_config_readonly() -> Dict[str, Any]:
             config_path = get_config_path()
             st = config_path.stat()
             cache_key = (st.st_mtime_ns, st.st_size)
-        except (FileNotFoundError, OSError):
+        except FileNotFoundError:
             return {}
+        except OSError as e:
+            return FailedConfigRead(error=e)
 
         path_key = str(config_path)
         cached = _RAW_CONFIG_CACHE.get(path_key)
@@ -3598,7 +3626,7 @@ def read_raw_config_readonly() -> Dict[str, Any]:
                 data = fast_safe_load(f) or {}
         except Exception as e:
             _warn_config_parse_failure(config_path, e)
-            return {}
+            return FailedConfigRead(error=e)
 
         if not isinstance(data, dict):
             data = {}
@@ -3711,6 +3739,7 @@ def atomic_config_write(config_path: Path, data: Any, **kwargs: Any) -> None:
     """
     from utils import atomic_yaml_write
 
+    _refuse_failed_read(config_path, data)
     require_readable_config_before_write(config_path)
     atomic_yaml_write(config_path, data, **kwargs)
 
@@ -3980,6 +4009,7 @@ def _load_config_impl(*, want_deepcopy: bool) -> Dict[str, Any]:
                 return copy.deepcopy(cached[4]) if want_deepcopy else cached[4]
 
         config = copy.deepcopy(DEFAULT_CONFIG)
+        failed_read: Optional[Exception] = None
 
         if user_sig is not None:
             try:
@@ -4022,7 +4052,10 @@ def _load_config_impl(*, want_deepcopy: bool) -> Dict[str, Any]:
                     lkg_copy: Dict[str, Any] = _cast(
                         Dict[str, Any], _expand_env_vars(copy.deepcopy(lkg))
                     )
-                    if cache_sig is not None:
+                    lkg_copy = FailedConfigRead(lkg_copy, error=e)
+                    # A read error leaves an intact file behind and nothing edits it, so a
+                    # cached fallback would stay until restart: only a parse error is cached.
+                    if cache_sig is not None and not isinstance(e, OSError):
                         # Cache under the corrupt file's signature (empty env
                         # snapshot: always valid) so repeated loads don't
                         # re-parse the broken file; fixing the file changes the
@@ -4034,6 +4067,7 @@ def _load_config_impl(*, want_deepcopy: bool) -> Dict[str, Any]:
                             lkg_copy, _empty_env,
                         )
                     return copy.deepcopy(lkg_copy) if want_deepcopy else lkg_copy
+                failed_read = e
 
         normalized = _normalize_root_model_keys(_normalize_max_turns_config(config))
         expanded = _expand_env_vars(normalized)
@@ -4057,6 +4091,13 @@ def _load_config_impl(*, want_deepcopy: bool) -> Dict[str, Any]:
                 managed_normalized["model"] = {"default": managed_normalized["model"]}
             managed_expanded = _expand_env_vars(managed_normalized)
             expanded = _deep_merge(expanded, managed_expanded)
+        if failed_read is not None:
+            # Defaults stand in for the unreadable file: never the next last-known-good, never
+            # saveable, and (like the last-known-good path) cached only for a parse error.
+            fallback = FailedConfigRead(expanded, error=failed_read)
+            if cache_sig is not None and not isinstance(failed_read, OSError):
+                _LOAD_CONFIG_CACHE[path_key] = (*cache_sig, fallback, {})
+            return copy.deepcopy(fallback) if want_deepcopy else fallback
         _LAST_EXPANDED_CONFIG_BY_PATH[path_key] = copy.deepcopy(expanded)
         if cache_sig is not None:
             # Cache stores a separate deepcopy so subsequent ``load_config()``
@@ -4204,12 +4245,14 @@ def save_config(
 
         ensure_hermes_home()
         config_path = get_config_path()
+        _refuse_failed_read(config_path, config)
         require_readable_config_before_write(config_path)
         # Compute explicit user paths BEFORE any normalisation --------
         # _normalize_max_turns_config may inject agent.max_turns from
         # DEFAULT_CONFIG; using the raw dict preserves which paths the
         # user actually set so _strip_default_values can keep them.
         _raw_for_paths = read_raw_config()
+        _refuse_failed_read(config_path, _raw_for_paths)
         explicit_raw_paths: Optional[Set[Tuple[str, ...]]] = (
             _explicit_config_paths(_raw_for_paths) if _raw_for_paths else None
         )
