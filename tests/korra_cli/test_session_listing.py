@@ -178,3 +178,18 @@ class TestQuerySessionListingLaneScope:
         )
 
         assert [row["id"] for row in rows] == ["foreign_59"]
+
+
+def test_listing_total_equals_rows_when_hidden_sessions_exist(tmp_path):
+    """K21-264: «показаны N из M» — M не включает скрытые разговоры, которых в списке нет."""
+    from korra_state import SessionDB
+
+    with SessionDB(tmp_path / "state.db") as db:
+        for i in range(3):
+            db.create_session(f"chat-{i}", "dashboard")
+        db.create_session("scaffold", "dashboard")
+        db.set_session_hidden("scaffold", True)
+        rows = db.list_sessions_rich(limit=50)
+        assert len(rows) == 3
+        assert db.session_count(exclude_children=True, exclude_hidden=True) == len(rows)
+        assert db.session_count(exclude_children=True) == 4  # прежнее поведение для статистики

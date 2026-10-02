@@ -180,6 +180,7 @@ def get_sessions(
                 include_archived=include_archived,
                 archived_only=archived_only,
                 exclude_children=True,
+                exclude_hidden=True,
             )
             now = time.time()
             # Same ownership contract as get_session_detail: rows are stamped
