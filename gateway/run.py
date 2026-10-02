@@ -19579,7 +19579,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             # Normal completion/exception/interrupt owns and clears this exact
             # durable marker.  SIGKILL/OOM skips finally, leaving the marker for
             # the next unclean startup's recovery pass.
-            await self._clear_durable_active_turn(event)
+            # An adapter that records the final reply in the delivery ledger
+            # (base._process_message_background) clears it right after that
+            # write instead, so no crash can lose both marker and reply.
+            if not getattr(event, "_gateway_defer_turn_clear", False):
+                await self._clear_durable_active_turn(event)
             # Unconditional release covers every exit path. _release_running_agent_state
             # is idempotent (pop-on-absent is harmless) and, called without a
             # run_generation guard, always clears the slot regardless of which
@@ -20182,6 +20186,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             for attr in (
                 "_gateway_active_turn_session_key",
                 "_gateway_active_turn_token",
+                "_gateway_defer_turn_clear",
             ):
                 try:
                     delattr(event, attr)

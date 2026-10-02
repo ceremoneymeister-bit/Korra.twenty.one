@@ -6596,6 +6596,16 @@ class BasePlatformAdapter(ABC):
             max_ms = 2500
         return random.uniform(min_ms / 1000.0, max_ms / 1000.0)
 
+    async def _release_turn_marker(self, event: MessageEvent) -> None:
+        """Clear the durable active-turn marker the gateway left to this adapter."""
+        clear = getattr(getattr(self, "gateway_runner", None), "_clear_durable_active_turn", None)
+        if not callable(clear):
+            return
+        try:
+            await clear(event)
+        except Exception:
+            logger.debug("[%s] active-turn marker release failed", self.name, exc_info=True)
+
     async def _process_message_background(self, event: MessageEvent, session_key: str) -> None:
         """Background task that actually processes the message."""
         # Track delivery outcomes for the processing-complete hook
@@ -6647,7 +6657,12 @@ class BasePlatformAdapter(ABC):
         try:
             await self._run_processing_hook("on_processing_start", event)
 
-            # Call the handler (this can take a while with tool calls)
+            # Call the handler (this can take a while with tool calls).  The
+            # handler leaves the durable active-turn marker for us to clear
+            # once the final reply is in the delivery ledger (see
+            # _release_turn_marker); otherwise a crash right after the turn
+            # ends would lose both the marker and the reply.
+            setattr(event, "_gateway_defer_turn_clear", True)
             response = await self._message_handler(event)
             is_ephemeral_response = isinstance(response, EphemeralReply)
 
@@ -6923,6 +6938,7 @@ class BasePlatformAdapter(ABC):
                         except Exception:
                             logger.debug("delivery ledger record failed", exc_info=True)
                             _obligation_id = None
+                    await self._release_turn_marker(event)
                     result = await delivery_adapter._send_with_retry(
                         chat_id=event.source.chat_id,
                         content=text_content,
@@ -7244,6 +7260,7 @@ class BasePlatformAdapter(ABC):
             if isinstance(e, (SystemExit, KeyboardInterrupt)):
                 raise
         finally:
+            await self._release_turn_marker(event)
             # Stop typing before any deferred callback work.  Post-delivery
             # callbacks may perform platform I/O; a stuck callback must not
             # leave the typing refresh task running indefinitely.
