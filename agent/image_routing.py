@@ -475,6 +475,9 @@ def _explicit_aux_vision_override(cfg: Optional[Dict[str, Any]]) -> bool:
     return True
 
 
+_CODEX_VISION_SLUGS = frozenset({"gpt-6-sol", "gpt-6.1-sol"})
+
+
 def _lookup_supports_vision(
     provider: str,
     model: str,
@@ -530,11 +533,25 @@ def _lookup_supports_vision(
         # reintroduce the bug. This preserves the historical
         # network-on-cold-cache behavior for this one path; the fetch is
         # cached (4h TTL) and backoff-limited after failures.
-        caps = get_model_capabilities(provider, model, allow_network=True)
+        caps_model = model
+        if (provider or "").strip().lower() == "openai-codex":
+            # A valid Codex ``-900k`` picker variant is an alias of its base
+            # slug; the catalog only knows the base. The runtime model id is
+            # untouched; ineligible ``-900k`` strings pass through unchanged.
+            from agent.model_metadata import strip_codex_context_variant_suffix
+
+            caps_model = strip_codex_context_variant_suffix(model)
+        caps = get_model_capabilities(provider, caps_model, allow_network=True)
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug("image_routing: caps lookup failed for %s:%s — %s", provider, model, exc)
     if caps is not None:
         return bool(caps.supports_vision)
+
+    if (provider or "").strip().lower() == "openai-codex" and (
+        (model or "").strip().lower().rsplit("/", 1)[-1] in _CODEX_VISION_SLUGS
+    ):
+        # GPT-6 Sol sees images; the models.dev catalog can lag a new slug.
+        return True
 
     base_url = _resolve_inference_base_url(cfg, provider)
     if not base_url and (provider or "").strip().lower() == "ollama":
