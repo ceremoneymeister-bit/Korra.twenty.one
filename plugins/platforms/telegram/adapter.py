@@ -849,6 +849,8 @@ class TelegramAdapter(BasePlatformAdapter):
         self._polling_progress_accepting: bool = False
         self._polling_progress_verifier_task: Optional[asyncio.Task] = None
         self._polling_teardown_started: bool = False
+        self._intake_paused: bool = False
+        self._webhook_start_kwargs: Optional[dict] = None
         self._polling_error_callback_ref = None
         self._polling_heartbeat_task: Optional[asyncio.Task] = None
         # Monotonic timestamps for the polling stall watchdog (#92991): when
@@ -4723,6 +4725,7 @@ class TelegramAdapter(BasePlatformAdapter):
         # after a completed, serialized teardown. Background recovery never
         # clears this fence.
         self._polling_teardown_started = False
+        self._intake_paused = False
         # Mode selection is re-evaluated on every explicit connection. Keep
         # webhook state false unless this connection starts its webhook.
         self._webhook_mode = False
@@ -5150,7 +5153,7 @@ class TelegramAdapter(BasePlatformAdapter):
                 from urllib.parse import urlparse
                 webhook_path = urlparse(webhook_url).path or "/telegram"
 
-                await self._app.updater.start_webhook(
+                self._webhook_start_kwargs = dict(
                     listen=webhook_host,
                     port=webhook_port,
                     url_path=webhook_path,
@@ -5159,6 +5162,7 @@ class TelegramAdapter(BasePlatformAdapter):
                     allowed_updates=Update.ALL_TYPES,
                     drop_pending_updates=False,
                 )
+                await self._app.updater.start_webhook(**self._webhook_start_kwargs)
                 self._webhook_mode = True
                 self._polling_progress_accepting = False
                 self._send_path_degraded = False
@@ -5451,11 +5455,13 @@ class TelegramAdapter(BasePlatformAdapter):
         them: the queue survives a cold start and update receipts prevent
         repeats. The app keeps running, so already fetched updates and the
         replies of running turns are still handled. One-way until the next
-        connect(); the polling recovery paths stay fenced meanwhile.
+        connect() or resume_intake(); the polling recovery paths stay fenced
+        meanwhile.
         """
         if getattr(self, "_polling_teardown_started", False):
             return
         self._polling_teardown_started = True
+        self._intake_paused = True
         self._polling_progress_accepting = False
         current_task = asyncio.current_task()
         for task in (
@@ -5481,6 +5487,43 @@ class TelegramAdapter(BasePlatformAdapter):
             self.name,
         )
 
+    async def resume_intake(self) -> None:
+        """Undo pause_intake() when the drain was cancelled: fetch updates again.
+
+        Only a paused adapter resumes; one that was disconnected meanwhile
+        stays down. Updates that arrived while paused are still in Telegram's
+        queue and are fetched now.
+        """
+        if not self._intake_paused:
+            return
+        self._intake_paused = False
+        self._polling_teardown_started = False
+        updater = getattr(self._app, "updater", None) if self._app else None
+        if updater is None:
+            return
+        if self._webhook_mode:
+            if not updater.running and self._webhook_start_kwargs:
+                await updater.start_webhook(**self._webhook_start_kwargs)
+            identity_task = getattr(self, "_bot_identity_refresh_task", None)
+            if not identity_task or identity_task.done():
+                self._bot_identity_refresh_task = asyncio.ensure_future(
+                    self._bot_identity_refresh_loop()
+                )
+            logger.info("[%s] Telegram intake resumed (webhook)", self.name)
+            return
+        if not updater.running:
+            try:
+                await self._start_polling_resilient(
+                    drop_pending_updates=False,
+                    error_callback=self._polling_error_callback_ref,
+                    require_progress=False,
+                )
+            except Exception as start_error:
+                self._schedule_polling_recovery(start_error, reason="intake resume")
+        if not self._polling_heartbeat_task or self._polling_heartbeat_task.done():
+            self._polling_heartbeat_task = asyncio.ensure_future(self._polling_heartbeat_loop())
+        logger.info("[%s] Telegram intake resumed", self.name)
+
     async def disconnect(self) -> None:
         """Stop polling/webhook, cancel pending delayed deliveries, and disconnect."""
         # Mark disconnected first so the drop guard short-circuits any flush
@@ -5488,6 +5531,7 @@ class TelegramAdapter(BasePlatformAdapter):
         # from being scheduled by late update handlers.
         self._mark_disconnected()
         self._polling_teardown_started = True
+        self._intake_paused = False
         self._polling_progress_accepting = False
         self._polling_generation = getattr(self, "_polling_generation", 0) + 1
         self._polling_progress_event = asyncio.Event()

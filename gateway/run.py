@@ -9754,15 +9754,16 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
     # with its lifecycle action, then (on cancel/abort) the marker is removed
     # and the gateway re-accepts turns.
     # ------------------------------------------------------------------
-    def _enter_external_drain(self) -> None:
+    def _enter_external_drain(self) -> bool:
         """Begin external drain: stop accepting new turns, flip state.
 
         Idempotent — re-entering while already draining is a no-op beyond a
         best-effort status re-write. In-flight turns are NOT interrupted (the
         whole point is to let them finish); only NEW turns are refused.
+        Returns True when this call started the drain.
         """
         if self._external_drain_active:
-            return
+            return False
         self._external_drain_active = True
         logger.info(
             "External drain ENGAGED (.drain_request.json present) — refusing "
@@ -9773,16 +9774,18 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # gateway_drainable track the drain. Preserve active_agents (the
         # read-merge keeps the live count); only the state changes.
         self._update_runtime_status("draining")
+        return True
 
-    def _exit_external_drain(self) -> None:
+    def _exit_external_drain(self) -> bool:
         """Cancel external drain: revert state, re-accept new turns.
 
         Idempotent. Only reverts to ``running`` when we are actually mid-drain
         AND not also shutting down (a real shutdown ``_draining`` must win —
-        never resurrect a stopping gateway to ``running``).
+        never resurrect a stopping gateway to ``running``). Returns True when
+        the gateway went back to accepting turns.
         """
         if not self._external_drain_active:
-            return
+            return False
         self._external_drain_active = False
         if self._draining or not self._running:
             # A shutdown drain is in progress / the loop has stopped — do not
@@ -9791,12 +9794,13 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 "External drain marker cleared during shutdown — not reverting "
                 "to running (shutdown takes precedence)."
             )
-            return
+            return False
         logger.info(
             "External drain RELEASED (.drain_request.json removed) — "
             "re-accepting new turns; gateway_state -> running."
         )
         self._update_runtime_status("running")
+        return True
 
     async def _drain_control_watcher(self, interval: float = 1.0) -> None:
         """Background task: reconcile gateway accept-state with the drain marker.
@@ -9817,13 +9821,14 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         while self._running:
             try:
                 if drain_requested():
-                    self._enter_external_drain()
+                    if self._enter_external_drain():
+                        await self._pause_platform_intake()
                     # API and cron work live outside messaging's
                     # _running_agents map. Refresh the aggregate while an
                     # external caller polls this reversible drain state.
                     self._persist_active_agents()
-                else:
-                    self._exit_external_drain()
+                elif self._exit_external_drain():
+                    await self._resume_platform_intake()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -11456,20 +11461,27 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         Messages written during the drain then wait in the platform's own queue
         for the next process instead of getting "not accepting". Idempotent.
         """
+        await self._call_intake_hook("pause_intake")
+
+    async def _resume_platform_intake(self) -> None:
+        """An external drain was cancelled: adapters take new messages again."""
+        await self._call_intake_hook("resume_intake")
+
+    async def _call_intake_hook(self, hook_name: str) -> None:
         adapters = list(self.adapters.values())
         for amap in list(getattr(self, "_profile_adapters", {}).values()):
             adapters.extend(amap.values())
 
-        async def _pause(adapter) -> None:
-            pause = getattr(adapter, "pause_intake", None)
-            if not callable(pause):
+        async def _call(adapter) -> None:
+            hook = getattr(adapter, hook_name, None)
+            if not callable(hook):
                 return
             try:
-                await pause()
+                await hook()
             except Exception as e:
-                logger.warning("Pausing intake failed for %s: %s", getattr(adapter, "name", adapter), e)
+                logger.warning("%s failed for %s: %s", hook_name, getattr(adapter, "name", adapter), e)
 
-        await asyncio.gather(*(_pause(a) for a in adapters))
+        await asyncio.gather(*(_call(a) for a in adapters))
 
     async def _notify_active_sessions_of_shutdown(self) -> None:
         """Send shutdown/restart notifications to active chats and home channels.
@@ -19544,6 +19556,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 "Refusing new turn for session %s — external drain active.",
                 _quick_key,
             )
+            # A refusal is not an answer: the platform must not receipt it.
+            event.update_ids.clear()
             return (
                 '''⏳ Корра завершает работу перед обслуживанием и пока не принимает сообщения. Отправьте сообщение ещё раз чуть позже.'''
             )

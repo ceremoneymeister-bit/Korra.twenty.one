@@ -322,7 +322,183 @@ class TestNewTurnGate:
             source=make_restart_source(),
             message_id="m1",
         )
+        event.update_ids = {7}
         result = await runner._handle_message(event)
         assert result is not None
         assert 'завершает работу перед обслуживанием' in result.lower()
+        assert event.update_ids == set()  # a refusal is never receipted
 
+
+
+# ---------------------------------------------------------------------------
+# Telegram intake follows the marker (reversible pause)
+# ---------------------------------------------------------------------------
+
+
+class _FakeTelegram:
+    """The Bot API queue: updates wait here while no updater is polling."""
+
+    def __init__(self):
+        self.queue: list[tuple[int, str]] = []
+        self.listeners: list = []
+
+    def send(self, update_id, text):
+        self.queue.append((update_id, text))
+
+    async def poll(self):
+        while self.queue:
+            update_id, text = self.queue.pop(0)
+            for listener in self.listeners:
+                await listener(update_id, text)
+
+
+def _telegram_bot(telegram, replies, token="123:abc", profile=None):
+    from unittest.mock import AsyncMock, MagicMock
+    from types import SimpleNamespace
+    from gateway.config import PlatformConfig
+    from plugins.platforms.telegram.adapter import TelegramAdapter
+
+    adapter = TelegramAdapter(PlatformConfig(enabled=True, token=token))
+    if profile:
+        adapter.set_owner_profile(profile)
+    updater = MagicMock()
+    updater.running = True
+    polls: list = []
+
+    async def _stop():
+        updater.running = False
+
+    updater.stop = AsyncMock(side_effect=_stop)
+    adapter._app = SimpleNamespace(updater=updater)
+    adapter._polling_heartbeat_loop = AsyncMock()
+
+    async def deliver(update_id, text):
+        if not updater.running:
+            telegram.queue.append((update_id, text))
+            return
+        update = SimpleNamespace(
+            update_id=update_id, message=SimpleNamespace(chat=SimpleNamespace(id=42))
+        )
+        try:
+            await adapter._admit_update(update, None)
+        except Exception:
+            return  # a receipted update is dropped by ApplicationHandlerStop
+        event = MessageEvent(
+            text=text, message_type=MessageType.TEXT,
+            source=make_restart_source(), message_id=str(update_id),
+            update_ids={update_id},
+        )
+        await adapter._process_message_background(event, "sk")
+
+    async def _start_polling(**kwargs):
+        updater.running = True
+        polls.append(asyncio.ensure_future(telegram.poll()))
+
+    adapter._start_polling_resilient = AsyncMock(side_effect=_start_polling)
+    telegram.listeners.append(deliver)
+
+    async def handler(event):
+        replies.append(event.text)
+        return "ok"
+
+    adapter.set_message_handler(handler)
+    adapter._send_with_retry = AsyncMock(return_value=MagicMock(success=True, message_id="o"))
+    return adapter, updater
+
+
+async def _until(condition, timeout=5.0):
+    deadline = asyncio.get_running_loop().time() + timeout
+    while not condition() and asyncio.get_running_loop().time() < deadline:
+        await asyncio.sleep(0.02)
+
+
+async def _tick(runner, seconds=0.12):
+    task = asyncio.create_task(runner._drain_control_watcher(interval=0.02))
+    await asyncio.sleep(seconds)
+    return task
+
+
+async def _stop_watcher(runner, task):
+    runner._running = False
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+
+class TestIntakeFollowsTheMarker:
+    @pytest.mark.asyncio
+    async def test_begin_messages_cancel_answers_each_message_once(self, home, monkeypatch):
+        monkeypatch.setattr(
+            "korra_cli.profiles.resolve_profile_env", lambda name: str(home / "profiles" / name)
+        )
+        runner, _ = _drain_runner()
+        telegram, replies = _FakeTelegram(), []
+        primary, primary_updater = _telegram_bot(telegram, replies)
+        secondary_telegram, secondary_replies = _FakeTelegram(), []
+        secondary, secondary_updater = _telegram_bot(
+            secondary_telegram, secondary_replies, token="555:abc", profile="work"
+        )
+        runner.adapters = {Platform.TELEGRAM: primary}
+        runner._profile_adapters = {"work": {Platform.TELEGRAM: secondary}}
+
+        dc.write_drain_request(principal="nas")
+        task = await _tick(runner)
+        assert primary_updater.running is False and secondary_updater.running is False
+
+        for bot in (telegram, secondary_telegram):
+            for listener in bot.listeners:
+                await listener(1, "first")
+                await listener(2, "second")
+        assert replies == [] and secondary_replies == []  # waiting in Telegram's queue
+
+        dc.clear_drain_request()
+        await _until(lambda: len(replies) == 2 and len(secondary_replies) == 2)
+        await _stop_watcher(runner, task)
+
+        assert primary_updater.running is True and secondary_updater.running is True
+        assert replies == ["first", "second"]
+        assert secondary_replies == ["first", "second"]
+        # a redelivery of an answered update is not answered again
+        await telegram.listeners[0](1, "first")
+        assert replies == ["first", "second"]
+
+    @pytest.mark.asyncio
+    async def test_begin_messages_restart_answers_after_start_once(self, home):
+        runner, _ = _drain_runner()
+        telegram, replies = _FakeTelegram(), []
+        old, old_updater = _telegram_bot(telegram, replies)
+        runner.adapters = {Platform.TELEGRAM: old}
+
+        dc.write_drain_request(principal="nas")
+        task = await _tick(runner)
+        await telegram.listeners[0](1, "first")
+        await telegram.listeners[0](2, "second")
+        await _stop_watcher(runner, task)
+        assert replies == [] and len(telegram.queue) == 2
+
+        # the old process goes away; the new one polls the same bot
+        old._app = None
+        telegram.listeners.clear()
+        new, new_updater = _telegram_bot(telegram, replies)
+        await new._start_polling_resilient()
+        await _until(lambda: len(replies) == 2)
+        assert replies == ["first", "second"]
+
+    @pytest.mark.asyncio
+    async def test_cancel_during_shutdown_does_not_reopen_intake(self, home):
+        runner, _ = _drain_runner()
+        telegram, replies = _FakeTelegram(), []
+        adapter, updater = _telegram_bot(telegram, replies)
+        runner.adapters = {Platform.TELEGRAM: adapter}
+
+        dc.write_drain_request(principal="nas")
+        task = await _tick(runner)
+        assert updater.running is False
+        runner._draining = True
+        dc.clear_drain_request()
+        await asyncio.sleep(0.1)
+        await _stop_watcher(runner, task)
+
+        assert updater.running is False
