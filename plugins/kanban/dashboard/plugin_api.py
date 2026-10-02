@@ -979,8 +979,22 @@ def _reopen_if_review(conn, task_id: str, current) -> Optional[bool]:
     the review-reopen routing can't drift between them.
     """
     if current is not None and getattr(current, "status", None) == "review":
-        return kanban_db.reopen_review_task(conn, task_id)
+        return kanban_db.reopen_review_task(conn, task_id, author=_BOARD_OWNER)
     return None
+
+
+# Everything the board's PATCH/bulk endpoints do is the owner's own action.
+_BOARD_OWNER = "Владелец"
+
+
+def _hold_returned_result(conn, task_id: str, previous_status: str, target: str) -> None:
+    """A result the owner takes back for rework comes back to the owner.
+
+    Without this a card without owner review closed itself when the agent
+    resubmitted (K21-257). Called after the transition succeeded.
+    """
+    if previous_status in ("done", "review") and target in ("ready", "todo"):
+        kanban_db.hold_result_for_owner(conn, task_id)
 
 
 @router.patch("/tasks/{task_id}")
@@ -1033,6 +1047,7 @@ def update_task(task_id: str, payload: UpdateTaskBody, board: Optional[str] = Qu
                     result=payload.result,
                     summary=payload.summary,
                     metadata=payload.metadata,
+                    author=_BOARD_OWNER,
                 )
             elif s == "blocked":
                 # The board's "pause" is the owner's own stop: typed so it
@@ -1116,6 +1131,9 @@ def update_task(task_id: str, payload: UpdateTaskBody, board: Optional[str] = Qu
                     status_code=409,
                     detail=f"status transition to {s!r} not valid from current state",
                 )
+
+        if payload.status is not None:
+            _hold_returned_result(conn, task_id, task.status, payload.status)
 
         # --- model/provider override ---------------------------------------
         if payload.clear_model_override or payload.model_override is not None:
@@ -1269,6 +1287,7 @@ def _invalidate_descendants_for_parent_reopen(
 
 def _set_status_direct(
     conn: sqlite3.Connection, task_id: str, new_status: str,
+    *, author: Optional[str] = _BOARD_OWNER,
 ) -> bool:
     """Direct status write for drag-drop moves that aren't covered by the
     structured complete/block/unblock/archive verbs (e.g. todo<->ready,
@@ -1359,6 +1378,7 @@ def _set_status_direct(
                     {
                         "status": effective_status,
                         "requested_status": new_status,
+                        **({"author": author} if author else {}),
                     }
                 ),
                 int(time.time()),
@@ -1728,6 +1748,7 @@ def bulk_update(payload: BulkTaskBody, board: Optional[str] = Query(None)):
                             result=payload.result,
                             summary=payload.summary,
                             metadata=payload.metadata,
+                            author=_BOARD_OWNER,
                         )
                     elif s == "blocked":
                         ok = kanban_db.pause_task(conn, tid)["ok"]
@@ -1770,6 +1791,8 @@ def bulk_update(payload: BulkTaskBody, board: Optional[str] = Query(None)):
                         continue
                     if not ok:
                         entry.update(ok=False, error=f"transition to {s!r} refused")
+                    else:
+                        _hold_returned_result(conn, tid, task.status, s)
                 if payload.assignee is not None:
                     try:
                         if payload.reclaim_first:

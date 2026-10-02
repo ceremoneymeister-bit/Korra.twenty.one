@@ -291,3 +291,84 @@ def test_rework_without_assignee_is_explained_and_does_not_write_comment(client)
     assert response.status_code == 409
     assert response.json()["detail"]["code"] == "assignee_required"
     assert client.get(f"{API}/tasks/{tid}").json()["comments"] == []
+
+
+# --- K21-257: a result the owner took back for rework returns to the owner ---
+
+
+def _worker_submit(tid, text, *, review=False):
+    with kb.connect_closing() as conn:
+        with kb.write_txn(conn):
+            conn.execute("UPDATE tasks SET status='ready' WHERE id=? AND status NOT IN ('running')", (tid,))
+        claimed = kb.claim_task(conn, tid, claimer="worker")
+        assert claimed is not None
+        run_id = claimed.current_run_id
+        if review:
+            return kb.request_review(conn, tid, summary=text, expected_run_id=run_id, with_reason=True)
+        return kb.complete_task(conn, tid, result=text, summary=text, expected_run_id=run_id, as_worker=True)
+
+
+def _plain_card(client, title="Без проверки"):
+    r = client.post(f"{API}/tasks", json={"title": title, "body": "b", "assignee": "worker"})
+    assert r.status_code == 200, r.text
+    return r.json()["task"]["id"]
+
+
+def _event_kinds(tid):
+    with kb.connect_closing() as conn:
+        return [e.kind for e in kb.list_events(conn, tid)]
+
+
+def test_rework_from_done_of_unreviewed_card_returns_resubmission_to_owner(client):
+    tid = _plain_card(client)
+    assert _worker_submit(tid, "v1") is True
+    assert client.get(f"{API}/tasks/{tid}").json()["task"]["status"] == "done"
+    r = client.patch(f"{API}/tasks/{tid}", json={"status": "ready"})
+    assert r.status_code == 200, r.text
+    assert r.json()["task"]["acceptance"] == "owner"
+    assert "owner_review_enabled" in _event_kinds(tid)
+    assert _worker_submit(tid, "v2") is True
+    task = client.get(f"{API}/tasks/{tid}").json()["task"]
+    assert task["status"] == "review" and task["owner_attention"] == "accept"
+    assert task["result"] == "v2" and isinstance(task["submitted_version"], int)
+    done = client.post(f"{API}/tasks/{tid}/accept", json={"version": task["submitted_version"], "request_id": "a"})
+    assert done.status_code == 200 and done.json()["task"]["status"] == "done"
+
+
+def test_rework_from_legacy_review_lane_returns_resubmission_to_owner(client):
+    tid = _plain_card(client)
+    ok, reason = _worker_submit(tid, "v1", review=True)
+    assert ok, reason
+    assert client.get(f"{API}/tasks/{tid}").json()["task"]["status"] == "review"
+    assert client.post(f"{API}/tasks/bulk", json={"ids": [tid], "status": "ready"}).json()["results"][0]["ok"] is True
+    assert client.get(f"{API}/tasks/{tid}").json()["task"]["acceptance"] == "owner"
+    _worker_submit(tid, "v2")
+    assert client.get(f"{API}/tasks/{tid}").json()["task"]["status"] == "review"
+
+
+def test_request_review_on_owner_card_is_refused_with_a_hint(client):
+    tid = _submitted_via_form(client)
+    version = client.get(f"{API}/tasks/{tid}").json()["task"]["submitted_version"]
+    client.post(f"{API}/tasks/{tid}/request-changes", json={"version": version, "request_id": "rw", "comment": "Исправь"})
+    ok, reason = _worker_submit(tid, "v2 через request_review", review=True)
+    assert ok is False and "kanban_complete" in reason
+    task = client.get(f"{API}/tasks/{tid}").json()["task"]
+    assert task["status"] == "running" and task["acceptance"] == "owner"
+
+
+def test_status_changes_and_manual_completion_name_the_owner(client):
+    tid = _plain_card(client)
+    _worker_submit(tid, "v1")
+    client.patch(f"{API}/tasks/{tid}", json={"status": "ready"})
+    with kb.connect_closing() as conn:
+        status_event = [e for e in kb.list_events(conn, tid) if e.kind == "status"][-1]
+    assert status_event.payload["author"] == "Владелец"
+    tid2 = _plain_card(client, "ручное завершение")
+    with kb.connect_closing() as conn:
+        with kb.write_txn(conn):
+            conn.execute("UPDATE tasks SET status='ready' WHERE id=?", (tid2,))
+    r = client.patch(f"{API}/tasks/{tid2}", json={"status": "done", "result": "готово", "summary": "готово"})
+    assert r.status_code == 200, r.text
+    with kb.connect_closing() as conn:
+        completed = [e for e in kb.list_events(conn, tid2) if e.kind == "completed"][-1]
+    assert completed.payload["completed_by"] == "Владелец"
