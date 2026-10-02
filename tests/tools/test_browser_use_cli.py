@@ -900,6 +900,34 @@ class TestBrowserExec:
         result = json.loads(bu_cli.browser_exec("print(1)", timeout_s=1))
         assert "timed out" in result["error"]
 
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX process groups")
+    def test_timeout_kills_grandchild_holding_the_pipes(self, tmp_path, monkeypatch):
+        """The harness daemon inherits stdout; plain subprocess.run would wait
+        for its EOF forever and leave it running (K21-271)."""
+        import time
+
+        pidfile = tmp_path / "daemon.pid"
+        cli = _fake_cli(
+            tmp_path,
+            f'cat > /dev/null\nsleep 60 &\necho $! > {pidfile}\nsleep 60\n',
+        )
+        monkeypatch.setattr(bu_cli, "_find_cli", lambda: [cli])
+        monkeypatch.setattr(bu_cli, "_MIN_TIMEOUT_S", 1)
+        started = time.time()
+        result = json.loads(bu_cli.browser_exec("print(1)", timeout_s=1))
+        assert "timed out" in result["error"]
+        assert time.time() - started < 15
+        daemon = int(pidfile.read_text())
+        for _ in range(50):
+            try:
+                os.kill(daemon, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.1)
+        else:
+            os.kill(daemon, 9)
+            pytest.fail("grandchild survived the timeout")
+
 
 class TestFindCliManagedBin:
     """MANAGED-FIRST: _find_cli probes $HERMES_HOME/bin before PATH and

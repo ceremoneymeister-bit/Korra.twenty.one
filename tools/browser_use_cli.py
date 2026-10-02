@@ -674,6 +674,39 @@ def _resolve_real_profile_cdp(env: dict, force_local: bool) -> Optional[str]:
     return None
 
 
+def _run_in_own_group(cmd, code, timeout, env, popen_extra):
+    """subprocess.run, but a timeout kills the whole process group.
+
+    The harness daemon and Chrome helpers inherit the stdout/stderr pipes;
+    plain ``subprocess.run`` only kills the direct child, so its final
+    ``communicate()`` waits for pipe EOF from those grandchildren forever.
+    """
+    if os.name == "nt":
+        return subprocess.run(
+            cmd, input=code, capture_output=True, text=True,
+            timeout=timeout, env=env, **popen_extra,
+        )
+    import signal
+
+    with subprocess.Popen(
+        cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, env=env, start_new_session=True,
+    ) as proc:
+        try:
+            stdout, stderr = proc.communicate(code, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except OSError:
+                proc.kill()
+            try:
+                proc.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+            raise
+    return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
+
+
 def browser_exec(
     code: str,
     session: str = "",
@@ -776,15 +809,7 @@ def browser_exec(
 
     started = time.time()
     try:
-        proc = subprocess.run(
-            cmd,
-            input=code,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env=env,
-            **popen_extra,
-        )
+        proc = _run_in_own_group(cmd, code, timeout, env, popen_extra)
     except subprocess.TimeoutExpired:
         return tool_error(
             f"browser-use exec timed out after {timeout}s. The daemon may "
