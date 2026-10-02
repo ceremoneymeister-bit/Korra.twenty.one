@@ -446,6 +446,7 @@ def _(rid, params: dict) -> dict:
                     os.chmod(str(dst_env), 0o600)
                 except OSError:
                     pass
+                profiles_mod.strip_channel_env_file(dst_env)
                 mirrored["env"] = True
         except Exception:
             pass
