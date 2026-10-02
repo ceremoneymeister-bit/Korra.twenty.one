@@ -18,10 +18,12 @@ from plugins.platforms.telegram.update_receipts import (
 
 def test_receipt_survives_restart(tmp_path):
     path = tmp_path / "r.txt"
-    assert UpdateReceipts(path).admit(101) is True
+    first = UpdateReceipts(path)
+    assert first.seen(101) is False
+    first.record(101)
     again = UpdateReceipts(path)
-    assert again.admit(101) is False
-    assert again.admit(102) is True
+    assert again.seen(101) is True
+    assert again.seen(102) is False
 
 
 def test_expired_and_garbage_lines_are_dropped(tmp_path):
@@ -29,8 +31,8 @@ def test_expired_and_garbage_lines_are_dropped(tmp_path):
     old = time.time() - RECEIPT_TTL_SECONDS - 60
     path.write_text(f"1 {old:.0f}\nnot a receipt\n2 {time.time():.0f}\n", encoding="utf-8")
     receipts = UpdateReceipts(path)
-    assert receipts.admit(1) is True  # expired: allowed again
-    assert receipts.admit(2) is False
+    assert receipts.seen(1) is False  # expired: allowed again
+    assert receipts.seen(2) is True
     assert "not a receipt" not in path.read_text(encoding="utf-8")
 
 
@@ -38,8 +40,8 @@ def test_unwritable_location_still_dedups_in_memory(tmp_path):
     blocker = tmp_path / "file"
     blocker.write_text("x")
     receipts = UpdateReceipts(blocker / "sub" / "r.txt")
-    assert receipts.admit(5) is True
-    assert receipts.admit(5) is False
+    receipts.record(5)
+    assert receipts.seen(5) is True
 
 
 def test_path_is_per_bot_and_needs_a_numeric_bot_id(tmp_path):
@@ -55,23 +57,71 @@ def _adapter(token="123:abc", profile=None):
     return adapter
 
 
-@pytest.mark.asyncio
-async def test_redelivered_update_is_stopped_before_any_handler(tmp_path, monkeypatch):
+def _message_update(update_id, chat_id=42):
+    return SimpleNamespace(update_id=update_id, message=SimpleNamespace(chat=SimpleNamespace(id=chat_id)))
+
+
+def _stop_exception(monkeypatch):
     class ApplicationHandlerStop(Exception):
         pass
 
-    monkeypatch.setattr(sys.modules["telegram.ext"], "ApplicationHandlerStop", ApplicationHandlerStop, raising=False)
+    monkeypatch.setattr(
+        sys.modules["telegram.ext"], "ApplicationHandlerStop", ApplicationHandlerStop, raising=False
+    )
+    return ApplicationHandlerStop
+
+
+def _event(chat_id="42"):
+    return SimpleNamespace(source=SimpleNamespace(chat_id=chat_id))
+
+
+@pytest.mark.asyncio
+async def test_message_is_receipted_when_handed_to_the_gateway(tmp_path, monkeypatch):
+    stop = _stop_exception(monkeypatch)
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    handed = []
+
+    async def fake_handle(self, event):
+        handed.append(event)
+
+    monkeypatch.setattr("gateway.platforms.base.BasePlatformAdapter.handle_message", fake_handle)
+    adapter = _adapter()
+    await adapter._admit_update(_message_update(77), None)
+    # admitted but still in the batching window: a redelivery must get through
+    await adapter._admit_update(_message_update(77), None)
+    await adapter.handle_message(_event())
+    assert handed
+    with pytest.raises(stop):
+        await adapter._admit_update(_message_update(77), None)
+    # a new process (new adapter) still remembers it
+    with pytest.raises(stop):
+        await _adapter()._admit_update(_message_update(77), None)
+    # the same id on another bot is a different message
+    await _adapter(token="999:zzz")._admit_update(_message_update(77), None)
+
+
+@pytest.mark.asyncio
+async def test_handoff_in_another_chat_does_not_receipt_the_message(tmp_path, monkeypatch):
+    _stop_exception(monkeypatch)
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setattr(
+        "gateway.platforms.base.BasePlatformAdapter.handle_message", AsyncMock()
+    )
+    adapter = _adapter()
+    await adapter._admit_update(_message_update(10, chat_id=1), None)
+    await adapter.handle_message(_event(chat_id="2"))
+    await adapter._admit_update(_message_update(10, chat_id=1), None)  # still not stopped
+
+
+@pytest.mark.asyncio
+async def test_non_message_update_is_receipted_at_once(tmp_path, monkeypatch):
+    stop = _stop_exception(monkeypatch)
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     adapter = _adapter()
-    update = SimpleNamespace(update_id=77)
-    await adapter._admit_update(update, None)
-    with pytest.raises(ApplicationHandlerStop):
-        await adapter._admit_update(update, None)
-    # a new process (new adapter) still remembers it
-    with pytest.raises(ApplicationHandlerStop):
-        await _adapter()._admit_update(update, None)
-    # the same id on another bot is a different message
-    await _adapter(token="999:zzz")._admit_update(update, None)
+    callback = SimpleNamespace(update_id=5, message=None, channel_post=None)
+    await adapter._admit_update(callback, None)
+    with pytest.raises(stop):
+        await adapter._admit_update(callback, None)
 
 
 @pytest.mark.asyncio
@@ -81,7 +131,7 @@ async def test_secondary_profile_keeps_receipts_in_its_own_home(tmp_path, monkey
         "korra_cli.profiles.resolve_profile_env", lambda name: str(tmp_path / "profiles" / name)
     )
     adapter = _adapter(token="555:abc", profile="work")
-    await adapter._admit_update(SimpleNamespace(update_id=1), None)
+    await adapter._admit_update(SimpleNamespace(update_id=1, message=None, channel_post=None), None)
     assert (tmp_path / "profiles" / "work" / "telegram_update_receipts_555.txt").exists()
     assert not (tmp_path / "telegram_update_receipts_555.txt").exists()
 

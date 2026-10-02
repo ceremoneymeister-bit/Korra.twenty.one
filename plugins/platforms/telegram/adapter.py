@@ -898,6 +898,7 @@ class TelegramAdapter(BasePlatformAdapter):
         # "what this adapter understands" stays stated in exactly one place.
         self._core_handlers: List[Any] = []
         self._update_receipts: Optional[UpdateReceipts] = None
+        self._unconfirmed_updates: Dict[int, str] = {}
         # Update kinds already reported as unhandled. One INFO line per kind per
         # process is enough to notice a new silent class of updates without
         # turning a chatty group into a log flood.
@@ -4645,24 +4646,57 @@ class TelegramAdapter(BasePlatformAdapter):
         return self._update_receipts
 
     async def _admit_update(self, update, context) -> None:
-        """Let each Telegram update through once; a redelivery gets no second answer."""
+        """Stop an update that was already handed to the gateway (a redelivery).
+
+        A message is receipted only when ``handle_message`` takes it, so one
+        that dies in the batching window is redelivered; every other kind of
+        update is receipted here.
+        """
         update_id = getattr(update, "update_id", None)
         if not isinstance(update_id, int):
             return
         try:
             receipts = self._receipts_for_bot()
-            fresh = receipts.admit(update_id) if receipts is not None else True
+            if receipts is None:
+                return
+            if not receipts.seen(update_id):
+                message = getattr(update, "message", None) or getattr(update, "channel_post", None)
+                chat = getattr(message, "chat", None)
+                if chat is not None:
+                    unconfirmed = self._unconfirmed_updates
+                    unconfirmed[update_id] = str(getattr(chat, "id", ""))
+                    while len(unconfirmed) > 512:
+                        unconfirmed.pop(next(iter(unconfirmed)))
+                else:
+                    receipts.record(update_id)
+                return
         except Exception:
             logger.warning("[%s] update receipt check failed", self.name, exc_info=True)
             return
-        if not fresh:
-            from telegram.ext import ApplicationHandlerStop
+        from telegram.ext import ApplicationHandlerStop
 
-            logger.info(
-                "[%s] Telegram update %s was already handled; skipping the redelivery",
-                self.name, update_id,
-            )
-            raise ApplicationHandlerStop
+        logger.info(
+            "[%s] Telegram update %s was already handled; skipping the redelivery",
+            self.name, update_id,
+        )
+        raise ApplicationHandlerStop
+
+    async def handle_message(self, event: MessageEvent) -> None:
+        self._confirm_updates(str(getattr(event.source, "chat_id", "")))
+        await super().handle_message(event)
+
+    def _confirm_updates(self, chat_id: str) -> None:
+        unconfirmed = self._unconfirmed_updates
+        if not unconfirmed:
+            return
+        try:
+            receipts = self._receipts_for_bot()
+            for update_id in [u for u, c in unconfirmed.items() if c == chat_id]:
+                del unconfirmed[update_id]
+                if receipts is not None:
+                    receipts.record(update_id)
+        except Exception:
+            logger.warning("[%s] update receipt not recorded", self.name, exc_info=True)
 
     def _add_core_handler(self, app, handler) -> None:
         """Register a group-0 handler and remember it.

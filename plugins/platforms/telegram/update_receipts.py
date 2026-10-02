@@ -3,7 +3,8 @@
 Telegram redelivers an update until the bot confirms a later offset. After a
 crash or a reconnect that confirmation can be lost, and the same message would
 get a second answer. A receipt is one line, ``<update_id> <unix_ts>``, appended
-the moment an update is admitted; lines older than the TTL are dropped on load.
+once the update has been handed to the gateway; lines older than the TTL are
+dropped on load.
 The file is plain text next to the profile data, so older code simply ignores it.
 """
 
@@ -60,12 +61,14 @@ class UpdateReceipts:
         except OSError:
             logger.warning("Telegram update receipts not compacted: %s", self._path, exc_info=True)
 
-    def admit(self, update_id: int) -> bool:
-        """Record ``update_id``; return False if it was already admitted."""
+    def seen(self, update_id: int) -> bool:
         if not self._loaded:
             self._load()
-        if update_id in self._seen:
-            return False
+        return update_id in self._seen
+
+    def record(self, update_id: int) -> None:
+        if self.seen(update_id):
+            return
         now = time.time()
         self._seen[update_id] = now
         try:
@@ -74,7 +77,6 @@ class UpdateReceipts:
                 fh.write(f"{update_id} {now:.0f}\n")
         except OSError:
             logger.warning("Telegram update receipt not saved: %s", self._path, exc_info=True)
-        return True
 
 
 def receipts_path(home: Path, bot_token: str) -> Optional[Path]:
