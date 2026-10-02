@@ -695,7 +695,7 @@ def _run_in_own_group(cmd, code, timeout, env, popen_extra):
             stdout, stderr = proc.communicate(code, timeout=timeout)
         except subprocess.TimeoutExpired:
             try:
-                os.killpg(proc.pid, signal.SIGKILL)
+                os.killpg(proc.pid, signal.SIGKILL)  # windows-footgun: ok — POSIX only, os.name == "nt" returns above
             except OSError:
                 proc.kill()
             try:
