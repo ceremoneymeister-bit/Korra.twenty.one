@@ -390,4 +390,14 @@ describe("Доска поручений", () => {
     boardTasks = [{ ...task, status: "ready", acceptance: "owner" }]; await renderPage(); await click(host.querySelector('[data-task-id]')!);
     expect(host.querySelector('[data-owner-review="true"]')?.textContent).toContain("Результат проверяете вы");
   });
+
+  it("в результате есть «Скопировать результат», копируется полный текст (K21-261)", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    boardTasks = [{ ...task, status: "done", result: "| А | Б |\n|---|---|\n| 1 | 2 |" }];
+    await renderPage(); await click(host.querySelector('[data-task-id]')!);
+    await click(button("Скопировать результат"));
+    expect(writeText).toHaveBeenCalledWith("| А | Б |\n|---|---|\n| 1 | 2 |");
+    expect(host.textContent).toContain("Результат скопирован");
+  });
 });

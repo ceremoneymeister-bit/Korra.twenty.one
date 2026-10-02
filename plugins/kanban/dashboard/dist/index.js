@@ -175,9 +175,16 @@
     const latest = (runs || []).slice().sort((a, b) => (b.id || 0) - (a.id || 0))[0];
     const main = task.result || task.latest_summary;
     const details = !task.result && latest && latest.metadata ? metadataLines(latest.metadata, 0) : [];
+    const [copy, setCopy] = useState("");
     return h("section", { className: "k21-note k21-result" },
       h("h3", null, title || "Результат"),
       h(RichText, null, main || "Здесь появится итог работы агента. Он останется в карточке после завершения."),
+      main && h("div", { className: "k21-result-actions" },
+        h(Button, { onClick: async () => {
+          try { await navigator.clipboard.writeText(String(main)); setCopy("done"); }
+          catch (_) { setCopy("failed"); }
+        } }, copy === "done" ? "Результат скопирован" : "Скопировать результат"),
+        copy === "failed" && h("span", { className: "k21-muted", role: "status" }, "Браузер не разрешил копирование. Выделите текст результата и скопируйте его вручную.")),
       details.length > 0 && h("div", { className: "k21-result-details" }, h("h4", null, "Подробности от агента"),
         h("p", { className: "k21-preserve" }, details.join("\n"))));
   }

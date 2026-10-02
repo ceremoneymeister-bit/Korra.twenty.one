@@ -143,6 +143,24 @@
   overflow-x: auto;
   outline: none;
 }
+/* Общий стиль скрывает полосы прокрутки; у широкой таблицы она нужна всегда,
+   иначе непонятно, что столбцы продолжаются за краем. */
+.korra-markdown__table,
+.korra-markdown__table:hover {
+  scrollbar-width: auto;
+  scrollbar-color: color-mix(in srgb, var(--neo-text-secondary) 75%, transparent)
+    color-mix(in srgb, var(--neo-text-secondary) 18%, transparent);
+}
+.korra-markdown__table::-webkit-scrollbar {
+  height: 0.75rem;
+}
+.korra-markdown__table::-webkit-scrollbar-track {
+  display: block;
+  background: color-mix(in srgb, var(--neo-text-secondary) 18%, transparent);
+}
+.korra-markdown__table::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--neo-text-secondary) 75%, transparent);
+}
 .korra-markdown__table-hint {
   margin-bottom: 8px;
   color: var(--neo-text-secondary);

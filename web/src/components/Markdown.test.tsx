@@ -3,6 +3,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { Markdown } from "./Markdown";
+import { readFileSync } from "node:fs";
 
 function render(content: string, streaming = false) {
   const host = document.createElement("div");
@@ -133,5 +134,12 @@ describe("Чтение ответа агента", () => {
   it("сохраняет читаемый текст при чрезмерной вложенности", () => {
     const host = render("> ".repeat(40) + "Текст клиента");
     expect(host.textContent).toContain("Текст клиента");
+  });
+
+  it("оставляет у широкой таблицы видимую полосу прокрутки поверх общего скрытия полос", () => {
+    const markdownCss = readFileSync(`${process.cwd()}/src/components/markdown.css`, "utf8");
+    const rule = markdownCss.match(/\.korra-markdown__table,\s*\.korra-markdown__table:hover\s*\{[^}]*\}/)?.[0] ?? "";
+    expect(rule).toContain("scrollbar-width: auto");
+    expect(rule).not.toContain("transparent transparent");
   });
 });
