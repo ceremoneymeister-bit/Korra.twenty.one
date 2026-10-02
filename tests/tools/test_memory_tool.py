@@ -10,7 +10,9 @@ from tools.memory_tool import (
     _scan_memory_content,
 )
 from tools.skill_provenance import (
+    reset_current_review_attended,
     reset_current_write_origin,
+    set_current_review_attended,
     set_current_write_origin,
 )
 
@@ -514,6 +516,27 @@ class TestWholeEntryMatchBeatsSubstring:
 
 class TestBackgroundReviewDeleteGate:
     """Unattended review may append memory, never replace or remove it."""
+
+    def test_manual_refine_keeps_replace_and_remove(self, store):
+        """K21-279: a review the person started (/refine) is attended, so a
+        full memory can still be consolidated."""
+        store.add("memory", "old rule that is too long")
+        store.add("memory", "stale rule")
+        token = set_current_write_origin("background_review")
+        attended = set_current_review_attended(True)
+        try:
+            replaced = json.loads(memory_tool(
+                action="replace", old_text="old rule", content="short rule", store=store,
+            ))
+            removed = json.loads(memory_tool(
+                action="remove", old_text="stale rule", store=store,
+            ))
+        finally:
+            reset_current_review_attended(attended)
+            reset_current_write_origin(token)
+
+        assert replaced["success"] is True and removed["success"] is True
+        assert store._entries_for("memory") == ["short rule"]
 
     def test_remove_denied_and_store_untouched(self, store):
         standing_rule = "never create records without permission"

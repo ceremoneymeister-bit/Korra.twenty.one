@@ -1200,6 +1200,7 @@ def build_cache_parity_fork(
     *,
     max_iterations: int,
     write_origin: str = "background_review",
+    attended: bool = False,
 ) -> Tuple[Any, Dict[str, Any], bool]:
     """Construct a detached AIAgent fork with warm prompt-cache parity.
 
@@ -1331,6 +1332,7 @@ def build_cache_parity_fork(
     )
     review_agent._memory_write_origin = write_origin
     review_agent._memory_write_context = write_origin
+    review_agent._review_attended = attended
     # The review fork pins the parent's cached system prompt and keeps
     # ``tools[]`` byte-identical to the parent so its outbound request
     # hits the same provider cache prefix (see the toolset-parity note
@@ -1549,6 +1551,7 @@ def _run_review_in_thread(
     task_cfg: Optional[Dict[str, Any]] = None,
     review_run: Optional[_BackgroundReviewRun] = None,
     review_memory: bool = False,
+    attended: bool = False,
 ) -> None:
     """Worker function executed in the background-review daemon thread.
 
@@ -1652,7 +1655,8 @@ def _run_review_in_thread(
         # streams.
         with thread_scoped_silence():
             review_agent, _rt, _routed = build_cache_parity_fork(
-                agent, task_cfg, max_iterations=_REVIEW_MAX_ITERATIONS
+                agent, task_cfg, max_iterations=_REVIEW_MAX_ITERATIONS,
+                attended=attended,
             )
 
             # Register this fork on the PARENT's _active_children (the same
@@ -1868,6 +1872,7 @@ def spawn_background_review_thread(
     focus: Optional[str] = None,
     task_cfg: Optional[Dict[str, Any]] = None,
     review_run: Optional[_BackgroundReviewRun] = None,
+    attended: bool = False,
 ):
     """Build the review thread target and prompt for a background review.
 
@@ -1915,6 +1920,7 @@ def spawn_background_review_thread(
             task_cfg=task_cfg,
             review_run=review_run,
             review_memory=review_memory,
+            attended=attended,
         )
 
     return _target, prompt

@@ -1077,13 +1077,14 @@ def _background_delete_gate(
     """Prevent an unattended review fork from deciding what to forget.
 
     Background review may append a new fact, but destructive replacement or
-    removal is denied for both single operations and atomic batches. This gate
+    removal is denied for both single operations and atomic batches. A review
+    the person started with ``/refine`` is attended and keeps every action. This gate
     runs before approval/staging so no later policy can accidentally authorize
     an unattended deletion.
     """
-    from tools.skill_provenance import is_background_review
+    from tools.skill_provenance import is_unattended_review
 
-    if not is_background_review():
+    if not is_unattended_review():
         return None
 
     destructive = action in _BACKGROUND_DELETE_ACTIONS or any(

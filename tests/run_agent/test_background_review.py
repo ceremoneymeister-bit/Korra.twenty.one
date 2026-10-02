@@ -234,6 +234,36 @@ def test_background_review_releases_clients_without_closing_shared_session(monke
     ]
 
 
+@pytest.mark.parametrize("manual, attended", [(True, True), (False, False)])
+def test_review_fork_is_attended_only_for_manual_refine(monkeypatch, manual, attended):
+    """K21-279: /refine is started by a person, so its fork may edit memory;
+    the fork still runs under the background_review origin."""
+    seen = {}
+
+    class FakeReviewAgent:
+        def __init__(self, **kwargs):
+            self._session_messages = []
+
+        def run_conversation(self, **kwargs):
+            seen["attended"] = self._review_attended
+            seen["origin"] = self._memory_write_origin
+
+        def release_clients(self):
+            pass
+
+    monkeypatch.setattr(run_agent_module, "AIAgent", FakeReviewAgent)
+    monkeypatch.setattr(run_agent_module.threading, "Thread", ImmediateThread)
+
+    AIAgent._spawn_background_review(
+        _bare_agent(),
+        messages_snapshot=[{"role": "user", "content": "hello"}],
+        review_memory=True,
+        manual=manual,
+    )
+
+    assert seen == {"attended": attended, "origin": "background_review"}
+
+
 def test_parallel_review_threads_keep_profile_memory_isolated(
     monkeypatch,
     tmp_path,
@@ -260,6 +290,7 @@ def test_parallel_review_threads_keep_profile_memory_isolated(
         task_cfg=None,
         review_run=None,
         review_memory=False,
+        attended=False,
     ):
         try:
             assert review_memory is True

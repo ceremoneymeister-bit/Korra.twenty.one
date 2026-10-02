@@ -1977,6 +1977,7 @@ class AIAgent:
                 focus=focus,
                 task_cfg=task_cfg,
                 review_run=review_run,
+                attended=manual,
             )
             # Carry the active profile into the review thread so MEMORY.md /
             # skill review writes land in the right profile (#54937).
