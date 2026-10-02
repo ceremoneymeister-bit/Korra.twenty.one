@@ -533,7 +533,7 @@ describe("useChatStream — хозяин очереди вопросов ост�
       return realInterval(handler, delay) as unknown as ReturnType<typeof window.setInterval>;
     });
     let pending = false;
-    const fetch = vi.fn(async (_url: RequestInfo | URL) => new Response(JSON.stringify({ data: pending ? [{
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => new Response(JSON.stringify({ data: pending ? [{
       request_id: "kb-current-version", decision_kind: "kanban_question",
       command: "Какой срок?", choices: ["once"], task_url: "/kanban?task=t_1",
     }] : [] }), { status: 200, headers: { "content-type": "application/json" } }));
@@ -1623,7 +1623,7 @@ it("K21-234: rereading the open conversation stays editable, switching still wai
 
 it("a hidden chat tab does not poll approvals (0.21.16 review R3)", async () => {
   vi.spyOn(api, "getSessionMessages").mockResolvedValue({ messages: [], session_id: "hidden-chat" } as never);
-  const fetcher = vi.fn(async (..._args: unknown[]) => new Response(JSON.stringify({ data: [] }), { status: 200 }));
+  const fetcher = vi.fn<typeof globalThis.fetch>(async () => new Response(JSON.stringify({ data: [] }), { status: 200 }));
   vi.stubGlobal("fetch", fetcher);
   vi.useFakeTimers();
   try {
