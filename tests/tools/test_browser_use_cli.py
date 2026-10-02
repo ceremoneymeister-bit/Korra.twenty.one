@@ -902,8 +902,8 @@ class TestBrowserExec:
 
     @pytest.mark.skipif(os.name == "nt", reason="POSIX process groups")
     def test_timeout_kills_grandchild_holding_the_pipes(self, tmp_path, monkeypatch):
-        """The harness daemon inherits stdout; plain subprocess.run would wait
-        for its EOF forever and leave it running (K21-271)."""
+        """Plain subprocess.run kills only the direct CLI child and leaves the
+        harness daemon running (K21-271)."""
         import time
 
         pidfile = tmp_path / "daemon.pid"

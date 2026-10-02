@@ -677,9 +677,8 @@ def _resolve_real_profile_cdp(env: dict, force_local: bool) -> Optional[str]:
 def _run_in_own_group(cmd, code, timeout, env, popen_extra):
     """subprocess.run, but a timeout kills the whole process group.
 
-    The harness daemon and Chrome helpers inherit the stdout/stderr pipes;
-    plain ``subprocess.run`` only kills the direct child, so its final
-    ``communicate()`` waits for pipe EOF from those grandchildren forever.
+    Plain ``subprocess.run`` kills only the direct child, leaving the harness
+    daemon and Chrome helpers running after every timed-out call.
     """
     if os.name == "nt":
         return subprocess.run(
