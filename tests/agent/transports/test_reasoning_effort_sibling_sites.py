@@ -118,6 +118,7 @@ class TestCodexUltraForEveryModel:
             "gpt-5.6-codex": "max",
             "gpt-6-sol": "max",
             "gpt-6-luna": "max",
+            "gpt-6.1-sol": "max",
             "o5-pro": "xhigh",
             "gpt-5.5": "xhigh",
             "some-responses-model": "xhigh",

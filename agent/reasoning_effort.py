@@ -76,7 +76,9 @@ CODEX_LEGACY_EFFORTS: tuple[str, ...] = (
 def codex_supported_efforts(model: Optional[str]) -> tuple[str, ...]:
     """Supported effort set for an OpenAI/Codex Responses model."""
     bare_model = (model or "").lower().rsplit("/", 1)[-1]
-    if "gpt-5.6" in bare_model or bare_model in {"gpt-6-sol", "gpt-6-luna"}:
+    if "gpt-5.6" in bare_model or bare_model in {
+        "gpt-6-sol", "gpt-6-luna", "gpt-6.1-sol",
+    }:
         return CODEX_GPT56_EFFORTS
     return CODEX_LEGACY_EFFORTS
 
