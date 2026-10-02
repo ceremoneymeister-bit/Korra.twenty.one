@@ -6618,6 +6618,8 @@ class BasePlatformAdapter(ABC):
         # Track delivery outcomes for the processing-complete hook
         delivery_attempted = False
         delivery_succeeded = False
+        # A cancelled turn has not produced its reply: its updates stay unreceipted.
+        cancelled = False
 
         def _record_delivery(result):
             nonlocal delivery_attempted, delivery_succeeded
@@ -7234,6 +7236,7 @@ class BasePlatformAdapter(ABC):
                 return  # Drain task owns the session now.
                 
         except asyncio.CancelledError:
+            cancelled = True
             current_task = asyncio.current_task()
             outcome = ProcessingOutcome.CANCELLED
             if current_task is None or current_task not in self._expected_cancelled_tasks:
@@ -7269,7 +7272,8 @@ class BasePlatformAdapter(ABC):
             if isinstance(e, (SystemExit, KeyboardInterrupt)):
                 raise
         finally:
-            self._confirm_event_updates(event)
+            if not cancelled:
+                self._confirm_event_updates(event)
             await self._release_turn_marker(event)
             # Stop typing before any deferred callback work.  Post-delivery
             # callbacks may perform platform I/O; a stuck callback must not

@@ -113,6 +113,29 @@ async def test_message_is_receipted_only_when_its_processing_ends(tmp_path, monk
 
 
 @pytest.mark.asyncio
+async def test_cancelled_turn_before_its_reply_is_not_receipted(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    adapter = _adapter()
+    started = asyncio.Event()
+
+    async def handler(event):
+        started.set()
+        await asyncio.sleep(60)
+
+    adapter.set_message_handler(handler)
+    receipts = adapter._receipts_for_bot()
+    event = _event(88)
+    task = asyncio.create_task(adapter._process_message_background(event, "sk"))
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert receipts.seen(88) is False
+    assert event.update_ids == {88}
+
+
+@pytest.mark.asyncio
 async def test_second_batch_of_a_chat_is_recovered_after_a_crash(tmp_path, monkeypatch):
     stop = _stop_exception(monkeypatch)
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
