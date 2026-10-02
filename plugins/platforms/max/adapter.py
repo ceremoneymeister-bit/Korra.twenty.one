@@ -62,7 +62,7 @@ class MaxAdapter(BasePlatformAdapter):
                 return False
             self._marker_path = get_hermes_home() / "gateway" / f"max-{self._bot_id}-marker.json"
             try:
-                self._marker = json.loads(self._marker_path.read_text())["marker"]
+                self._marker = json.loads(self._marker_path.read_text(encoding="utf-8"))["marker"]
             except (OSError, ValueError, KeyError, TypeError):
                 self._marker = None
             self._mark_connected()
