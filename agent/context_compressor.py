@@ -201,6 +201,42 @@ def _response_finish_reason(response: Any) -> str:
 # in sync. (Ported from earendil-works/pi#7048 / commit 97fa14e39.)
 _TRUNCATED_SUMMARY_MARKER = "finish_reason=length"
 
+# A provider can answer the summary request with a refusal and finish_reason="stop". It is
+# non-empty, so response validation accepts it, but it carries nothing of the checkpoint that
+# would replace the compacted turns. Narrow on purpose: it must open like a refusal and refer to
+# the summary/checkpoint, and a real summary (templated "## " headings) is never a refusal.
+_SUMMARY_REFUSAL_PREFIX_RE = re.compile(
+    r"^\s*(?:(?:sorry|i(?:['’]m| am)\s+sorry|i\s+apologi[sz]e|as\s+an\s+ai)"
+    r"\s*[,;:]?\s*(?:but\s+)?)?(?:i|we)\s+"
+    r"(?:can(?:not|['’]t)|could\s*not|couldn['’]t|won['’]t|will\s+not|must\s+decline|"
+    r"refuse\s+to|am\s+unable\s+to|am\s+not\s+able\s+to)\b"
+    r"|^\s*(?:i['’]?m|i\s+am)\s+(?:unable|not\s+able)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_summary_refusal(content: str) -> bool:
+    """Return whether a complete response is a refusal instead of a summary."""
+    normalized = " ".join(content.split())
+    if not _SUMMARY_REFUSAL_PREFIX_RE.match(normalized):
+        return False
+    if re.search(r"(?m)^##\s", content):
+        return False
+    return any(term in normalized[:400].casefold() for term in ("summar", "checkpoint"))
+
+
+def _response_refusal_text(response: Any) -> str:
+    """Explicit provider ``choices[0].message.refusal`` (str or dict); ``""`` when absent."""
+    choices = (response.get("choices") if isinstance(response, dict) else getattr(response, "choices", None)) or []
+    if not choices:
+        return ""
+    first = choices[0]
+    message = first.get("message") if isinstance(first, dict) else getattr(first, "message", None)
+    refusal = message.get("refusal") if isinstance(message, dict) else getattr(message, "refusal", None)
+    if isinstance(refusal, dict):
+        refusal = refusal.get("message") or refusal.get("reason") or refusal.get("text")
+    return refusal.strip() if isinstance(refusal, str) else ""
+
 
 def _is_summary_access_or_quota_error(exc: Exception) -> bool:
     """Return True for non-retryable summary auth, permission, or quota errors."""
@@ -5418,6 +5454,14 @@ This compaction should PRIORITISE preserving all information related to the focu
             stripped = strip_think_blocks(None, content).strip()
             if stripped:
                 content = stripped
+            # A refusal reuses the empty-content path (main-model retry, cooldown, abort), so it can
+            # never become the compaction checkpoint or _previous_summary.
+            if _response_refusal_text(response) or _is_summary_refusal(content):
+                raise RuntimeError(
+                    "Context compression LLM returned refusal content "
+                    f"(provider={self.provider or 'auto'} "
+                    f"model={self.summary_model or self.model})"
+                )
             # Redact the summary output as well — the summarizer LLM may
             # ignore prompt instructions and echo back secrets verbatim.
             summary = _redact_compaction_text(content.strip())
@@ -5512,6 +5556,7 @@ This compaction should PRIORITISE preserving all information related to the focu
             # degraded proxy channel / upstream provider fault; #94448).
             _is_empty_content = isinstance(e, RuntimeError) and (
                 "empty content" in _err_str
+                or "refusal content" in _err_str
                 # Sibling terminal "no usable response" shapes from the
                 # auxiliary boundary's _validate_llm_response (#7264): a None
                 # response or a malformed/missing choices[0].message — same
