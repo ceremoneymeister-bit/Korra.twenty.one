@@ -1,4 +1,4 @@
-"""K21-230: owner opt-in, manual refine and truthful background accounting."""
+"""K21-230: preserve automatic learning, owner settings and truthful accounting."""
 import asyncio
 import json
 import threading
@@ -6,10 +6,8 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-import yaml
 
 from agent import background_review as br
-from korra_cli.config import ensure_background_review_opt_in, load_config
 import importlib.util
 from pathlib import Path
 _spec = importlib.util.spec_from_file_location("review_helpers", Path(__file__).parents[1] / "run_agent/test_background_review.py")
@@ -26,38 +24,39 @@ from korra_state import SessionDB
     '{}\n',
     'auxiliary:\n  vision: {}\n',
 ])
-def test_only_missing_switch_is_pinned(tmp_path, monkeypatch, seed):
+def test_loading_missing_switch_preserves_config_and_enables_learning(tmp_path, monkeypatch, seed):
     monkeypatch.setenv('HERMES_HOME', str(tmp_path))
     path = tmp_path / 'config.yaml'
     path.write_text(seed)
-    before = yaml.safe_load(seed)
-    assert ensure_background_review_opt_in()
-    written = path.read_text()
-    raw = yaml.safe_load(written)
-    assert raw['auxiliary']['background_review'].pop('enabled') is False
-    if 'background_review' not in before.get('auxiliary', {}):
-        raw['auxiliary'].pop('background_review')
-    if 'auxiliary' not in before:
-        raw.pop('auxiliary')
-    assert raw == before
-    # Every original character survives; a single inserted span is sufficient.
-    common_prefix = 0
-    while common_prefix < len(seed) and seed[common_prefix] == written[common_prefix]:
-        common_prefix += 1
-    inserted = len(written) - len(seed)
-    assert seed == written[:common_prefix] + written[common_prefix + inserted:]
-    assert not ensure_background_review_opt_in()
-    assert path.read_text() == written
-    assert load_config()['auxiliary']['background_review']['enabled'] is False
+    before = (path.read_bytes(), path.stat().st_ino, path.stat().st_mtime_ns)
+    assert br.load_background_review_settings()[0] is True
+    assert br.load_background_review_settings()[0] is True
+    assert (path.read_bytes(), path.stat().st_ino, path.stat().st_mtime_ns) == before
 
 
-@pytest.mark.parametrize('value', ['true', 'false', 'null'])
-def test_explicit_switch_is_untouched(tmp_path, monkeypatch, value):
+@pytest.mark.parametrize('value,expected', [('true', True), ('false', False), ('null', False)])
+def test_explicit_switch_is_untouched(tmp_path, monkeypatch, value, expected):
     monkeypatch.setenv('HERMES_HOME', str(tmp_path))
     path = tmp_path / 'config.yaml'
     original = 'auxiliary: {background_review: {enabled: ' + value + '}}\n'
     path.write_text(original)
-    assert not ensure_background_review_opt_in()
+    assert br.load_background_review_settings()[0] is expected
+    assert path.read_text() == original
+
+
+@pytest.mark.parametrize('original', [
+    'auxiliary: [unterminated\n',
+    '[false]\n',
+    'false\n',
+    'auxiliary: false\n',
+    'auxiliary: {background_review: false}\n',
+    'auxiliary: {background_review: [false]}\n',
+])
+def test_invalid_config_stays_untouched_and_does_not_start_review(tmp_path, monkeypatch, original):
+    monkeypatch.setenv('HERMES_HOME', str(tmp_path))
+    path = tmp_path / 'config.yaml'
+    path.write_text(original)
+    assert br.load_background_review_settings()[0] is False
     assert path.read_text() == original
 
 
@@ -124,23 +123,21 @@ def test_notification_off_does_not_hide_review_result(monkeypatch, caplog):
     assert parent_prints == []
 
 
-def test_profile_pin_is_local_and_atomic(tmp_path, monkeypatch):
+def test_review_settings_remain_profile_local(tmp_path, monkeypatch):
     first = tmp_path / 'first'
     second = tmp_path / 'second'
     first.mkdir()
     second.mkdir()
-    original = '# keep\nmodel: {default: fake}\n'
-    (first / 'config.yaml').write_text(original)
-    (second / 'config.yaml').write_text(original)
+    first_config = '# keep\nmodel: {default: fake}\n'
+    second_config = 'auxiliary: {background_review: {enabled: false}}\n'
+    (first / 'config.yaml').write_text(first_config)
+    (second / 'config.yaml').write_text(second_config)
     monkeypatch.setenv('HERMES_HOME', str(first))
-    with patch('utils.atomic_replace', side_effect=OSError('synthetic disk failure')):
-        with pytest.raises(OSError):
-            ensure_background_review_opt_in()
-    assert (first / 'config.yaml').read_text() == original
-    assert ensure_background_review_opt_in()
-    assert (second / 'config.yaml').read_text() == original
+    assert br.load_background_review_settings()[0] is True
     monkeypatch.setenv('HERMES_HOME', str(second))
-    assert ensure_background_review_opt_in()
+    assert br.load_background_review_settings()[0] is False
+    assert (first / 'config.yaml').read_text() == first_config
+    assert (second / 'config.yaml').read_text() == second_config
 
 
 @pytest.mark.parametrize('surface', ['cli', 'gateway'])
@@ -165,12 +162,14 @@ def test_refine_busy_does_not_announce_start(surface):
     assert '⚗' not in message
 
 
-def test_fresh_profile_never_starts_automatic_review(tmp_path, monkeypatch):
+def test_fresh_profile_can_start_automatic_review_without_config_write(tmp_path, monkeypatch):
     monkeypatch.setenv('HERMES_HOME', str(tmp_path))
     assert not (tmp_path / 'config.yaml').exists()
-    config = load_config()
-    assert config['auxiliary']['background_review']['enabled'] is False
-    assert br.load_background_review_settings()[0] is False
-    with patch('run_agent.threading.Thread') as thread:
-        assert _bare_agent()._spawn_background_review([], review_memory=True) is False
-    thread.assert_not_called()
+    assert br.load_background_review_settings()[0] is True
+    agent = _bare_agent()
+    with patch('agent.background_review.spawn_background_review_thread', return_value=(lambda: None, 'review')), \
+         patch('run_agent.threading.Thread') as thread:
+        assert agent._spawn_background_review([], review_memory=True) is True
+    thread.return_value.start.assert_called_once()
+    assert agent._cached_system_prompt == 'test-cached-system-prompt'
+    assert not (tmp_path / 'config.yaml').exists()

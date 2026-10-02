@@ -111,8 +111,8 @@ def test_docker_config_migrate_stamps_minimal_seed_and_preserves_comments(tmp_pa
     assert first.returncode == 0, first.stderr
     raw = yaml.safe_load(config_path.read_text())
     assert raw.pop("_config_version", None) == DEFAULT_CONFIG["_config_version"]
-    # The seed already pins background review off (K21-230): nothing to add.
-    assert raw["auxiliary"] == {"background_review": {"enabled": False}}
+    # Fresh installs retain learning and migration preserves the supplied seed.
+    assert raw["auxiliary"]["background_review"]["enabled"] is True
     assert raw == yaml.safe_load(original)
     for comment in (line for line in original.splitlines() if line.lstrip().startswith("#")):
         assert comment in config_path.read_text()
@@ -122,6 +122,36 @@ def test_docker_config_migrate_stamps_minimal_seed_and_preserves_comments(tmp_pa
     assert _run_migration(tmp_path).returncode == 0
     assert (config_path.read_bytes(), config_path.stat().st_ino) == stamped
     assert not list(tmp_path.glob("*.bak-*"))
+
+
+@pytest.mark.parametrize("previous_schema", [False, True])
+@pytest.mark.parametrize("enabled", [None, True, False])
+def test_migration_preserves_automatic_learning_choice(tmp_path: Path, previous_schema: bool, enabled) -> None:
+    """An update must not turn an inherited learning default into an opt-out."""
+    latest = DEFAULT_CONFIG["_config_version"]
+    original = {
+        "_config_version": latest - 1 if previous_schema else latest,
+        "model": {"default": "synthetic-model"},
+        "auxiliary": {"background_review": {"model": "synthetic-review"}},
+    }
+    if enabled is not None:
+        original["auxiliary"]["background_review"]["enabled"] = enabled
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(original), encoding="utf-8")
+
+    proc = _run_migration(tmp_path)
+
+    assert proc.returncode == 0, proc.stderr
+    actual = yaml.safe_load(config_path.read_text())
+    task = actual["auxiliary"]["background_review"]
+    assert task["model"] == "synthetic-review"
+    assert task.get("enabled", DEFAULT_CONFIG["auxiliary"]["background_review"]["enabled"]) is (
+        True if enabled is None else enabled
+    )
+    if enabled is None:
+        assert "enabled" not in task
+    if enabled is False:
+        assert task["enabled"] is False
 
 
 @pytest.mark.parametrize("original", [

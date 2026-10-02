@@ -948,10 +948,6 @@ class TestConfigSupportFloor:
         # advanced past 33, only the version key may differ.
         assert raw["_config_version"] == DEFAULT_CONFIG["_config_version"]
         raw.pop("_config_version")
-        # K21-230's rollback pin is the sole permitted added default.
-        assert raw["auxiliary"].pop("background_review") == {"enabled": False}
-        if not raw["auxiliary"]:
-            raw.pop("auxiliary")
         exp = dict(expected)
         exp.pop("_config_version")
         if DEFAULT_CONFIG["_config_version"] == 33:
@@ -1511,9 +1507,8 @@ class TestMigrationWriteInvariant:
         assert loaded["matrix"]["require_mention"] is False
         # No default-only top-level section the user never wrote lands on disk —
         # neither from per-version seeds nor the catch-all finalizer.
-        assert raw["auxiliary"] == {"background_review": {"enabled": False}}
         for default_key in (
-            "timezone", "curator", "tts", "compression",
+            "timezone", "auxiliary", "curator", "tts", "compression",
             "whatsapp", "bedrock",
         ):
             assert default_key not in raw, (

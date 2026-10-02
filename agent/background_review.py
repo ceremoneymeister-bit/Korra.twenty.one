@@ -266,20 +266,25 @@ def _review_input_token_budget(
 def load_background_review_settings() -> tuple[bool, Dict[str, Any]]:
     """Single config read for the automatic-review gate + task block.
 
-    Returns ``(enabled, task_cfg)``. Automatic review requires opt-in;
-    config errors leave it disabled.
+    Returns ``(enabled, task_cfg)``. Automatic review stays enabled unless
+    configured otherwise. Reading this gate never rewrites config.yaml;
+    unreadable configuration leaves the current review disabled.
     """
     try:
-        from korra_cli.config import load_config_readonly, ensure_background_review_opt_in
+        from korra_cli.config import load_config_readonly, require_readable_config_before_write
         from utils import is_truthy_value
 
-        ensure_background_review_opt_in()
-
+        # The merged reader can silently fall back to defaults on malformed YAML.
+        # Reuse the strict raw-read guard without performing any config write.
+        require_readable_config_before_write()
         cfg = load_config_readonly()
-        aux = cfg.get("auxiliary", {}) if isinstance(cfg.get("auxiliary"), dict) else {}
+        aux = cfg.get("auxiliary", {})
+        if not isinstance(aux, dict):
+            raise ValueError("auxiliary must be a mapping")
         task = aux.get("background_review", {})
-        task = task if isinstance(task, dict) else {}
-        return is_truthy_value(task.get("enabled"), default=False), task
+        if not isinstance(task, dict):
+            raise ValueError("auxiliary.background_review must be a mapping")
+        return is_truthy_value(task.get("enabled", True), default=False), task
     except Exception:
         logger.warning(
             "Failed to read background_review.enabled; leaving automatic "
@@ -294,7 +299,7 @@ def is_background_review_enabled(
 ) -> bool:
     """Return whether automatic post-turn background review may spawn.
 
-    Controlled by ``auxiliary.background_review.enabled`` (default ``false``).
+    Controlled by ``auxiliary.background_review.enabled`` (default ``true``).
     Explicit ``/refine`` (``manual=True``) bypasses this gate — same contract as
     zeroing the nudge intervals, which stops automatic forks but leaves manual
     refine working (issue #87250).
@@ -306,7 +311,7 @@ def is_background_review_enabled(
         try:
             from utils import is_truthy_value
 
-            return is_truthy_value(task_cfg.get("enabled"), default=False)
+            return is_truthy_value(task_cfg.get("enabled", True), default=False)
         except Exception:
             logger.warning(
                 "Failed to interpret background_review.enabled; leaving "

@@ -2527,84 +2527,6 @@ def _persist_migration(config: Dict[str, Any]) -> None:
     save_config(config)
 
 
-def ensure_background_review_opt_in() -> bool:
-    """Pin only an absent review switch in raw profile YAML for 0.21.15 rollback.
-
-    Do not save a merged config: that would materialize unrelated defaults.
-    Explicit choices (including null), invalid blocks and unsupported old
-    configs are left alone. Insert text without reserializing other settings.
-    """
-    with _CONFIG_LOCK:
-        path = get_config_path()
-        if not path.is_file() or is_managed():
-            return False
-        raw = require_readable_config_before_write(path)
-        version = raw.get("_config_version")
-        from korra_cli.config_migrations import SUPPORT_FLOOR_VERSION
-        if isinstance(version, int) and version < SUPPORT_FLOOR_VERSION:
-            return False
-        aux = raw.get("auxiliary", {})
-        if not isinstance(aux, dict):
-            return False
-        review = aux.get("background_review", {})
-        if not isinstance(review, dict) or "enabled" in review:
-            return False
-        from utils import atomic_write_text
-        with path.open(encoding="utf-8", newline="") as handle:
-            text = handle.read()
-        if (fast_safe_load(text) or {}) != raw:
-            raise RuntimeError("config.yaml changed while adding background review opt-in")
-        newline = "\r\n" if "\r\n" in text else "\n"
-        node = yaml.compose(text)
-        keys = ["auxiliary", "background_review", "enabled"]
-        depth = 0
-        while isinstance(node, yaml.MappingNode) and depth < 2:
-            child = next((v for k, v in node.value if k.value == keys[depth]), None)
-            if child is None:
-                break
-            node = child
-            depth += 1
-        if not isinstance(node, yaml.MappingNode):
-            return False
-        if node.flow_style:
-            addition = "false"
-            for key in reversed(keys[depth:]):
-                addition = "{" + key + ": " + addition + "}"
-            addition = addition[1:-1]
-            position = node.end_mark.index - 1
-            addition = (", " if node.value else "") + addition
-        else:
-            indent = node.value[0][0].start_mark.column if node.value else depth * 2
-            position = node.end_mark.index
-            line_start = text.rfind("\n", 0, position) + 1
-            prefix = ""
-            if not text[line_start:position].strip():
-                position = line_start
-            elif position and text[position - 1] != "\n":
-                prefix = "\n"
-            addition = prefix + "".join(
-                " " * (indent + 2 * i) + key + (": false\n" if key == "enabled" else ":\n")
-                for i, key in enumerate(keys[depth:])
-            )
-        if newline != "\n":
-            addition = addition.replace("\n", newline)
-        updated_text = text[:position] + addition + text[position:]
-        expected = copy.deepcopy(raw)
-        expected["auxiliary"] = copy.deepcopy(aux)
-        expected["auxiliary"]["background_review"] = copy.deepcopy(review)
-        expected["auxiliary"]["background_review"]["enabled"] = False
-        if fast_safe_load(updated_text) != expected:
-            raise RuntimeError("Cannot add background review opt-in without changing other settings")
-        # An owner edit during the read must not be overwritten.
-        with path.open(encoding="utf-8", newline="") as handle:
-            if handle.read() != text:
-                raise RuntimeError("config.yaml changed while adding background review opt-in")
-        atomic_write_text(path, updated_text, preserve_mode=True)
-        _RAW_CONFIG_CACHE.pop(str(path), None)
-        _LOAD_CONFIG_CACHE.pop(str(path), None)
-        return True
-
-
 def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, Any]:
     """
     Migrate config to latest version, prompting for new required fields.
@@ -2870,9 +2792,6 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
             _persist_migration(config)
         else:
             print('  Можно настроить позже: korra config set <key> <value>')
-
-    if ensure_background_review_opt_in():
-        results["config_added"].append("auxiliary.background_review.enabled")
 
     return results
 

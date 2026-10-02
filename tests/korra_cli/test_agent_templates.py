@@ -88,8 +88,8 @@ def test_every_catalogue_package_installs_loadable_payload_and_replay_preserves_
                 from tools.memory_tool import get_builtin_memory_store_flags
 
                 assert get_builtin_memory_store_flags() == (True, True)
-                # K21-230: automatic background review is opt-in.
-                assert load_background_review_settings()[0] is False
+                # Creating a ready agent preserves automatic learning.
+                assert load_background_review_settings()[0] is True
             for owned in manifest.distribution_owned:
                 src = source / owned
                 files = [src] if src.is_file() else list(src.rglob("*"))

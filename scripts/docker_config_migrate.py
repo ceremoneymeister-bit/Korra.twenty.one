@@ -11,7 +11,6 @@ from typing import Iterable
 from korra_cli.config import (
     _raw_config_has_explicit_version,
     check_config_version,
-    ensure_background_review_opt_in,
     get_config_path,
     get_env_path,
     migrate_config,
@@ -63,10 +62,6 @@ def main() -> int:
 
     current_ver, latest_ver = check_config_version()
     if current_ver >= latest_ver:
-        try:
-            ensure_background_review_opt_in()
-        except RuntimeError as exc:
-            print(f"[config-migrate] WARNING: {exc}", file=sys.stderr)
         return 0
 
     # Native core distinguishes a fresh hand-written seed from an explicit
@@ -89,7 +84,6 @@ def main() -> int:
         current_seed = fast_safe_load(template.read_text(encoding="utf-8"))
         if raw == current_seed:
             atomic_roundtrip_yaml_update(config_path, "_config_version", latest_ver)
-            ensure_background_review_opt_in()
             print(f"[config-migrate] Fresh config schema stamped: {latest_ver}")
             return 0
 
