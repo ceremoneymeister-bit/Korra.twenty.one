@@ -559,6 +559,15 @@ def note_turn_persisted(agent):
     agent._inflight_turn_session_id = None
 
 
+def content_with_turn_override(msg: Dict, content: Any, override: Any) -> Any:
+    """Apply the persist override to the current turn only, keeping an unanswered request before it."""
+    prefix = msg.get("_merged_turn_prefix")
+    if isinstance(content, str) and isinstance(override, str) and isinstance(prefix, str):
+        if content.startswith(prefix):
+            return prefix + override
+    return override
+
+
 def repair_message_sequence(agent, messages: List[Dict]) -> int:
     """Collapse malformed role-alternation left in the live history.
 
@@ -926,6 +935,10 @@ def repair_message_sequence(agent, messages: List[Dict]) -> int:
                 # bytes previously sent for the pre-merge message) — drop it
                 # so replay can't substitute stale bytes.
                 drop_stale_api_content(prev)
+                # The new turn was absorbed into an unanswered user row; remember the older text so
+                # the clean-text persist override replaces only the new turn, not the old request.
+                if prev_content and new_content:
+                    prev["_merged_turn_prefix"] = prev_content + "\n\n"
                 repairs += 1
                 continue
         merged.append(msg)

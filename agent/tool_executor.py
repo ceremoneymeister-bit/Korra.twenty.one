@@ -39,6 +39,7 @@ from agent.tool_dispatch_helpers import (
     _is_multimodal_tool_result,
     _multimodal_text_summary,
     _append_subdir_hint_to_multimodal,
+    _context_pruned_argument_paths,
     _plan_tool_batch_segments,
     make_tool_result_message,
 )
@@ -669,6 +670,17 @@ def _run_agent_tool_execution_middleware(
                 if authorization_gate is None
                 else authorization_gate.run(_resolve_pre_tool_block)
             )
+
+        # Checked after the pre-tool hooks so plugin-modified arguments are covered too.
+        if block_message is None:
+            pruned_paths = _context_pruned_argument_paths(function_name, final_args)
+            if pruned_paths:
+                block_message = (
+                    "Tool was not executed: arguments contain a context-compression "
+                    f"artifact ({', '.join(pruned_paths)}). Re-read the exact content from "
+                    "its source and issue a complete new call; do not retry these arguments."
+                )
+                block_error_type = "suspected_pruned_tool_arguments"
 
         guardrail_decision = None
         if block_message is None:

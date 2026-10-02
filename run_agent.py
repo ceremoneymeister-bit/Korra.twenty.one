@@ -2051,7 +2051,8 @@ class AIAgent:
                         or isinstance(override, list)
                     )
                 ):
-                    msg["content"] = override
+                    from agent.agent_runtime_helpers import content_with_turn_override
+                    msg["content"] = content_with_turn_override(msg, msg.get("content"), override)
                 if timestamp is not None:
                     msg["timestamp"] = timestamp
 
@@ -2346,7 +2347,8 @@ class AIAgent:
                             and content != _ov_content
                         ):
                             _row_api_content = content
-                        content = _ov_content
+                        from agent.agent_runtime_helpers import content_with_turn_override
+                        content = content_with_turn_override(msg, content, _ov_content)
                     if _ov_timestamp is not None:
                         _row_timestamp = _ov_timestamp
                 # Store the sidecar only when it actually differs.

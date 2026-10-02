@@ -24,6 +24,14 @@ from korra_constants import korra_env
 logger = logging.getLogger(__name__)
 
 
+class TranscriptReadError(RuntimeError):
+    """Persisted history could not be read; it is not an empty conversation."""
+
+    def __init__(self, session_id: str) -> None:
+        self.session_id = session_id
+        super().__init__(f"transcript read failed for session {session_id}")
+
+
 def _now() -> datetime:
     """Return the current local time."""
     return datetime.now()
@@ -4073,6 +4081,9 @@ class SessionStore:
     def load_transcript(self, session_id: str) -> List[Dict[str, Any]]:
         """Load all messages from a session's transcript.
 
+        Raises :class:`TranscriptReadError` when the canonical store cannot be
+        read: an unreadable history is not an empty conversation.
+
         state.db is the canonical store. The legacy JSONL fallback was removed
         in spec 002 — pre-DB sessions on existing disks have already been
         migrated (their DB row holds the full message history).
@@ -4113,12 +4124,12 @@ class SessionStore:
             # A failed read must be distinguishable from an empty transcript:
             # downstream guards treat [] as "nothing persisted" and may make
             # routing decisions on it (#82616). WARNING, not DEBUG.
-            logger.warning(
-                "Transcript read failed for session %s (returning empty; "
-                "downstream must not treat this as data loss): %s",
-                session_id, e,
+            logger.error(
+                "Transcript read failed for session %s; refusing to treat the "
+                "conversation as empty: %s",
+                session_id, e, exc_info=True,
             )
-            return []
+            raise TranscriptReadError(session_id) from e
 
     def rewind_session(
         self,

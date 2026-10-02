@@ -201,6 +201,42 @@ def _response_finish_reason(response: Any) -> str:
 # in sync. (Ported from earendil-works/pi#7048 / commit 97fa14e39.)
 _TRUNCATED_SUMMARY_MARKER = "finish_reason=length"
 
+# A provider can answer the summary request with a refusal and finish_reason="stop". It is
+# non-empty, so response validation accepts it, but it carries nothing of the checkpoint that
+# would replace the compacted turns. Narrow on purpose: it must open like a refusal and refer to
+# the summary/checkpoint, and a real summary (templated "## " headings) is never a refusal.
+_SUMMARY_REFUSAL_PREFIX_RE = re.compile(
+    r"^\s*(?:(?:sorry|i(?:['’]m| am)\s+sorry|i\s+apologi[sz]e|as\s+an\s+ai)"
+    r"\s*[,;:]?\s*(?:but\s+)?)?(?:i|we)\s+"
+    r"(?:can(?:not|['’]t)|could\s*not|couldn['’]t|won['’]t|will\s+not|must\s+decline|"
+    r"refuse\s+to|am\s+unable\s+to|am\s+not\s+able\s+to)\b"
+    r"|^\s*(?:i['’]?m|i\s+am)\s+(?:unable|not\s+able)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_summary_refusal(content: str) -> bool:
+    """Return whether a complete response is a refusal instead of a summary."""
+    normalized = " ".join(content.split())
+    if not _SUMMARY_REFUSAL_PREFIX_RE.match(normalized):
+        return False
+    if re.search(r"(?m)^##\s", content):
+        return False
+    return any(term in normalized[:400].casefold() for term in ("summar", "checkpoint"))
+
+
+def _response_refusal_text(response: Any) -> str:
+    """Explicit provider ``choices[0].message.refusal`` (str or dict); ``""`` when absent."""
+    choices = (response.get("choices") if isinstance(response, dict) else getattr(response, "choices", None)) or []
+    if not choices:
+        return ""
+    first = choices[0]
+    message = first.get("message") if isinstance(first, dict) else getattr(first, "message", None)
+    refusal = message.get("refusal") if isinstance(message, dict) else getattr(message, "refusal", None)
+    if isinstance(refusal, dict):
+        refusal = refusal.get("message") or refusal.get("reason") or refusal.get("text")
+    return refusal.strip() if isinstance(refusal, str) else ""
+
 
 def _is_summary_access_or_quota_error(exc: Exception) -> bool:
     """Return True for non-retryable summary auth, permission, or quota errors."""
@@ -1295,6 +1331,9 @@ _IMAGE_TOKEN_ESTIMATE = 1600
 # for tail-cut decisions.
 _IMAGE_CHAR_EQUIVALENT = _IMAGE_TOKEN_ESTIMATE * _CHARS_PER_TOKEN
 _SUMMARY_FAILURE_COOLDOWN_SECONDS = 600
+# Consecutive provider-overload summary failures tolerated before the
+# deterministic fallback summary is allowed to replace the middle window.
+_OVERLOAD_ABORT_BUDGET = 3
 
 # Hard ceiling for the deterministic summary-failure handoff.  The fallback is
 # only meant to preserve continuity anchors from the dropped window, not to
@@ -1322,6 +1361,8 @@ _FEASIBILITY_SKIP_MIDDLE_FRACTION = 0.10
 # protected region — but always keep this many trailing messages verbatim so
 # the active user ask / latest tool pair remain readable.  Issue #61932.
 _PRESSURE_KEEP_RECENT_MESSAGES = 3
+# A pending tool round larger than this share of the window is not spared.
+_PENDING_ROUND_MAX_FRACTION = 0.20
 # Native vision_analyze / computer_use screenshots that sit inside the
 # protected tail cannot be demoted by pass 2, so they ride every later
 # request until anti-thrash disables compression (#92699).  Keep this many
@@ -1599,6 +1640,19 @@ def _estimate_msg_budget_tokens(msg: dict, charge_stale_thinking: bool = True) -
             // _CHARS_PER_TOKEN
         )
     return tokens
+
+
+def _pending_tool_round(messages: "List[Dict[str, Any]]") -> range:
+    """Indices of the tool results the transcript ends with: a round the model
+    has not read yet. One trailing /steer row does not answer it (a steer is
+    delivered after the newest result, before the next API call)."""
+    end = len(messages)
+    if end and messages[end - 1].get("display_kind") == STEER_DISPLAY_KIND:
+        end -= 1
+    start = end
+    while start > 0 and messages[start - 1].get("role") == "tool":
+        start -= 1
+    return range(start, end)
 
 
 def _last_assistant_index(messages: "List[Dict[str, Any]]") -> int:
@@ -2287,6 +2341,7 @@ class ContextCompressor(ContextEngine):
         self._summary_has_user_turn = None
         self._last_summary_error = None
         self._consecutive_timeout_failures = 0
+        self._consecutive_overload_failures = 0
         self._last_summary_dropped_count = 0
         self._last_summary_fallback_used = False
         self._last_feasibility_skip = False
@@ -2591,6 +2646,7 @@ class ContextCompressor(ContextEngine):
         self._summary_has_user_turn = None
         self._last_summary_error = None
         self._consecutive_timeout_failures = 0
+        self._consecutive_overload_failures = 0
         self._last_summary_dropped_count = 0
         self._last_summary_fallback_used = False
         self._last_feasibility_skip = False
@@ -2628,6 +2684,7 @@ class ContextCompressor(ContextEngine):
         self._cooldown_persist_failed = False
         self._last_summary_error = None
         self._consecutive_timeout_failures = 0
+        self._consecutive_overload_failures = 0
         self._fallback_compression_streak = 0
         self._ineffective_compression_count = 0
         self._prellm_skip_count = 0
@@ -3080,6 +3137,7 @@ class ContextCompressor(ContextEngine):
         self._summary_failure_cooldown_until = 0.0
         self._last_summary_error = None
         self._consecutive_timeout_failures = 0
+        self._consecutive_overload_failures = 0
         self._cooldown_persist_failed = False
 
         session_db = getattr(self, "_session_db", None)
@@ -4089,6 +4147,18 @@ class ContextCompressor(ContextEngine):
         else:
             prune_boundary = len(result) - protect_tail_count
 
+        # The pending tool round is output the model asked for and has not read
+        # yet: a stub makes it re-run the call (side effects included) or answer
+        # blind. Passes 2 and 4 spare it, unless the round alone exceeds a fifth
+        # of the window: then it must still give way (#61932, one 200KB read).
+        spared = _pending_tool_round(result)
+        if sum(_estimate_msg_budget_tokens(result[i]) for i in spared) > int(
+            (getattr(self, "context_length", 0) or 0) * _PENDING_ROUND_MAX_FRACTION
+        ):
+            spared = range(0)
+        if spared:
+            prune_boundary = min(prune_boundary, spared.start)
+
         # Pass 1: Deduplicate identical tool results.
         # When the same file is read multiple times, keep only the most recent
         # full copy and replace older duplicates with a back-reference.
@@ -4241,6 +4311,8 @@ class ContextCompressor(ContextEngine):
             if demote_end > prune_boundary and _protected_region_tokens() > soft_ceiling:
                 pressure_hits = 0
                 for i in range(max(0, prune_boundary), demote_end):
+                    if i in spared:
+                        continue
                     # Pressure passes override the just-loaded-skill guard:
                     # when the protected region itself blows the soft budget,
                     # sparing skill bodies would recreate the #61932 dead-end.
@@ -4261,7 +4333,7 @@ class ContextCompressor(ContextEngine):
                             last_tool_idx = i
                             break
                     for i in range(max(0, prune_boundary), len(result)):
-                        if last_tool_idx is not None and i == last_tool_idx:
+                        if i in spared or (last_tool_idx is not None and i == last_tool_idx):
                             continue
                         if result[i].get("role") == "tool":
                             if _demote_tool_result_at(i, spare_protected_skills=False):
@@ -4275,6 +4347,7 @@ class ContextCompressor(ContextEngine):
                     # enough headroom to continue the session.
                     if (
                         last_tool_idx is not None
+                        and last_tool_idx not in spared
                         and last_tool_idx >= prune_boundary
                         and _protected_region_tokens() > soft_ceiling
                     ):
@@ -5381,6 +5454,14 @@ This compaction should PRIORITISE preserving all information related to the focu
             stripped = strip_think_blocks(None, content).strip()
             if stripped:
                 content = stripped
+            # A refusal reuses the empty-content path (main-model retry, cooldown, abort), so it can
+            # never become the compaction checkpoint or _previous_summary.
+            if _response_refusal_text(response) or _is_summary_refusal(content):
+                raise RuntimeError(
+                    "Context compression LLM returned refusal content "
+                    f"(provider={self.provider or 'auto'} "
+                    f"model={self.summary_model or self.model})"
+                )
             # Redact the summary output as well — the summarizer LLM may
             # ignore prompt instructions and echo back secrets verbatim.
             summary = _redact_compaction_text(content.strip())
@@ -5436,10 +5517,15 @@ This compaction should PRIORITISE preserving all information related to the focu
                 or "does not exist" in _err_str
                 or "no available channel" in _err_str
             )
+            # A stalled stream guard raises TimeoutError("... stream stalled:
+            # no new output for 60s"), whose text has neither "timeout" nor
+            # "timed out" — it is still a deadline, not a network failure.
             _is_timeout = (
-                _status in {408, 429, 502, 504}
+                isinstance(e, TimeoutError)
+                or _status in {408, 429, 502, 504}
                 or "timeout" in _err_str
                 or "timed out" in _err_str
+                or "stalled" in _err_str
             )
             # Non-JSON / malformed-body responses from misconfigured providers
             # or proxies (e.g. an HTML 502 page returned with
@@ -5460,11 +5546,17 @@ This compaction should PRIORITISE preserving all information related to the focu
             # transient network events; treat them like a timeout so we fall
             # back to the main model instead of entering a 60-second cooldown.
             # See issue #18458.
-            _is_streaming_closed = _is_connection_error(e)
+            # Provider overload (Anthropic 529 / "overloaded_error") is a
+            # momentary capacity signal, not a reason to replace the middle of
+            # the conversation with a placeholder.
+            _is_overloaded = _status == 529 or "overloaded" in _err_str
+            _is_connection = _is_connection_error(e)
+            _is_streaming_closed = _is_connection and not _is_timeout
             # Provider returned HTTP 200 with empty or whitespace body (e.g.
             # degraded proxy channel / upstream provider fault; #94448).
             _is_empty_content = isinstance(e, RuntimeError) and (
                 "empty content" in _err_str
+                or "refusal content" in _err_str
                 # Sibling terminal "no usable response" shapes from the
                 # auxiliary boundary's _validate_llm_response (#7264): a None
                 # response or a malformed/missing choices[0].message — same
@@ -5575,7 +5667,7 @@ This compaction should PRIORITISE preserving all information related to the focu
                     min(self._consecutive_timeout_failures,
                         len(_TIMEOUT_COOLDOWN_LADDER)) - 1
                 ]
-            elif _is_json_decode or _is_streaming_closed or _is_empty_content or _is_truncated_summary:
+            elif _is_json_decode or _is_streaming_closed or _is_empty_content or _is_truncated_summary or _is_overloaded:
                 _transient_cooldown = 30
             else:
                 _transient_cooldown = 60
@@ -5592,7 +5684,25 @@ This compaction should PRIORITISE preserving all information related to the focu
             # marker — retrying once the provider recovers is strictly better
             # than dropping context (#29559, #25585, #94448). Mirrors the
             # auth-failure carve-out; independent of abort_on_summary_failure.
-            if _is_streaming_closed:
+            if _is_overloaded and not _is_timeout:
+                # Keep the transcript and retry after the cooldown; only a
+                # sustained outage (3 overloads in a row) degrades once to
+                # the deterministic fallback instead of growing until reset.
+                self._consecutive_overload_failures = (
+                    getattr(self, "_consecutive_overload_failures", 0) + 1
+                )
+                self._last_summary_network_failure = (
+                    self._consecutive_overload_failures < _OVERLOAD_ABORT_BUDGET
+                )
+            elif _is_timeout and _is_connection:
+                # First hang: keep the transcript and retry after the
+                # cooldown. A repeated hang means the summary route cannot
+                # finish this window, so degrade once to the deterministic
+                # fallback summary instead of looping on the same timeout.
+                self._last_summary_network_failure = (
+                    self._consecutive_timeout_failures < 2
+                )
+            elif _is_streaming_closed:
                 self._last_summary_network_failure = True
             elif _is_truncated_summary:
                 self._last_summary_truncated_failure = True
