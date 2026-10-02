@@ -5454,6 +5454,44 @@ class TelegramAdapter(BasePlatformAdapter):
         )
         return False
 
+    async def pause_intake(self) -> None:
+        """Stop fetching new updates while in-flight turns finish (gateway drain).
+
+        Updates not fetched yet stay in Telegram's queue (the offset is only
+        confirmed for what was already received), and the next process takes
+        them: the queue survives a cold start and update receipts prevent
+        repeats. The app keeps running, so already fetched updates and the
+        replies of running turns are still handled. One-way until the next
+        connect(); the polling recovery paths stay fenced meanwhile.
+        """
+        if getattr(self, "_polling_teardown_started", False):
+            return
+        self._polling_teardown_started = True
+        self._polling_progress_accepting = False
+        current_task = asyncio.current_task()
+        for task in (
+            getattr(self, "_polling_error_task", None),
+            getattr(self, "_polling_progress_verifier_task", None),
+        ):
+            if task and not task.done() and task is not current_task:
+                task.cancel()
+        updater = getattr(self._app, "updater", None) if self._app else None
+        if updater is not None and updater.running:
+            try:
+                await self._await_disconnect_step(
+                    updater.stop(), _UPDATER_STOP_TIMEOUT, "updater.stop()"
+                )
+            except Exception as stop_error:
+                logger.warning(
+                    "[%s] updater.stop() failed while pausing intake: %s",
+                    self.name,
+                    _redact_telegram_error_text(stop_error),
+                )
+        logger.info(
+            "[%s] Telegram intake paused for drain: new messages stay queued at Telegram",
+            self.name,
+        )
+
     async def disconnect(self) -> None:
         """Stop polling/webhook, cancel pending delayed deliveries, and disconnect."""
         # Mark disconnected first so the drop guard short-circuits any flush

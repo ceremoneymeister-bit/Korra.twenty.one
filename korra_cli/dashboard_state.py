@@ -1218,35 +1218,61 @@ def _kanban_items(
     return items, errors, max(total, len(items))
 
 
+def _session_id_for_key(db: Path, session_key: Any) -> Optional[str]:
+    if not session_key or not db.is_file():
+        return None
+    with closing(_ro(db)) as conn:
+        if "session_key" not in _columns(conn, "sessions"):
+            return None
+        found = conn.execute(
+            "SELECT id FROM sessions WHERE session_key = ? ORDER BY started_at DESC LIMIT 1",
+            (session_key,),
+        ).fetchone()
+    return found["id"] if found else None
+
+
 def _delivery_items(agents: list[Agent], *, now: float) -> list[dict[str, Any]]:
     since = now - 3 * 86400
     stuck_before = now - 15 * 60
     items: list[dict[str, Any]] = []
+    # The delivery ledger is one store in the main agent's home; each row names
+    # the bot (adapter_profile) it belongs to. A secondary agent's own database
+    # may still hold rows written by 0.21.15.
+    shared_db = next((agent.home / "state.db" for agent in agents if not agent.profile), None)
     for agent in agents:
-        db = agent.home / "state.db"
-        if not db.is_file():
-            continue
-        with closing(_ro(db)) as conn:
-            if not _columns(conn, "delivery_obligations"):
+        own_db = agent.home / "state.db"
+        sources = [(own_db, None if agent.profile else agent.name)]
+        if agent.profile and shared_db is not None:
+            sources.append((shared_db, agent.name))
+        seen: set[str] = set()
+        for db, owner in sources:
+            if not db.is_file():
                 continue
-            rows = conn.execute(
-                "SELECT obligation_id, session_key, platform, state, updated_at, "
-                "substr(content, 1, 240) AS preview FROM delivery_obligations "
-                "WHERE updated_at >= ? AND (state IN ('failed', 'abandoned') "
-                "OR (state IN ('pending', 'attempting') AND updated_at < ?)) "
-                "ORDER BY updated_at DESC LIMIT 10",
-                (since, stuck_before),
-            ).fetchall()
-            has_key = "session_key" in _columns(conn, "sessions")
+            with closing(_ro(db)) as conn:
+                columns = _columns(conn, "delivery_obligations")
+                if not columns:
+                    continue
+                scope, params = "", []
+                if owner is not None:
+                    if "adapter_profile" not in columns:
+                        if owner != "default":
+                            continue
+                    else:
+                        scope = " AND COALESCE(adapter_profile, 'default') = ?"
+                        params = [owner]
+                rows = conn.execute(
+                    "SELECT obligation_id, session_key, platform, state, updated_at, "
+                    "substr(content, 1, 240) AS preview FROM delivery_obligations "
+                    "WHERE updated_at >= ? AND (state IN ('failed', 'abandoned') "
+                    "OR (state IN ('pending', 'attempting') AND updated_at < ?))"
+                    + scope + " ORDER BY updated_at DESC LIMIT 10",
+                    (since, stuck_before, *params),
+                ).fetchall()
             for row in rows:
-                session_id = None
-                if has_key and row["session_key"]:
-                    found = conn.execute(
-                        "SELECT id FROM sessions WHERE session_key = ? "
-                        "ORDER BY started_at DESC LIMIT 1",
-                        (row["session_key"],),
-                    ).fetchone()
-                    session_id = found["id"] if found else None
+                if row["obligation_id"] in seen:
+                    continue
+                seen.add(row["obligation_id"])
+                session_id = _session_id_for_key(own_db, row["session_key"])
                 platform = _PLATFORM_LABELS.get(str(row["platform"] or "").lower(), str(row["platform"] or "мессенджер"))
                 preview = _trim(row["preview"], 110)
                 items.append({

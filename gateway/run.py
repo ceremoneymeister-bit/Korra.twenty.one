@@ -11450,6 +11450,27 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             )
         return len(notified)
 
+    async def _pause_platform_intake(self) -> None:
+        """Drain started: adapters that can, stop taking new messages from the platform.
+
+        Messages written during the drain then wait in the platform's own queue
+        for the next process instead of getting "not accepting". Idempotent.
+        """
+        adapters = list(self.adapters.values())
+        for amap in list(getattr(self, "_profile_adapters", {}).values()):
+            adapters.extend(amap.values())
+
+        async def _pause(adapter) -> None:
+            pause = getattr(adapter, "pause_intake", None)
+            if not callable(pause):
+                return
+            try:
+                await pause()
+            except Exception as e:
+                logger.warning("Pausing intake failed for %s: %s", getattr(adapter, "name", adapter), e)
+
+        await asyncio.gather(*(_pause(a) for a in adapters))
+
     async def _notify_active_sessions_of_shutdown(self) -> None:
         """Send shutdown/restart notifications to active chats and home channels.
 
@@ -12396,6 +12417,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         self._draining = True
 
         async def _run_restart() -> None:
+            await self._pause_platform_intake()
             await self._await_active_work_before_restart()
             # Launch the detached helper only AFTER the after-turn wait.
             # Its deadline is drain_timeout+5 and covers stop() teardown —
@@ -12790,6 +12812,19 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
             if not await asyncio.to_thread(ledger_enabled):
                 return []
+            if getattr(getattr(self, "config", None), "multiplex_profiles", False):
+                # 0.21.15 kept a secondary bot's undelivered replies in its
+                # profile's own state.db; bring them into the shared ledger once.
+                from gateway.delivery_ledger import import_legacy_profile_rows
+
+                await asyncio.to_thread(
+                    import_legacy_profile_rows,
+                    {
+                        name: home
+                        for name, home in _multiplex_profile_homes(self.config)
+                        if name and name != "default"
+                    },
+                )
             # Only claim rows whose exact transport owner is connected this
             # boot. A multiplexed gateway can host several bot identities for
             # one platform; platform-only filtering would spend a disconnected
@@ -16000,6 +16035,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             self._running = False
             self._clear_plugin_message_injector()
             self._draining = True
+            await self._pause_platform_intake()
 
             stop_room_worker = getattr(self, "_stop_hosted_room_worker", None)
             if callable(stop_room_worker):
