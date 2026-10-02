@@ -13262,25 +13262,22 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         marker_path.unlink()
         return discarded
 
-    async def _recover_unclean_sessions(self) -> tuple[int, int]:
-        """Recover exact active turns, then run the legacy recency fallback."""
-        exact = 0
-        fallback = 0
+    async def _recover_unclean_sessions(self) -> int:
+        """Resume exactly the turns that were running when the process died.
+
+        A session that merely had activity shortly before the crash is not
+        resumed: its turn had finished, and re-running it would send an answer
+        nobody asked for.
+        """
         try:
             agent_timeout = max(1.0, _float_env("KORRA_AGENT_TIMEOUT", 1800))
             marker_max_age = max(60 * 60, int(agent_timeout * 2))
-            exact = await self.async_session_store.recover_interrupted_turns(
+            return await self.async_session_store.recover_interrupted_turns(
                 max_age_seconds=marker_max_age
             )
         except Exception as exc:
             logger.warning("Exact active-turn recovery on startup failed: %s", exc)
-        try:
-            fallback = await self.async_session_store.suspend_recently_active(
-                max_age_seconds=120
-            )
-        except Exception as exc:
-            logger.warning("Legacy session recovery on startup failed: %s", exc)
-        return exact, fallback
+            return 0
 
     @staticmethod
     def _start_hosted_room_worker_sync():
@@ -13696,9 +13693,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             logger.warning("Process checkpoint recovery: %s", e)
 
         # Recover sessions that were active when the gateway last exited.
-        # Exact durable turn markers cover long-running work; the 120-second
-        # recency heuristic remains as an upgrade fallback for turns started by
-        # older Hermes versions that did not write exact markers.
+        # Only exact durable turn markers are resumed; a session that was
+        # merely recently active had finished its turn and gets no unasked
+        # answer after a crash.
         #
         # SKIP suspension after a clean (graceful) shutdown — the previous
         # process already drained active agents, so sessions aren't stuck.
@@ -13722,15 +13719,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     discarded,
                 )
         else:
-            exact, fallback = await self._recover_unclean_sessions()
-            recovered = exact + fallback
+            recovered = await self._recover_unclean_sessions()
             if recovered:
                 logger.info(
-                    "Marked %d in-flight session(s) as resumable from previous run "
-                    "(%d exact, %d legacy)",
+                    "Marked %d in-flight session(s) as resumable from previous run",
                     recovered,
-                    exact,
-                    fallback,
                 )
 
         # Stuck-loop detection (#7536): if a session has been active across

@@ -482,23 +482,18 @@ async def test_runner_active_turn_clear_stops_after_bounded_retries():
 
 
 @pytest.mark.asyncio
-async def test_unclean_recovery_promotes_exact_markers_before_legacy_fallback(
-    monkeypatch,
-):
+async def test_unclean_recovery_resumes_only_exact_markers(monkeypatch):
+    """K21-274: recent activity without a turn marker must not be resumed."""
     runner = object.__new__(GatewayRunner)
-    calls: list[str] = []
 
     monkeypatch.delenv("HERMES_AGENT_TIMEOUT", raising=False)
 
     async def _recover(*, max_age_seconds):
         assert max_age_seconds == ACTIVE_TURN_MAX_AGE_SECONDS
-        calls.append("exact")
         return 1
 
     async def _fallback(*, max_age_seconds):
-        assert max_age_seconds == 120
-        calls.append("fallback")
-        return 2
+        raise AssertionError("the recency fallback must not run")
 
     runner.session_store = MagicMock()
     setattr(
@@ -511,5 +506,4 @@ async def test_unclean_recovery_promotes_exact_markers_before_legacy_fallback(
         ),
     )
 
-    assert await runner._recover_unclean_sessions() == (1, 2)
-    assert calls == ["exact", "fallback"]
+    assert await runner._recover_unclean_sessions() == 1
