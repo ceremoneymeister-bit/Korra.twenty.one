@@ -80,7 +80,7 @@ describe("K21-117 hidden agent polling", () => {
 describe("K21-264 «Показать ещё»", () => {
   it("докладывает следующую порцию и не повторяет уже показанные разговоры", async () => {
     const row = (id: string, at: number) => ({ id, last_active: at } as SessionInfo);
-    const get = vi.spyOn(api, "getSessions").mockImplementation(async (limit, offset) => ({
+    const get = vi.spyOn(api, "getSessions").mockImplementation(async (limit = 20, offset = 0) => ({
       sessions: Array.from({ length: Math.min(limit, 130 - offset) }, (_, i) => row(`s-${offset + i}`, 1000 - offset - i)), total: 130, offset, limit,
     }));
     await render("designer");

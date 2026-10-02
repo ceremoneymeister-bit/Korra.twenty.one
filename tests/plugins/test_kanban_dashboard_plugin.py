@@ -752,7 +752,7 @@ def test_dashboard_done_actions_prompt_for_completion_summary():
     # кнопкой в карточке — идёт через один диалог `MoveDialog`, а не прямым
     # PATCH. Диалог требует текста для «Готово» (итог), «Нужно решение»
     # (причина) и возврата на доработку, и только он шлёт PATCH со статусом.
-    assert 'setModal({ kind: "move", task, target })' in js
+    assert 'setModal({ kind: "move", task, target: rule.dialog })' in js
     assert 'const needsText = target === "done" || (target === "ready" && (task.status === "review" || task.status === "done"));' in js
     assert 'if (target === "done") { patch.summary = text.trim(); patch.result = text.trim(); }' in js
     assert 'if (target === "blocked") patch.block_reason = text.trim();' in js
@@ -761,8 +761,8 @@ def test_dashboard_done_actions_prompt_for_completion_summary():
     assert 'disabled: busy || (needsText && !text.trim()) || (target === "ready" && !assignee)' in js
     assert js.count('const patch = { status: target };') == 1
     assert '"PATCH", { status' not in js
-    # Сброс перетаскивания и отказ от «автоматических» этапов без диалога.
-    assert 'if (!ACTION[target]) { setNotice(' in js
+    # Отказ от «автоматических» этапов без диалога — в единой таблице moveRule.
+    assert 'return { explain: "Этот этап меняется автоматически.' in js
 
 
 def test_dashboard_cancel_keeps_task_in_old_status(client):
