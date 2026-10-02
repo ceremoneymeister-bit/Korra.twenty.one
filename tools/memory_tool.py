@@ -551,11 +551,16 @@ class MemoryStore:
                     "usage": f"{current:,}/{limit:,}",
                 })
 
+            replaced_entry = entries[idx]
             entries[idx] = new_content
             self._set_entries(target, entries)
             self.save_to_disk(target)
 
-        return self._success_response(target, "Entry replaced.")
+        return self._success_response(
+            target,
+            "Entry replaced: the whole entry was overwritten with the new content.",
+            replaced_entry=replaced_entry,
+        )
 
     def remove(self, target: str, old_text: str, *, exact: bool = False) -> Dict[str, Any]:
         """Remove a matching entry; exact mode never deletes a changed card."""
@@ -635,6 +640,7 @@ class MemoryStore:
             # Work on a copy; only commit if the whole batch validates.
             working: List[str] = list(self._entries_for(target))
             limit = self._char_limit(target)
+            replaced_entries: Dict[int, str] = {}
 
             for i, op in enumerate(operations):
                 op = op or {}
@@ -666,6 +672,7 @@ class MemoryStore:
                             target,
                             f"{pos}: '{old_text}' matched multiple distinct entries -- be more specific.",
                         )
+                    replaced_entries[i] = working[matches[0]]
                     working[matches[0]] = content
 
                 elif act == "remove":
@@ -706,7 +713,10 @@ class MemoryStore:
             self._set_entries(target, working)
             self.save_to_disk(target)
 
-        return self._success_response(target, f"Applied {len(operations)} operation(s).")
+        extra = {"replaced_entries": replaced_entries} if replaced_entries else {}
+        return self._success_response(
+            target, f"Applied {len(operations)} operation(s).", **extra
+        )
 
     def _batch_error(self, target: str, message: str) -> Dict[str, Any]:
         """Build a batch-abort error that reports live (uncommitted) state."""
@@ -739,7 +749,7 @@ class MemoryStore:
         """Truncated one-line previews of entries for error feedback."""
         return [e[:width] + ("..." if len(e) > width else "") for e in entries]
 
-    def _success_response(self, target: str, message: str = None) -> Dict[str, Any]:
+    def _success_response(self, target: str, message: str = None, **extra: Any) -> Dict[str, Any]:
         # A successful write means the consolidation loop made progress, so the
         # per-turn failure budget resets (the cap counts consecutive failures,
         # not lifetime ones within a turn) (#42405).
@@ -765,6 +775,7 @@ class MemoryStore:
         }
         if message:
             resp["message"] = message
+        resp.update(extra)
         resp["note"] = "Write saved. This update is complete — do not repeat it."
         return resp
 
@@ -1127,6 +1138,11 @@ def _missing_old_text_error(store: "MemoryStore", target: str, action: str) -> s
                 f"'{action}' needs old_text -- a short unique substring of the entry "
                 f"to {action}. None was provided. Reissue the {action} with old_text "
                 f"set to part of one of the current_entries below."
+                + (
+                    " For 'replace', content is the COMPLETE new entry -- the whole "
+                    "matched entry is overwritten, not just the old_text span."
+                    if action == "replace" else ""
+                )
             ),
             "current_entries": entries,
             "usage": f"{current:,}/{limit:,}",
@@ -1153,10 +1169,11 @@ def memory_tool(
                    atomically against the final char budget in ONE call.
 
     ``new_text`` is accepted as an alias for ``content`` on both shapes. The
-    replace/remove ops target by ``old_text`` and supply the replacement via
-    ``content``; callers naturally reach for ``new_text`` to mirror
-    ``old_text`` (it's the patch tool's ``old_string``/``new_string`` shape),
-    which silently left ``content`` empty and errored. Coalescing here removes
+    replace/remove ops locate the entry by ``old_text``; for ``replace`` the
+    ``content`` is the COMPLETE new entry -- the whole matched entry is
+    overwritten, not just the ``old_text`` span -- and the result echoes the
+    overwritten text as ``replaced_entry`` / ``replaced_entries``. Callers
+    reach for ``new_text`` to mirror ``old_text``; coalescing here removes
     that trap.
 
     Returns JSON string with results.
@@ -1354,15 +1371,15 @@ MEMORY_SCHEMA = {
             },
             "content": {
                 "type": "string",
-                "description": "The entry content. Required for 'add' and 'replace' (single-op shape). Alias: 'new_text' is also accepted (mirrors old_text)."
+                "description": "The entry content. Required for 'add' and 'replace' (single-op shape). For 'replace' it is the COMPLETE new entry: the whole matched entry is overwritten, so include everything you want to keep. Alias: 'new_text' is also accepted (same meaning)."
             },
             "old_text": {
                 "type": "string",
-                "description": "REQUIRED for 'replace' and 'remove' (single-op shape): a short unique substring identifying the existing entry to modify. Omit only for 'add'."
+                "description": "REQUIRED for 'replace' and 'remove' (single-op shape): a short unique substring IDENTIFYING the existing entry to modify -- it only locates the entry, it is not spliced out. Omit only for 'add'."
             },
             "new_text": {
                 "type": "string",
-                "description": "Alias for 'content' (single-op shape). Provided so the replace/remove old_text/new_text pairing works; if both are set, 'content' wins."
+                "description": "Alias for 'content' (single-op shape): for 'replace' the COMPLETE new entry, not a patch of old_text. If both are set, 'content' wins."
             },
             "operations": {
                 "type": "array",
@@ -1375,7 +1392,7 @@ MEMORY_SCHEMA = {
                     "type": "object",
                     "properties": {
                         "action": {"type": "string", "enum": ["add", "replace", "remove"]},
-                        "content": {"type": "string", "description": "Entry content for add/replace. Alias: 'new_text'."},
+                        "content": {"type": "string", "description": "Entry content for add/replace. For replace, the COMPLETE new entry (the whole entry is overwritten). Alias: 'new_text'."},
                         "new_text": {"type": "string", "description": "Alias for 'content' in a batch op."},
                         "old_text": {"type": "string", "description": "Substring identifying the entry for replace/remove."},
                     },
