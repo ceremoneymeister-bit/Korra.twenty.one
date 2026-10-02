@@ -468,15 +468,26 @@ def _digest_history(messages_snapshot: List[Dict], tail: int = 24) -> List[Dict]
 # the user-message that the forked review agent receives.  AIAgent exposes
 # them as class attributes (``_MEMORY_REVIEW_PROMPT`` etc.) for back-compat;
 # the actual text lives here so future edits are one-place.
+# Shared by the memory-only and combined prompts: the memory tool has two targets and the fork
+# must pick ONE per fact, otherwise the same lesson fills both memory files and the skill.
+_MEMORY_ROUTING_BLOCK = (
+    "TWO distinct stores — pick the right one for each fact:\n"
+    "  • USER.md (memory tool, target='user'): who the user is — persona, preferences, "
+    "communication and work style, personal details they revealed, and expectations about how "
+    "you should behave.\n"
+    "  • MEMORY.md (memory tool, target='memory'): facts about the ENVIRONMENT you operate in — "
+    "tool quirks, project conventions, config gotchas, paths and endpoints that matter.\n\n"
+    "One fact goes to ONE store, never both — writing it to both bloats both files until they "
+    "hit their size limits and crowds out the facts that matter; misrouting it puts it where "
+    "the next session won't look. If the tool schema lists only one target, that store is the "
+    "only one enabled — use it and skip the other.\n\n"
+)
+
 _MEMORY_REVIEW_PROMPT = (
     "Review the conversation above and consider saving to memory if appropriate.\n\n"
-    "Focus on:\n"
-    "1. Has the user revealed things about themselves — their persona, desires, "
-    "preferences, or personal details worth remembering?\n"
-    "2. Has the user expressed expectations about how you should behave, their work "
-    "style, or ways they want you to operate?\n\n"
-    "If something stands out, save it using the memory tool. "
-    "If nothing is worth saving, just say 'Nothing to save.' and stop."
+    "Memory has " + _MEMORY_ROUTING_BLOCK +
+    "If something stands out, save it once, in the right store, using the memory tool with "
+    "the matching target. If nothing is worth saving, just say 'Nothing to save.' and stop."
 )
 
 # Shared shape contract for every skill mutation. Korra needs reusable working
@@ -663,10 +674,7 @@ _SKILL_REVIEW_PROMPT = (
 
 _COMBINED_REVIEW_PROMPT = (
     "Review the conversation above and update two things:\n\n"
-    "**Memory**: who the user is. Did the user reveal persona, "
-    "desires, preferences, personal details, or expectations about "
-    "how you should behave? Save facts about the user and durable "
-    "preferences with the memory tool.\n\n"
+    "**Memory**: " + _MEMORY_ROUTING_BLOCK +
     "**Skills**: how to do this class of task. Be ACTIVE — most "
     "sessions produce at least one skill update. A pass that does "
     "nothing is a missed learning opportunity, not a neutral outcome.\n\n"
@@ -720,11 +728,14 @@ _COMBINED_REVIEW_PROMPT = (
     "need no prior read. On a read-before-write refusal: view the "
     "named target once, retry the write once, do not loop.\n\n"
     "User-preference embedding: when the user complains about how "
-    "you handled a task, update the skill that governs that task — "
-    "memory alone isn't enough. Memory says 'who the user is and "
-    "what the current situation and state of your operations are'; "
-    "skills say 'how to do this class of task for this user'. Both "
-    "should carry user-preference lessons when relevant.\n\n"
+    "you handled a task, update the skill that governs that task "
+    "rather than memory. Memory says 'who the user is and what the "
+    "current situation and state of your operations are'; skills say "
+    "'how to do this class of task for this user'. A user-preference "
+    "lesson lives in exactly ONE place: the skill that governs the task "
+    "when one exists, USER.md only for cross-cutting preferences no skill "
+    "owns — never both. Duplicating it is how a memory file ends up "
+    "restating SKILL.md until both hit their size limits.\n\n"
     "If you notice overlapping existing skills, mention it — the "
     "background curator handles consolidation.\n\n"
     "Protected skills (DO NOT edit these):\n"
@@ -1207,7 +1218,7 @@ def build_cache_parity_fork(
     The caller keeps ownership of: registering the fork on the parent's
     ``_active_children`` / ``_background_review_agent`` slots, thread tool
     whitelisting, running the conversation, usage attribution, and teardown
-    (``shutdown_memory_provider()`` + ``close()``).
+    (``release_clients()`` only: the fork shares the parent's session id).
     """
     # Local import to avoid a hard circular dep at module load.
     from run_agent import AIAgent
@@ -1380,11 +1391,8 @@ def build_cache_parity_fork(
         review_agent.session_start = agent.session_start
     review_agent.session_id = agent.session_id
     # The fork shares the parent's live session_id (pinned above for
-    # prefix-cache parity). It is single-lifecycle and calls close()
-    # right after this run_conversation(); without opting out, close()
-    # would finalize the parent's still-active session row mid
-    # conversation (the review fires every ~10 turns). Leave session
-    # finalization to the real owner (CLI close / gateway reset / cron).
+    # prefix-cache parity). Opt out of session finalization in case anything
+    # still close()s it; the review thread itself only release_clients().
     review_agent._end_session_on_close = False
     # DETACHED IN-MEMORY COMPACTION (issue #93057). The fork shares
     # the parent's session_id (pinned above for prefix-cache parity),
@@ -1761,16 +1769,12 @@ def _run_review_in_thread(
             # summary still needs the completed review agent's tool results.
             review_messages = list(getattr(review_agent, "_session_messages", []))
 
-            # Tear down memory providers while stdout is still
-            # redirected so background thread teardown (Honcho flush,
-            # Hindsight sync, etc.) stays silent.  The finally block
-            # below is a safety net for the exception path.
+            # The fork shares the foreground session id for prompt-cache
+            # parity. close() and shutdown_memory_provider() are session-bound:
+            # close() kills that id's terminal, background processes and
+            # browser. Release only the fork's own clients.
             try:
-                review_agent.shutdown_memory_provider()
-            except Exception:
-                pass
-            try:
-                review_agent.close()
+                review_agent.release_clients()
             except Exception:
                 pass
             review_agent = None
@@ -1843,11 +1847,7 @@ def _run_review_in_thread(
             try:
                 with thread_scoped_silence():
                     try:
-                        review_agent.shutdown_memory_provider()
-                    except Exception:
-                        pass
-                    try:
-                        review_agent.close()
+                        review_agent.release_clients()
                     except Exception:
                         pass
             except Exception:
