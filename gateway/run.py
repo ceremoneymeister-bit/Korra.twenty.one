@@ -12812,6 +12812,19 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
             if not await asyncio.to_thread(ledger_enabled):
                 return []
+            if getattr(getattr(self, "config", None), "multiplex_profiles", False):
+                # 0.21.15 kept a secondary bot's undelivered replies in its
+                # profile's own state.db; bring them into the shared ledger once.
+                from gateway.delivery_ledger import import_legacy_profile_rows
+
+                await asyncio.to_thread(
+                    import_legacy_profile_rows,
+                    {
+                        name: home
+                        for name, home in _multiplex_profile_homes(self.config)
+                        if name and name != "default"
+                    },
+                )
             # Only claim rows whose exact transport owner is connected this
             # boot. A multiplexed gateway can host several bot identities for
             # one platform; platform-only filtering would spend a disconnected

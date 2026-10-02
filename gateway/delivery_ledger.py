@@ -49,6 +49,7 @@ import sqlite3
 import threading
 import time
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
 from korra_constants import get_process_hermes_home
@@ -393,6 +394,67 @@ def sweep_recoverable(
                     "attempts": attempts + 1,
                 })
     return claimed
+
+
+_LEGACY_COLUMNS = (
+    "obligation_id", "session_key", "platform", "chat_id", "thread_id", "content",
+    "state", "attempts", "created_at", "updated_at", "owner_pid",
+    "owner_started_at", "last_error",
+)
+
+
+def import_legacy_profile_rows(profile_homes: Dict[str, Any]) -> int:
+    """Move undelivered rows 0.21.15 wrote into secondary profiles' own ``state.db``.
+
+    That version kept a secondary bot's ledger rows under its profile home; the
+    shared store is the process home now. Each such row is copied once into the
+    shared store (``INSERT OR IGNORE`` on the obligation id) and marked
+    ``migrated`` at the source, so the usual sweep redelivers it exactly once.
+    Rows whose owner process is still alive are left alone. Best-effort per
+    profile; returns the number of rows moved.
+    """
+    shared = _db_path().resolve()
+    moved = 0
+    for profile, home in profile_homes.items():
+        path = Path(home) / "state.db"
+        try:
+            if not path.is_file() or path.resolve() == shared:
+                continue
+            src = sqlite3.connect(path, timeout=5)
+        except Exception:
+            logger.debug("legacy ledger: cannot open %s", path, exc_info=True)
+            continue
+        try:
+            columns = {r[1] for r in src.execute("PRAGMA table_info(delivery_obligations)")}
+            if not set(_LEGACY_COLUMNS) <= columns:
+                continue
+            rows = src.execute(
+                f"SELECT {', '.join(_LEGACY_COLUMNS)} FROM delivery_obligations "
+                "WHERE state IN ('pending', 'attempting', 'failed')"
+            ).fetchall()
+            rows = [r for r in rows if not _owner_alive(r[10], r[11])]
+            if not rows:
+                continue
+            with _DB_LOCK, _transaction() as conn:
+                conn.executemany(
+                    f"""INSERT OR IGNORE INTO delivery_obligations
+                        ({', '.join(_LEGACY_COLUMNS)}, adapter_profile)
+                        VALUES ({', '.join('?' * len(_LEGACY_COLUMNS))}, ?)""",
+                    [(*r, profile) for r in rows],
+                )
+            with src:
+                src.executemany(
+                    "UPDATE delivery_obligations SET state='migrated' WHERE obligation_id=?",
+                    [(r[0],) for r in rows],
+                )
+            moved += len(rows)
+        except Exception:
+            logger.debug("legacy ledger: import from %s failed", path, exc_info=True)
+        finally:
+            src.close()
+    if moved:
+        logger.info("Moved %d undelivered reply row(s) from profile databases to the shared ledger", moved)
+    return moved
 
 
 def sweep_failed_for_runtime(
