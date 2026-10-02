@@ -45,6 +45,21 @@ import pytest
 from korra_state import SessionDB
 
 
+@pytest.fixture(autouse=True)
+def _no_tool_discovery(monkeypatch):
+    """Skip real tool discovery (browser/node/npx probes) for these tests.
+
+    Agent init and the compaction-boundary tool refresh each rebuild tool
+    definitions, which costs seconds per call on cold CI runners and is
+    irrelevant to locking.
+    """
+    import model_tools
+    import run_agent
+
+    monkeypatch.setattr(run_agent, "get_tool_definitions", lambda *a, **k: [])
+    monkeypatch.setattr(model_tools, "get_tool_definitions", lambda *a, **k: [])
+
+
 def _build_agent_with_db(
     db: SessionDB,
     session_id: str,

@@ -34,6 +34,21 @@ from agent.conversation_compression import (
 from korra_state import SessionDB
 
 
+@pytest.fixture(autouse=True)
+def _no_tool_discovery(monkeypatch):
+    """Skip real tool discovery (browser/node/npx probes) for these tests.
+
+    Agent init and the compaction-boundary tool refresh each rebuild tool
+    definitions, which costs seconds per call on cold CI runners and is
+    irrelevant to rotation state.
+    """
+    import model_tools
+    import run_agent
+
+    monkeypatch.setattr(run_agent, "get_tool_definitions", lambda *a, **k: [])
+    monkeypatch.setattr(model_tools, "get_tool_definitions", lambda *a, **k: [])
+
+
 def _build_agent_with_db(db: SessionDB, session_id: str, platform: str = "telegram"):
     with patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-key"}):
         from run_agent import AIAgent
@@ -64,6 +79,9 @@ def _build_agent_with_db(db: SessionDB, session_id: str, platform: str = "telegr
     compressor._last_aux_model_failure_model = None
     compressor._last_aux_model_failure_error = None
     agent.context_compressor = compressor
+    # The compressor is a stub: skip the one-time aux-model feasibility probe,
+    # which would resolve a real auxiliary provider on first compression.
+    agent._compression_feasibility_checked = True
     # ROTATION fallback path — pin in_place=False so these keep covering fork
     # rotation regardless of the global default (flipped to True in #38763).
     agent.compression_in_place = False
