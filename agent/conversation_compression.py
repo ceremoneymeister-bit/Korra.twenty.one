@@ -4128,6 +4128,10 @@ def compress_context(
                         "No messages were dropped — conversation continues unchanged. "
                         "Run /compress to retry, or /new to start a fresh session."
                     )
+                # The abort armed a summary cooldown: the overflow loops must
+                # see a temporary defer, so a failed summary never ends in
+                # compression_exhausted and a gateway session reset.
+                _mark_compression_blocked_transient(agent, agent.context_compressor)
                 _existing_sp = getattr(agent, "_cached_system_prompt", None)
                 if not _existing_sp:
                     _existing_sp = agent._build_system_prompt(system_message)

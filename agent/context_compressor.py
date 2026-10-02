@@ -5436,10 +5436,15 @@ This compaction should PRIORITISE preserving all information related to the focu
                 or "does not exist" in _err_str
                 or "no available channel" in _err_str
             )
+            # A stalled stream guard raises TimeoutError("... stream stalled:
+            # no new output for 60s"), whose text has neither "timeout" nor
+            # "timed out" — it is still a deadline, not a network failure.
             _is_timeout = (
-                _status in {408, 429, 502, 504}
+                isinstance(e, TimeoutError)
+                or _status in {408, 429, 502, 504}
                 or "timeout" in _err_str
                 or "timed out" in _err_str
+                or "stalled" in _err_str
             )
             # Non-JSON / malformed-body responses from misconfigured providers
             # or proxies (e.g. an HTML 502 page returned with
@@ -5460,7 +5465,8 @@ This compaction should PRIORITISE preserving all information related to the focu
             # transient network events; treat them like a timeout so we fall
             # back to the main model instead of entering a 60-second cooldown.
             # See issue #18458.
-            _is_streaming_closed = _is_connection_error(e)
+            _is_connection = _is_connection_error(e)
+            _is_streaming_closed = _is_connection and not _is_timeout
             # Provider returned HTTP 200 with empty or whitespace body (e.g.
             # degraded proxy channel / upstream provider fault; #94448).
             _is_empty_content = isinstance(e, RuntimeError) and (
@@ -5592,7 +5598,15 @@ This compaction should PRIORITISE preserving all information related to the focu
             # marker — retrying once the provider recovers is strictly better
             # than dropping context (#29559, #25585, #94448). Mirrors the
             # auth-failure carve-out; independent of abort_on_summary_failure.
-            if _is_streaming_closed:
+            if _is_timeout and _is_connection:
+                # First hang: keep the transcript and retry after the
+                # cooldown. A repeated hang means the summary route cannot
+                # finish this window, so degrade once to the deterministic
+                # fallback summary instead of looping on the same timeout.
+                self._last_summary_network_failure = (
+                    self._consecutive_timeout_failures < 2
+                )
+            elif _is_streaming_closed:
                 self._last_summary_network_failure = True
             elif _is_truncated_summary:
                 self._last_summary_truncated_failure = True
