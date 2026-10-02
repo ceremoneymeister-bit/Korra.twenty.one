@@ -753,6 +753,20 @@ describe("ProfileBuilderPage — мастер создания агента", ()
     expect(location()).toBe("/profiles?agent=designer&edit=model");
   });
 
+  it("свой агент без настроенной модели честно называется «не настроена» и не шлёт пробный запрос", async () => {
+    apiMocks.createProfile.mockResolvedValueOnce({ ok: true, name: "pomoschnik", model_set: false });
+    await openWizard();
+    await enterText(nameInput(), "Помощник");
+    await click(findButton("Создать агента"));
+    await flush();
+    expect(container.textContent).toContain("Модель не настроена");
+    expect(container.textContent).toContain("не настроена");
+    expect(container.textContent).not.toContain("не сохранилась");
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    await click(findButton("Настроить модель"));
+    expect(location()).toBe("/profiles?agent=pomoschnik&edit=model");
+  });
+
   it("возврат к своему агенту сохраняет написанную роль и имя", async () => {
     await openWizard();
     await enterText(nameInput(), "Помощник");

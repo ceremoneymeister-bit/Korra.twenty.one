@@ -906,8 +906,10 @@ def _create_custom_profile(body: ProfileCreate, *, _staging_dir=None):
         # has already copied the source profile's skills, including any
         # user-installed skills. When no_skills=True, create_profile() wrote
         # the opt-out marker and seed_profile_skills() will no-op.
-        if not clone:
-            profiles_mod.seed_profile_skills(path, quiet=True)
+        if not clone and profiles_mod.seed_profile_skills(path, quiet=True) is None and _staging_dir is not None:
+            # The keyed create publishes only a fully prepared agent; the
+            # unkeyed legacy path stays best-effort.
+            raise RuntimeError("Не удалось подготовить навыки агента. Повторите создание.")
 
         # Match the CLI's profile-create flow: named profiles should get a
         # wrapper in ~/.local/bin when the alias is safe to create.
@@ -934,6 +936,8 @@ def _create_custom_profile(body: ProfileCreate, *, _staging_dir=None):
             model_set = True
         except Exception:
             _log.exception("Setting model for new profile %s failed", body.name)
+            if _staging_dir is not None:
+                raise HTTPException(status_code=500, detail="Не удалось сохранить модель агента. Повторите создание.")
         # Korra: тот же засев ключей, что и при смене провайдера у готового
         # профиля (PUT /api/profiles/{name}/model). Без него агент, созданный
         # мастером в панели с провайдером вроде custom:*, поднимался без ключа
@@ -955,6 +959,10 @@ def _create_custom_profile(body: ProfileCreate, *, _staging_dir=None):
                 )
         except Exception:
             _log.debug("seed_provider_credentials_from_root skipped", exc_info=True)
+
+    if not model_set:
+        saved_model, saved_provider = profiles_mod._read_config_model(path)
+        model_set = bool(saved_model and saved_provider)
 
     # Optional MCP servers. Best-effort, same rationale as model assignment.
     mcp_written = 0

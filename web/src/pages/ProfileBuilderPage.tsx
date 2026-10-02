@@ -424,10 +424,10 @@ export default function ProfileBuilderPage() {
       // Агент уже есть на диске: неудача обновления каталога — не повод
       // считать создание провалившимся и тем более повторять его.
       void refreshProfiles().catch(() => undefined);
-      const modelSaved = selectedTemplate ? res.model_set === true : !picked || res.model_set !== false;
+      const modelSaved = res.model_set === true;
       if (!modelSaved) {
         showToast(
-          "Агент создан, но модель не сохранилась — задайте её в настройках агента.",
+          "Агент создан, но модель не настроена — задайте её в настройках агента.",
           "error",
         );
       }
@@ -447,7 +447,7 @@ export default function ProfileBuilderPage() {
         knowledgeSaved: res.knowledge_saved === true,
         materialSaved: res.knowledge_saved === true && Boolean(initialKnowledge?.material),
       });
-      if (selectedTemplate && !modelSaved) {
+      if (!modelSaved) {
         setProbeState("error");
         setProbeError("Модель не настроена");
         setProbeDetail("Подключите чат-модель в настройках агента. Его роль и навыки уже сохранены.");
@@ -507,7 +507,11 @@ export default function ProfileBuilderPage() {
 
   if (probeFor !== null) {
     const failure =
-      probeState === "error" ? explainProbeFailure(probeError, probeDetail) : null;
+      probeState !== "error"
+        ? null
+        : probeFor.modelSaved
+          ? explainProbeFailure(probeError, probeDetail)
+          : { kind: "config" as const, title: "Модель не настроена", advice: probeDetail, keys: false };
     const savedModel = probeFor.model
       ? `${probeFor.model.providerName} · ${probeFor.model.model}`
       : cloning
@@ -551,7 +555,7 @@ export default function ProfileBuilderPage() {
                 ) : (
                   <>
                     <Badge tone="warning" className="shrink-0">
-                      не сохранилась
+                      не настроена
                     </Badge>
                     задайте модель в меню вкладки
                   </>
@@ -669,19 +673,19 @@ export default function ProfileBuilderPage() {
                 <div className="grid gap-2">
                   <div className="flex items-start gap-2">
                     <Badge tone="warning" className="shrink-0">
-                      не отвечает
+                      {probeFor.modelSaved ? "не отвечает" : "нужна модель"}
                     </Badge>
                     <p className="text-sm font-medium">{failure.title}</p>
                   </div>
                   <p className="text-sm">{failure.advice}</p>
-                  {(probeDetail || probeError) && (
+                  {probeFor.modelSaved && (probeDetail || probeError) && (
                     <p className="break-words text-xs text-[var(--neo-text-secondary)]">
                       Ответ сервера: {(probeDetail || probeError).slice(0, 300)}
                     </p>
                   )}
                 </div>
                 <div className="flex flex-wrap justify-end gap-2">
-                  {probeFor.role === "template" && !probeFor.modelSaved && (
+                  {!probeFor.modelSaved && (
                     <Button ghost onClick={() => navigate(`/profiles?agent=${encodeURIComponent(probeFor.id)}&edit=model`)}>
                       Настроить модель
                     </Button>
