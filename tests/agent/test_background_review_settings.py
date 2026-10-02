@@ -176,3 +176,20 @@ def test_fresh_profile_can_start_automatic_review_without_config_write(tmp_path,
     thread.return_value.start.assert_called_once()
     assert agent._cached_system_prompt == 'test-cached-system-prompt'
     assert not (tmp_path / 'config.yaml').exists()
+
+
+def test_failed_second_read_keeps_an_explicit_off_switch(tmp_path, monkeypatch):
+    from korra_cli import config as cfg_mod
+
+    monkeypatch.setenv('HERMES_HOME', str(tmp_path))
+    (tmp_path / 'config.yaml').write_text('auxiliary: {background_review: {enabled: false}}\n')
+    real_loader = cfg_mod._load_config_impl
+
+    def _fail_merged_read(*args, **kwargs):
+        # strict read passed; the merged read fails and serves defaults
+        return cfg_mod.FailedConfigRead({}, error=OSError("busy"))
+
+    monkeypatch.setattr(cfg_mod, '_load_config_impl', _fail_merged_read)
+    assert br.load_background_review_settings() == (False, {})
+    monkeypatch.setattr(cfg_mod, '_load_config_impl', real_loader)
+    assert br.load_background_review_settings()[0] is False

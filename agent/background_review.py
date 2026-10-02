@@ -278,6 +278,10 @@ def load_background_review_settings() -> tuple[bool, Dict[str, Any]]:
         # Reuse the strict raw-read guard without performing any config write.
         require_readable_config_before_write()
         cfg = load_config_readonly()
+        # A failure between the two reads serves defaults, which would turn an
+        # explicit ``enabled: false`` back on.
+        if getattr(cfg, "read_error", None):
+            raise ValueError("config could not be read") from cfg.read_error
         aux = cfg.get("auxiliary", {})
         if not isinstance(aux, dict):
             raise ValueError("auxiliary must be a mapping")
