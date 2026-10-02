@@ -683,6 +683,44 @@ def _auto_truncate_response_history(
     return [conversation_history[index] for index in sorted(kept_indices)]
 
 
+_LEARNING_SLASH_RE = re.compile(r"^/(learn|refine)(?=\s|$)\s*(.*)$", re.DOTALL)
+
+
+def _parse_learning_slash(user_message: Any) -> Optional[tuple]:
+    """``("learn" | "refine", args)`` for a plain-text ``/learn`` or ``/refine`` turn."""
+    if not isinstance(user_message, str):
+        return None
+    match = _LEARNING_SLASH_RE.match(user_message.strip())
+    if not match:
+        return None
+    return match.group(1), match.group(2).strip()
+
+
+def _start_manual_refine(agent: Any, history: Any, focus: str) -> str:
+    """Start the same manual review as the messenger ``/refine``; return the reply text."""
+    snapshot = list(history or [])
+    if not snapshot:
+        return "Пока нечего разбирать: в этом диалоге ещё нет сообщений."
+    try:
+        started = agent._spawn_background_review(
+            messages_snapshot=snapshot,
+            review_memory=True,
+            review_skills="skill_manage" in getattr(agent, "valid_tool_names", set()),
+            focus=focus or None,
+            manual=True,
+        )
+    except Exception as exc:
+        logger.warning("Manual /refine failed to start: %s", exc, exc_info=True)
+        return f"Не удалось запустить /refine: {exc}"
+    if started is False:
+        return "Разбор уже выполняется. Дождитесь его завершения."
+    tail = f" (тема: {focus})" if focus else ""
+    return (
+        f"⚗ Изучаю диалог в фоне{tail}. Если найду, что стоит сохранить, "
+        "это появится в памяти и навыках агента; итог в этот чат не придёт."
+    )
+
+
 def _normalize_chat_content(
     content: Any, *, _max_depth: int = 10, _depth: int = 0,
 ) -> str:
@@ -7978,8 +8016,18 @@ class APIServerAdapter(BasePlatformAdapter):
         )
         request_session_source = _api_request_session_source.get()
 
+        learning_slash = _parse_learning_slash(user_message)
+
         def _run():
             from gateway.session_context import clear_session_vars
+
+            run_user_message = user_message
+            persist_message_kwargs: Dict[str, Any] = {}
+            if learning_slash and learning_slash[0] == "learn":
+                from agent.learn_prompt import build_learn_prompt
+
+                run_user_message = build_learn_prompt(learning_slash[1])
+                persist_message_kwargs["persist_user_message"] = user_message
 
             with self._profile_scope(request_profile):
                 tokens = self._bind_api_server_session(
@@ -8027,13 +8075,24 @@ class APIServerAdapter(BasePlatformAdapter):
                     # ``agent_ref``, and only /v1/runs has a run_id, so neither
                     # is a usable hook for the rest.
                     self._shutdown_interruptible_agents[id(agent)] = agent
-                    result = agent.run_conversation(
-                        user_message=user_message,
-                        conversation_history=conversation_history,
-                        task_id=effective_task_id,
-                        **({"persist_user_display_metadata": persist_user_display_metadata}
-                           if persist_user_display_metadata else {}),
-                    )
+                    if learning_slash and learning_slash[0] == "refine":
+                        result = {
+                            "final_response": _start_manual_refine(
+                                agent, conversation_history, learning_slash[1]
+                            ),
+                            "messages": list(conversation_history or []),
+                            "api_calls": 0,
+                            "completed": True,
+                        }
+                    else:
+                        result = agent.run_conversation(
+                            user_message=run_user_message,
+                            conversation_history=conversation_history,
+                            task_id=effective_task_id,
+                            **persist_message_kwargs,
+                            **({"persist_user_display_metadata": persist_user_display_metadata}
+                               if persist_user_display_metadata else {}),
+                        )
                     usage = {
                         "input_tokens": getattr(agent, "session_prompt_tokens", 0) or 0,
                         "output_tokens": getattr(agent, "session_completion_tokens", 0) or 0,

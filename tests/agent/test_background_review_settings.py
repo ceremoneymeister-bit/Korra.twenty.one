@@ -60,7 +60,7 @@ def test_invalid_config_stays_untouched_and_does_not_start_review(tmp_path, monk
     assert path.read_text() == original
 
 
-@pytest.mark.parametrize('surface', ['cli', 'gateway'])
+@pytest.mark.parametrize('surface', ['cli', 'gateway', 'api'])
 def test_manual_refine_without_topic_starts_with_automatic_off(surface):
     from korra_cli.cli_commands_mixin import CLICommandsMixin
     from gateway.slash_commands import GatewaySlashCommandsMixin
@@ -76,6 +76,9 @@ def test_manual_refine_without_topic_starts_with_automatic_off(surface):
          patch('run_agent.threading.Thread') as thread, patch('cli._cprint'):
         if surface == 'cli':
             CLICommandsMixin._handle_refine_command(owner, '/refine')
+        elif surface == 'api':
+            from gateway.platforms.api_server import _start_manual_refine
+            _start_manual_refine(agent, agent._session_messages, '')
         else:
             event = SimpleNamespace(source=object(), get_command_args=lambda: '')
             asyncio.run(GatewaySlashCommandsMixin._handle_refine_command(owner, event))
