@@ -367,6 +367,10 @@ interface BubbleChatSidebarProps {
   onRenamed?: () => void;
   historyRevision?: number;
   layout?: "desktop" | "mobile";
+  /** Сколько чатов у агента всего; пусто — счётчик не показываем. */
+  total?: number | null;
+  canLoadMore?: boolean;
+  onLoadMore?: () => void;
 }
 
 export function BubbleChatSidebar({
@@ -381,6 +385,9 @@ export function BubbleChatSidebar({
   onRenamed,
   historyRevision = 0,
   layout = "desktop",
+  total = null,
+  canLoadMore = false,
+  onLoadMore,
 }: BubbleChatSidebarProps) {
   const [searchInput, setSearchInput] = useState({ profile, value: "" });
   const query = searchInput.profile === profile ? searchInput.value : "";
@@ -532,6 +539,16 @@ export function BubbleChatSidebar({
             </div>
           );
         })}
+        {!searching && !visibleError && total !== null && sessions.length > 0 && (
+          <div role="status" className="korra-chat-history__more px-3 py-2 text-xs text-[var(--neo-text-secondary)]">
+            {sessions.length < total
+              ? <p>Показаны последние {sessions.length} из {total}.{canLoadMore ? "" : " Остальные найдёт поиск."}</p>
+              : <p>Показаны все чаты: {total}.</p>}
+            {sessions.length < total && canLoadMore && onLoadMore && (
+              <button type="button" className="mt-1 underline" disabled={loading} onClick={onLoadMore}>Показать ещё</button>
+            )}
+          </div>
+        )}
       </nav>
     </aside>
   );
@@ -1753,6 +1770,9 @@ export default function BubbleChatPage({
         onRequestDelete={sessionDelete.requestDelete}
         onRenamed={() => void sessionList.refresh()}
         historyRevision={historyRevision}
+        total={sessionTotal}
+        canLoadMore={sessionList.hasMore}
+        onLoadMore={sessionList.loadMore}
       />
       {/* История чатов на телефоне и планшете.
        *
@@ -1781,6 +1801,9 @@ export default function BubbleChatPage({
               onRequestDelete={(id) => { setMobileHistoryOpen(false); sessionDelete.requestDelete(id); }}
               onRenamed={() => void sessionList.refresh()}
               historyRevision={historyRevision}
+              total={sessionTotal}
+              canLoadMore={sessionList.hasMore}
+              onLoadMore={sessionList.loadMore}
               layout="mobile"
             />
           </div>
@@ -1826,6 +1849,9 @@ export default function BubbleChatPage({
                 onRequestDelete={(id) => { setMobileHistoryOpen(false); sessionDelete.requestDelete(id); }}
                 onRenamed={() => void sessionList.refresh()}
                 historyRevision={historyRevision}
+                total={sessionTotal}
+                canLoadMore={sessionList.hasMore}
+                onLoadMore={sessionList.loadMore}
                 layout="mobile"
               />
             </div>
