@@ -1325,6 +1325,8 @@ _FEASIBILITY_SKIP_MIDDLE_FRACTION = 0.10
 # protected region — but always keep this many trailing messages verbatim so
 # the active user ask / latest tool pair remain readable.  Issue #61932.
 _PRESSURE_KEEP_RECENT_MESSAGES = 3
+# A pending tool round larger than this share of the window is not spared.
+_PENDING_ROUND_MAX_FRACTION = 0.20
 # Native vision_analyze / computer_use screenshots that sit inside the
 # protected tail cannot be demoted by pass 2, so they ride every later
 # request until anti-thrash disables compression (#92699).  Keep this many
@@ -1602,6 +1604,19 @@ def _estimate_msg_budget_tokens(msg: dict, charge_stale_thinking: bool = True) -
             // _CHARS_PER_TOKEN
         )
     return tokens
+
+
+def _pending_tool_round(messages: "List[Dict[str, Any]]") -> range:
+    """Indices of the tool results the transcript ends with: a round the model
+    has not read yet. One trailing /steer row does not answer it (a steer is
+    delivered after the newest result, before the next API call)."""
+    end = len(messages)
+    if end and messages[end - 1].get("display_kind") == STEER_DISPLAY_KIND:
+        end -= 1
+    start = end
+    while start > 0 and messages[start - 1].get("role") == "tool":
+        start -= 1
+    return range(start, end)
 
 
 def _last_assistant_index(messages: "List[Dict[str, Any]]") -> int:
@@ -4096,6 +4111,18 @@ class ContextCompressor(ContextEngine):
         else:
             prune_boundary = len(result) - protect_tail_count
 
+        # The pending tool round is output the model asked for and has not read
+        # yet: a stub makes it re-run the call (side effects included) or answer
+        # blind. Passes 2 and 4 spare it, unless the round alone exceeds a fifth
+        # of the window: then it must still give way (#61932, one 200KB read).
+        spared = _pending_tool_round(result)
+        if sum(_estimate_msg_budget_tokens(result[i]) for i in spared) > int(
+            (getattr(self, "context_length", 0) or 0) * _PENDING_ROUND_MAX_FRACTION
+        ):
+            spared = range(0)
+        if spared:
+            prune_boundary = min(prune_boundary, spared.start)
+
         # Pass 1: Deduplicate identical tool results.
         # When the same file is read multiple times, keep only the most recent
         # full copy and replace older duplicates with a back-reference.
@@ -4248,6 +4275,8 @@ class ContextCompressor(ContextEngine):
             if demote_end > prune_boundary and _protected_region_tokens() > soft_ceiling:
                 pressure_hits = 0
                 for i in range(max(0, prune_boundary), demote_end):
+                    if i in spared:
+                        continue
                     # Pressure passes override the just-loaded-skill guard:
                     # when the protected region itself blows the soft budget,
                     # sparing skill bodies would recreate the #61932 dead-end.
@@ -4268,7 +4297,7 @@ class ContextCompressor(ContextEngine):
                             last_tool_idx = i
                             break
                     for i in range(max(0, prune_boundary), len(result)):
-                        if last_tool_idx is not None and i == last_tool_idx:
+                        if i in spared or (last_tool_idx is not None and i == last_tool_idx):
                             continue
                         if result[i].get("role") == "tool":
                             if _demote_tool_result_at(i, spare_protected_skills=False):
@@ -4282,6 +4311,7 @@ class ContextCompressor(ContextEngine):
                     # enough headroom to continue the session.
                     if (
                         last_tool_idx is not None
+                        and last_tool_idx not in spared
                         and last_tool_idx >= prune_boundary
                         and _protected_region_tokens() > soft_ceiling
                     ):
