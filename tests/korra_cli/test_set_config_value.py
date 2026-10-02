@@ -340,6 +340,8 @@ class TestCronModelDriftConfigWarning:
             ],
         )
 
+        set_config_value("cron.model_drift_guard", "true")
+        capsys.readouterr()
         set_config_value("model.default", "new-model")
 
         warning = capsys.readouterr().out
@@ -350,7 +352,7 @@ class TestCronModelDriftConfigWarning:
 
 
 
-    def test_explicit_opt_out_suppresses_warning(
+    def test_default_off_suppresses_warning(
         self,
         _isolated_hermes_home,
         capsys,
@@ -367,14 +369,9 @@ class TestCronModelDriftConfigWarning:
             ],
         )
 
-        set_config_value("cron.model_drift_guard", "false")
-        capsys.readouterr()
         set_config_value("model.default", "new-model")
 
-        import yaml
-        reloaded = yaml.safe_load(_read_config(_isolated_hermes_home))
         captured = capsys.readouterr()
-        assert reloaded["cron"]["model_drift_guard"] is False
         assert 'Сохранено model.default = new-model' in captured.out
         assert "остановятся с ошибкой" not in captured.out
 
@@ -382,16 +379,20 @@ class TestCronModelDriftConfigWarning:
     @pytest.mark.parametrize(
         ("configured_value", "expected"),
         [
-            (False, False),
             (True, True),
-            ("false", True),
-            (0, True),
-            (None, True),
+            (False, False),
+            ("true", False),
+            (1, False),
+            (None, False),
         ],
     )
-    def test_only_literal_false_disables_guard(self, configured_value, expected):
+    def test_only_literal_true_enables_guard(self, configured_value, expected):
         config = {"cron": {"model_drift_guard": configured_value}}
         assert cron_model_drift_guard_enabled(config) is expected
+
+    def test_guard_is_off_without_config(self):
+        assert cron_model_drift_guard_enabled({}) is False
+        assert cron_model_drift_guard_enabled({"cron": {}}) is False
 
 
 # ---------------------------------------------------------------------------

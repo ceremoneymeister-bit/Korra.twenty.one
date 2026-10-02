@@ -2808,10 +2808,10 @@ DEFAULT_CONFIG = {
         # Set to false to restore the old behavior (fail during the run).
         "preflight": True,
         # Fail closed when an unpinned job's current global model/provider
-        # differs from its creation-time snapshot. This prevents unattended
-        # jobs from silently inheriting a paid default. Set to false only when
-        # jobs should deliberately track changing global inference defaults.
-        "model_drift_guard": True,
+        # differs from its creation-time snapshot. OFF by default (K21-273):
+        # models are subscription-only, so jobs follow the global model and
+        # keep running after a switch. Set to true to skip drifted jobs.
+        "model_drift_guard": False,
         # Default inference model for cron jobs (Axis A — WHAT model an
         # agent job runs on). Resolution at fire time: per-job user pin >
         # cron.model > global model.default. When set, unpinned jobs follow
