@@ -634,6 +634,47 @@ def test_attention_lists_real_problems_with_links_to_the_exact_place(tmp_path, m
     assert set(value["checked"]) >= {"kanban", "delivery", "cron", "provider", "updates"}
 
 
+def _ledger_row(conn, oid, state, profile, key, text, *, age=600):
+    conn.execute(
+        "INSERT INTO delivery_obligations (obligation_id, session_key, platform, chat_id, content, "
+        "state, attempts, created_at, updated_at, adapter_profile) VALUES (?, ?, 'telegram', '1', ?, ?, 1, ?, ?, ?)",
+        (oid, key, text, state, NOW - age, NOW - age, profile),
+    )
+
+
+def test_attention_shows_secondary_bot_deliveries_from_the_shared_ledger(tmp_path):
+    from gateway import delivery_ledger
+
+    main = _agent(tmp_path, "default", "Корра")
+    second = _agent(tmp_path, "second", "Помощник")
+    conn = _state_db(main.home)
+    delivery_ledger._initialize_schema(conn)
+    _ledger_row(conn, "m1", "failed", "default", "agent:main:telegram:dm:1", "ответ основного")
+    _ledger_row(conn, "s1", "failed", "second", "agent:second:telegram:dm:2", "ответ помощника")
+    _ledger_row(conn, "s2", "delivered", "second", "agent:second:telegram:dm:2", "доставлено")
+    conn.commit()
+    conn.close()
+    sec = _state_db(second.home)
+    _session(sec, "sec-1", at=NOW - 3600, source="telegram", key="agent:second:telegram:dm:2")
+    delivery_ledger._initialize_schema(sec)
+    # Left by 0.21.15 in the profile's own database.
+    _ledger_row(sec, "old1", "failed", "second", "agent:second:telegram:dm:2", "старый ответ")
+    _ledger_row(sec, "gone", "migrated", "second", "agent:second:telegram:dm:2", "уже перенесён")
+    sec.commit()
+    sec.close()
+
+    items = ds._delivery_items([main, second], now=NOW)
+
+    by_agent = {}
+    for item in items:
+        by_agent.setdefault(item["profile"], []).append(item["detail"])
+    assert by_agent[""] == ["«ответ основного»"]
+    assert set(by_agent["second"]) == {"«старый ответ»", "«ответ помощника»"}
+    second_items = [item for item in items if item["profile"] == "second"]
+    assert {item["href"] for item in second_items} == {"/agents?agent=second&resume=sec-1"}
+    assert len({item["id"] for item in items}) == len(items)
+
+
 def test_attention_reports_unreadable_sources_instead_of_all_clear(tmp_path, monkeypatch):
     main = _agent(tmp_path, "default", "Корра")
     (main.home / "state.db").write_bytes(b"garbage" * 100)
