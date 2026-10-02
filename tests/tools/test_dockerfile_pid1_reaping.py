@@ -167,3 +167,19 @@ def test_dockerignore_excludes_nested_dependency_dirs():
 
     assert "**/node_modules" in text
     assert "**/.venv" in text
+
+
+def test_s6_stop_budget_fits_docker_stop_time_60(dockerfile_text: str) -> None:
+    """The updater runs ``docker stop --time 60``; s6's 3 s defaults cut the gateway drain short (K21-274)."""
+    import re
+
+    env: dict[str, int] = {}
+    for instruction in _dockerfile_instructions(dockerfile_text):
+        if instruction.upper().startswith("ENV "):
+            for key, value in re.findall(r"(S6_[A-Z_]+)=(\d+)", instruction):
+                env[key] = int(value)
+    services = env.get("S6_SERVICES_GRACETIME")
+    kill = env.get("S6_KILL_GRACETIME")
+    assert services is not None and kill is not None, "set both s6 grace periods explicitly"
+    assert services >= 30_000, "services (the gateway) need far more than s6's 3 s default"
+    assert services + kill < 60_000, "both phases must end before docker stop --time 60 sends SIGKILL"

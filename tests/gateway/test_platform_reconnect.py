@@ -202,8 +202,8 @@ class TestPlatformReconnectWatcher:
     @pytest.mark.asyncio
     async def test_cold_connect_defaults_to_is_reconnect_false(self):
         """The cold-start connect path (_connect_adapter_with_timeout with no
-        is_reconnect arg) must default to False so a first boot still drops any
-        stale queue (#46621)."""
+        is_reconnect arg) must default to False (adapters only relax readiness checks
+        on a reconnect; the pending Telegram queue is kept either way)."""
         runner = _make_runner()
         adapter = StubAdapter(succeed=True)
 

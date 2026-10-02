@@ -489,6 +489,12 @@ ENV HERMES_WEB_DIST=/opt/hermes/korra_cli/web_dist
 # check. (A separate launcher hardening is tracked independently.)
 ENV HERMES_TUI_DIR=/opt/hermes/ui-tui
 ENV HERMES_HOME=/opt/data
+# The updater stops the container with `docker stop --time 60`. s6-overlay's
+# defaults give services and the final kill 3 s each, which cut a gateway
+# short mid-drain (log stops ~2.3 s after SIGTERM, next start "exited
+# UNCLEANLY"). Services get 45 s, the final kill phase 10 s: 55 s < 60 s.
+ENV S6_SERVICES_GRACETIME=45000 \
+    S6_KILL_GRACETIME=10000
 ENV HERMES_WRITE_SAFE_ROOT=/opt/data
 ENV HERMES_DISABLE_LAZY_INSTALLS=1
 # The published image seals /opt/hermes (root-owned, read-only) so a runtime

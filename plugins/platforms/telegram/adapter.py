@@ -267,6 +267,7 @@ from plugins.platforms.telegram.telegram_network import (
     parse_fallback_ip_env,
     tcp_keepalive_socket_options,
 )
+from plugins.platforms.telegram.update_receipts import UpdateReceipts, receipts_path
 from utils import atomic_replace, env_float, env_int
 
 # Inbound only: image documents with these extensions take the photo path.
@@ -896,6 +897,8 @@ class TelegramAdapter(BasePlatformAdapter):
         # catch-all observer asks them whether an inbound update has a home, so
         # "what this adapter understands" stays stated in exactly one place.
         self._core_handlers: List[Any] = []
+        self._update_receipts: Optional[UpdateReceipts] = None
+        self._unconfirmed_updates: Dict[int, str] = {}
         # Update kinds already reported as unhandled. One INFO line per kind per
         # process is enough to notice a new silent class of updates without
         # turning a chatty group into a log flood.
@@ -4590,6 +4593,9 @@ class TelegramAdapter(BasePlatformAdapter):
         """
         # Re-registration (reconnect rebuild) starts the group-0 record over.
         self._core_handlers = []
+        # Group -1 runs before every core handler: an update already admitted
+        # (redelivered after a crash or reconnect) stops here.
+        app.add_handler(TypeHandler(Update, self._admit_update), group=-1)
         self._add_core_handler(app, TelegramMessageHandler(
             filters.TEXT & ~filters.COMMAND,
             self._handle_text_message
@@ -4621,6 +4627,77 @@ class TelegramAdapter(BasePlatformAdapter):
         # it observes alongside, never displaces, the core handlers.
         app.add_handler(TypeHandler(Update, self._on_platform_update), group=99)
 
+    def _receipts_for_bot(self) -> Optional[UpdateReceipts]:
+        receipts = getattr(self, "_update_receipts", None)
+        if receipts is not None:
+            return receipts
+        from korra_constants import get_process_hermes_home
+
+        profile = getattr(self, "_owner_profile", None)
+        if profile:
+            from korra_cli.profiles import resolve_profile_env
+            home = resolve_profile_env(profile)
+        else:
+            home = get_process_hermes_home()
+        path = receipts_path(home, getattr(self.config, "token", "") or "")
+        if path is None:
+            return None
+        self._update_receipts = UpdateReceipts(path)
+        return self._update_receipts
+
+    async def _admit_update(self, update, context) -> None:
+        """Stop an update that was already handed to the gateway (a redelivery).
+
+        A message is receipted only when ``handle_message`` takes it, so one
+        that dies in the batching window is redelivered; every other kind of
+        update is receipted here.
+        """
+        update_id = getattr(update, "update_id", None)
+        if not isinstance(update_id, int):
+            return
+        try:
+            receipts = self._receipts_for_bot()
+            if receipts is None:
+                return
+            if not receipts.seen(update_id):
+                message = getattr(update, "message", None) or getattr(update, "channel_post", None)
+                chat = getattr(message, "chat", None)
+                if chat is not None:
+                    unconfirmed = self._unconfirmed_updates
+                    unconfirmed[update_id] = str(getattr(chat, "id", ""))
+                    while len(unconfirmed) > 512:
+                        unconfirmed.pop(next(iter(unconfirmed)))
+                else:
+                    receipts.record(update_id)
+                return
+        except Exception:
+            logger.warning("[%s] update receipt check failed", self.name, exc_info=True)
+            return
+        from telegram.ext import ApplicationHandlerStop
+
+        logger.info(
+            "[%s] Telegram update %s was already handled; skipping the redelivery",
+            self.name, update_id,
+        )
+        raise ApplicationHandlerStop
+
+    async def handle_message(self, event: MessageEvent) -> None:
+        self._confirm_updates(str(getattr(event.source, "chat_id", "")))
+        await super().handle_message(event)
+
+    def _confirm_updates(self, chat_id: str) -> None:
+        unconfirmed = self._unconfirmed_updates
+        if not unconfirmed:
+            return
+        try:
+            receipts = self._receipts_for_bot()
+            for update_id in [u for u, c in unconfirmed.items() if c == chat_id]:
+                del unconfirmed[update_id]
+                if receipts is not None:
+                    receipts.record(update_id)
+        except Exception:
+            logger.warning("[%s] update receipt not recorded", self.name, exc_info=True)
+
     def _add_core_handler(self, app, handler) -> None:
         """Register a group-0 handler and remember it.
 
@@ -4640,13 +4717,10 @@ class TelegramAdapter(BasePlatformAdapter):
         instead.  Webhook mode is useful for cloud deployments (Fly.io,
         Railway) where inbound HTTP can wake a suspended machine.
 
-        ``is_reconnect`` distinguishes a cold first boot (False — drop any
-        stale Bot API queue) from a watcher reconnect after a prolonged
-        outage (True — preserve the updates Telegram queued while the bot
-        was offline, otherwise every message sent during the outage is
-        silently lost). The in-process network-error ladder and the
-        409-conflict handler already pass ``drop_pending_updates=False``
-        for the same reason; bootstrap follows suit on the reconnect path.
+        The pending Bot API queue is kept on every start, cold or reconnect, so
+        messages sent while the bot was offline are delivered; ``is_reconnect``
+        only relaxes the readiness requirements. Redeliveries are filtered by
+        the update receipts (``_admit_update``).
 
         Env vars for webhook mode::
 
@@ -5094,11 +5168,7 @@ class TelegramAdapter(BasePlatformAdapter):
                     webhook_url=webhook_url,
                     secret_token=webhook_secret,
                     allowed_updates=Update.ALL_TYPES,
-                    # Webhooks are push-based — Telegram does not hold a
-                    # server-side getUpdates queue, so this flag is a no-op
-                    # in practice. Mirror the polling path's reconnect
-                    # semantics for consistency.
-                    drop_pending_updates=not is_reconnect,
+                    drop_pending_updates=False,
                 )
                 self._webhook_mode = True
                 self._polling_progress_accepting = False
@@ -5151,11 +5221,17 @@ class TelegramAdapter(BasePlatformAdapter):
                 # Store reference for retry use in _handle_polling_conflict
                 self._polling_error_callback_ref = _polling_error_callback
 
+                # The Bot API queue is never dropped: messages people sent while
+                # the gateway was down (an update, a crash) are delivered, and
+                # the receipts in _admit_update keep a redelivery from being
+                # answered twice.
+                logger.info(
+                    "[%s] Telegram cold start keeps the pending update queue "
+                    "(is_reconnect=%s); already-handled updates are skipped by receipt",
+                    self.name, is_reconnect,
+                )
                 polling_started = await self._start_polling_resilient(
-                    # On a cold first boot drop the stale Bot API queue; on a
-                    # watcher reconnect after an outage preserve it so messages
-                    # sent while the bot was offline are delivered (#46621).
-                    drop_pending_updates=not is_reconnect,
+                    drop_pending_updates=False,
                     error_callback=_polling_error_callback,
                     require_progress=not is_reconnect,
                 )
