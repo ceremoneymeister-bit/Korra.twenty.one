@@ -249,7 +249,8 @@ RUN npm install --prefer-offline --no-audit --fetch-retries=5 && \
 # каждом запуске качает ~70 МБ через npx в том клиента. Версия и sha512
 # закреплены; бинарники других платформ удаляются, остаётся один (~11 МБ).
 # Исполняемый бит ставим здесь: во время работы /opt и /usr/local read-only
-# для пользователя hermes, обёртка не сможет сделать chmod сама.
+# для пользователя hermes, обёртка не сможет сделать chmod сама. Команда
+# указывает прямо на бинарник, без node-обёртки: тайм-аут убивает настоящий процесс.
 ARG AGENT_BROWSER_VERSION=0.26.0
 ARG AGENT_BROWSER_INTEGRITY=sha512-pdqSfjwbFSp+qnwlb2g23e9wXveIOfMi19xpPA9xZUbzEAUp6W4YBZj6Ybj8z4M7WkcbGDDYc+oDIHDt9R3EDQ==
 RUN set -eu; \
@@ -263,6 +264,7 @@ RUN set -eu; \
     ab_bin="$(npm root -g)/agent-browser/bin"; \
     find "$ab_bin" -maxdepth 1 -name 'agent-browser-*' ! -name "agent-browser-linux-${ab_arch}" -delete; \
     chmod 0755 "$ab_bin/agent-browser-linux-${ab_arch}"; \
+    ln -sf "$ab_bin/agent-browser-linux-${ab_arch}" /usr/local/bin/agent-browser; \
     agent-browser --version; \
     rm -rf "/tmp/$tgz" /root/.npm
 

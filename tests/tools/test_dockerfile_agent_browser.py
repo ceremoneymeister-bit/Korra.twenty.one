@@ -30,6 +30,8 @@ def test_agent_browser_binary_is_executable_for_runtime_user_and_pruned() -> Non
     assert 'chmod 0755 "$ab_bin/agent-browser-linux-${ab_arch}"' in block
     # Other platforms' binaries (~60 MB) are not shipped.
     assert "-delete" in block and "! -name \"agent-browser-linux-${ab_arch}\"" in block
+    # Direct link: no node wrapper between the engine's kill and the real CLI.
+    assert 'ln -sf "$ab_bin/agent-browser-linux-${ab_arch}" /usr/local/bin/agent-browser' in block
     # Build fails early if the CLI does not start.
     assert "agent-browser --version" in block
 
