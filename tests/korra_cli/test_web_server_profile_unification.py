@@ -252,6 +252,9 @@ class TestProfileScopedModel:
             "provider_snapshot": "openrouter",
             "model_snapshot": "old/model",
         }
+        (isolated_profiles["worker_beta"] / "config.yaml").write_text(
+            "cron:\n  model_drift_guard: true\n", encoding="utf-8"
+        )
         _write_jobs(
             isolated_profiles["worker_beta"], [{"id": "worker-job", **stale}]
         )
