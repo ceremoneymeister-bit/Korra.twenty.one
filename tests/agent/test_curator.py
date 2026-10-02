@@ -312,6 +312,18 @@ def _enable_prune_builtins(curator_env, monkeypatch):
     monkeypatch.setattr(u, "_prune_builtins_enabled", lambda: True)
 
 
+def test_prune_builtins_is_off_by_default(curator_env, monkeypatch):
+    """K21-270: built-ins are never archived unless the owner opts in."""
+    from korra_cli.config_defaults import DEFAULT_CONFIG
+
+    c = curator_env["curator"]
+    assert DEFAULT_CONFIG["curator"]["prune_builtins"] is False
+    monkeypatch.setattr(c, "_load_config", lambda: {})
+    assert c.get_prune_builtins() is False
+    monkeypatch.setattr(c, "_load_config", lambda: {"prune_builtins": True})
+    assert c.get_prune_builtins() is True
+
+
 def _disable_prune_builtins(curator_env, monkeypatch):
     """Flip curator.prune_builtins off for both config-reading paths."""
     c = curator_env["curator"]

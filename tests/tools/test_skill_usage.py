@@ -509,12 +509,33 @@ def test_adopt_preserves_the_inactivity_clock(skills_home):
     assert rec["patch_count"] == 7
 
 
+def test_prune_builtins_fallback_is_off_and_explicit_true_is_respected(skills_home, monkeypatch):
+    """K21-270: with no config (or a failing read) built-ins stay protected."""
+    import importlib
+    import korra_cli.config as cfg_mod
+    import tools.skill_usage as mod
+
+    importlib.reload(mod)  # drop the fixture's pin: exercise the real reader
+    monkeypatch.setattr(cfg_mod, "load_config", lambda: {})
+    assert mod._prune_builtins_enabled() is False
+    monkeypatch.setattr(cfg_mod, "load_config", lambda: {"curator": {}})
+    assert mod._prune_builtins_enabled() is False
+    monkeypatch.setattr(cfg_mod, "load_config", lambda: {"curator": {"prune_builtins": True}})
+    assert mod._prune_builtins_enabled() is True
+
+    def boom():
+        raise RuntimeError("config unreadable")
+
+    monkeypatch.setattr(cfg_mod, "load_config", boom)
+    assert mod._prune_builtins_enabled() is False
+
+
 @pytest.mark.parametrize("kind", ["bundled", "hub", "protected", "missing"])
 def test_adopt_refuses_skills_the_user_does_not_own(skills_home, monkeypatch, kind):
     """Adoption writes a provenance claim, so it must refuse anything with an
     external owner rather than stamping a lie onto the record.
 
-    ``prune_builtins`` is forced ON here — the shipped default — because that
+    ``prune_builtins`` is forced ON here (opt-in) because that
     is the configuration in which a bundled skill is otherwise curation-
     eligible. With it off, ``mark_agent_created``'s own eligibility gate would
     block the write and this test would pass without exercising adopt's guard
