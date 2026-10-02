@@ -675,9 +675,11 @@ class TestRegisterHandlers:
         # Six core handlers (default group, no group kwarg — incl. the
         # inline command picker) plus the gateway_platform_event observer
         # alone in group 99, so it observes alongside rather than
-        # displacing the core handlers.
+        # displacing the core handlers, plus the update-receipt admission
+        # handler alone in group -1 (it runs before them).
         calls = app.add_handler.call_args_list
-        assert len(calls) == 7
+        assert len(calls) == 8
+        assert len([c for c in calls if c.kwargs.get("group") == -1]) == 1
         assert len([c for c in calls if c.kwargs.get("group") == 99]) == 1
         assert len([c for c in calls if not c.kwargs]) == 6
 
@@ -691,7 +693,7 @@ class TestRegisterHandlers:
         a._register_handlers(first_app)
         a._register_handlers(rebuilt_app)  # the rebuild path
 
-        assert rebuilt_app.add_handler.call_count == 7
+        assert rebuilt_app.add_handler.call_count == 8
         assert len(self._observer_calls(rebuilt_app)) == 1
 
     def test_transient_init_rebuild_uses_shared_registration(self, monkeypatch):
