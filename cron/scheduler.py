@@ -3794,10 +3794,14 @@ def _deliver_result(
                 route_metadata = {
                     "direct_messages_topic_id": str(thread_id),
                     "job_id": job["id"],
+                    "notify": True,
                 }
                 # Media metadata mirrors the text routing so attachments land in
                 # the same DM topic instead of the General lane (#22773).
-                media_metadata = {"direct_messages_topic_id": str(thread_id)}
+                media_metadata = {
+                    "direct_messages_topic_id": str(thread_id),
+                    "notify": True,
+                }
             else:
                 # Forum-style topic (private chat / supergroup) or non-topic
                 # target: route via message_thread_id (#52060).  Put thread_id in
@@ -3808,10 +3812,12 @@ def _deliver_result(
                 # anchor, so the metadata key bypasses that check and lets the
                 # adapter route via a plain message_thread_id.
                 route_thread_id = str(thread_id) if thread_id is not None else None
-                route_metadata = {"job_id": job["id"]}
+                route_metadata = {"job_id": job["id"], "notify": True}
                 if route_thread_id:
                     route_metadata["thread_id"] = route_thread_id
-                media_metadata = {"thread_id": thread_id} if thread_id else None
+                media_metadata = {"notify": True}
+                if thread_id:
+                    media_metadata["thread_id"] = thread_id
 
             # Relay egress needs a tenant discriminator on the frame: the
             # connector's fail-closed guard resolves the workspace/guild from
