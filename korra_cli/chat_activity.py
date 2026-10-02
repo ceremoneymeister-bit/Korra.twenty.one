@@ -282,12 +282,17 @@ def _load_profile_snapshot(profile: str, home: Path, now: float) -> dict[str, An
     # see how many decisions wait: four birthday greetings in one chat are
     # four answers, not one (Birukova, 27.09).
     decisions_per_session: dict[str, int] = {}
+    # Board questions shown here are the same waits as the board's own rows on
+    # the dashboard; the card links let the client show each wait once.
+    board_links_per_session: dict[str, list[str]] = {}
     for decision in decisions:
         sid = str(decision.get("source_session_id") or "") or str(
             decision.get("source_session_key") or ""
         )
         if sid:
             decisions_per_session[sid] = decisions_per_session.get(sid, 0) + 1
+            if decision.get("task_url"):
+                board_links_per_session.setdefault(sid, []).append(str(decision["task_url"]))
 
     for decision in decisions:
         sid = str(decision.get("source_session_id") or "")
@@ -314,6 +319,7 @@ def _load_profile_snapshot(profile: str, home: Path, now: float) -> dict[str, An
             "profile": profile,
             "status": "waiting_decision",
             "pending_decisions": decisions_per_session.get(sid, 1),
+            **({"kanban_task_urls": board_links_per_session[sid]} if sid in board_links_per_session else {}),
             "updated_at": float(decision.get("updated_at") or decision.get("created_at") or 0),
             "started_at": float(decision.get("created_at") or 0),
             "delivery": "pending",
@@ -371,12 +377,15 @@ def project_chat_activity(
 
     by_session_status: dict[tuple[str, str], str] = {}
     by_session_decisions: dict[tuple[str, str], int] = {}
+    by_session_boards: dict[tuple[str, str], list[str]] = {}
     for wire_profile, snapshot in snapshots.items():
         for item in snapshot["activity"]:
             status = item["status"]
             key = (wire_profile, item["session_id"])
             if status == "waiting_decision":
                 by_session_decisions[key] = int(item.get("pending_decisions") or 1)
+                if item.get("kanban_task_urls"):
+                    by_session_boards[key] = list(item["kanban_task_urls"])
             if status == "waiting_decision" or (
                 status == "running" and by_session_status.get(key) != "waiting_decision"
             ) or key not in by_session_status:
@@ -401,6 +410,8 @@ def project_chat_activity(
         }:
             item["status"] = durable_status
             item["pending_decisions"] = by_session_decisions.get(key, 1)
+            if key in by_session_boards:
+                item["kanban_task_urls"] = by_session_boards[key]
         elif browser_status == "interrupted" and durable_status == "running":
             item["status"] = durable_status
         if item.get("status") in {"queued", "running", "waiting_decision"}:

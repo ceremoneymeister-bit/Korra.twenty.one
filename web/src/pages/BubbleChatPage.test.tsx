@@ -834,6 +834,26 @@ describe("BubbleChatSidebar", () => {
     expect(aside.querySelectorAll(".korra-chat-history__item")).toHaveLength(3);
     expect(aside.querySelector('[aria-current="page"]')?.textContent).toContain("Второй чат");
   });
+
+  it("говорит, что показана часть списка, и догружает по кнопке «Показать ещё» (K21-264)", async () => {
+    const onLoadMore = vi.fn();
+    await render(
+      <BubbleChatSidebar sessions={sessions} activeId="a" loading={false} error={null} total={73} canLoadMore
+        onLoadMore={onLoadMore} onSelect={vi.fn()} onNewChat={vi.fn()} onRequestDelete={vi.fn()} />,
+    );
+    expect(container.querySelector(".korra-chat-history__more")?.textContent).toContain("Показаны последние 3 из 73");
+    await act(async () => [...container.querySelectorAll("button")].find((b) => b.textContent === "Показать ещё")!.click());
+    expect(onLoadMore).toHaveBeenCalledTimes(1);
+  });
+
+  it("при полном списке пишет об этом и не предлагает догрузку", async () => {
+    await render(
+      <BubbleChatSidebar sessions={sessions} activeId="a" loading={false} error={null} total={3}
+        onSelect={vi.fn()} onNewChat={vi.fn()} onRequestDelete={vi.fn()} />,
+    );
+    expect(container.querySelector(".korra-chat-history__more")?.textContent).toContain("Показаны все чаты: 3");
+    expect([...container.querySelectorAll("button")].some((b) => b.textContent === "Показать ещё")).toBe(false);
+  });
 });
 
 

@@ -341,6 +341,7 @@ def get_profiles_sessions(
                 include_archived=include_archived,
                 archived_only=archived_only,
                 exclude_children=True,
+                exclude_hidden=True,
             )
             total += profile_total
             profile_totals[name] = profile_total

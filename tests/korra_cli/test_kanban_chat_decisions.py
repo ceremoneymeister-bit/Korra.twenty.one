@@ -163,3 +163,17 @@ def test_compressed_owner_chat_can_answer_but_an_explicit_fork_cannot(home):
     with pytest.raises(decisions.KanbanDecisionConflict):
         decisions.resolve(item["request_id"], "once", source_session_id="fork")
     assert decisions.resolve(item["request_id"], "once", source_session_id="compressed")["ok"]
+
+
+def test_waiting_row_names_the_board_card_so_the_dashboard_shows_it_once(home, monkeypatch):
+    """K21-265: строка чата несёт ссылку на карточку, по ней дашборд убирает дубль строки доски."""
+    from korra_cli import chat_activity
+    kb.create_board("contracts")
+    _, item = question(board="contracts")
+    monkeypatch.setattr(chat_activity, "_profile_targets", lambda _: [("", home)])
+    runs = chat_activity.project_chat_activity([], profile=None, session_id=None)
+    assert runs[0]["kanban_task_urls"] == [item["task_url"]]
+    browser_run = {"message_id": "m1", "session_id": "origin", "profile": "", "status": "running",
+                   "updated_at": 1, "history_count": 1, "user_message": {"role": "user", "content": "Проверь договор"}}
+    runs = chat_activity.project_chat_activity([browser_run], profile=None, session_id=None)
+    assert [(r["status"], r.get("kanban_task_urls")) for r in runs] == [("waiting_decision", [item["task_url"]])]

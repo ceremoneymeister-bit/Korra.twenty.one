@@ -5497,8 +5497,13 @@ def complete_task(
     expected_run_id: Optional[int] = None,
     fire_lifecycle_hook: bool = True,
     as_worker: bool = False,
+    author: Optional[str] = None,
 ) -> bool:
     """Transition ``running|ready|blocked|review -> done`` and record ``result``.
+
+    ``author`` names who finished the card by hand (the board's owner); it
+    lands in the ``completed`` event so the journal tells a person's
+    completion from an agent's.
 
     ``as_worker=True`` marks an agent's completion (worker or orchestrator
     tool, CLI inside an agent). For a task with ``acceptance='owner'`` the
@@ -5697,6 +5702,8 @@ def complete_task(
         }
         if verified_cards:
             completed_payload["verified_cards"] = verified_cards
+        if author and not as_worker:
+            completed_payload["completed_by"] = author
         if hold:
             # A result submitted after the owner returned the previous one
             # is a new version, not a repeat: the notifier says so, so the
@@ -6717,13 +6724,21 @@ def request_review(
         if not _parents_satisfied(conn, task_id):
             return _ret(False, "parent dependencies are not satisfied")
         trow = conn.execute(
-            "SELECT assignee, status, claim_lock, current_run_id, actor_kind "
-            "FROM tasks WHERE id = ?", (task_id,),
+            "SELECT assignee, status, claim_lock, current_run_id, actor_kind, "
+            "acceptance FROM tasks WHERE id = ?", (task_id,),
         ).fetchone()
         if trow is None:
             return _ret(False, "task not found")
         if trow["actor_kind"] == "human":
             return _ret(False, "the owner's own step is never reviewed by an agent")
+        if trow["acceptance"] == "owner":
+            return _ret(
+                False,
+                "this card's result is checked by the owner: submit it with "
+                "kanban_complete (summary + metadata) so the owner gets a new "
+                "version to accept or return; kanban_request_review does not "
+                "create one",
+            )
         # Refuse to clear a live worker's claim without proof of ownership
         # (expected_run_id) or an explicit human override (force=True).
         if (
@@ -7488,7 +7503,28 @@ def pause_task(
     return {"ok": True, "stopped": stopped}
 
 
-def reopen_review_task(conn: sqlite3.Connection, task_id: str) -> bool:
+def hold_result_for_owner(conn: sqlite3.Connection, task_id: str) -> bool:
+    """The owner took a result back for rework: its next version is theirs to judge.
+
+    Sets ``acceptance='owner'`` so the agent's resubmission waits in ``review``
+    for the owner's ``accept_result`` instead of closing the card. No-op (False)
+    when the card is already held for the owner.
+    """
+    with write_txn(conn):
+        cur = conn.execute(
+            "UPDATE tasks SET acceptance = 'owner' "
+            "WHERE id = ? AND COALESCE(acceptance, '') != 'owner'",
+            (task_id,),
+        )
+        if cur.rowcount != 1:
+            return False
+        _append_event(conn, task_id, "owner_review_enabled", {"reason": "returned_by_owner"})
+    return True
+
+
+def reopen_review_task(
+    conn: sqlite3.Connection, task_id: str, *, author: Optional[str] = None,
+) -> bool:
     """Transition ``review`` -> ready (or todo) so the implementer re-runs.
 
     The "changes requested" counterpart of :func:`request_review`: sends the
@@ -7547,6 +7583,8 @@ def reopen_review_task(conn: sqlite3.Connection, task_id: str) -> bool:
         payload: dict[str, Any] = {"status": new_status}
         if implementer:
             payload["implementer"] = implementer
+        if author:
+            payload["author"] = author
         _append_event(
             conn,
             task_id,

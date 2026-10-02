@@ -76,3 +76,24 @@ describe("K21-117 hidden agent polling", () => {
     vi.useRealTimers();
   });
 });
+
+describe("K21-264 «Показать ещё»", () => {
+  it("докладывает следующую порцию и не повторяет уже показанные разговоры", async () => {
+    const row = (id: string, at: number) => ({ id, last_active: at } as SessionInfo);
+    const get = vi.spyOn(api, "getSessions").mockImplementation(async (limit = 20, offset = 0) => ({
+      sessions: Array.from({ length: Math.min(limit, 130 - offset) }, (_, i) => row(`s-${offset + i}`, 1000 - offset - i)), total: 130, offset, limit,
+    }));
+    await render("designer");
+    expect(current.sessions).toHaveLength(50);
+    expect(current.total).toBe(130);
+    expect(current.hasMore).toBe(true);
+    await act(async () => current.loadMore());
+    expect(get).toHaveBeenLastCalledWith(100, 0, "designer", "recent");
+    expect(current.sessions).toHaveLength(100);
+    await act(async () => current.loadMore());
+    expect(get.mock.calls.slice(-2).map(([limit, offset]) => [limit, offset])).toEqual([[100, 0], [50, 100]]);
+    expect(current.sessions).toHaveLength(130);
+    expect(new Set(current.sessions.map(r => r.id)).size).toBe(130);
+    expect(current.hasMore).toBe(false);
+  });
+});

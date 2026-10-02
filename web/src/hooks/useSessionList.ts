@@ -3,7 +3,10 @@ import { api, type SessionInfo } from "../lib/api";
 import { ownerFacingError } from "../lib/owner-facing-error";
 
 const DEFAULT_LIMIT = 50;
-const DEFAULT_OFFSET = 0;
+// Сервер отдаёт не больше 100 строк за запрос; больше этого списка в боковой
+// панели не держим — остальное находит поиск.
+const PAGE_SIZE = 100;
+const MAX_SHOWN = 300;
 
 export interface UseSessionListReturn {
   sessions: SessionInfo[];
@@ -12,6 +15,9 @@ export interface UseSessionListReturn {
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
+  /** Есть ли ещё разговоры, которые можно догрузить кнопкой «Показать ещё». */
+  hasMore: boolean;
+  loadMore: () => void;
 }
 
 interface UseSessionListOptions {
@@ -33,7 +39,8 @@ function errorToMessage(error: unknown): string {
 export function useSessionList(
   options?: UseSessionListOptions
 ): UseSessionListReturn {
-  const limit = options?.limit ?? DEFAULT_LIMIT;
+  const step = options?.limit ?? DEFAULT_LIMIT;
+  const [limit, setLimit] = useState(step);
   const pollIntervalMs = options?.pollIntervalMs ?? 0;
   const profile = options?.profile;
   const profileRef = useRef(profile);
@@ -66,18 +73,29 @@ export function useSessionList(
     try {
       // Пустой/незаданный profile передаём как undefined, чтобы сработало
       // значение по умолчанию у api.getSessions (глобальный management scope).
-      const response = await api.getSessions(
-        limit,
-        DEFAULT_OFFSET,
-        profile === undefined ? undefined : profile || "default",
-        "recent",
+      const pages = await Promise.all(
+        Array.from({ length: Math.ceil(limit / PAGE_SIZE) }, (_, index) =>
+          api.getSessions(
+            Math.min(PAGE_SIZE, limit - index * PAGE_SIZE),
+            index * PAGE_SIZE,
+            profile === undefined ? undefined : profile || "default",
+            "recent",
+          ),
+        ),
       );
       if (!current()) return;
 
+      const seen = new Set<string>();
+      const rows = pages.flatMap((page) => page.sessions).filter((row) => {
+        if (seen.has(row.id)) return false;
+        seen.add(row.id);
+        return true;
+      });
+      const reported = pages[0]?.total;
       setResult({
         profile,
-        sessions: sortByLastActiveDesc(response.sessions),
-        total: typeof response.total === "number" ? response.total : response.sessions.length,
+        sessions: sortByLastActiveDesc(rows),
+        total: typeof reported === "number" ? reported : rows.length,
       });
     } catch (err) {
       if (!current()) return;
@@ -113,7 +131,15 @@ export function useSessionList(
     };
   }, [pollIntervalMs, refresh]);
 
+  const loadMore = useCallback(() => {
+    setLimit((value) => Math.min(MAX_SHOWN, value + step));
+  }, [step]);
+  const visibleSessions = result.profile === profile ? result.sessions : [];
+  const visibleTotal = result.profile === profile ? result.total : null;
+
   return {
+    hasMore: visibleTotal !== null && visibleSessions.length < visibleTotal && limit < MAX_SHOWN,
+    loadMore,
     // A different profile's rows must never appear even during its first
     // render before the new request's effect has run.
     sessions: result.profile === profile ? result.sessions : [],

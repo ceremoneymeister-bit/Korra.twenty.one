@@ -286,4 +286,118 @@ describe("Доска поручений", () => {
     expect(url).toContain("/tasks/task-1/respond");
     expect(JSON.parse(options.body)).toMatchObject({ decision: "deny", revision: 12 });
   });
+
+  describe("правка задания, когда агент ждёт ответа (K21-258)", () => {
+    const waitingTask = { ...task, status: "blocked", owner_attention: "question", block_reason: "Какой каталог?", block_revision: 31 };
+    it("«Сохранить и продолжить» сохраняет задание и отвечает по загруженной версии вопроса", async () => {
+      boardTasks = [waitingTask]; await renderPage(); await click(host.querySelector('[data-task-id]')!);
+      await click(button("Изменить задание"));
+      expect(host.querySelector('[data-waiting="question"]')?.textContent).toContain("ждёт ответа");
+      await change(field("Задание и ожидаемый результат"), "Каталог Б, четыре поставщика");
+      await click(button("Сохранить и продолжить"));
+      const out = writes();
+      expect(out.map(([url, options]) => options.method + " " + url.split("?")[0].replace(/^.*\/tasks\//, ""))).toEqual(["PATCH task-1", "POST task-1/respond"]);
+      expect(JSON.parse(out[1][1].body)).toMatchObject({ revision: 31, decision: null });
+      expect(host.textContent).toContain("передано агенту как ответ");
+    });
+    it("«Только сохранить» не отвечает агенту и напоминает, что он ждёт", async () => {
+      boardTasks = [waitingTask]; await renderPage(); await click(host.querySelector('[data-task-id]')!);
+      await click(button("Изменить задание"));
+      await change(field("Что нужно сделать"), "Сравнить поставщиков и каталоги");
+      await click(button("Только сохранить"));
+      expect(writes().map(([, options]) => options.method)).toEqual(["PATCH"]);
+      expect(host.textContent).toContain("Агент по-прежнему ждёт ответа");
+    });
+    it("если ответ не ушёл, текст задания уже сохранён и это сказано", async () => {
+      boardTasks = [waitingTask]; await renderPage(); await click(host.querySelector('[data-task-id]')!);
+      await click(button("Изменить задание"));
+      const base = fetchJSON.getMockImplementation()!;
+      fetchJSON.mockImplementation(async (url: string, options?: { method: string }) => {
+        if (options?.method === "POST") throw new Error("503: сбой");
+        return base(url, options);
+      });
+      await click(button("Сохранить и продолжить"));
+      expect(host.textContent).toContain("Изменения задания сохранены, но агенту ответить не удалось");
+    });
+    it("для запроса разрешения только предупреждение, без «Сохранить и продолжить»", async () => {
+      boardTasks = [{ ...waitingTask, needs_approval: true, block_kind: "approval" }];
+      await renderPage(); await click(host.querySelector('[data-task-id]')!);
+      await click(button("Изменить задание"));
+      expect(host.querySelector('[data-waiting="approval"]')?.textContent).toContain("разрешения");
+      expect(Array.from(host.querySelectorAll("button")).some(el => el.textContent === "Сохранить и продолжить")).toBe(false);
+      await click(button("Сохранить"));
+      expect(writes().map(([, options]) => options.method)).toEqual(["PATCH"]);
+      expect(host.textContent).toContain("ждёт вашего разрешения");
+    });
+  });
+
+  describe("перетаскивание: правила переходов (K21-259)", () => {
+    const dragOver = async (status: string) => {
+      const event = new Event("dragover", { bubbles: true, cancelable: true });
+      Object.defineProperty(event, "dataTransfer", { value: { getData: () => "task-1", dropEffect: "" } });
+      await act(async () => { host.querySelector(`[data-status="${status}"]`)!.dispatchEvent(event); });
+      return event.defaultPrevented;
+    };
+    const drop = async (status: string) => act(async () => {
+      const event = new Event("drop", { bubbles: true, cancelable: true });
+      Object.defineProperty(event, "dataTransfer", { value: { getData: () => "task-1" } });
+      host.querySelector(`[data-status="${status}"]`)!.dispatchEvent(event);
+    });
+    it("карточка в работе переносится в «Остановлена» через подтверждение, а очередь объясняет, что задача уже там", async () => {
+      boardTasks = [{ ...task, status: "running" }, { ...task, id: "task-2", title: "Другая", status: "ready" }]; await renderPage();
+      await drop("blocked");
+      expect(host.querySelector('[role="dialog"]')?.textContent).toContain("Приостановить");
+      await click(button("Отмена"));
+      expect(writes()).toHaveLength(0);
+    });
+    it("перенос из очереди в «В работе» объясняет, что агент возьмёт задачу сам", async () => {
+      boardTasks = [task]; await renderPage();
+      await drop("running");
+      expect(host.querySelector('[role="dialog"]')?.textContent).toContain("уже в очереди");
+      expect(writes()).toHaveLength(0);
+    });
+    it("карточка с проверкой владельцем не переносится в «Готово»: объяснено, что нажать", async () => {
+      boardTasks = [{ ...task, status: "review", acceptance: "owner", owner_attention: "accept", submitted_version: 2, result: "Итог" }];
+      await renderPage();
+      await drop("done");
+      const text = host.querySelector('[role="dialog"]')?.textContent || "";
+      expect(text).toContain("Принять");
+      expect(writes()).toHaveLength(0);
+    });
+    it("вопрос агента не переносится в очередь перетаскиванием: ответить нужно в карточке", async () => {
+      boardTasks = [{ ...task, status: "blocked", owner_attention: "question", block_reason: "Какой каталог?", block_revision: 3 }];
+      await renderPage();
+      await drop("ready");
+      expect(host.querySelector('[role="dialog"]')?.textContent).toContain("Ответить");
+      expect(writes()).toHaveLength(0);
+    });
+    it("колонки принимают наведение, а подсвечиваются только допустимые", async () => {
+      boardTasks = [{ ...task, status: "running" }]; await renderPage();
+      const source = host.querySelector('[data-task-id]')!;
+      await act(async () => {
+        const start = new Event("dragstart", { bubbles: true });
+        Object.defineProperty(start, "dataTransfer", { value: { setData: () => undefined, effectAllowed: "" } });
+        source.dispatchEvent(start);
+      });
+      expect(await dragOver("review")).toBe(true);
+      expect(host.querySelector('[data-status="blocked"]')!.getAttribute("data-drop-available")).toBe("true");
+      expect(host.querySelector('[data-status="ready"]')!.getAttribute("data-drop-available")).toBe("true");
+      expect(host.querySelector('[data-status="review"]')!.getAttribute("data-drop-available")).not.toBe("true");
+    });
+  });
+
+  it("в карточке видно, что результат проверяет владелец (K21-257)", async () => {
+    boardTasks = [{ ...task, status: "ready", acceptance: "owner" }]; await renderPage(); await click(host.querySelector('[data-task-id]')!);
+    expect(host.querySelector('[data-owner-review="true"]')?.textContent).toContain("Результат проверяете вы");
+  });
+
+  it("в результате есть «Скопировать результат», копируется полный текст (K21-261)", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    boardTasks = [{ ...task, status: "done", result: "| А | Б |\n|---|---|\n| 1 | 2 |" }];
+    await renderPage(); await click(host.querySelector('[data-task-id]')!);
+    await click(button("Скопировать результат"));
+    expect(writeText).toHaveBeenCalledWith("| А | Б |\n|---|---|\n| 1 | 2 |");
+    expect(host.textContent).toContain("Результат скопирован");
+  });
 });

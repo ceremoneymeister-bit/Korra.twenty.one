@@ -23,6 +23,8 @@ export interface ChatRun {
   unread?: boolean;
   /** У строки `waiting_decision`: сколько решений ждёт в этом разговоре. */
   pending_decisions?: number;
+  /** У строки `waiting_decision`: карточки доски, чьи вопросы ждут в этом чате. */
+  kanban_task_urls?: string[];
   event_revision?: string;
   failure?: {
     message?: string;

@@ -475,7 +475,17 @@ export function attentionView(
       });
     }
   }
-  for (const item of section?.items ?? []) rows.push({ ...item, origin: "server" });
+  // Вопрос доски, уже показанный строкой чата, второй строкой доски не повторяем.
+  const shownInChat = new Set<string>();
+  if (chat.known) {
+    for (const run of chat.runs) {
+      if (run.status === "waiting_decision") for (const url of run.kanban_task_urls ?? []) shownInChat.add(url);
+    }
+  }
+  for (const item of section?.items ?? []) {
+    if (item.source === "kanban" && shownInChat.has(item.href)) continue;
+    rows.push({ ...item, origin: "server" });
+  }
 
   const rank = { action: 0, problem: 1, info: 2 } as const;
   rows.sort((a, b) => rank[a.severity] - rank[b.severity] || (b.at ?? 0) - (a.at ?? 0));

@@ -13910,6 +13910,7 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
         archived_only: bool = False,
         exclude_children: bool = False,
         exclude_sources: List[str] = None,
+        exclude_hidden: bool = False,
     ) -> int:
         """Count sessions, optionally filtered by source.
 
@@ -13924,6 +13925,10 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
         (e.g. ``["cron"]`` so the recents "load more" total matches a
         cron-excluded ``list_sessions_rich`` page and doesn't keep "load more"
         stuck on for buried scheduler sessions).
+
+        Pass ``exclude_hidden=True`` to drop ``hidden`` sessions the same way
+        ``list_sessions_rich`` does by default, so the total equals the number
+        of rows the listing can ever return.
         """
         where_clauses = []
         params = []
@@ -13954,6 +13959,8 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
             where_clauses.append("s.archived = 1")
         elif not include_archived:
             where_clauses.append("s.archived = 0")
+        if exclude_hidden:
+            where_clauses.append("s.hidden = 0")
 
         where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
