@@ -216,10 +216,9 @@ def is_legacy_browser_use_cloud_config(browser_cfg: dict) -> bool:
 def is_browser_use_cli_mode() -> bool:
     """True when the Browser Use CLI replaces the built-in browser stack.
 
-    Browser Use mode is the DEFAULT: an unset ``browser.backend`` ("") enables
-    it whenever the browser-use CLI is runnable (installed binary or uvx).
-    Set ``browser.backend: off`` (or ``/browser use off``) for the built-in
-    browser_* tools.
+    Only an explicit ``browser.backend: browser-use`` (or a legacy
+    BROWSER_USE_API_KEY cloud config) enables it. An unset backend and ``off``
+    both mean the built-in browser_* tools.
 
     Camofox always falls back to the built-in tools regardless of
     ``browser.backend`` — it is Firefox-based with a custom HTTP API and no
@@ -235,59 +234,10 @@ def is_browser_use_cli_mode() -> bool:
     backend = get_browser_backend()
     if backend:
         return backend == _BACKEND_KEY
-    if is_legacy_browser_use_cloud_config(_read_browser_cfg()):
-        return True
-    # Default (backend unset): Browser Use mode when the CLI can run at all;
-    # otherwise keep the built-in tools so browsing never silently breaks.
-    return _find_cli() is not None
-
-
-_NOTICE_STAMP_NAME = ".browser_use_default_notice"
-_NOTICE_INTERVAL_S = 24 * 3600
-
-
-def default_downgrade_notice() -> Optional[str]:
-    """One-line notice when the default Browser Use backend silently downgraded.
-
-    Returns the notice string when ``browser.backend`` is unset (Browser Use
-    would be the default) but the CLI is not runnable, so the session fell
-    back to the built-in browser tools. Rate-limited to once per 24h via a
-    stamp file so it nudges without nagging. Returns ``None`` otherwise.
-    """
-    try:
-        if get_browser_backend():
-            return None  # explicit choice — nothing downgraded
-        try:
-            from tools.browser_camofox import is_camofox_mode
-
-            if is_camofox_mode():
-                return None
-        except Exception:
-            pass
-        if _find_cli() is not None:
-            return None
-
-        from korra_constants import get_hermes_home
-
-        stamp = Path(get_hermes_home()) / "cache" / _NOTICE_STAMP_NAME
-        try:
-            if 0 <= time.time() - stamp.stat().st_mtime < _NOTICE_INTERVAL_S:
-                return None
-        except OSError:
-            pass
-        try:
-            stamp.parent.mkdir(parents=True, exist_ok=True)
-            stamp.touch()
-        except OSError:
-            pass
-        return (
-            "Browser Use CLI not found — using the built-in browser tools. "
-            "Run `hermes tools` (Browser Automation → Browser Use) to install it, "
-            "or `browser.backend: off` in config.yaml to silence this."
-        )
-    except Exception as e:  # pragma: no cover — a notice must never break startup
-        logger.debug("browser-use downgrade notice failed: %s", e)
-        return None
+    # Backend unset: the built-in browser_* tools on the packaged Chromium.
+    # Browser Use needs a browser it can attach to (installed Chrome or a
+    # cloud one); the Korra image has none, so it must be chosen explicitly.
+    return is_legacy_browser_use_cloud_config(_read_browser_cfg())
 
 
 def _managed_bin_dir() -> Optional[str]:
@@ -724,6 +674,38 @@ def _resolve_real_profile_cdp(env: dict, force_local: bool) -> Optional[str]:
     return None
 
 
+def _run_in_own_group(cmd, code, timeout, env, popen_extra):
+    """subprocess.run, but a timeout kills the whole process group.
+
+    Plain ``subprocess.run`` kills only the direct child, leaving the harness
+    daemon and Chrome helpers running after every timed-out call.
+    """
+    if os.name == "nt":
+        return subprocess.run(
+            cmd, input=code, capture_output=True, text=True,
+            timeout=timeout, env=env, **popen_extra,
+        )
+    import signal
+
+    with subprocess.Popen(
+        cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, env=env, start_new_session=True,
+    ) as proc:
+        try:
+            stdout, stderr = proc.communicate(code, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except OSError:
+                proc.kill()
+            try:
+                proc.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+            raise
+    return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
+
+
 def browser_exec(
     code: str,
     session: str = "",
@@ -826,15 +808,7 @@ def browser_exec(
 
     started = time.time()
     try:
-        proc = subprocess.run(
-            cmd,
-            input=code,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env=env,
-            **popen_extra,
-        )
+        proc = _run_in_own_group(cmd, code, timeout, env, popen_extra)
     except subprocess.TimeoutExpired:
         return tool_error(
             f"browser-use exec timed out after {timeout}s. The daemon may "

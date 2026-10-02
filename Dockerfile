@@ -245,6 +245,29 @@ RUN npm install --prefer-offline --no-audit --fetch-retries=5 && \
     done && \
     npm cache clean --force
 
+# agent-browser — драйвер встроенных browser_* (K21-271). Без него движок на
+# каждом запуске качает ~70 МБ через npx в том клиента. Версия и sha512
+# закреплены; бинарники других платформ удаляются, остаётся один (~11 МБ).
+# Исполняемый бит ставим здесь: во время работы /opt и /usr/local read-only
+# для пользователя hermes, обёртка не сможет сделать chmod сама. Команда
+# указывает прямо на бинарник, без node-обёртки: тайм-аут убивает настоящий процесс.
+ARG AGENT_BROWSER_VERSION=0.26.0
+ARG AGENT_BROWSER_INTEGRITY=sha512-pdqSfjwbFSp+qnwlb2g23e9wXveIOfMi19xpPA9xZUbzEAUp6W4YBZj6Ybj8z4M7WkcbGDDYc+oDIHDt9R3EDQ==
+RUN set -eu; \
+    cd /tmp; \
+    npm pack "agent-browser@${AGENT_BROWSER_VERSION}" --silent; \
+    tgz="agent-browser-${AGENT_BROWSER_VERSION}.tgz"; \
+    got="sha512-$(node -e 'process.stdout.write(require("crypto").createHash("sha512").update(require("fs").readFileSync(process.argv[1])).digest("base64"))' "$tgz")"; \
+    [ "$got" = "${AGENT_BROWSER_INTEGRITY}" ] || { echo "agent-browser integrity mismatch: $got" >&2; exit 1; }; \
+    npm install -g --ignore-scripts --no-audit --no-fund "./$tgz"; \
+    case "$(uname -m)" in x86_64) ab_arch=x64 ;; aarch64) ab_arch=arm64 ;; *) echo "unsupported arch" >&2; exit 1 ;; esac; \
+    ab_bin="$(npm root -g)/agent-browser/bin"; \
+    find "$ab_bin" -maxdepth 1 -name 'agent-browser-*' ! -name "agent-browser-linux-${ab_arch}" -delete; \
+    chmod 0755 "$ab_bin/agent-browser-linux-${ab_arch}"; \
+    ln -sf "$ab_bin/agent-browser-linux-${ab_arch}" /usr/local/bin/agent-browser; \
+    agent-browser --version; \
+    rm -rf "/tmp/$tgz" /root/.npm
+
 # ---------- Layer-cached Python dependency install ----------
 # Copy only pyproject.toml + uv.lock so the Python dep resolve + wheel
 # download + native-extension compile layer is cached unless those inputs
