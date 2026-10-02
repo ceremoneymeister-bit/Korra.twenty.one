@@ -139,7 +139,7 @@ def test_documented_limits_match_the_defaults_in_code():
     assert "`skills.creation_nudge_interval` tool iterations (10)" in learning
     assert f"{curator['stale_after_days']} days" in learning
     assert str(curator["archive_after_days"]) in learning
-    assert curator["prune_builtins"] is True and "prune_builtins` (true)" in learning
+    assert curator["prune_builtins"] is False and "`prune_builtins: false`" in learning
     assert f"default **{delegation['max_concurrent_children']}**" in background
     assert f"`max_iterations` {delegation['max_iterations']}" in background
     assert f"{delegation['max_concurrent_children']} параллельных" in skill

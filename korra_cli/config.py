@@ -5280,9 +5280,11 @@ def cron_model_drift_guard_enabled(
         try:
             config = load_config()
         except Exception:
-            return False
-    if not isinstance(config, dict):
-        return False
+            # Unreadable settings must not silently drop an owner's explicit
+            # guard: skip this tick, the next one reads the file again.
+            return True
+    if not isinstance(config, dict) or getattr(config, "read_error", None):
+        return True
     cron_config = config.get("cron")
     if not isinstance(cron_config, dict):
         return False

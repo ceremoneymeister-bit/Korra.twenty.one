@@ -45,8 +45,8 @@ A copy of the agent reviews the conversation in the background after the answer:
 On by default (`curator.enabled`), runs every 7 days when idle ≥ 2 h
 (`interval_hours` 168, `min_idle_hours` 2). Unused skills become stale after
 30 days and are **archived** after 90 — never deleted; `korra curator restore NAME`
-brings one back. With `prune_builtins` (true) bundled skills can be archived
-too; skills installed from the hub never are. `pin` exempts a skill.
+brings one back. Bundled skills are not archived by default
+(`prune_builtins: false`); an owner may turn it on. Hub-installed skills never are. `pin` exempts a skill.
 Merging overlapping skills is opt-in (`curator.consolidate: true`).
 CLI: `korra curator status|usage|run|pause|resume|pin|unpin|adopt|restore|list-archived|archive|prune|backup|rollback|ledger`.
 
