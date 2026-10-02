@@ -615,7 +615,7 @@ import dataclasses
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional, Any, Callable, Awaitable, Tuple, Union
+from typing import TYPE_CHECKING, Dict, List, Optional, Any, Set, Callable, Awaitable, Tuple, Union
 from enum import Enum
 
 from pathlib import Path as _Path
@@ -2538,7 +2538,10 @@ class MessageEvent:
     # ("Error while calling `get_updates` one more time to mark all fetched
     # updates" in gateway.log).
     platform_update_id: Optional[int] = None
-    
+    # Every platform update this event stands for, including parts merged into
+    # it while batching or queueing. Telegram receipts cover exactly this set.
+    update_ids: Set[int] = field(default_factory=set)
+
     # Media attachments
     # media_urls: local file paths (for vision tool access)
     media_urls: List[str] = field(default_factory=list)
@@ -2926,6 +2929,7 @@ def merge_pending_message_event(
     """
     existing = pending_messages.get(session_key)
     if existing:
+        existing.update_ids |= event.update_ids
         existing_is_photo = getattr(existing, "message_type", None) == MessageType.PHOTO
         incoming_is_photo = event.message_type == MessageType.PHOTO
         existing_has_media = bool(existing.media_urls)
@@ -6596,6 +6600,9 @@ class BasePlatformAdapter(ABC):
             max_ms = 2500
         return random.uniform(min_ms / 1000.0, max_ms / 1000.0)
 
+    def _confirm_event_updates(self, event: MessageEvent) -> None:
+        """Hook: the event's reply is durable or its processing has ended."""
+
     async def _release_turn_marker(self, event: MessageEvent) -> None:
         """Clear the durable active-turn marker the gateway left to this adapter."""
         clear = getattr(getattr(self, "gateway_runner", None), "_clear_durable_active_turn", None)
@@ -6938,6 +6945,8 @@ class BasePlatformAdapter(ABC):
                         except Exception:
                             logger.debug("delivery ledger record failed", exc_info=True)
                             _obligation_id = None
+                    if _obligation_id is not None:
+                        self._confirm_event_updates(event)
                     await self._release_turn_marker(event)
                     result = await delivery_adapter._send_with_retry(
                         chat_id=event.source.chat_id,
@@ -7260,6 +7269,7 @@ class BasePlatformAdapter(ABC):
             if isinstance(e, (SystemExit, KeyboardInterrupt)):
                 raise
         finally:
+            self._confirm_event_updates(event)
             await self._release_turn_marker(event)
             # Stop typing before any deferred callback work.  Post-delivery
             # callbacks may perform platform I/O; a stuck callback must not

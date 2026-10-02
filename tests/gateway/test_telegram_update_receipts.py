@@ -3,7 +3,7 @@ import asyncio
 import sys
 import time
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -71,26 +71,38 @@ def _stop_exception(monkeypatch):
     return ApplicationHandlerStop
 
 
-def _event(chat_id="42"):
-    return SimpleNamespace(source=SimpleNamespace(chat_id=chat_id))
+def _event(*update_ids, chat_id="42", text="hi"):
+    from gateway.platforms.base import MessageEvent, MessageType
+    from gateway.session import SessionSource
+    from gateway.config import Platform
+
+    source = SessionSource(platform=Platform.TELEGRAM, chat_id=chat_id, chat_type="dm", user_id="u")
+    return MessageEvent(
+        text=text, message_type=MessageType.TEXT, source=source,
+        message_id=f"m{update_ids[0]}", update_ids=set(update_ids),
+    )
 
 
 @pytest.mark.asyncio
-async def test_message_is_receipted_when_handed_to_the_gateway(tmp_path, monkeypatch):
+async def test_message_is_receipted_only_when_its_processing_ends(tmp_path, monkeypatch):
     stop = _stop_exception(monkeypatch)
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    handed = []
-
-    async def fake_handle(self, event):
-        handed.append(event)
-
-    monkeypatch.setattr("gateway.platforms.base.BasePlatformAdapter.handle_message", fake_handle)
     adapter = _adapter()
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def handler(event):
+        started.set()
+        await release.wait()
+
+    adapter.set_message_handler(handler)
     await adapter._admit_update(_message_update(77), None)
-    # admitted but still in the batching window: a redelivery must get through
+    # admitted but not processed: a redelivery must get through
     await adapter._admit_update(_message_update(77), None)
-    await adapter.handle_message(_event())
-    assert handed
+    task = asyncio.create_task(adapter._process_message_background(_event(77), "sk"))
+    await started.wait()
+    await adapter._admit_update(_message_update(77), None)  # mid-turn crash: still not receipted
+    release.set()
+    await task
     with pytest.raises(stop):
         await adapter._admit_update(_message_update(77), None)
     # a new process (new adapter) still remembers it
@@ -101,16 +113,71 @@ async def test_message_is_receipted_when_handed_to_the_gateway(tmp_path, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_handoff_in_another_chat_does_not_receipt_the_message(tmp_path, monkeypatch):
-    _stop_exception(monkeypatch)
+async def test_second_batch_of_a_chat_is_recovered_after_a_crash(tmp_path, monkeypatch):
+    stop = _stop_exception(monkeypatch)
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    monkeypatch.setattr(
-        "gateway.platforms.base.BasePlatformAdapter.handle_message", AsyncMock()
-    )
     adapter = _adapter()
-    await adapter._admit_update(_message_update(10, chat_id=1), None)
-    await adapter.handle_message(_event(chat_id="2"))
-    await adapter._admit_update(_message_update(10, chat_id=1), None)  # still not stopped
+    adapter.set_message_handler(AsyncMock(return_value=None))
+    await adapter._admit_update(_message_update(101), None)
+    await adapter._admit_update(_message_update(102), None)  # same chat, other batch
+    await adapter._process_message_background(_event(101), "sk")
+    # the process dies before the second batch is processed
+    restarted = _adapter()
+    with pytest.raises(stop):
+        await restarted._admit_update(_message_update(101), None)  # not run twice
+    await restarted._admit_update(_message_update(102), None)  # recovered
+
+
+@pytest.mark.asyncio
+async def test_receipt_covers_every_part_merged_into_the_event(tmp_path, monkeypatch):
+    stop = _stop_exception(monkeypatch)
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    adapter = _adapter()
+    adapter._text_batch_delay_seconds = 0.01
+    adapter._text_batch_split_delay_seconds = 0.01
+    handed = []
+    adapter.handle_message = AsyncMock(side_effect=handed.append)
+    adapter._enqueue_text_event(_event(101, text="part one"))
+    adapter._enqueue_text_event(_event(102, text="part two"))
+    await asyncio.sleep(0.2)
+    assert len(handed) == 1 and handed[0].update_ids == {101, 102}
+
+    queued = {}
+    from gateway.platforms.base import merge_pending_message_event
+    merge_pending_message_event(queued, "sk", _event(103), merge_text=True)
+    merge_pending_message_event(queued, "sk", _event(104), merge_text=True)
+    assert queued["sk"].update_ids == {103, 104}
+
+    adapter.set_message_handler(AsyncMock(return_value=None))
+    await adapter._process_message_background(queued["sk"], "sk")
+    for uid in (103, 104):
+        with pytest.raises(stop):
+            await adapter._admit_update(_message_update(uid), None)
+    await adapter._admit_update(_message_update(105), None)
+
+
+@pytest.mark.asyncio
+async def test_receipt_is_written_once_the_reply_is_in_the_ledger(tmp_path, monkeypatch):
+    from gateway.platforms.base import SendResult
+
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    adapter = _adapter()
+    adapter.set_message_handler(AsyncMock(return_value="answer"))
+    order = []
+    receipts = adapter._receipts_for_bot()
+
+    async def send(**kwargs):
+        order.append("send:" + str(receipts.seen(7)))
+        return SendResult(success=True, message_id="out")
+
+    adapter._send_with_retry = send
+    with patch("gateway.delivery_ledger.ledger_enabled", return_value=True), \
+         patch("gateway.delivery_ledger.record_obligation", side_effect=lambda **kw: order.append("ledger")), \
+         patch("gateway.delivery_ledger.mark_attempting"), \
+         patch("gateway.delivery_ledger.mark_delivered"):
+        order.append("before:" + str(receipts.seen(7)))
+        await adapter._process_message_background(_event(7), "sk")
+    assert order == ["before:False", "ledger", "send:True"]
 
 
 @pytest.mark.asyncio

@@ -898,7 +898,6 @@ class TelegramAdapter(BasePlatformAdapter):
         # "what this adapter understands" stays stated in exactly one place.
         self._core_handlers: List[Any] = []
         self._update_receipts: Optional[UpdateReceipts] = None
-        self._unconfirmed_updates: Dict[int, str] = {}
         # Update kinds already reported as unhandled. One INFO line per kind per
         # process is enough to notice a new silent class of updates without
         # turning a chatty group into a log flood.
@@ -4646,11 +4645,11 @@ class TelegramAdapter(BasePlatformAdapter):
         return self._update_receipts
 
     async def _admit_update(self, update, context) -> None:
-        """Stop an update that was already handed to the gateway (a redelivery).
+        """Stop an update that was already taken in (a redelivery).
 
-        A message is receipted only when ``handle_message`` takes it, so one
-        that dies in the batching window is redelivered; every other kind of
-        update is receipted here.
+        A message is receipted only when its reply is durable or its processing
+        has ended (``_confirm_event_updates``), so one that dies before that is
+        redelivered; every other kind of update is receipted here.
         """
         update_id = getattr(update, "update_id", None)
         if not isinstance(update_id, int):
@@ -4661,13 +4660,7 @@ class TelegramAdapter(BasePlatformAdapter):
                 return
             if not receipts.seen(update_id):
                 message = getattr(update, "message", None) or getattr(update, "channel_post", None)
-                chat = getattr(message, "chat", None)
-                if chat is not None:
-                    unconfirmed = self._unconfirmed_updates
-                    unconfirmed[update_id] = str(getattr(chat, "id", ""))
-                    while len(unconfirmed) > 512:
-                        unconfirmed.pop(next(iter(unconfirmed)))
-                else:
+                if getattr(message, "chat", None) is None:
                     receipts.record(update_id)
                 return
         except Exception:
@@ -4681,20 +4674,16 @@ class TelegramAdapter(BasePlatformAdapter):
         )
         raise ApplicationHandlerStop
 
-    async def handle_message(self, event: MessageEvent) -> None:
-        self._confirm_updates(str(getattr(event.source, "chat_id", "")))
-        await super().handle_message(event)
-
-    def _confirm_updates(self, chat_id: str) -> None:
-        unconfirmed = self._unconfirmed_updates
-        if not unconfirmed:
+    def _confirm_event_updates(self, event: MessageEvent) -> None:
+        update_ids = getattr(event, "update_ids", None)
+        if not update_ids:
             return
         try:
             receipts = self._receipts_for_bot()
-            for update_id in [u for u, c in unconfirmed.items() if c == chat_id]:
-                del unconfirmed[update_id]
+            for update_id in sorted(update_ids):
                 if receipts is not None:
                     receipts.record(update_id)
+            update_ids.clear()
         except Exception:
             logger.warning("[%s] update receipt not recorded", self.name, exc_info=True)
 
@@ -10471,6 +10460,7 @@ class TelegramAdapter(BasePlatformAdapter):
             if event.text:
                 existing.text = f"{existing.text}\n{event.text}" if existing.text else event.text
             existing._last_chunk_len = chunk_len  # type: ignore[attr-defined]
+            existing.update_ids |= event.update_ids
             # Merge any media that might be attached
             if event.media_urls:
                 existing.media_urls.extend(event.media_urls)
@@ -10591,6 +10581,7 @@ class TelegramAdapter(BasePlatformAdapter):
         if existing is None:
             self._pending_photo_batches[batch_key] = event
         else:
+            existing.update_ids |= event.update_ids
             existing.media_urls.extend(event.media_urls)
             existing.media_types.extend(event.media_types)
             if event.text:
@@ -10961,6 +10952,7 @@ class TelegramAdapter(BasePlatformAdapter):
         if existing is None:
             self._media_group_events[media_group_id] = event
         else:
+            existing.update_ids |= event.update_ids
             existing.media_urls.extend(event.media_urls)
             existing.media_types.extend(event.media_types)
             if event.text:
@@ -11462,6 +11454,7 @@ class TelegramAdapter(BasePlatformAdapter):
             raw_message=message,
             message_id=str(message.message_id),
             platform_update_id=update_id,
+            update_ids={update_id} if update_id is not None else set(),
             reply_to_message_id=reply_to_id,
             reply_to_text=reply_to_text,
             # Scheduled-result reply links resolve only replies to this bot's
