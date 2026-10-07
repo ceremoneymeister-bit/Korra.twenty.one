@@ -1,5 +1,7 @@
 """Content/package checks only: no live profile, network or model invocation."""
 
+import hashlib
+import json
 import re
 from pathlib import Path
 
@@ -32,10 +34,10 @@ def test_manifest_matches_explicit_payload():
     assert not any(path.is_symlink() for path in PACKAGE.rglob("*"))
 
 
-def test_package_contains_only_reviewable_content():
+def test_package_contains_methodology_and_declared_font_assets():
     files = {path.relative_to(PACKAGE).as_posix()
              for path in PACKAGE.rglob("*") if path.is_file()}
-    assert files == {
+    required = {
         "distribution.yaml",
         "SOUL.md",
         "skills/visual-design/SKILL.md",
@@ -45,6 +47,32 @@ def test_package_contains_only_reviewable_content():
         "skills/visual-design/references/project-memory.md",
         "skills/visual-design/scripts/review_board.py",
     }
+    font_root = PACKAGE / "skills/visual-design/assets/fonts"
+    provenance = json.loads((font_root / "SOURCE.json").read_text())
+    font_assets = {"README.md", "SOURCE.json", "LICENSE.txt", *provenance["files"]}
+    assert files == required | {
+        "skills/visual-design/assets/fonts/" + name for name in font_assets
+    }
+
+
+def test_bundled_fonts_match_provenance_and_render_cyrillic():
+    from PIL import ImageFont
+
+    root = PACKAGE / "skills/visual-design/assets/fonts"
+    provenance = json.loads((root / "SOURCE.json").read_text())
+    assert provenance["source_url"].startswith("https://github.com/rsms/inter/")
+    assert "SIL OPEN FONT LICENSE Version 1.1" in (root / "LICENSE.txt").read_text()
+    for name, expected in provenance["files"].items():
+        assert Path(name).name == name and name.endswith(".ttf")
+        path = root / name
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == expected["sha256"]
+        font = ImageFont.truetype(str(path), 48)
+        assert font.getname()[0] == expected["family"]
+        assert font.getname()[1] == expected["style"]
+        missing = bytes(font.getmask(chr(0x10FFFF)))
+        for character in "АБВЁЖЙФЦЧШЩЪЫЬЭЮЯабвёжйфцчшщъыьэюя":
+            glyph = bytes(font.getmask(character))
+            assert glyph and glyph != missing, (name, character)
 
 
 def test_skill_frontmatter():
