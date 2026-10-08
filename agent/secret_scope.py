@@ -294,12 +294,21 @@ def load_env_file(env_path: Path) -> Dict[str, str]:
     return secrets
 
 
+# Credentials that belong to the installation, not to one agent: the owner
+# decides once how voice is recognised. A profile without its own value reads
+# the installation root's; a value in the profile's own .env always wins. Every
+# other secret stays private to its profile — keep this list to that one
+# decision (K21-317).
+_INSTALLATION_SHARED_KEYS = ("DEEPGRAM_API_KEY",)
+
+
 def build_profile_secret_scope(hermes_home: Path) -> Dict[str, str]:
     """Build a profile's secret mapping from its ``<home>/.env``.
 
     Returns a fresh dict (safe to install via ``set_secret_scope``). Genuinely
     global vars are intentionally NOT copied in — ``get_secret`` reads those
-    from ``os.environ`` directly, so the scope holds only profile secrets.
+    from ``os.environ`` directly, so the scope holds only profile secrets,
+    plus the few installation-wide keys in ``_INSTALLATION_SHARED_KEYS``.
     """
     home = Path(hermes_home)
     secrets = load_env_file(home / ".env")
@@ -314,5 +323,15 @@ def build_profile_secret_scope(hermes_home: Path) -> Dict[str, str]:
         if _is_global_env(key):
             continue
         secrets[key] = value
+
+    if home.parent.name == "profiles":
+        root_env = None
+        for key in _INSTALLATION_SHARED_KEYS:
+            if secrets.get(key, "").strip():
+                continue
+            if root_env is None:
+                root_env = load_env_file(home.parent.parent / ".env")
+            if root_env.get(key, "").strip():
+                secrets[key] = root_env[key]
 
     return secrets
