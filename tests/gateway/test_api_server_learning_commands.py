@@ -358,3 +358,76 @@ async def test_context_is_explained_in_the_web_chat():
     agent, result = await _send("/context")
     assert "мессенджерах" in result["final_response"]
     agent.run_conversation.assert_not_called()
+
+
+def _unresolvable_codex_provider():
+    from korra_cli.auth import AuthError
+
+    def _raise():
+        try:
+            raise AuthError(
+                "No Codex credentials stored. Run `hermes auth` to authenticate.",
+                provider="openai-codex", code="codex_auth_missing", relogin_required=True,
+            )
+        except AuthError as auth:
+            raise RuntimeError(str(auth)) from auth
+
+    return patch("gateway.run._resolve_runtime_agent_kwargs", side_effect=_raise)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text", ["/memory", "/skills", "/context", "/curator status"])
+async def test_no_model_commands_work_without_a_subscription_login(text, tmp_path, monkeypatch):
+    import subprocess
+
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    adapter = _adapter()
+    fake_agent_cls = MagicMock()
+    completed = subprocess.CompletedProcess([], 0, stdout="curator: всё спокойно\n", stderr="")
+    with _unresolvable_codex_provider() as resolver, \
+            patch("run_agent.AIAgent", fake_agent_cls), \
+            patch.object(adapter, "_create_agent", wraps=adapter._create_agent) as create, \
+            patch("subprocess.run", return_value=completed):
+        result, usage = await adapter._run_agent(
+            user_message=text,
+            conversation_history=[{"role": "user", "content": "x"}],
+            session_id="s1",
+        )
+    assert not result.get("failed")
+    assert result["completed"] is True
+    assert result["final_response"].strip()
+    assert "Подписка ChatGPT" not in result["final_response"]
+    assert "Не удалось обратиться к провайдеру" not in result["final_response"]
+    create.assert_not_called()
+    resolver.assert_not_called()
+    fake_agent_cls.assert_not_called()
+    assert usage["total_tokens"] == 0
+
+
+@pytest.mark.asyncio
+async def test_plain_message_still_reports_the_missing_subscription(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    adapter = _adapter()
+    with _unresolvable_codex_provider():
+        result, _ = await adapter._run_agent(
+            user_message="привет",
+            conversation_history=[],
+            session_id="s1",
+        )
+    assert result["failed"] is True
+    assert "Подписка ChatGPT / Codex не подключена" in result["final_response"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text", ["/learn тема", "/refine"])
+async def test_learn_and_refine_still_need_the_model(text, tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    adapter = _adapter()
+    with _unresolvable_codex_provider():
+        result, _ = await adapter._run_agent(
+            user_message=text,
+            conversation_history=[],
+            session_id="s1",
+        )
+    assert result["failed"] is True
+    assert "Подписка ChatGPT / Codex не подключена" in result["final_response"]
