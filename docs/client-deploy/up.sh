@@ -36,6 +36,10 @@ OWNER_TIMEZONE="${OWNER_TIMEZONE:-$TIMEZONE}"
 ENGINE_UID="${ENGINE_UID:-10000}"           # владелец файлов данных
 ENGINE_GID="${ENGINE_GID:-10000}"
 WAIT_SECONDS="${WAIT_SECONDS:-120}"         # сколько ждать панель после старта
+# Обновлятор передаёт все три CONTAINER_* всегда, пустые тоже: пустой RAM —
+# явный unlimited исходного контейнера, а не «не задано». Локальный default
+# установки допустим только для unset (`[ "${CONTAINER_MEMORY+x}" = x ] ||`);
+# перед остановкой обновлятор сверяет по --dry-run, что launcher не сдвинул лимиты.
 CONTAINER_CPUS="${CONTAINER_CPUS:-}"
 CONTAINER_MEMORY="${CONTAINER_MEMORY:-}"
 # Total RAM + swap, matching Docker --memory-swap. Equal to RAM disables swap.

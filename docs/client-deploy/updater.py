@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 import fcntl
 import hashlib
 import inspect
@@ -510,6 +511,74 @@ def timezone_from_launch_argv(argv):
     """Both timezones the launcher's own `--dry-run` docker argv would set."""
     return timezone_env(dict(item.split("=", 1) for flag, item in zip(argv, argv[1:])
                              if flag == "-e" and "=" in item))
+
+
+_SIZE = re.compile(r"(\d+(?:\.\d+)?) ?([kmgtp])?(?:i?b)?", re.IGNORECASE)
+
+
+def docker_bytes(value):
+    """A `--memory` argument as Docker reads it ("" is unset, "-1" is unlimited)."""
+    value = value.strip()
+    if value == "-1":
+        return -1
+    match = _SIZE.fullmatch(value)
+    if not match:
+        raise UpdateError(f"Unreadable launcher memory value: {value!r}")
+    unit = "bkmgtp".index((match.group(2) or "b").lower())
+    return int(float(match.group(1)) * 1024 ** unit)
+
+
+def docker_nano_cpus(value):
+    value = value.strip()
+    try:
+        return int(Decimal(value) * 1_000_000_000) if value else 0
+    except InvalidOperation:
+        raise UpdateError(f"Unreadable launcher CPU value: {value!r}") from None
+
+
+def effective_resources(cpus="", memory="", swap=""):
+    """What Docker records in HostConfig for these three launcher arguments.
+
+    An absent flag, an empty value and a literal 0 all mean "not set" to
+    Docker, and RAM without a swap cap gets RAM + equal swap: 3g becomes a
+    6 GiB RAM+swap budget, which is how a launcher default turned a native
+    unlimited baseline into a different contour.
+    """
+    ram = docker_bytes(memory) if memory.strip() else 0
+    total = docker_bytes(swap) if swap.strip() else 0
+    if ram > 0 and total == 0:
+        total = 2 * ram
+    return {"nano_cpus": docker_nano_cpus(cpus), "memory_bytes": max(ram, 0),
+            "memory_swap_bytes": total}
+
+
+def resources_from_launch_argv(argv):
+    """The resource limits the launcher's own `--dry-run` docker argv would set."""
+    values = {"--cpus": "", "--memory": "", "--memory-swap": ""}
+    aliases = {"-m": "--memory"}
+    index = 0
+    while index < len(argv):
+        flag, equals, inline = argv[index].partition("=")
+        flag = aliases.get(flag, flag)
+        if flag in values:
+            if equals:
+                values[flag] = inline
+            elif index + 1 < len(argv):
+                index += 1
+                values[flag] = argv[index]
+        index += 1
+    return effective_resources(values["--cpus"], values["--memory"], values["--memory-swap"])
+
+
+def resource_drift(actual, expected):
+    """Name every resource limit the launcher would not reproduce."""
+    def show(key, value):
+        if key == "nano_cpus":
+            return f"{value / 1e9:g} CPUs" if value else "unlimited CPUs"
+        return "unlimited" if not value else ("unlimited swap" if value < 0 else f"{value} bytes")
+    labels = {"nano_cpus": "CPU", "memory_bytes": "RAM", "memory_swap_bytes": "RAM+swap"}
+    return "; ".join(f"{labels[key]} {show(key, actual[key])} instead of {show(key, expected[key])}"
+                     for key in labels if actual[key] != expected[key])
 
 
 def timezone_drift(actual, plan):
@@ -1730,36 +1799,51 @@ class Updater:
                       "source": "preserved" if expected[key] else "launcher_default"}
                 for key in RUNTIME_TIMEZONE_KEYS}
 
-    def verify_launcher_timezone(self, rollback=False):
-        """Refuse a launcher that would not reproduce the pinned timezone.
+    def verify_launcher(self, rollback=False):
+        """Refuse a launcher that would not reproduce the preserved contour.
 
         The launcher, not the updater, decides what the container gets: up.sh
-        falls back to its own default whenever TIMEZONE arrives empty, and an
-        adopted host launcher may carry someone else's default. Finding that
-        out after the contour is stopped costs a rollback through the very same
-        launcher, so it is asked first — `--dry-run` starts nothing, touches
-        neither DATA nor Docker, and answers with the exact docker argv.
+        falls back to its own default whenever TIMEZONE arrives empty, an
+        adopted host launcher may carry someone else's default, and a local
+        RAM default read an explicit "unlimited" (empty RAM, swap 0) as "unset"
+        and made Docker apply 3 GiB RAM + 3 GiB swap. Finding that out after
+        the contour is stopped costs a rollback through the very same launcher
+        (which hit the same wall), so it is asked first: `--dry-run` starts
+        nothing, touches neither DATA nor Docker, and answers with the exact
+        docker argv. Timezone and resource limits are checked from that one answer.
         """
         plan = self.timezone_plan(rollback=rollback)
-        if not any(item["expected"] for item in plan.values()):
-            return None
+        resources = self.launch_resource_env(rollback=rollback)
         result = subprocess.run(["bash", str(self.home / "up.sh"), "--dry-run"],
                                 env=self.launcher_env(rollback=rollback),
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True, timeout=120)
-        if result.returncode:
+        if result.returncode or not result.stdout.strip():
             with (self.job / "operation.log").open("a") as stream:
                 stream.write(result.stdout)
             self.receipt["error_code"] = "launcher_dry_run_failed"
             raise UpdateError("Host launcher rejected `up.sh --dry-run` on the preserved "
                               "contract; see private operation.log")
-        planned = timezone_from_launch_argv(shlex.split(result.stdout.splitlines()[-1]))
-        drift = timezone_drift(planned, plan)
+        argv = shlex.split(result.stdout.splitlines()[-1])
+        drift = timezone_drift(timezone_from_launch_argv(argv), plan)
         if drift:
             self.receipt["error_code"] = "launcher_timezone_mismatch"
             raise UpdateError("Host launcher would start the contour with " + drift
                               + "; restore this installation's timezone default in up.sh")
-        return planned
+        planned = resources_from_launch_argv(argv)
+        wanted = effective_resources(resources.get("CONTAINER_CPUS", ""),
+                                     resources.get("CONTAINER_MEMORY", ""),
+                                     resources.get("CONTAINER_MEMORY_SWAP", ""))
+        if "CONTAINER_MEMORY_SWAP" not in resources:
+            wanted["memory_swap_bytes"] = planned["memory_swap_bytes"]
+        drift = resource_drift(planned, wanted)
+        if drift:
+            self.receipt["error_code"] = "launcher_resource_mismatch"
+            raise UpdateError(
+                "Host launcher would start the contour with " + drift + "; make its resource "
+                "defaults apply only when CONTAINER_MEMORY is unset (an empty value is "
+                "an explicit unlimited)")
+        self.receipt["launcher_resources" + ("_rollback" if rollback else "")] = planned
 
     def capability(self, timeout=30):
         try:
@@ -2312,7 +2396,7 @@ print(json.dumps(changed))
             self.receipt["timezone_plan"] = self.timezone_plan()
             # Asked of the real launcher while the contour is still up, so a
             # dry run reports it too and a mismatch never costs an outage.
-            self.verify_launcher_timezone()
+            self.verify_launcher()
             self.free_space()
             if dry_run:
                 self.phase("dry_run", status="succeeded", planned_reference=reference)
@@ -2407,7 +2491,7 @@ print(json.dumps(changed))
         # restore the old image with the wrong clock. Ask before quiescing:
         # a refused rollback that changed nothing is recoverable, a finished
         # one that silently moved the owner's day is not.
-        self.verify_launcher_timezone(rollback=True)
+        self.verify_launcher(rollback=True)
         self.verify_backup()  # validate before quiescing a healthy newer gateway
         allowed = {self.receipt.get("old_image_id"), self.receipt.get("target_image_id")}
         try:

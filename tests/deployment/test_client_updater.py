@@ -34,6 +34,7 @@ class FakeDockerUpdater(u.Updater):
         self.wrong_mount = False
         self.mounts_override = None
         self.extra_env = []
+        self.host_resources = {}
         self.tags = {}
         self.judge_verdict = {"bad": []}
         self.judge_image_missing = False
@@ -67,7 +68,7 @@ class FakeDockerUpdater(u.Updater):
             return json.dumps([{"Name": "/" + self.name, "Image": self.image,
                 "State": {"Running": self.running},
                 "Mounts": mounts,
-                "HostConfig": {"NetworkMode": "host"},
+                "HostConfig": {"NetworkMode": "host", **self.host_resources},
                 "Config": {"Cmd": ["gateway", "run"], "Env": [f"KORRA_DASHBOARD_PORT={self.panel}", f"API_SERVER_PORT={self.api}", *self.extra_env]}}])
         if args[0] == "diff":
             return getattr(self, "diff_output", "")
@@ -189,6 +190,7 @@ def updater(tmp_path, monkeypatch):
     (home / "IMAGE").write_text(OLD)
     monkeypatch.setenv("DATA", str(data))
     monkeypatch.setenv("NAME", "updater-fixture")
+    _installed_launcher(home)
     instance = FakeDockerUpdater(home)
     instance.initialize("fixture-job", "registry.example/korra:latest")
     instance.receipt["baseline_capability"] = instance.capability()
@@ -1430,6 +1432,7 @@ def test_up_launcher_resource_flags_are_optional(tmp_path, explicit):
 
 def test_detached_rollback_returns_pending_then_worker_completes(updater, monkeypatch, capsys):
     updater.update("registry.example/korra:latest")
+    updater.verify_launcher = lambda rollback=False: None  # Popen is faked below; launcher dry-run has its own tests
     backup = updater.receipt["backup_path"]
     monkeypatch.setattr(u.os, "geteuid", lambda: 0)
     monkeypatch.setattr(u, "HERE", updater.home)
@@ -2966,6 +2969,7 @@ def test_a_neighbour_installation_on_the_host_is_never_touched(updater, history_
     home_b = tmp_path / "deploy-b"
     home_b.mkdir()
     (home_b / "IMAGE").write_text(OLD)
+    _installed_launcher(home_b)
     monkeypatch.setenv("DATA", str(data_b))
     monkeypatch.setenv("NAME", "neighbour-fixture")
     neighbour = FakeDockerUpdater(home_b)
@@ -3020,3 +3024,133 @@ def test_a_symlinked_review_mark_does_not_release_exports(updater, history_env, 
     elsewhere.write_text("x")
     (updater.job / u.EXPORTS_REVIEWED).symlink_to(elsewhere)
     assert updater.exports_reviewed(updater.job, updater.receipt) is False
+
+
+# ─── Лимиты launcher сверяются с исходным контейнером до остановки (K21-297) ─
+#
+# При раскатке 0.21.16 native сохранил unlimited (Memory=0, MemorySwap=0), а
+# локальный default launcher принял пустой RAM за «не задано», поставил 3 ГиБ,
+# и Docker выдал 6 ГиБ RAM+swap. Остановил это только runtime gate — уже после
+# пересоздания, как обновления, так и отката.
+GIB = 1024 ** 3
+UNLIMITED = {}
+BOUNDED = {"Memory": 2 * GIB, "MemorySwap": 4 * GIB}
+SWAPLESS = {"Memory": 2 * GIB, "MemorySwap": 2 * GIB}
+CPU_AND_RAM = {"NanoCpus": 2_500_000_000, "Memory": 3 * GIB, "MemorySwap": 6 * GIB}
+
+# Локальный default RAM в launcher установки: как его пишут «по-старому»
+# (пустое значение = не задано) и как требуется (default только для unset).
+NAIVE_DEFAULT = ': "${CONTAINER_MEMORY:=3g}"; export CONTAINER_MEMORY'
+UNSET_ONLY_DEFAULT = '[ "${CONTAINER_MEMORY+x}" = x ] || export CONTAINER_MEMORY=3g'
+
+
+def _launcher_with(home, *lines):
+    core = home / "launcher-core.sh"
+    u.shutil.copy2(SOURCE.with_name("up.sh"), core)
+    path = home / "up.sh"
+    path.write_text("\n".join([
+        "#!/usr/bin/env bash", "set -euo pipefail",
+        "ENGINE_UID=$(id -u); ENGINE_GID=$(id -g); export ENGINE_UID ENGINE_GID",
+        *lines, f'exec bash {shlex.quote(str(core))} "$@"']) + "\n")
+    path.chmod(0o755)
+
+
+@pytest.mark.parametrize("launcher", [(), (UNSET_ONLY_DEFAULT,)], ids=["shipped", "unset-only-default"])
+@pytest.mark.parametrize("baseline", [UNLIMITED, BOUNDED, SWAPLESS, CPU_AND_RAM],
+                         ids=["unlimited", "bounded", "swapless", "cpu-and-ram"])
+def test_launcher_that_reproduces_the_original_limits_updates_and_rolls_back(updater, baseline, launcher):
+    updater.host_resources = baseline
+    _launcher_with(updater.home, *launcher)
+
+    updater.update("registry.example/korra:latest")
+    updater.rollback()
+
+    assert updater.receipt["status"] == "rolled_back"
+    assert updater.receipt["old_resources"] == {
+        "nano_cpus": baseline.get("NanoCpus", 0), "memory_bytes": baseline.get("Memory", 0),
+        "memory_swap_bytes": baseline.get("MemorySwap", 0)}
+    assert updater.receipt["launcher_resources"] == updater.receipt["old_resources"]
+    assert updater.receipt["launcher_resources_rollback"] == updater.receipt["old_resources"]
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+@pytest.mark.parametrize("baseline", [UNLIMITED, BOUNDED], ids=["unlimited", "bounded"])
+def test_update_refuses_a_launcher_whose_local_default_moves_the_limits(updater, baseline, dry_run):
+    # NAIVE_DEFAULT оставляет positive-лимиты нетронутыми только если они
+    # заданы; ограниченный baseline тут проходил бы, поэтому для него launcher
+    # подменяет RAM безусловно.
+    updater.host_resources = baseline
+    _launcher_with(updater.home, NAIVE_DEFAULT if not baseline else "export CONTAINER_MEMORY=3g")
+    before = u.tree_manifest(updater.data)
+
+    with pytest.raises(u.UpdateError, match="Host launcher would start the contour with RAM"):
+        updater.update("registry.example/korra:latest", dry_run=dry_run)
+
+    assert updater.receipt["error_code"] == "launcher_resource_mismatch"
+    assert updater.receipt["status"] == "failed"
+    assert u.tree_manifest(updater.data) == before
+    assert updater.running and updater.image == OLD
+    assert not any(call[0] in {"pull", "native", "stop", "start_image"} for call in updater.calls)
+
+
+def test_update_names_the_docker_doubling_of_a_local_ram_default(updater):
+    _launcher_with(updater.home, NAIVE_DEFAULT)
+
+    with pytest.raises(u.UpdateError) as caught:
+        updater.update("registry.example/korra:latest")
+
+    # 3g без своего swap — это 6 ГиБ RAM+swap, ровно то, что видел Docker.
+    assert f"RAM {3 * GIB} bytes instead of unlimited" in str(caught.value)
+    assert f"RAM+swap {6 * GIB} bytes instead of unlimited" in str(caught.value)
+
+
+def test_rollback_refuses_a_launcher_whose_local_default_moves_the_limits(updater):
+    updater.update("registry.example/korra:latest")
+    _launcher_with(updater.home, NAIVE_DEFAULT)
+    calls_before = len(updater.calls)
+
+    with pytest.raises(u.UpdateError, match="Host launcher would start the contour with RAM"):
+        updater.rollback()
+
+    # Исправный новый контур не остановлен ради отката, который не прошёл бы gate.
+    assert updater.receipt["error_code"] == "launcher_resource_mismatch"
+    assert updater.receipt["status"] != "rolled_back"
+    assert updater.image == NEW and updater.running
+    assert not any(call[0] in {"stop", "native"} for call in updater.calls[calls_before:])
+
+
+def test_launcher_that_drops_the_cpu_limit_is_refused(updater):
+    updater.host_resources = CPU_AND_RAM
+    _launcher_with(updater.home, "export CONTAINER_CPUS=")
+
+    with pytest.raises(u.UpdateError, match="CPU unlimited CPUs instead of 2.5 CPUs"):
+        updater.update("registry.example/korra:latest")
+
+
+def test_operator_override_is_the_expected_limit_for_update_only(updater, monkeypatch):
+    updater.host_resources = BOUNDED
+    monkeypatch.setenv("CONTAINER_MEMORY", "4g")
+    _launcher_with(updater.home)
+
+    updater.update("registry.example/korra:latest")
+    updater.rollback()
+
+    # Новый бюджет RAM получает парный swap Docker (8 ГиБ), откат — прежний.
+    assert updater.receipt["launcher_resources"]["memory_bytes"] == 4 * GIB
+    assert updater.receipt["launcher_resources"]["memory_swap_bytes"] == 8 * GIB
+    assert updater.receipt["launcher_resources_rollback"] == updater.receipt["old_resources"]
+
+
+@pytest.mark.parametrize("argv,expected", [
+    ([], (0, 0, 0)),
+    (["--memory", "3g"], (0, 3 * GIB, 6 * GIB)),
+    (["--memory=3g", "--memory-swap=3584m"], (0, 3 * GIB, 3584 * 1024 ** 2)),
+    (["-m", "512m", "--memory-swap", "0"], (0, 512 * 1024 ** 2, GIB)),
+    (["--memory-swap", "0"], (0, 0, 0)),
+    (["--memory", "", "--memory-swap", ""], (0, 0, 0)),
+    (["--memory", "3GiB", "--memory-swap", "-1"], (0, 3 * GIB, -1)),
+    (["--cpus", "2.5", "--memory", "1024"], (2_500_000_000, 1024, 2048)),
+])
+def test_effective_resources_follow_docker_semantics(argv, expected):
+    got = u.resources_from_launch_argv(["docker", "run", "-d", *argv, "image"])
+    assert (got["nano_cpus"], got["memory_bytes"], got["memory_swap_bytes"]) == expected
