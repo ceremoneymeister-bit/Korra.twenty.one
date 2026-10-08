@@ -406,6 +406,13 @@ COPY --link --chmod=a+rX,go-w . .
 # resolution or downloads.
 RUN uv pip install --no-cache-dir --no-deps -e "."
 
+# Korra: пакеты пользователя живут в DATA/lazy-packages (HERMES_LAZY_INSTALL_TARGET)
+# и переживают обновление образа. Обычная строка .pth добавляет каталог в КОНЕЦ
+# sys.path любого интерпретатора venv (поставка при совпадении имён главнее), а
+# /opt/data/lazy-packages/bin стоит на PATH ниже venv: не только процессы Korra,
+# но и `python script.py` и CLI из терминала агента видят такие пакеты.
+RUN /opt/hermes/.venv/bin/python -c "import pathlib, site; pathlib.Path(site.getsitepackages()[0], 'korra-durable-packages.pth').write_text('/opt/data/lazy-packages\\n')"
+
 # Wire the exec shim and install-method stamp.  Files under /opt/hermes are
 # already root-owned (COPY, uv sync, npm install all run as root) and
 # read-only for the hermes user (go-w from the --chmod above).
@@ -568,7 +575,7 @@ RUN ln -sf hermes /opt/hermes/bin/korra
 # shim wins PATH resolution. The shim's last act is to exec the venv
 # binary by absolute path, so this PATH ordering is transparent to
 # every other consumer.
-ENV PATH="/opt/hermes/bin:/opt/hermes/.venv/bin:/opt/data/.local/bin:${PATH}"
+ENV PATH="/opt/hermes/bin:/opt/hermes/.venv/bin:/opt/data/.local/bin:/opt/data/lazy-packages/bin:${PATH}"
 # Native terminal uses a login-shell snapshot, which otherwise loses ENV PATH
 # in /etc/profile and cannot see bundled Python skill dependencies.
 COPY --chmod=0644 docker/runtime-path.sh /etc/profile.d/korra-runtime-path.sh
