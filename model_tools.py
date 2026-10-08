@@ -1306,6 +1306,39 @@ def handle_function_call(
     # tool name, not the bridge.
     _dispatch_start = time.monotonic()
 
+    def _transform_result(result: Any, duration_ms: int) -> Any:
+        """Apply the same result hook to catalog reads and dispatched tools."""
+        try:
+            from korra_cli.lifecycle import has_hook, invoke_hook
+            if has_hook("transform_tool_result"):
+                status, error_type, error_message = _tool_result_observer_fields(
+                    function_name,
+                    result,
+                )
+                hook_results = invoke_hook(
+                    "transform_tool_result",
+                    tool_name=function_name,
+                    args=function_args,
+                    result=result,
+                    task_id=task_id or "",
+                    session_id=session_id or "",
+                    tool_call_id=tool_call_id or "",
+                    turn_id=turn_id or "",
+                    api_request_id=api_request_id or "",
+                    duration_ms=duration_ms,
+                    status=status,
+                    error_type=error_type,
+                    error_message=error_message,
+                )
+                for hook_result in hook_results:
+                    if isinstance(hook_result, str):
+                        result = hook_result
+                        break
+        except Exception as _hook_err:
+            logger.debug("transform_tool_result hook error: %s", _hook_err)
+
+        return result
+
     def _return_bridge_result(result: Any) -> Any:
         _emit_post_tool_call_hook(
             function_name=function_name,
@@ -1319,7 +1352,7 @@ def handle_function_call(
             duration_ms=int((time.monotonic() - _dispatch_start) * 1000),
             middleware_trace=list(_tool_middleware_trace),
         )
-        return result
+        return _transform_result(result, int((time.monotonic() - _dispatch_start) * 1000))
 
     _ts_mod = None
     try:
@@ -1609,44 +1642,7 @@ def handle_function_call(
             middleware_trace=list(_tool_middleware_trace),
         )
 
-        # Generic tool-result canonicalization seam: plugins receive the
-        # final result string (JSON, usually) and may replace it by
-        # returning a string from transform_tool_result. Runs after
-        # post_tool_call (which stays observational) and before the result
-        # is appended back into conversation context. Fail-open; the first
-        # valid string return wins; non-string returns are ignored.
-        # Gated on has_hook so the no-listener path skips both the result
-        # field derivation and the payload dispatch.
-        try:
-            from korra_cli.lifecycle import has_hook, invoke_hook
-            if has_hook("transform_tool_result"):
-                status, error_type, error_message = _tool_result_observer_fields(
-                    function_name,
-                    result,
-                )
-                hook_results = invoke_hook(
-                    "transform_tool_result",
-                    tool_name=function_name,
-                    args=function_args,
-                    result=result,
-                    task_id=task_id or "",
-                    session_id=session_id or "",
-                    tool_call_id=tool_call_id or "",
-                    turn_id=turn_id or "",
-                    api_request_id=api_request_id or "",
-                    duration_ms=duration_ms,
-                    status=status,
-                    error_type=error_type,
-                    error_message=error_message,
-                )
-                for hook_result in hook_results:
-                    if isinstance(hook_result, str):
-                        result = hook_result
-                        break
-        except Exception as _hook_err:
-            logger.debug("transform_tool_result hook error: %s", _hook_err)
-
-        return result
+        return _transform_result(result, duration_ms)
 
     except Exception as e:
         error_msg = f"Error executing {function_name}: {str(e)}"

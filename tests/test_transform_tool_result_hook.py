@@ -164,3 +164,48 @@ def test_transform_tool_result_integration_with_real_plugin(monkeypatch, tmp_pat
         dispatch_result='{"payload": 42}',
     )
     assert out == 'CANON[some_tool]{"payload": 42}'
+
+
+def test_catalog_bridge_runs_transform_after_observer_with_scoped_catalog(monkeypatch):
+    """Tool search took an early return, silently skipping result plugins."""
+    import json
+    from tools import tool_search
+
+    calls = []
+    original = {"tools": {"allowed": {"description": "Allowed operation"}}, "results": []}
+    def definitions(**kwargs):
+        assert kwargs["enabled_toolsets"] == ["allowed-set"]
+        assert kwargs["disabled_toolsets"] == ["denied-set"]
+        assert kwargs["skip_tool_search_assembly"] is True
+        return [{"type": "function", "function": {"name": "allowed"}}]
+    def search(args, *, current_tool_defs):
+        assert current_tool_defs[0]["function"]["name"] == "allowed"
+        return json.dumps(original)
+    def hook(name, **kwargs):
+        calls.append((name, kwargs))
+        if name == "transform_tool_result":
+            return [None, {"invalid": True}, json.dumps({**original, "ranked": True})]
+        return []
+    monkeypatch.setattr(model_tools, "get_tool_definitions", definitions)
+    monkeypatch.setattr(tool_search, "dispatch_tool_search", search)
+    monkeypatch.setattr(plugins_mod, "has_hook", lambda name: True)
+    monkeypatch.setattr(plugins_mod, "invoke_hook", hook)
+    out = model_tools.handle_function_call("tool_search", {"queries": ["allowed"]},
+                                           enabled_toolsets=["allowed-set"], disabled_toolsets=["denied-set"],
+                                           session_id="s", turn_id="turn")
+    assert json.loads(out) == {**original, "ranked": True}
+    assert [name for name, _ in calls] == ["post_tool_call", "transform_tool_result"]
+    assert all(json.loads(kw["result"]) == original for _, kw in calls)
+    assert calls[-1][1]["turn_id"] == "turn"
+    assert calls[-1][1]["tool_name"] == "tool_search"
+
+
+def test_catalog_transform_error_preserves_original_result(monkeypatch):
+    from tools import tool_search
+    monkeypatch.setattr(model_tools, "get_tool_definitions", lambda **kw: [])
+    monkeypatch.setattr(tool_search, "dispatch_tool_describe", lambda *a, **kw: '{"tools": {}}')
+    monkeypatch.setattr(plugins_mod, "has_hook", lambda name: name == "transform_tool_result")
+    def broken(*args, **kwargs):
+        raise RuntimeError("plugin failure")
+    monkeypatch.setattr(plugins_mod, "invoke_hook", broken)
+    assert model_tools.handle_function_call("tool_describe", {"tools": ["missing"]}) == '{"tools": {}}'
