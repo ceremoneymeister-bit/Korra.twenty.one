@@ -304,9 +304,12 @@ class CodexQuotaSnapshot:
     plan_type: Optional[str] = None
     captured_at: float = 0.0
     source: str = ""
+    # Only the usage endpoint reports these two; older readers ignore them.
+    limit_reached: Optional[bool] = None
+    reset_credits: Optional[dict] = None  # {"available": N, "applicable": M}
 
     def to_dict(self) -> dict:
-        return {
+        data = {
             "version": _CODEX_QUOTA_VERSION,
             "limit_id": self.limit_id,
             "plan_type": self.plan_type,
@@ -315,6 +318,11 @@ class CodexQuotaSnapshot:
             "primary": self.primary.to_dict() if self.primary else None,
             "secondary": self.secondary.to_dict() if self.secondary else None,
         }
+        if self.limit_reached is not None:
+            data["limit_reached"] = self.limit_reached
+        if self.reset_credits is not None:
+            data["reset_credits"] = self.reset_credits
+        return data
 
 
 def _first(mapping: Mapping[str, Any], *names: str) -> Any:
@@ -382,6 +390,21 @@ def _window(
     )
 
 
+def is_placeholder_window(window: Any) -> bool:
+    """A second window with no length and nothing used carries no information.
+
+    Response headers can announce one as ``used 0 %, length unknown, resets
+    at the time of writing``; shown, it reads as a reset that never happened.
+    """
+    if isinstance(window, CodexQuotaWindow):
+        used, minutes = window.used_percent, window.window_minutes
+    elif isinstance(window, Mapping):
+        used, minutes = _as_float(window.get("used_percent")), window.get("window_minutes")
+    else:
+        return False
+    return not minutes and not used
+
+
 def _body_window(raw: Any, now: float) -> Optional[CodexQuotaWindow]:
     if not isinstance(raw, Mapping):
         return None
@@ -425,6 +448,8 @@ def parse_codex_rate_limits_body(
         limits = inner if isinstance(inner, Mapping) else outer
         primary = _body_window(_first(limits, "primary", "primary_window"), current)
         secondary = _body_window(_first(limits, "secondary", "secondary_window"), current)
+        if is_placeholder_window(secondary):
+            secondary = None
         if primary is None and secondary is None:
             return None
         if primary is None:
@@ -480,14 +505,76 @@ def parse_codex_rate_limit_headers(
         primary = _headers_window("primary")
         if primary is None:
             return None
+        secondary = _headers_window("secondary")
+        if is_placeholder_window(secondary):
+            secondary = None
         plan = lowered.get(f"{prefix}-plan-type") or lowered.get("x-codex-plan-type")
         return CodexQuotaSnapshot(
             primary=primary,
-            secondary=_headers_window("secondary"),
+            secondary=secondary,
             limit_id=prefix[2:] or "codex",
             plan_type=str(plan).strip() or None if plan else None,
             captured_at=current,
             source="headers",
+        )
+    except Exception:
+        return None
+
+
+def _count(value: Any) -> Optional[int]:
+    number = _as_float(value)
+    return max(0, int(number)) if number is not None else None
+
+
+def parse_codex_usage_payload(
+    payload: Any, *, now: Optional[float] = None
+) -> Optional[CodexQuotaSnapshot]:
+    """Parse the ``wham/usage`` answer the Codex CLI shows on ``/status``; never raises."""
+    try:
+        if not isinstance(payload, Mapping):
+            return None
+        current = time.time() if now is None else float(now)
+        rate = payload.get("rate_limit")
+        if not isinstance(rate, Mapping):
+            return None
+
+        def _usage_window(raw: Any) -> Optional[CodexQuotaWindow]:
+            if not isinstance(raw, Mapping):
+                return None
+            seconds = _as_float(raw.get("limit_window_seconds"))
+            return _window(
+                raw.get("used_percent"),
+                seconds / 60 if seconds and seconds > 0 else None,
+                raw.get("reset_at"),
+                raw.get("reset_after_seconds"),
+                current,
+            )
+
+        primary = _usage_window(rate.get("primary_window"))
+        secondary = _usage_window(rate.get("secondary_window"))
+        if is_placeholder_window(secondary):
+            secondary = None
+        if primary is None:
+            primary, secondary = secondary, None
+        if primary is None:
+            return None
+        credits = payload.get("rate_limit_reset_credits")
+        reset_credits = None
+        if isinstance(credits, Mapping) and _count(credits.get("available_count")) is not None:
+            reset_credits = {
+                "available": _count(credits.get("available_count")),
+                "applicable": _count(credits.get("applicable_available_count")) or 0,
+            }
+        plan = payload.get("plan_type")
+        reached = rate.get("limit_reached")
+        return CodexQuotaSnapshot(
+            primary=primary,
+            secondary=secondary,
+            plan_type=str(plan) if isinstance(plan, str) and plan.strip() else None,
+            captured_at=current,
+            source="usage_api",
+            limit_reached=reached if isinstance(reached, bool) else None,
+            reset_credits=reset_credits,
         )
     except Exception:
         return None
@@ -511,14 +598,23 @@ def _quota_signature(snapshot: CodexQuotaSnapshot) -> tuple:
         reset = round(window.resets_at) if window.resets_at else None
         return (round(window.used_percent, 1), window.window_minutes, reset)
 
-    return (snapshot.limit_id, snapshot.plan_type, _sig(snapshot.primary), _sig(snapshot.secondary))
+    return (
+        snapshot.limit_id, snapshot.plan_type, _sig(snapshot.primary), _sig(snapshot.secondary),
+        snapshot.limit_reached, tuple(sorted((snapshot.reset_credits or {}).items())),
+    )
 
 
-def record_codex_quota(snapshot: Optional[CodexQuotaSnapshot], *, root: Optional[Any] = None) -> bool:
+def record_codex_quota(
+    snapshot: Optional[CodexQuotaSnapshot],
+    *,
+    root: Optional[Any] = None,
+    force: bool = False,
+) -> bool:
     """Persist the snapshot if it changed; return whether a write happened.
 
     Best effort by contract: a read-only disk or a race with another profile
     process must never disturb the agent turn that carried the value.
+    ``force`` writes an unchanged value too, to move its "captured at" time.
     """
     if snapshot is None or snapshot.primary is None:
         return False
@@ -528,11 +624,21 @@ def record_codex_quota(snapshot: Optional[CodexQuotaSnapshot], *, root: Optional
         signature = _quota_signature(snapshot)
         last = _codex_quota_memo.get(key)
         if (
-            last is not None
+            not force
+            and last is not None
             and last[0] == signature
             and snapshot.captured_at - last[1] < _CODEX_QUOTA_REFRESH_SECONDS
         ):
             return False
+        if snapshot.reset_credits is None:
+            # Response headers do not know the banked resets: keep the last
+            # count the usage endpoint gave instead of erasing it.
+            stored = load_codex_quota(root=root)
+            kept = stored.get("reset_credits") if stored else None
+            if isinstance(kept, dict):
+                from dataclasses import replace
+
+                snapshot = replace(snapshot, reset_credits=kept)
         import json
 
         from utils import atomic_write_text
