@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from typing import Any, Dict, List, Optional
 
@@ -406,6 +407,41 @@ def _agent_home(agent: Any) -> Optional[Path]:
     return None
 
 
+def _auto_load_parts(agent: Any) -> List[str]:
+    """``skills.auto_load`` blocks of the agent's own profile.
+
+    Resolved once per agent (config and skill files are read on the first build)
+    so the prompt stays byte-stable across model switches and compression. Same
+    gate as the skills index: nothing without the skills tools, and nothing for
+    internal forks (delegate children, curator/review agents) that skip context
+    files. A typo or unreadable config never blocks a session.
+    """
+    if getattr(agent, "skip_context_files", False) or not any(
+        name in agent.valid_tool_names for name in ("skills_list", "skill_view", "skill_manage")
+    ):
+        return []
+    if not getattr(agent, "_auto_load_skills_resolved", False):
+        prompt = ""
+        try:
+            if not is_truthy_value(os.environ.get("HERMES_IGNORE_RULES")):
+                from agent.skill_commands import build_auto_load_prompt
+
+                prompt, _loaded, skipped = build_auto_load_prompt(
+                    task_id=getattr(agent, "session_id", None), home_override=_agent_home(agent)
+                )
+                if skipped:
+                    logger.warning(
+                        "skills.auto_load: skipped (not found, disabled or over the size limit): %s",
+                        ", ".join(skipped),
+                    )
+        except Exception:
+            logger.debug("skills.auto_load: injection skipped", exc_info=True)
+        agent._auto_load_skills_prompt = prompt
+        agent._auto_load_skills_resolved = True
+    prompt = getattr(agent, "_auto_load_skills_prompt", "")
+    return [prompt] if prompt else []
+
+
 def _agent_skills_dir(agent: Any) -> Optional[Path]:
     """The agent's own ``<home>/skills`` dir, or None to use ambient home."""
     home = _agent_home(agent)
@@ -687,6 +723,9 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
             f"When asked what model you are, always answer based on this information, "
             f"not on any model name returned by the API."
         )
+
+    # Pinned skills are per-agent constants, so they live in the stable prefix.
+    stable_parts.extend(_auto_load_parts(agent))
 
     # Environment hints (WSL, Termux, etc.) — tell the agent about the
     # execution environment so it can translate paths and adapt behavior.

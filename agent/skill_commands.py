@@ -845,10 +845,17 @@ def build_stacked_skill_invocation_message(
 def build_preloaded_skills_prompt(
     skill_identifiers: list[str],
     task_id: str | None = None,
+    *,
+    activation_note: Any = None,
+    max_chars: int | None = None,
 ) -> tuple[str, list[str], list[str]]:
     """Load one or more skills for session-wide CLI/TUI preloading.
 
     Returns (prompt_text, loaded_skill_names, missing_identifiers).
+
+    *activation_note* (``name -> str``) replaces the ``-s`` wording; *max_chars*
+    caps the combined size of the rendered blocks — a skill that would not fit
+    is reported in ``missing_identifiers`` instead of being loaded.
 
     Disabled skills are treated the same as missing ones: this loads via a
     raw identifier straight into ``_load_skill_payload``, bypassing
@@ -860,6 +867,7 @@ def build_preloaded_skills_prompt(
     prompt_parts: list[str] = []
     loaded_names: list[str] = []
     missing: list[str] = []
+    used_chars = 0
 
     try:
         from agent.skill_utils import get_disabled_skill_names
@@ -892,19 +900,78 @@ def build_preloaded_skills_prompt(
         except Exception:
             pass  # Non-critical
 
-        activation_note = (
-            f'[IMPORTANT: The user launched this CLI session with the "{skill_name}" skill '
-            "preloaded. Treat its instructions as active guidance for the duration of this "
-            "session unless the user overrides them.]"
-        )
-        prompt_parts.append(
-            _build_skill_message(
-                loaded_skill,
-                skill_dir,
-                activation_note,
-                session_id=task_id,
+        note = (
+            activation_note(skill_name)
+            if activation_note
+            else (
+                f'[IMPORTANT: The user launched this CLI session with the "{skill_name}" skill '
+                "preloaded. Treat its instructions as active guidance for the duration of this "
+                "session unless the user overrides them.]"
             )
         )
+        block = _build_skill_message(loaded_skill, skill_dir, note, session_id=task_id)
+        if max_chars is not None and used_chars + len(block) > max_chars:
+            missing.append(identifier)
+            continue
+        used_chars += len(block)
+        prompt_parts.append(block)
         loaded_names.append(skill_name)
 
     return "\n\n".join(prompt_parts), loaded_names, missing
+
+
+# Pinned skills sit in the stable system prompt of every session, so their
+# combined size is capped: a skill that does not fit is skipped with a warning.
+AUTO_LOAD_MAX_CHARS = 24_000
+
+
+def resolve_auto_load_skills(user_config: dict | None = None) -> list[str]:
+    """``skills.auto_load`` (the active profile's config unless *user_config* is
+    given), deduplicated; empty when unset, malformed or unreadable."""
+    try:
+        if user_config is None:
+            from agent.skill_utils import _load_raw_config
+
+            user_config = _load_raw_config()
+    except Exception:
+        return []
+    skills_cfg = user_config.get("skills") if isinstance(user_config, dict) else None
+    names = skills_cfg.get("auto_load") if isinstance(skills_cfg, dict) else None
+    if not isinstance(names, list):
+        return []
+    return list(dict.fromkeys(n.strip() for n in names if isinstance(n, str) and n.strip()))
+
+
+def build_auto_load_prompt(
+    task_id: str | None = None,
+    user_config: dict | None = None,
+    home_override: Path | None = None,
+) -> tuple[str, list[str], list[str]]:
+    """``skills.auto_load`` rendered as fully loaded skill blocks for a new session.
+
+    Returns ``(prompt_text, loaded_names, skipped)``; missing, disabled and
+    over-budget names are reported, never raised — a typo in config must not
+    block session start. *home_override* makes the profile explicit: config,
+    disabled list and the skills lookup all resolve under that home, so a thread
+    that lost the HERMES_HOME context cannot pin another profile's skills.
+    """
+    from korra_constants import reset_hermes_home_override, set_hermes_home_override
+
+    token = set_hermes_home_override(str(home_override)) if home_override is not None else None
+    try:
+        names = resolve_auto_load_skills(user_config)
+        if not names:
+            return "", [], []
+        return build_preloaded_skills_prompt(
+            names,
+            task_id=task_id,
+            activation_note=lambda name: (
+                f'[IMPORTANT: The "{name}" skill is auto-loaded via config (skills.auto_load). '
+                "Treat its instructions as active guidance for the duration of this session "
+                "unless the user overrides them.]"
+            ),
+            max_chars=AUTO_LOAD_MAX_CHARS,
+        )
+    finally:
+        if token is not None:
+            reset_hermes_home_override(token)

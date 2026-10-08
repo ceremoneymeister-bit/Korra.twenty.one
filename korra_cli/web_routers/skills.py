@@ -20,6 +20,7 @@ from fastapi import APIRouter, HTTPException  # noqa: F401
 
 from korra_cli.web_deps import late, LateState
 from korra_cli.web_models import (
+    SkillAutoLoad,
     SkillContentUpdate,
     SkillCreate,
     SkillInstallRequest,
@@ -429,6 +430,7 @@ async def scan_skill_hub(identifier: str = "", profile: Optional[str] = None):
 
 @router.get("/api/skills")
 async def get_skills(profile: Optional[str] = None):
+    from agent.skill_commands import resolve_auto_load_skills
     from tools.skills_tool import _find_all_skills
     from korra_cli.skills_config import get_disabled_skills
     from tools.skill_usage import (
@@ -441,6 +443,7 @@ async def get_skills(profile: Optional[str] = None):
         with _profile_scope(profile):
             config = load_config()
             disabled = get_disabled_skills(config)
+            pinned = set(resolve_auto_load_skills(config))
             skills = _find_all_skills(skip_disabled=True)
             usage = load_usage()
             # Set-based provenance (same classification as skill_usage.provenance,
@@ -451,6 +454,7 @@ async def get_skills(profile: Optional[str] = None):
             hub_names = _read_hub_installed_names()
         for s in skills:
             s["enabled"] = s["name"] not in disabled
+            s["auto_load"] = s["name"] in pinned
             s["usage"] = activity_count(usage.get(s["name"], {}))
             s["provenance"] = (
                 "hub" if s["name"] in hub_names
@@ -477,6 +481,48 @@ async def toggle_skill(body: SkillToggle, profile: Optional[str] = None):
                     disabled.add(body.name)
                 save_disabled_skills(config, disabled)
         return {"ok": True, "name": body.name, "enabled": body.enabled}
+
+    return await asyncio.to_thread(_run)
+
+
+@router.put("/api/skills/auto-load")
+async def set_skill_auto_load(body: SkillAutoLoad, profile: Optional[str] = None):
+    """«В каждом чате»: закрепить навык (или снять) в ``skills.auto_load`` профиля."""
+    from agent.skill_commands import AUTO_LOAD_MAX_CHARS, resolve_auto_load_skills
+    from korra_cli.config import save_config
+    from tools.skill_manager_tool import _find_skill
+
+    def _skill_chars(name: str) -> int:
+        found = _find_skill(name)
+        try:
+            return len((found["path"] / "SKILL.md").read_text(encoding="utf-8")) if found else 0
+        except OSError:
+            return 0
+
+    def _run():
+        with _profile_scope(body.profile or profile):
+            with _CONFIG_MUTATION_LOCK:
+                config = load_config()
+                pinned = resolve_auto_load_skills(config)
+                if body.enabled and body.name not in pinned:
+                    if not _find_skill(body.name):
+                        raise HTTPException(status_code=404, detail=f"Навык «{body.name}» не найден.")
+                    total = sum(_skill_chars(n) + 500 for n in [*pinned, body.name])
+                    if total > AUTO_LOAD_MAX_CHARS:
+                        raise HTTPException(
+                            status_code=409,
+                            detail=(
+                                "Закреплённые навыки попадают в каждый чат целиком, "
+                                f"поэтому их общий размер ограничен (≈{AUTO_LOAD_MAX_CHARS} символов). "
+                                "Снимите другой навык или сократите этот."
+                            ),
+                        )
+                    pinned.append(body.name)
+                elif not body.enabled:
+                    pinned = [n for n in pinned if n != body.name]
+                config.setdefault("skills", {})["auto_load"] = pinned
+                save_config(config)
+        return {"ok": True, "name": body.name, "auto_load": body.name in pinned}
 
     return await asyncio.to_thread(_run)
 
