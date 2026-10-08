@@ -793,6 +793,21 @@ export const api = {
       ),
       signal ? { signal } : undefined,
     ),
+  /** Часть разговора до живой ленты, только чтение: страница от новых к
+   *  старым, `offset` — сколько сообщений с конца архива уже получено. */
+  getSessionArchive: (
+    id: string,
+    profile: string,
+    signal: AbortSignal | undefined,
+    page: { limit: number; offset: number },
+  ) =>
+    fetchJSON<SessionMessagesResponse>(
+      appendProfileParam(
+        `/api/sessions/${encodeURIComponent(id)}/messages?archive=true&limit=${page.limit}&offset=${page.offset}`,
+        profile,
+      ),
+      signal ? { signal } : undefined,
+    ),
   getSessionDetail: (id: string, profile = getManagementProfile()) =>
     fetchJSON<SessionInfo>(
       appendProfileParam(`/api/sessions/${encodeURIComponent(id)}`, profile),
@@ -2972,6 +2987,8 @@ export interface SessionMessagesResponse {
     has_more?: boolean;
     /** Раньше живой истории есть сжатая часть, которую лента пока не показывает. */
     archived_before?: boolean;
+    /** Режим архива (`archive=true`): всего сообщений в части до живой ленты. */
+    total?: number;
   };
 }
 

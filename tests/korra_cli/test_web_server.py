@@ -2435,6 +2435,88 @@ class TestWebServerEndpoints:
         assert [m["content"] for m in chain["messages"]] == ["new question", "new answer"]
         assert chain["pagination"]["archived_before"] is True
 
+    def _archive_pages(self, session_id, page_size):
+        """Архив «Показать раннюю часть»: страницы от новых к старым до начала."""
+        pages, offset = [], 0
+        while True:
+            reply = self.client.get(
+                f"/api/sessions/{session_id}/messages?archive=true&limit={page_size}&offset={offset}"
+            ).json()
+            pages.append(reply)
+            offset += reply["pagination"]["returned"]
+            if not reply["pagination"]["has_more"]:
+                return pages
+
+    def _live_contents(self, session_id):
+        contents, before = [], None
+        while True:
+            url = f"/api/sessions/{session_id}/messages?display_limit=30"
+            reply = self.client.get(url + (f"&before_id={before}" if before else "")).json()
+            contents = [m["content"] for m in reply["messages"]] + contents
+            before = reply["pagination"]["before_id"]
+            if not reply["pagination"]["has_more"]:
+                return contents
+
+    def test_archive_reads_every_earlier_message_after_two_compressions(self):
+        """K21-203: «Показать раннюю часть» после двух сжатий — все ранние
+        реплики до самого начала, постранично, без повторов с живой лентой,
+        и в сжатии на месте, и в цепочке сессий-предков."""
+        from korra_state import SessionDB
+
+        def fill(db, sid, tag, count):
+            db.append_messages_batch(sid, [
+                {"role": "user" if i % 2 == 0 else "assistant", "content": f"{tag}{i}"}
+                for i in range(count)
+            ])
+
+        db = SessionDB()
+        try:
+            db.create_session(session_id="inplace", source="dashboard")
+            fill(db, "inplace", "a", 100)
+            for tag, extra in (("1", "b"), ("2", "c")):
+                live = db.get_messages("inplace")
+                db.archive_and_compact(
+                    "inplace",
+                    [{"role": "user", "content": f"summary {tag}", "_compressed_summary": True}, *live[-4:]],
+                    watermark=db.get_active_message_watermark("inplace"), tail_count=4,
+                )
+                fill(db, "inplace", extra, 6)
+
+            db.create_session(session_id="rot0", source="dashboard")
+            fill(db, "rot0", "r", 60)
+            for parent, child, extra in (("rot0", "rot1", "s"), ("rot1", "rot2", "t")):
+                live = db.get_messages(parent)
+                db.publish_compression_child(
+                    parent_session_id=parent, child_session_id=child, source="dashboard",
+                    messages=[{"role": "user", "content": f"summary {child}", "_compressed_summary": True}, *live[-4:]],
+                    require_compression_lease=False, watermark=db.get_active_message_watermark(parent),
+                )
+                fill(db, child, extra, 6)
+        finally:
+            db.close()
+
+        for sid, first, count in (("inplace", "a0", 100), ("rot2", "r0", 60)):
+            pages = self._archive_pages(sid, 25)
+            assert len(pages) > 1
+            assert all(len(p["messages"]) <= 25 for p in pages)
+            archive = [m["content"] for p in reversed(pages) for m in p["messages"]]
+            assert archive[0] == first
+            assert len(archive) == len(set(archive)), "повторы внутри архива"
+            for i in range(count - 4):  # хвост из 4 реплик — уже в живой ленте
+                assert f"{first[0]}{i}" in archive
+            live = self._live_contents(sid)
+            assert not set(archive) & set(live), "архив и живая лента не пересекаются"
+            assert pages[0]["pagination"]["total"] == len(archive)
+
+        assert self.client.get(
+            "/api/sessions/inplace/messages?archive=true&display_limit=30"
+        ).status_code == 400
+        assert self.client.get(
+            "/api/sessions/inplace/messages?archive=true&include_compacted=true"
+        ).status_code == 400
+        # Без archive сжатая лента и предки не склеиваются, как и раньше.
+        assert "r0" not in self._live_contents("rot2")
+
     def test_chat_page_carries_tool_previews_not_whole_outputs(self):
         """Дмитрий 28.09: «не надо сразу так много загружать». Лента видит из
         результата инструмента только превью — его и отдаёт сервер; полный

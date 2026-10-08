@@ -1,6 +1,6 @@
 import { clearChatAttachmentDraft } from "@/hooks/useChatAttachmentDraft";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { chatViewKey, forgetChatSelection, readChatSelection, writeChatSelection, writeChatView } from "@/lib/chat-view-state";
+import { chatViewKey, clearChatDraft, forgetChatSelection, readChatSelection, writeChatSelection } from "@/lib/chat-view-state";
 import { $viewedChat, markChatViewed, chatRunHeaders, chatRunUrl, getChatRuns, isRunBusy, refreshChatRuns, type ChatRun } from "@/lib/chat-runs";
 import type { ToolEntry } from "@/components/ToolCall";
 import type {
@@ -747,7 +747,7 @@ const HISTORY_LOAD_TIMEOUT_MS = 30_000;
 /** Строка истории со всем, что реально отдаёт панельный маршрут
  *  `GET /api/sessions/{id}/messages` (он возвращает строку таблицы целиком,
  *  без проекции api_server). */
-type HistoryMessage = SessionMessage & SessionMessageReasoning;
+export type HistoryMessage = SessionMessage & SessionMessageReasoning;
 
 /**
  * История сессии → лента чата.
@@ -759,7 +759,7 @@ type HistoryMessage = SessionMessage & SessionMessageReasoning;
  * в одно сообщение — иначе после перезагрузки та же переписка выглядела бы
  * иначе, чем минуту назад вживую.
  */
-function sessionMessagesToChat(
+export function sessionMessagesToChat(
   sessionId: string,
   messages: HistoryMessage[],
 ): ChatMessage[] {
@@ -1373,7 +1373,7 @@ export function useChatStream(
         return false;
       }
 
-      writeChatView(chatViewKey(profile, state.sessionId), "");
+      clearChatDraft(chatViewKey(profile, state.sessionId));
       clearChatAttachmentDraft(chatViewKey(profile, state.sessionId));
       const userMsg: ChatMessage = {
         id: `user-${messageId}`,

@@ -329,6 +329,31 @@ describe("«Вкладки» на телефоне", () => {
     expect(container.querySelector("[data-agent-notice]")).toBeNull();
   });
 
+  it("при видимом уведомлении «Все агенты» открывается; скрытие не отмечает ответ прочитанным (K21-295)", async () => {
+    await render(page());
+    const fetcher = vi.mocked(fetch);
+    expect(container.querySelector("[data-agent-notice]")).not.toBeNull();
+    const unreadBefore = $unreadChatRuns.get().map((item) => item.message_id);
+    expect(unreadBefore.length).toBeGreaterThan(0);
+    const trigger = byLabel("Все агенты: 7");
+    await click(trigger);
+    expect(container.querySelector("[role=dialog]")).not.toBeNull();
+    await act(async () => {
+      container.querySelector("[role=dialog]")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    });
+    expect(container.querySelector("[role=dialog]")).toBeNull();
+    fetcher.mockClear();
+    await act(async () => trigger.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 0 })));
+    expect(container.querySelector("[role=dialog]")).not.toBeNull();
+    await act(async () => {
+      container.querySelector("[role=dialog]")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    });
+    await click(byLabel("Скрыть уведомление"));
+    expect(container.querySelector("[data-agent-notice]")).toBeNull();
+    expect($unreadChatRuns.get().map((item) => item.message_id)).toEqual(unreadBefore);
+    expect(fetcher.mock.calls.filter(([, init]) => init?.method && init.method !== "GET")).toHaveLength(0);
+  });
+
   it("при наборе полоса уходит, строка разговора остаётся", async () => {
     await render(page());
     const field = container.querySelector<HTMLTextAreaElement>("[aria-label='Сообщение designer']")!;

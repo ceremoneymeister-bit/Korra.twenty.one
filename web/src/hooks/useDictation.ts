@@ -77,6 +77,12 @@ interface KeptEntry {
   view: KeptRecording;
 }
 const keptByKey = new Map<string, KeptEntry>();
+/** Поле того же чата могло открыться заново, пока закрытое ждало текст:
+ *  оно узнаёт о смене сохранённой записи и не держит устаревшую карточку. */
+const keptListeners = new Map<string, Set<() => void>>();
+function announceKept(key: string): void {
+  keptListeners.get(key)?.forEach((sync) => sync());
+}
 
 export interface UseDictationOptions {
   /** Профиль агента: у каждого свой ключ распознавания. */
@@ -90,6 +96,9 @@ export interface UseDictationOptions {
   onError: (message: string) => void;
   /** Речи не слышно: сервер ответил успехом и пустой строкой. */
   onEmpty?: () => void;
+  /** Успешный текст пришёл после закрытия поля. true означает, что текст
+   *  надёжно сохранён в точном черновике; только тогда можно удалить аудио. */
+  onDetachedText?: (text: string) => boolean;
 }
 
 export interface UseDictationReturn {
@@ -241,6 +250,7 @@ export function useDictation({
   onText,
   onError,
   onEmpty,
+  onDetachedText,
 }: UseDictationOptions): UseDictationReturn {
   const [support] = useState(detectSupport);
   const [state, setState] = useState<DictationState>("idle");
@@ -251,9 +261,9 @@ export function useDictation({
 
   // Обработчики меняют личность на каждом рендере, а запись живёт дольше
   // рендера: держим их в ref, чтобы start/stop оставались стабильными.
-  const handlersRef = useRef({ profile, onText, onError, onEmpty });
+  const handlersRef = useRef({ profile, onText, onError, onEmpty, onDetachedText });
   useEffect(() => {
-    handlersRef.current = { profile, onText, onError, onEmpty };
+    handlersRef.current = { profile, onText, onError, onEmpty, onDetachedText };
   });
 
   const stateRef = useRef<DictationState>("idle");
@@ -274,6 +284,20 @@ export function useDictation({
   const orphanRunRef = useRef<number | null>(null);
   useEffect(() => {
     keepKeyRef.current = keepKey;
+  }, [keepKey]);
+  useEffect(() => {
+    if (!keepKey) return;
+    const sync = () => {
+      keptRef.current = keptByKey.get(keepKey) ?? null;
+      setKept(keptRef.current?.view ?? null);
+    };
+    const listeners = keptListeners.get(keepKey) ?? new Set<() => void>();
+    keptListeners.set(keepKey, listeners);
+    listeners.add(sync);
+    return () => {
+      listeners.delete(sync);
+      if (listeners.size === 0) keptListeners.delete(keepKey);
+    };
   }, [keepKey]);
   const aliveRef = useRef(true);
   // Номер попытки. Отмена и размонтирование его увеличивают, и всё, что
@@ -304,9 +328,11 @@ export function useDictation({
   }, []);
 
   const dropKept = useCallback(() => {
-    revokeUrl(keptRef.current?.view.url);
+    const key = keepKeyRef.current;
+    const previous = keptRef.current ?? (key ? keptByKey.get(key) ?? null : null);
+    revokeUrl(previous?.view.url);
     keptRef.current = null;
-    if (keepKeyRef.current) keptByKey.delete(keepKeyRef.current);
+    if (key) keptByKey.delete(key);
     if (aliveRef.current) setKept(null);
   }, []);
 
@@ -317,9 +343,11 @@ export function useDictation({
       message: string,
       audioSeconds: number | null,
     ) => {
-      revokeUrl(keptRef.current?.view.url);
+      const key = keepKeyRef.current;
+      const previous = keptRef.current ?? (key ? keptByKey.get(key) ?? null : null);
+      revokeUrl(previous?.view.url);
       keptRef.current = keptEntry(recording, kind, message, audioSeconds);
-      if (keepKeyRef.current) keptByKey.set(keepKeyRef.current, keptRef.current);
+      if (key) keptByKey.set(key, keptRef.current);
       if (aliveRef.current) setKept(keptRef.current.view);
     },
     [],
@@ -338,12 +366,36 @@ export function useDictation({
           profile: scope,
           recordedMs: recording.recordedMs,
         });
-        if (runRef.current !== run) return;
+        const text = result.text.trim();
+        if (runRef.current !== run) {
+          inFlightRef.current = null;
+          // A deliberate cancellation must stay cancelled. Recovery is only
+          // for a response which outlived its unmounted composer.
+          if (aliveRef.current || !text || !handlersRef.current.onDetachedText?.(text)) return;
+          const audio = result.audioSeconds;
+          const missing = audio === null ? 0 : recordedSeconds - audio;
+          if (
+            audio !== null &&
+            missing > PARTIAL_MIN_GAP_SECONDS &&
+            missing > recordedSeconds * PARTIAL_MIN_SHARE
+          ) {
+            keep(
+              recording,
+              "partial",
+              `Распознано ${formatDictationClock(audio)} из ${formatDictationClock(recordedSeconds)}: ` +
+                "остальное до сервера не дошло. Текст уже в поле, запись можно скачать.",
+              audio,
+            );
+          } else {
+            dropKept();
+          }
+          if (keepKeyRef.current) announceKept(keepKeyRef.current);
+          return;
+        }
         inFlightRef.current = null;
         // Сохранённая запись (это был повтор) разобрана; если текст неполный
         // или пустой, ниже она сохранится заново.
         if (keptRef.current) dropKept();
-        const text = result.text.trim();
         if (!text) {
           if (recordedSeconds >= SILENT_KEEP_SECONDS) {
             keep(

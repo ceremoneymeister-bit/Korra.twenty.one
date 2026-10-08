@@ -10,6 +10,66 @@ export function writeChatView(key: string, value: string): void {
   try { if (value) sessionStorage.setItem(key, value); else sessionStorage.removeItem(key); } catch { /* Browser storage may be unavailable. */ }
 }
 
+const CHAT_DRAFT_RECOVERY_PREFIX = "korra-chat-draft-recovery:";
+
+function chatDraftRecoveryKey(key: string): string {
+  return `${CHAT_DRAFT_RECOVERY_PREFIX}${key}`;
+}
+
+/** A late STT response updates the mounted composer in the same browser tab. */
+export const CHAT_DRAFT_UPDATE_EVENT = "korra-chat-draft-update";
+
+/**
+ * Read the tab-local draft. A durable recovery copy exists only after STT
+ * finished after its composer closed; ordinary typed drafts remain tab-local.
+ */
+export function readChatDraft(key: string): string {
+  try {
+    const current = sessionStorage.getItem(key);
+    if (current !== null) return current;
+  } catch { /* Try the recovery copy. */ }
+  try { return localStorage.getItem(chatDraftRecoveryKey(key)) ?? ""; } catch { return ""; }
+}
+
+/**
+ * Keep editing a recovered draft durably until it is accepted for delivery.
+ * Drafts which never needed recovery retain the existing tab-local behaviour.
+ */
+export function writeChatDraft(key: string, value: string): void {
+  writeChatView(key, value);
+  const recoveryKey = chatDraftRecoveryKey(key);
+  try {
+    if (localStorage.getItem(recoveryKey) === null) return;
+    if (value) localStorage.setItem(recoveryKey, value);
+    else localStorage.removeItem(recoveryKey);
+  } catch { /* The tab-local copy remains available. */ }
+}
+
+/** Clear both the ordinary draft and any late-dictation recovery copy. */
+export function clearChatDraft(key: string): void {
+  writeChatView(key, "");
+  try { localStorage.removeItem(chatDraftRecoveryKey(key)); } catch { /* Storage unavailable. */ }
+}
+
+/**
+ * Recover text returned after its composer was unmounted. Persistent storage is
+ * written first: if it is unavailable, the caller keeps the audio for retry.
+ */
+export function appendRecoveredChatDraft(key: string, text: string): boolean {
+  const current = readChatDraft(key);
+  const next = current && !/\s$/.test(current) ? `${current} ${text}` : `${current}${text}`;
+  try {
+    localStorage.setItem(chatDraftRecoveryKey(key), next);
+  } catch {
+    return false;
+  }
+  try { sessionStorage.setItem(key, next); } catch { /* Persistent copy is authoritative. */ }
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(CHAT_DRAFT_UPDATE_EVENT, { detail: { key } }));
+  }
+  return true;
+}
+
 /** Synthetic ids (a decision's `cron:<job>:<run>` source) are not chats. */
 function isChatSessionId(value: string): boolean {
   return !value.startsWith("cron:");

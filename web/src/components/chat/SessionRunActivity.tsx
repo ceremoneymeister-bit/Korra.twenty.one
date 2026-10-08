@@ -70,69 +70,51 @@ export function SessionRunActivity({ tabs }: { tabs: AgentTabConfig[] }) {
   </>;
 }
 
-/** Сколько строк уведомление показывает на телефоне и на десктопе. */
-const RUN_TOAST_COMPACT_ITEMS = 1;
-const RUN_TOAST_ITEMS = 3;
+/** Уведомление показывает один ответ, остальные считает «+N». */
+const RUN_TOAST_ITEMS = 1;
 
 /**
  * Уведомление «агент ответил».
  *
- * На телефоне и планшете это одна полоса высотой в одну строку у правого
- * края верхней безопасной области — рядом с гамбургером, поверх пустого
- * места шапки. Прежняя версия занимала всю ширину под шапкой и закрывала
- * полосу вкладок: пока уведомление висело, сменить агента было нельзя
- * (скриншот владельца, 21.09). Остальные готовые ответы не исчезают —
- * их считает счётчик, а долговременный сигнал остаётся у чата в списке
- * (ChatUnreadMark).
+ * Всегда одна полоса высотой в одну строку у правого края верхней
+ * безопасной области — поверх пустого места шапки, а не поверх полосы
+ * вкладок. Прежняя карточка на десктопе занимала 110 px и закрывала «Все
+ * агенты» и «+» в правом конце полосы: при восьми профилях на 1280×800
+ * переключить агента было нельзя, пока не скрыть уведомление (K21-295;
+ * на телефоне то же случилось 21.09, скриншот владельца). Остальные
+ * готовые ответы не исчезают — их считает «+N», а долговременный сигнал
+ * остаётся у чата в списке (ChatUnreadMark).
  *
- * На десктопе поведение прежнее: карточка со списком до трёх чатов.
- * Автоперехода и перехвата фокуса нет ни там, ни там.
- *
- * Границу проводит CSS, а не измерение окна: у уведомления нет ни своего
- * состояния, ни зависимости от `matchMedia`, и при повороте планшета оно
- * ничего не пересчитывает.
+ * Автоперехода и перехвата фокуса нет.
  */
 function RunToast({ runs, name }: { runs: ChatRun[]; name: (profile: string) => string }) {
   const shown = runs.slice(0, RUN_TOAST_ITEMS);
-  const compactRest = runs.length - RUN_TOAST_COMPACT_ITEMS;
   const rest = runs.length - shown.length;
   return <div
     className={cn(
       "fixed z-50 rounded-2xl bg-[var(--neo-surface)] shadow-[var(--neo-depth-2)]",
-      // Верхняя безопасная область телефона: под «чёлкой», у правого края,
-      // не шире двух третей экрана — гамбургер и логотип остаются открыты,
-      // полоса вкладок под шапкой не перекрыта.
       "right-[max(0.75rem,env(safe-area-inset-right,0px))] top-[max(0.5rem,env(safe-area-inset-top,0px))]",
-      "flex max-w-[min(52vw,20rem)] items-center gap-1 p-1",
-      "lg:right-3 lg:top-3 lg:block lg:max-w-sm lg:p-3",
+      "flex max-w-[min(52vw,24rem)] items-center gap-1 p-1",
     )}
     role="status" aria-live="polite" data-run-toast>
-    <ul className="m-0 min-w-0 list-none p-0 lg:w-full">
-      {shown.map((run, index) => <li key={run.message_id}
-        // На телефоне видна одна строка; остальные готовые ответы считает
-        // «+N» и держит отметка у чата в списке.
-        className={cn("min-w-0", index >= RUN_TOAST_COMPACT_ITEMS && "hidden lg:block")}>
+    <ul className="m-0 min-w-0 list-none p-0">
+      {shown.map(run => <li key={run.message_id} className="min-w-0">
         <Link className="flex min-h-[44px] items-center gap-2 rounded-lg px-2 text-sm hover:shadow-[var(--neo-inset-compact)]" to={agentChatHref(run.profile, run.session_id)} title={`${name(run.profile)}: ${run.user_message.content}`}>
           <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--neo-accent-line)]" />
           {/* Без глагола: у агента нет рода, «Нюра ответил» резало глаз. */}
           <span className="min-w-0 flex-1 truncate">Новый ответ · {name(run.profile)}</span>
-          {/* На телефоне подсказка «Открыть чат» — лишняя ширина: строка и
-              так вся целиком ссылка, а место в шапке занято логотипом. */}
-          <span className="hidden shrink-0 text-xs text-muted-foreground lg:inline">Открыть чат</span>
         </Link>
       </li>)}
     </ul>
-    {compactRest > 0 && <p data-run-toast-rest="compact" className="m-0 shrink-0 px-1 text-xs text-muted-foreground lg:hidden">
-      <span aria-hidden>+{compactRest}</span>
-      <span className="sr-only">И ещё {compactRest} — отмечены в списке чатов</span>
+    {rest > 0 && <p data-run-toast-rest className="m-0 shrink-0 px-1 text-xs text-muted-foreground">
+      <span aria-hidden>+{rest}</span>
+      <span className="sr-only">И ещё {rest} — отмечены в списке чатов</span>
     </p>}
-    {rest > 0 && <p data-run-toast-rest="wide" className="m-0 hidden px-2 pt-1 text-xs text-muted-foreground lg:block">И ещё {rest} — отмечены в списке чатов</p>}
-    {/* Цель пальца 44 px: на телефоне это значок, на десктопе — подпись. */}
+    {/* Цель пальца 44 px. */}
     <button type="button" aria-label="Скрыть уведомление" title="Скрыть уведомление"
-      className="flex size-[44px] shrink-0 items-center justify-center text-muted-foreground lg:mt-1 lg:size-auto lg:min-h-[44px] lg:justify-start lg:px-2 lg:text-xs"
+      className="flex size-[44px] shrink-0 items-center justify-center text-muted-foreground"
       onClick={() => dismissRunToasts()}>
-      <X aria-hidden className="size-4 lg:hidden" />
-      <span aria-hidden className="hidden lg:inline">Скрыть уведомление</span>
+      <X aria-hidden className="size-4" />
     </button>
   </div>;
 }
