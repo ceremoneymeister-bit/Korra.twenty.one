@@ -2076,9 +2076,11 @@
 }
 
 .kdw-sales-sigt span {
+  display: -webkit-box;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
 }
 
 .kdw-sales-spark {
@@ -2190,6 +2192,11 @@
   background: color-mix(in srgb, var(--kdw-ink) 38%, transparent);
 }
 
+/* Точка — кружок размером с сделку, а не кнопка: общее правило пальца раздуло бы её до 44 px. */
+[data-client-ui="true"] #main-content a.kdw-sales-dot {
+  min-height: 0;
+}
+
 .kdw-sales-dot:hover,
 .kdw-sales-dot:focus-visible {
   outline: 2px solid var(--kdw-ink);
@@ -2262,7 +2269,17 @@
 }
 
 @container kdw-sales (max-height: 380px) {
-  .kdw-sales-legend {
+  .kdw-sales-legend,
+  .kdw-sales-river-h {
+    display: none;
+  }
+
+  .kdw-sales-col-f {
+    flex-direction: row;
+    gap: 4px;
+  }
+
+  .kdw-sales-spark {
     display: none;
   }
 }
@@ -2451,6 +2468,12 @@
   font-weight: 600;
   color: var(--kdw-ink);
   text-decoration: none;
+}
+
+@container kdw-sales (max-height: 380px) {
+  .kdw-sales-link {
+    display: none;
+  }
 }
 
 .kdw-sales-calm {
