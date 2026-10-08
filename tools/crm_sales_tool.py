@@ -67,17 +67,39 @@ def _freshness(section: dict) -> dict:
     return out
 
 
+def _limits(section: dict) -> list[str]:
+    """What the figures do not cover, in words; empty when everything was read in full."""
+    out: list[str] = []
+    river = section.get("river") or {}
+    if river.get("truncated"):
+        total = river.get("deals_total")
+        atleast = "" if river.get("total_exact") else "не менее "
+        out.append(
+            f"Открытых сделок {atleast}{total}; прочитаны первые {river.get('deals_loaded')}. "
+            "Застрявшие сделки, суммы по этапам и по менеджерам посчитаны по этой выборке — это «не менее»."
+        )
+    if (section.get("won") or {}).get("limited"):
+        out.append(
+            "Выигранные сделки прочитаны не полностью: количество и суммы — «не менее»; "
+            "сравнение с прошлым месяцем не считается."
+        )
+    if (section.get("new_leads") or {}).get("limited"):
+        out.append("Новых заявок за неделю прочитана часть: числа — «не менее».")
+    if (section.get("overdue") or {}).get("limited"):
+        out.append("Просроченных задач прочитана часть: число — «не менее».")
+    return out
+
+
 def _overview(section: dict) -> dict:
     keep = ("source_label", "portal", "pipeline", "stuck_days", "won", "new_leads", "stuck", "overdue", "managers")
     out = {key: section[key] for key in keep if key in section}
     out.update(_freshness(section))
+    out["limits"] = _limits(section)
     river = section.get("river") or {}
     out["river"] = [
         {"stage": s["name"], "deals": s["count"], "amount": s["amount"], "stuck": s["stuck"]}
         for s in river.get("stages") or []
     ]
-    if river.get("truncated"):
-        out["limited"] = f"Показаны первые {river.get('deals_loaded')} сделок из {river.get('deals_total')}."
     return out
 
 
@@ -90,7 +112,7 @@ def _stuck(section: dict, limit: int) -> dict:
     ]
     rows.sort(key=lambda d: -(d.get("days") or 0))
     out = {"stuck_days": section.get("stuck_days"), "count": (section.get("stuck") or {}).get("count"),
-           "deals": rows[:limit], **_freshness(section)}
+           "deals": rows[:limit], **_freshness(section), "limits": _limits(section)}
     if (section.get("stuck") or {}).get("approx"):
         out["note"] = "Журнал событий amoCRM обрезан: список может быть неполным."
     return out

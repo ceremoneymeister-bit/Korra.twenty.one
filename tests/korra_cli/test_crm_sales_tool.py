@@ -162,3 +162,40 @@ def test_fresh_data_has_no_failure_marks(desk, action):
     connect(desk)
     answer = run(action=action)
     assert answer["stale"] is False and "error" not in answer and "note" not in answer
+
+
+def _cut_everything(desk):
+    base = desk.bitrix.handlers["crm.deal.list"]
+    row = {"ID": "1", "TITLE": "d", "OPPORTUNITY": "10", "STAGE_ID": "NEW", "ASSIGNED_BY_ID": "5",
+           "DATE_CREATE": "2026-10-01T10:00:00+03:00", "MOVED_TIME": "2026-10-01T10:00:00+03:00",
+           "CLOSEDATE": "2026-10-02T10:00:00+03:00"}
+
+    def endless(p):
+        start = int(p.get("start", 0))
+        return {"result": [dict(row) for _ in range(50)], "next": start + 50, "total": 900}
+
+    desk.bitrix.handlers["crm.deal.list"] = endless
+    desk.bitrix.handlers["crm.lead.list"] = lambda p: {**endless(p), "total": 5000}
+    desk.bitrix.handlers["tasks.task.list"] = lambda p: {
+        "result": {"tasks": [{"id": "1", "responsibleId": "5", "ufCrmTask": ["D_1"]}] * 50},
+        "next": int(p.get("start", 0)) + 50, "total": 900,
+    }
+    assert base
+
+
+@pytest.mark.parametrize("action", ["overview", "stuck"])
+def test_cut_figures_are_named_lower_bounds_in_every_summary_action(desk, action):
+    connect(desk)
+    _cut_everything(desk)
+    answer = run(action=action)
+    text = " ".join(answer["limits"]).lower()
+    assert answer["ok"] is True
+    for subject in ("сделок", "застряв", "заявок", "задач", "выигр"):
+        assert subject in text, subject
+    assert "не менее" in text
+
+
+@pytest.mark.parametrize("action", ["overview", "stuck"])
+def test_complete_figures_carry_no_limits(desk, action):
+    connect(desk)
+    assert run(action=action)["limits"] == []

@@ -87,6 +87,7 @@ class Raw:
     names: dict = field(default_factory=dict)
     stuck_approx: bool = False
     deals_total_exact: bool = True
+    new_truncated: bool = False
 
 
 # ------------------------------------------------------------------ time helpers
@@ -217,7 +218,7 @@ def collect_bitrix(reader: cr.Bitrix24Reader, settings: dict, now: datetime, tz:
             won.append(Won(_money(row.get("OPPORTUNITY")), closed, str(row.get("ASSIGNED_BY_ID") or "")))
 
     week_ago = (_midnight(now) - timedelta(days=6)).isoformat(timespec="seconds")
-    new_leads = _bitrix_new(reader, category, week_ago, tz, now)
+    new_leads, new_cut = _bitrix_new(reader, category, week_ago, tz, now)
 
     tasks_available, overdue, overdue_cut = _bitrix_overdue(reader, {d.id for d in deals}, now)
 
@@ -236,6 +237,7 @@ def collect_bitrix(reader: cr.Bitrix24Reader, settings: dict, now: datetime, tz:
         won=won,
         won_truncated=bool(won_rows["truncated"]),
         new_leads=new_leads,
+        new_truncated=new_cut,
         unsorted=None,
         tasks_available=tasks_available,
         overdue=overdue,
@@ -244,21 +246,22 @@ def collect_bitrix(reader: cr.Bitrix24Reader, settings: dict, now: datetime, tz:
     )
 
 
-def _bitrix_new(reader, category: str, since: str, tz, now) -> list[datetime]:
-    """Creation moments of the last seven days: leads, or deals on portals without leads."""
+def _bitrix_new(reader, category: str, since: str, tz, now) -> tuple[list[datetime], bool]:
+    """Creation moments of the last seven days (leads, or deals on portals without leads); and whether the list was cut."""
     try:
-        rows = reader.collect(
+        found = reader.collect(
             "crm.lead.list", {"filter": {">=DATE_CREATE": since}, "select": ["ID", "DATE_CREATE"]}, max_pages=LEAD_PAGES
-        )["items"]
+        )
     except CrmError as exc:
         if exc.code in {"network", "rate_limited", "bad_key", "budget", "plan_closed", "redirect", "limit"}:
             raise
-        rows = reader.collect(
+        found = reader.collect(
             "crm.deal.list",
             {"filter": {"CATEGORY_ID": category, ">=DATE_CREATE": since}, "select": ["ID", "DATE_CREATE"]},
             max_pages=LEAD_PAGES,
-        )["items"]
-    return [m for m in (_parse_dt(r.get("DATE_CREATE"), tz) for r in rows) if m is not None]
+        )
+    moments = [m for m in (_parse_dt(r.get("DATE_CREATE"), tz) for r in found["items"]) if m is not None]
+    return moments, bool(found["truncated"])
 
 
 def _bitrix_overdue(reader, deal_ids: set[str], now: datetime) -> tuple[bool, list[dict], bool]:
@@ -409,6 +412,7 @@ def collect_amo(reader: cr.AmoReader, settings: dict, now: datetime, tz: Optiona
         won=won,
         won_truncated=won_page["truncated"],
         new_leads=new_leads,
+        new_truncated=new_page["truncated"],
         unsorted=unsorted,
         tasks_available=tasks_available,
         overdue=overdue,
@@ -520,7 +524,7 @@ def build_snapshot(
     cur = [w for w in raw.won if month_start <= w.ts <= now]
     prev = [w for w in raw.won if prev_start <= w.ts < prev_cut]
     cur_sum, prev_sum = sum(w.amount for w in cur), sum(w.amount for w in prev)
-    change = round((cur_sum - prev_sum) / prev_sum * 100) if prev_sum > 0 else None
+    change = None if raw.won_truncated or prev_sum <= 0 else round((cur_sum - prev_sum) / prev_sum * 100)
 
     weeks = []
     starts = week_starts(now)
@@ -630,12 +634,13 @@ def build_snapshot(
             "weeks": weeks,
             "limited": raw.won_truncated,
         },
-        "new_leads": {"today": series[6], "series": series, "unsorted": raw.unsorted},
+        "new_leads": {"today": series[6], "series": series, "unsorted": raw.unsorted, "limited": raw.new_truncated},
         "stuck": {
             "count": len(stuck_deals),
             "amount": _number(sum(d.amount for d in stuck_deals)),
             "days": stuck_days,
             "approx": raw.stuck_approx,
+            "limited": raw.deals_truncated,
             "top": [view(d) for d in top],
         },
         "overdue": {

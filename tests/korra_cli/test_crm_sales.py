@@ -600,3 +600,65 @@ def test_bitrix_total_comes_from_the_api_and_is_exact(portal):
     )
     river = cs.gather(BITRIX_CONN, now=NOW, tz=TZ)["river"]
     assert (river["deals_total"], river["total_exact"], river["truncated"]) == (900, True, True)
+
+
+# ---------------------------------------------------------------- every figure says whether it is complete (F6)
+
+
+def _endless(rows_per_page, row):
+    return lambda p: {
+        "result": [dict(row) for _ in range(rows_per_page)],
+        "next": int(p.get("start", 0)) + rows_per_page,
+        "total": 99999,
+    }
+
+
+def test_bitrix_new_leads_cut_by_the_page_limit_are_flagged(portal):
+    assert cs.gather(BITRIX_CONN, now=NOW, tz=TZ)["new_leads"]["limited"] is False
+    portal.bitrix.handlers["crm.lead.list"] = _endless(50, {"ID": "1", "DATE_CREATE": iso("2026-10-08T09:00:00")})
+    new = cs.gather(BITRIX_CONN, now=NOW, tz=TZ)["new_leads"]
+    assert new["limited"] is True and new["today"] == 300
+
+
+def test_amo_new_leads_cut_by_the_page_limit_are_flagged(portal):
+    assert cs.gather(AMO_CONN, now=NOW, tz=TZ)["new_leads"]["limited"] is False
+    base = portal.amo.handlers["leads"]
+
+    def leads(q):
+        if "filter[created_at][from]" in q:
+            return {"_embedded": {"leads": [{"id": i, "created_at": ts("2026-10-08T09:00:00")} for i in range(250)]}}
+        return base(q)
+
+    portal.amo.handlers["leads"] = leads
+    new = cs.gather(AMO_CONN, now=NOW, tz=TZ)["new_leads"]
+    assert new["limited"] is True and new["today"] == 1000
+
+
+def test_overdue_cut_by_the_page_limit_is_flagged(portal):
+    portal.bitrix.handlers["tasks.task.list"] = _endless(50, {"id": "1", "responsibleId": "5", "ufCrmTask": ["D_12"]})
+    overdue = cs.gather(BITRIX_CONN, now=NOW, tz=TZ)["overdue"]
+    assert overdue["limited"] is True
+
+
+def test_stuck_count_of_a_cut_pipeline_is_a_lower_bound(portal):
+    complete = cs.gather(BITRIX_CONN, now=NOW, tz=TZ)
+    assert complete["stuck"]["limited"] is False
+    _open_deals(portal, 400)
+    cut = cs.gather(AMO_CONN, now=NOW, tz=TZ)
+    assert cut["river"]["truncated"] is True and cut["stuck"]["limited"] is True
+
+
+def test_cut_won_list_gives_lower_bounds_and_no_exact_percentage(portal):
+    base = portal.bitrix.handlers["crm.deal.list"]
+    row = {"ID": "1", "OPPORTUNITY": "10", "CLOSEDATE": iso("2026-09-03T10:00:00"), "ASSIGNED_BY_ID": "5"}
+    portal.bitrix.handlers["crm.deal.list"] = (
+        lambda p: _endless(50, row)(p) if p["filter"]["STAGE_SEMANTIC_ID"] == "S" else base(p)
+    )
+    won = cs.gather(BITRIX_CONN, now=NOW, tz=TZ)["won"]
+    assert won["limited"] is True and won["change_pct"] is None
+    assert won["prev_count"] == 500
+
+
+def test_complete_won_list_keeps_the_percentage(portal):
+    won = cs.gather(BITRIX_CONN, now=NOW, tz=TZ)["won"]
+    assert won["limited"] is False and won["change_pct"] == 75
