@@ -284,23 +284,71 @@ async def test_skills_search_is_explained_not_sent_to_the_model():
 
 
 @pytest.mark.asyncio
-async def test_curator_runs_the_shared_cli_once_and_returns_its_output():
-    def fake_cli(tokens):
-        print("curator: всё спокойно")
-        return 0
+async def test_curator_runs_in_a_subprocess_of_the_profile_home(tmp_path, monkeypatch):
+    import subprocess
 
-    with patch("korra_cli.curator.cli_main", side_effect=fake_cli) as cli:
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        return subprocess.CompletedProcess(cmd, 0, stdout="curator: всё спокойно\n", stderr="")
+
+    home = tmp_path / "profile-home"
+    home.mkdir()
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    with patch("subprocess.run", side_effect=fake_run):
         agent, result = await _send("/curator status")
-    cli.assert_called_once_with(["status"])
+    assert len(calls) == 1
+    cmd, kwargs = calls[0]
+    assert cmd[1:] == ["-m", "korra_cli.curator", "status"]
+    assert kwargs["env"]["HERMES_HOME"] == str(home)
+    assert kwargs["timeout"] > 0
     assert "всё спокойно" in result["final_response"]
     agent.run_conversation.assert_not_called()
 
 
 @pytest.mark.asyncio
+async def test_curator_status_does_not_capture_output_of_other_threads(tmp_path, monkeypatch):
+    import threading
+
+    home = tmp_path / "profile-home"
+    home.mkdir()
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    stop = threading.Event()
+
+    def chatter():
+        while not stop.is_set():
+            print("ЧУЖАЯ-СЕССИЯ-СЕКРЕТ")
+            stop.wait(0.005)
+
+    thread = threading.Thread(target=chatter, daemon=True)
+    thread.start()
+    try:
+        _agent_obj, result = await _send("/curator status")
+    finally:
+        stop.set()
+        thread.join()
+    assert "ЧУЖАЯ-СЕССИЯ-СЕКРЕТ" not in result["final_response"]
+    assert result["final_response"].strip()
+
+
+@pytest.mark.asyncio
+async def test_curator_timeout_gives_a_clear_answer():
+    import subprocess
+
+    def hang(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd, kwargs["timeout"])
+
+    with patch("subprocess.run", side_effect=hang):
+        _agent_obj, result = await _send("/curator status")
+    assert "не успела выполниться" in result["final_response"]
+
+
+@pytest.mark.asyncio
 async def test_curator_run_is_explained_because_it_needs_a_model():
-    with patch("korra_cli.curator.cli_main") as cli:
+    with patch("subprocess.run") as run:
         agent, result = await _send("/curator run")
-    cli.assert_not_called()
+    run.assert_not_called()
     assert "korra curator run" in result["final_response"]
     agent.run_conversation.assert_not_called()
 

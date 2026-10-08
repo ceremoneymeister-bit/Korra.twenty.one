@@ -714,6 +714,9 @@ _CURATOR_WEB_SUBCOMMANDS = frozenset(
 )
 
 
+_CURATOR_WEB_TIMEOUT_SECONDS = 30
+
+
 def _run_web_learning_command(command: str, args: str) -> str:
     """Answer ``/memory``, ``/skills``, ``/curator`` or ``/context`` in the web chat.
 
@@ -721,8 +724,6 @@ def _run_web_learning_command(command: str, args: str) -> str:
     review, ``korra_cli.curator``) once, without a model turn; what a plain
     chat cannot do is answered with where the command is available.
     """
-    import contextlib
-    import io
     import shlex
 
     tokens = args.split()
@@ -744,17 +745,38 @@ def _run_web_learning_command(command: str, args: str) -> str:
                 + ". Запуск обслуживания (run) использует модель, поэтому его "
                 "выполняйте в терминале Korra командой «korra curator run»."
             )
-        from korra_cli.curator import cli_main
+        import subprocess
 
-        buffer = io.StringIO()
+        from korra_constants import get_hermes_home
+
+        source_root = str(Path(__file__).resolve().parents[2])
+        env = dict(
+            os.environ,
+            HERMES_HOME=str(get_hermes_home()),
+            PYTHONIOENCODING="utf-8",
+            PYTHONPATH=os.pathsep.join(
+                p for p in (source_root, os.environ.get("PYTHONPATH", "")) if p
+            ),
+        )
         try:
-            with contextlib.redirect_stdout(buffer):
-                cli_main(tokens or ["status"])
-        except SystemExit:
-            pass
-        except Exception as exc:
+            proc = subprocess.run(
+                [sys.executable, "-m", "korra_cli.curator", *(tokens or ["status"])],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                stdin=subprocess.DEVNULL,
+                env=env,
+                timeout=_CURATOR_WEB_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired:
+            return "Команда /curator не успела выполниться. Повторите её или запустите в терминале Korra."
+        except OSError as exc:
             return f"Не удалось выполнить /curator: {exc}"
-        return buffer.getvalue().strip() or "Готово."
+        output = (proc.stdout or "").strip()
+        if proc.returncode != 0 and (proc.stderr or "").strip():
+            output = f"{output}\n{proc.stderr.strip()}".strip()
+        return output or "Готово."
 
     from korra_cli.config import atomic_config_write, read_user_config_raw
     from korra_cli.write_approval_commands import handle_pending_subcommand
