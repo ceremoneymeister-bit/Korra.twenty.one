@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 import fcntl
 import hashlib
 import inspect
@@ -114,6 +115,132 @@ for name, path in _discover_bundled_skills(base):
     skills[name] = {'path': path.relative_to(base).as_posix(), 'native_hash': _dir_hash(path), 'files': files}
 print(json.dumps({'skills': skills}))
 '''
+
+# Пакеты пользователя живут в DATA/lazy-packages (HERMES_LAZY_INSTALL_TARGET).
+# Эта проверка выполняется образом-кандидатом (или старым при откате) над
+# read-only копией DATA и сверяет хранилище с его поставкой: версии
+# дистрибутивов, закреплённый стек из dependencies.lock.json, модули, которые
+# поставка перекрыла бы, зависимости, CLI и ABI интерпретатора. Данные она не
+# меняет. ABI-токен повторяет tools.lazy_deps._python_abi_tag (тест следит).
+USER_PACKAGES_CODE = r'''
+import importlib.machinery, importlib.metadata as md, json, os, re, sys, sysconfig
+from pathlib import Path
+root, pinned = Path(sys.argv[1]), json.loads(sys.argv[2])
+store = root / 'lazy-packages'
+norm = lambda n: re.sub(r'[-_.]+', '-', n).lower()
+result = {'packages': [], 'conflicts': []}
+def conflict(package, kind, detail):
+    result['conflicts'].append({'package': package, 'kind': kind, 'detail': detail})
+dists = list(md.distributions(path=[str(store)])) if store.is_dir() else []
+if dists:
+    resolved = store.resolve()
+    core_paths = [p for p in sys.path if p and Path(p).resolve() != resolved and resolved not in Path(p).resolve().parents]
+    core = {norm(d.metadata['Name']): d.version for d in md.distributions(path=core_paths)}
+    user = {norm(d.metadata['Name']): d.version for d in dists}
+    stamp = store / '.python-abi'
+    want = '%d.%d:%s' % (sys.version_info[0], sys.version_info[1], sysconfig.get_config_var('EXT_SUFFIX') or '')
+    if stamp.is_file() and stamp.read_text().strip() != want:
+        conflict('*', 'abi', stamp.read_text().strip() + ' -> ' + want)
+    try:
+        from packaging.requirements import Requirement
+    except ImportError:
+        Requirement = None
+    shadow_dirs = [Path('/opt/hermes/bin'), Path(sys.prefix, 'bin')]
+    for d in sorted(dists, key=lambda item: norm(item.metadata['Name'])):
+        name, version = norm(d.metadata['Name']), d.version
+        if name in core:
+            if core[name] != version:
+                conflict(name, 'version', 'в хранилище %s, в поставке %s' % (version, core[name]))
+            continue
+        if name in pinned and pinned[name] != version:
+            conflict(name, 'pinned', 'в хранилище %s, закреплено поставкой %s' % (version, pinned[name]))
+        files = d.files or []
+        gone = [str(f) for f in files if not str(f).startswith('..') and '__pycache__' not in f.parts
+                and f.suffix != '.pyc' and not d.locate_file(f).exists()]
+        if not files or gone:
+            conflict(name, 'incomplete', ', '.join(gone[:3]) or 'нет RECORD')
+        tops = set()
+        for f in files:
+            top = f.parts[0] if f.parts else ''
+            if not top or top in ('..', 'bin', '__pycache__') or top.endswith(('.dist-info', '.data', '.pth')):
+                continue
+            tops.add(top.split('.')[0] if len(f.parts) == 1 else top)
+        for top in sorted(tops):
+            spec = importlib.machinery.PathFinder.find_spec(top, core_paths)
+            if spec is not None and spec.origin not in (None, 'namespace'):
+                conflict(name, 'module', 'модуль %s перекрыт поставкой' % top)
+        for line in (d.requires or []) if Requirement else []:
+            try:
+                req = Requirement(line)
+                if req.marker and not req.marker.evaluate({'extra': ''}):
+                    continue
+            except Exception:
+                continue
+            have = core.get(norm(req.name)) or user.get(norm(req.name))
+            if have is None:
+                conflict(name, 'requires', 'нет зависимости ' + req.name)
+            elif req.specifier and not req.specifier.contains(have, prereleases=True):
+                conflict(name, 'requires', '%s %s не подходит под %s' % (req.name, have, req.specifier))
+        scripts = sorted(ep.name for ep in d.entry_points if ep.group == 'console_scripts')
+        for script in scripts:
+            path = store / 'bin' / script
+            if not path.is_file() or not os.access(path, os.X_OK):
+                conflict(name, 'cli', 'нет команды ' + script)
+            elif any((directory / script).exists() for directory in shadow_dirs):
+                conflict(name, 'cli', 'команда %s перекрыта поставкой' % script)
+        result['packages'].append({'name': name, 'version': version, 'cli': scripts})
+print(json.dumps(result))
+'''
+
+# Единовременный перенос пакетов, которые пользователь поставил в writable
+# слой старого контейнера (/opt/hermes/.venv), в DATA/lazy-packages. Только
+# добавления: существующие файлы не перезаписываются, при ошибке созданное
+# удаляется. Выполняется `docker exec` в ещё не пересозданном контейнере.
+MIGRATE_PACKAGES_CODE = r'''
+import importlib.metadata as md, json, os, re, shutil, sys, sysconfig
+from pathlib import Path
+stems, store = json.loads(sys.argv[1]), Path(sys.argv[2])
+site = Path(sysconfig.get_paths()['purelib']).resolve()
+bindir = Path(sys.prefix, 'bin').resolve()
+created, outside = [], []
+try:
+    for stem in stems:
+        info = site / (stem + '.dist-info')
+        files = md.PathDistribution(info).files if info.is_dir() else None
+        if not files:
+            raise RuntimeError('Нет RECORD у ' + stem)
+        for f in files:
+            if '__pycache__' in f.parts or f.suffix == '.pyc':
+                continue
+            source = Path(os.path.normpath(site / f))
+            if site in source.parents:
+                dest = store / source.relative_to(site)
+            elif bindir in source.parents:
+                dest = store / 'bin' / source.relative_to(bindir)
+            else:
+                outside.append(str(f))
+                continue
+            if not source.exists():
+                raise RuntimeError('RECORD перечисляет отсутствующий файл ' + str(f))
+            if dest.exists():
+                continue
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, dest)
+            created.append(dest)
+    stamp = store / '.python-abi'
+    if stems and not stamp.exists():
+        stamp.write_text('%d.%d:%s' % (sys.version_info[0], sys.version_info[1], sysconfig.get_config_var('EXT_SUFFIX') or ''))
+except BaseException:
+    for path in reversed(created):
+        path.unlink(missing_ok=True)
+    raise
+print(json.dumps({'migrated': stems, 'files': len(created), 'outside': outside}))
+'''
+
+# dist-info, появившийся в writable слое контейнера: `docker diff` старого
+# контейнера. Заменённые дистрибутивы поставки (A + D одного имени) пакетами
+# пользователя не считаются.
+WRITABLE_DIST_INFO = re.compile(r"/opt/hermes/\.venv/lib/python[0-9.]+/site-packages/([A-Za-z0-9_.]+-[A-Za-z0-9_.+!]+)\.dist-info")
 
 DRAIN_CODE = r'''
 import inspect, json, sys
@@ -510,6 +637,74 @@ def timezone_from_launch_argv(argv):
     """Both timezones the launcher's own `--dry-run` docker argv would set."""
     return timezone_env(dict(item.split("=", 1) for flag, item in zip(argv, argv[1:])
                              if flag == "-e" and "=" in item))
+
+
+_SIZE = re.compile(r"(\d+(?:\.\d+)?) ?([kmgtp])?(?:i?b)?", re.IGNORECASE)
+
+
+def docker_bytes(value):
+    """A `--memory` argument as Docker reads it ("" is unset, "-1" is unlimited)."""
+    value = value.strip()
+    if value == "-1":
+        return -1
+    match = _SIZE.fullmatch(value)
+    if not match:
+        raise UpdateError(f"Unreadable launcher memory value: {value!r}")
+    unit = "bkmgtp".index((match.group(2) or "b").lower())
+    return int(float(match.group(1)) * 1024 ** unit)
+
+
+def docker_nano_cpus(value):
+    value = value.strip()
+    try:
+        return int(Decimal(value) * 1_000_000_000) if value else 0
+    except InvalidOperation:
+        raise UpdateError(f"Unreadable launcher CPU value: {value!r}") from None
+
+
+def effective_resources(cpus="", memory="", swap=""):
+    """What Docker records in HostConfig for these three launcher arguments.
+
+    An absent flag, an empty value and a literal 0 all mean "not set" to
+    Docker, and RAM without a swap cap gets RAM + equal swap: 3g becomes a
+    6 GiB RAM+swap budget, which is how a launcher default turned a native
+    unlimited baseline into a different contour.
+    """
+    ram = docker_bytes(memory) if memory.strip() else 0
+    total = docker_bytes(swap) if swap.strip() else 0
+    if ram > 0 and total == 0:
+        total = 2 * ram
+    return {"nano_cpus": docker_nano_cpus(cpus), "memory_bytes": max(ram, 0),
+            "memory_swap_bytes": total}
+
+
+def resources_from_launch_argv(argv):
+    """The resource limits the launcher's own `--dry-run` docker argv would set."""
+    values = {"--cpus": "", "--memory": "", "--memory-swap": ""}
+    aliases = {"-m": "--memory"}
+    index = 0
+    while index < len(argv):
+        flag, equals, inline = argv[index].partition("=")
+        flag = aliases.get(flag, flag)
+        if flag in values:
+            if equals:
+                values[flag] = inline
+            elif index + 1 < len(argv):
+                index += 1
+                values[flag] = argv[index]
+        index += 1
+    return effective_resources(values["--cpus"], values["--memory"], values["--memory-swap"])
+
+
+def resource_drift(actual, expected):
+    """Name every resource limit the launcher would not reproduce."""
+    def show(key, value):
+        if key == "nano_cpus":
+            return f"{value / 1e9:g} CPUs" if value else "unlimited CPUs"
+        return "unlimited" if not value else ("unlimited swap" if value < 0 else f"{value} bytes")
+    labels = {"nano_cpus": "CPU", "memory_bytes": "RAM", "memory_swap_bytes": "RAM+swap"}
+    return "; ".join(f"{labels[key]} {show(key, actual[key])} instead of {show(key, expected[key])}"
+                     for key in labels if actual[key] != expected[key])
 
 
 def timezone_drift(actual, plan):
@@ -1509,6 +1704,63 @@ class Updater:
                              image, "-c", IMAGE_PROBE, timeout=180)
         return json.loads(output.splitlines()[-1])
 
+    def pinned_dependencies(self):
+        try:
+            packages = json.loads((self.home / "dependencies.lock.json").read_text())["packages"]
+            return {re.sub(r"[-_.]+", "-", spec.split("==")[0]).lower(): spec.split("==")[1]
+                    for spec in (item["spec"] for item in packages)}
+        except (OSError, ValueError, KeyError, IndexError, TypeError):
+            return {}
+
+    def verify_user_packages(self, image, root=None, *, strict=True):
+        """Сверить пакеты пользователя в DATA/lazy-packages с поставкой образа.
+
+        Образ запускается без сети над read-only копией; конфликт останавливает
+        операцию до запуска gateway, данные не меняются. Нестрогий режим (откат
+        после неудачного обновления) только записывает конфликты: остановка
+        там оставила бы контур без шлюза.
+        """
+        output = self.docker(
+            "run", "--rm", "--network", "none", "--cpus", "1", "--memory", "768m",
+            "--user", self.runtime_user(), "--entrypoint", PYTHON,
+            "-v", str(root or self.data) + ":/opt/data:ro", image,
+            "-c", USER_PACKAGES_CODE, "/opt/data", json.dumps(self.pinned_dependencies()), timeout=180)
+        try:
+            result = json.loads(output.splitlines()[-1])
+            conflicts = list(result["conflicts"])
+        except (ValueError, IndexError, KeyError, TypeError):
+            raise UpdateError("Проверка пакетов пользователя вернула некорректный ответ") from None
+        self.receipt["user_packages"] = result
+        if conflicts:
+            summary = "; ".join("{} ({}): {}".format(c["package"], c["kind"], c["detail"]) for c in conflicts[:5])
+            if not strict:
+                self.log("user packages conflict (rollback continues): " + summary)
+                return result
+            self.receipt["error_code"] = "user_packages_conflict"
+            raise UpdateError("Пакеты пользователя в lazy-packages несовместимы с образом: " + summary
+                              + ". Данные не изменены; удалите или переустановите эти пакеты")
+        return result
+
+    def migrate_writable_packages(self):
+        """Однократно перенести пакеты из writable слоя старого контейнера в DATA."""
+        added, replaced = {}, set()
+        for line in self.docker("diff", self.name, timeout=60).splitlines():
+            kind, _, path = line.partition(" ")
+            match = WRITABLE_DIST_INFO.fullmatch(path)
+            if match and kind in {"A", "D"}:
+                stem = match.group(1)
+                name = re.sub(r"[-_.]+", "-", stem.rpartition("-")[0]).lower()
+                if kind == "A":
+                    added[name] = stem
+                else:
+                    replaced.add(name)
+        stems = sorted(stem for name, stem in added.items() if name not in replaced)
+        self.receipt["writable_packages"] = {"migrated": stems, "replaced_distribution": sorted(set(added) & replaced)}
+        if not stems:
+            return
+        output = self.execute(MIGRATE_PACKAGES_CODE, json.dumps(stems), "/opt/data/lazy-packages", timeout=600)
+        self.receipt["writable_packages"].update(json.loads(output.splitlines()[-1]))
+
     def native_states(self, action="status", timeout=120):
         return json.loads(self.execute(DRAIN_CODE, action, "host-updater:" + self.receipt["job_id"], timeout=timeout).splitlines()[-1])
 
@@ -1730,36 +1982,51 @@ class Updater:
                       "source": "preserved" if expected[key] else "launcher_default"}
                 for key in RUNTIME_TIMEZONE_KEYS}
 
-    def verify_launcher_timezone(self, rollback=False):
-        """Refuse a launcher that would not reproduce the pinned timezone.
+    def verify_launcher(self, rollback=False):
+        """Refuse a launcher that would not reproduce the preserved contour.
 
         The launcher, not the updater, decides what the container gets: up.sh
-        falls back to its own default whenever TIMEZONE arrives empty, and an
-        adopted host launcher may carry someone else's default. Finding that
-        out after the contour is stopped costs a rollback through the very same
-        launcher, so it is asked first — `--dry-run` starts nothing, touches
-        neither DATA nor Docker, and answers with the exact docker argv.
+        falls back to its own default whenever TIMEZONE arrives empty, an
+        adopted host launcher may carry someone else's default, and a local
+        RAM default read an explicit "unlimited" (empty RAM, swap 0) as "unset"
+        and made Docker apply 3 GiB RAM + 3 GiB swap. Finding that out after
+        the contour is stopped costs a rollback through the very same launcher
+        (which hit the same wall), so it is asked first: `--dry-run` starts
+        nothing, touches neither DATA nor Docker, and answers with the exact
+        docker argv. Timezone and resource limits are checked from that one answer.
         """
         plan = self.timezone_plan(rollback=rollback)
-        if not any(item["expected"] for item in plan.values()):
-            return None
+        resources = self.launch_resource_env(rollback=rollback)
         result = subprocess.run(["bash", str(self.home / "up.sh"), "--dry-run"],
                                 env=self.launcher_env(rollback=rollback),
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True, timeout=120)
-        if result.returncode:
+        if result.returncode or not result.stdout.strip():
             with (self.job / "operation.log").open("a") as stream:
                 stream.write(result.stdout)
             self.receipt["error_code"] = "launcher_dry_run_failed"
             raise UpdateError("Host launcher rejected `up.sh --dry-run` on the preserved "
                               "contract; see private operation.log")
-        planned = timezone_from_launch_argv(shlex.split(result.stdout.splitlines()[-1]))
-        drift = timezone_drift(planned, plan)
+        argv = shlex.split(result.stdout.splitlines()[-1])
+        drift = timezone_drift(timezone_from_launch_argv(argv), plan)
         if drift:
             self.receipt["error_code"] = "launcher_timezone_mismatch"
             raise UpdateError("Host launcher would start the contour with " + drift
                               + "; restore this installation's timezone default in up.sh")
-        return planned
+        planned = resources_from_launch_argv(argv)
+        wanted = effective_resources(resources.get("CONTAINER_CPUS", ""),
+                                     resources.get("CONTAINER_MEMORY", ""),
+                                     resources.get("CONTAINER_MEMORY_SWAP", ""))
+        if "CONTAINER_MEMORY_SWAP" not in resources:
+            wanted["memory_swap_bytes"] = planned["memory_swap_bytes"]
+        drift = resource_drift(planned, wanted)
+        if drift:
+            self.receipt["error_code"] = "launcher_resource_mismatch"
+            raise UpdateError(
+                "Host launcher would start the contour with " + drift + "; make its resource "
+                "defaults apply only when CONTAINER_MEMORY is unset (an empty value is "
+                "an explicit unlimited)")
+        self.receipt["launcher_resources" + ("_rollback" if rollback else "")] = planned
 
     def capability(self, timeout=30):
         try:
@@ -2312,7 +2579,7 @@ print(json.dumps(changed))
             self.receipt["timezone_plan"] = self.timezone_plan()
             # Asked of the real launcher while the contour is still up, so a
             # dry run reports it too and a mismatch never costs an outage.
-            self.verify_launcher_timezone()
+            self.verify_launcher()
             self.free_space()
             if dry_run:
                 self.phase("dry_run", status="succeeded", planned_reference=reference)
@@ -2343,14 +2610,18 @@ print(json.dumps(changed))
             if target == old:
                 self.phase("already_current", status="succeeded")
                 return
+            self.phase("user_packages")
+            self.verify_user_packages(target)
             self.phase("draining")
             drained = True
             self.drain()
             self.inspect_target(old)
+            self.migrate_writable_packages()
             self.phase("stopping")
             self.docker("stop", "--time", "60", self.name, timeout=90)
             stopped = True
             self.inspect_target(old, running=False)
+            self.verify_user_packages(target)  # после переноса из writable слоя, до backup и recreate
             # DATA is now quiescent.  Resolve current intent/config here rather
             # than from the earlier gateway cache: profile create/delete and
             # channel toggles immediately before the operation are included.
@@ -2407,8 +2678,9 @@ print(json.dumps(changed))
         # restore the old image with the wrong clock. Ask before quiescing:
         # a refused rollback that changed nothing is recoverable, a finished
         # one that silently moved the owner's day is not.
-        self.verify_launcher_timezone(rollback=True)
-        self.verify_backup()  # validate before quiescing a healthy newer gateway
+        self.verify_launcher(rollback=True)
+        backup, _ = self.verify_backup()  # validate before quiescing a healthy newer gateway
+        self.verify_user_packages(self.receipt["old_image_id"], backup, strict=not automatic)
         allowed = {self.receipt.get("old_image_id"), self.receipt.get("target_image_id")}
         try:
             info = self.inspect_target(running=False)

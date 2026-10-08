@@ -8,7 +8,10 @@ import { Label } from "@nous-research/ui/ui/components/label";
 import { Select, SelectOption } from "@nous-research/ui/ui/components/select";
 import { useProfileScope } from "@/contexts/useProfileScope";
 import { usePageHeader } from "@/contexts/usePageHeader";
-import { agentVoiceApi, releaseSpeechClips, type AgentVoiceSettings, type BundledVoice } from "@/lib/agent-voice";
+import { agentVoiceApi, releaseSpeechClips, type AgentVoiceSettings, type BundledVoice, type RecognitionStatus } from "@/lib/agent-voice";
+
+const RECOGNITION_NAMES: Record<string, string> = { deepgram: "Deepgram", local: "локальный Whisper", local_command: "локальный Whisper", none: "не работает" };
+const recognitionName = (id: string) => RECOGNITION_NAMES[id] ?? id;
 
 export default function AgentVoicePage() {
   const { profile, profiles } = useProfileScope();
@@ -31,6 +34,7 @@ export function VoiceForm({ profile, name }: { profile: string; name: string }) 
   const [bundledVoices, setBundledVoices] = useState<BundledVoice[]>([]);
   const [catalogError, setCatalogError] = useState(false);
   const [clips, setClips] = useState<string[]>([]);
+  const [recognition, setRecognition] = useState<RecognitionStatus | null>(null);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => () => releaseSpeechClips(clips), [clips]);
@@ -38,6 +42,12 @@ export function VoiceForm({ profile, name }: { profile: string; name: string }) 
     let current = true;
     void agentVoiceApi.get(profile).then(result => { if (current) setValue(result); })
       .catch(() => { if (current) setError("Не удалось загрузить настройки голоса. Откройте раздел ещё раз."); });
+    return () => { current = false; };
+  }, [profile]);
+  useEffect(() => {
+    let current = true;
+    void agentVoiceApi.recognition(profile).then(result => { if (current) setRecognition(result); })
+      .catch(() => { if (current) setRecognition(null); });
     return () => { current = false; };
   }, [profile]);
   useEffect(() => {
@@ -131,6 +141,12 @@ export function VoiceForm({ profile, name }: { profile: string; name: string }) 
           <div className="grid gap-2"><Label htmlFor="voice-speed">Скорость речи</Label><Select id="voice-speed" value={String(value.speed)} onValueChange={speed => change({ speed: Number(speed) })}>{speedChoices.map(item => <SelectOption key={item.value} value={String(item.value)}>{item.label}</SelectOption>)}</Select></div>
         </fieldset>
       </CardContent></Card>
+      {recognition && <Card><CardContent className="grid gap-1 p-5">
+        <h3 className="font-semibold">Распознавание речи</h3>
+        <p role="status" data-recognition={recognition.actual} className="text-sm">Сейчас: {recognitionName(recognition.actual)}</p>
+        {recognition.actual !== recognition.configured && <p className="text-xs text-muted-foreground">{recognition.actual === "none" ? `Настроен ${recognitionName(recognition.configured)}, но он не готов, запасного нет. Голосовые сообщения не распознаются.` : `Настроен ${recognitionName(recognition.configured)}, но он не готов (нет ключа), поэтому работает ${recognitionName(recognition.actual)}.`}</p>}
+        <p className="text-xs text-muted-foreground">Ключ Deepgram задаётся один раз для всей установки; ключ агента важнее общего.</p>
+      </CardContent></Card>}
       <Card><CardContent className="grid gap-4 p-5">
         <h3 className="font-semibold">Как отвечать</h3>
         <div className="grid gap-2"><Label htmlFor="voice-web">В кабинете</Label><Select id="voice-web" value={value.web_mode} onValueChange={mode => change({ web_mode: mode as AgentVoiceSettings["web_mode"] })}><SelectOption value="manual">По кнопке «Послушать»</SelectOption><SelectOption value="auto">Озвучивать новые ответы в открытом чате</SelectOption></Select></div>

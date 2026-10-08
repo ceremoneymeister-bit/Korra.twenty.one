@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { VoiceForm } from "./AgentVoicePage";
-const api = vi.hoisted(() => ({ get: vi.fn(), save: vi.fn(), voices: vi.fn(), speak: vi.fn(), catalog: vi.fn(), sample: vi.fn() }));
+const api = vi.hoisted(() => ({ get: vi.fn(), save: vi.fn(), voices: vi.fn(), speak: vi.fn(), catalog: vi.fn(), sample: vi.fn(), recognition: vi.fn() }));
 vi.mock("@/lib/agent-voice", async (original) => ({ ...await original<typeof import("@/lib/agent-voice")>(), agentVoiceApi: api }));
 const settings = { enabled: false, provider: "elevenlabs", voice: "warm", model: "eleven_multilingual_v2", base_url: "", speed: 1, web_mode: "manual", telegram_mode: "off", has_key: false };
 let host: HTMLDivElement, root: Root;
@@ -15,6 +15,7 @@ beforeEach(() => {
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
   for (const fn of Object.values(api)) fn.mockReset();
   api.get.mockResolvedValue(settings);
+  api.recognition.mockResolvedValue({ configured: "deepgram", actual: "deepgram" });
   api.catalog.mockResolvedValue({ voices: [
     { id: "navigator", name: "Навигатор", description: "Разговорный голос", model: "fish-audio/s2.1-pro", default_speed: 1.5, sample_url: "/api/voices/navigator/sample" },
     { id: "boss", name: "Босс", description: "Ритмичный голос", model: "fish-audio/s2.1-pro", default_speed: 1, sample_url: "/api/voices/boss/sample" },
@@ -25,6 +26,16 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
 
+it("показывает фактического провайдера распознавания, а не только настроенного", async () => {
+  await act(async () => root.render(<MemoryRouter><VoiceForm profile="assistant" name="Помощник" /></MemoryRouter>));
+  expect(api.recognition).toHaveBeenCalledWith("assistant");
+  expect(host.textContent).toContain("Сейчас: Deepgram");
+  expect(host.textContent).not.toContain("не готов");
+  api.recognition.mockResolvedValue({ configured: "deepgram", actual: "local" });
+  await act(async () => { root.unmount(); root = createRoot(host); root.render(<MemoryRouter><VoiceForm profile="other" name="Другой" /></MemoryRouter>); });
+  expect(host.textContent).toContain("Сейчас: локальный Whisper");
+  expect(host.textContent).toContain("Настроен Deepgram, но он не готов");
+});
 it.each([["navigator", "Навигатор", 1.5], ["boss", "Босс", 1]])("показывает образец %s до ввода ключа", async (id, name, speed) => {
   api.get.mockResolvedValue({ ...settings, provider: "openrouter_fish", voice: id, model: "fish-audio/s2.1-pro", speed });
   await act(async () => root.render(<MemoryRouter><VoiceForm profile={id} name={name} /></MemoryRouter>));
