@@ -126,7 +126,8 @@ def session_ids(session_id: str, home: Path | None = None) -> set[str]:
         db.close()
 
 
-def resolve(request_id: str, choice: str, *, source_session_id: str, answer: str = "", allowed_sessions: set[str] | None = None) -> dict:
+def resolve(request_id: str, choice: str, *, source_session_id: str, answer: str = "",
+            allowed_sessions: set[str] | None = None, source: dict | None = None) -> dict:
     """Called only by an authenticated human endpoint/callback, never a tool."""
     if choice not in {"once", "deny"}:
         raise KanbanDecisionConflict("Выберите ответ только для этой версии.")
@@ -155,6 +156,7 @@ def resolve(request_id: str, choice: str, *, source_session_id: str, answer: str
                 conn, task_id, author="Владелец", request_id=action_id, revision=version,
                 answer=answer.strip() or (kb.CONTINUE_AS_PROPOSED if kind == "question" else None),
                 decision=("grant" if choice == "once" else "deny") if kind == "approval" else None,
+                source=source,
             )
         if not outcome["ok"]:
             if outcome.get("status") == "archived":

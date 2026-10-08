@@ -7275,6 +7275,23 @@ def block_revision(conn: sqlite3.Connection, task_id: str) -> Optional[int]:
     return None
 
 
+_SOURCE_PLATFORMS = {"telegram": "Telegram", "api_server": "Веб-чат", "tui": "Терминал"}
+
+
+def owner_source_label(source: dict[str, Any], fallback: str = "Владелец") -> str:
+    """«Имя · Telegram · 08.10 14:32»: who answered, where and when."""
+    import korra_time
+    from datetime import datetime
+    platform = str(source.get("platform") or "")
+    parts = [str(source.get("user_name") or "").strip() or fallback,
+             _SOURCE_PLATFORMS.get(platform, platform)]
+    try:
+        parts.append(datetime.fromtimestamp(int(source["at"]), korra_time.get_timezone()).strftime("%d.%m %H:%M"))
+    except (KeyError, TypeError, ValueError, OverflowError, OSError):
+        pass
+    return " · ".join(p for p in parts if p)
+
+
 def respond_to_block(
     conn: sqlite3.Connection,
     task_id: str,
@@ -7284,8 +7301,12 @@ def respond_to_block(
     request_id: str,
     revision: Optional[int] = None,
     decision: Optional[str] = None,
+    source: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """Answer a blocked task and resume it in one transaction.
+
+    ``source`` says where the owner answered (platform, session, message,
+    name); it signs the comment and rides in the ``owner_responded`` event.
 
     ``revision`` is required whenever the task waits on a question: an
     answer written for an earlier screen must not resume work on a question
@@ -7305,6 +7326,8 @@ def respond_to_block(
     if not request_id:
         raise ValueError("request_id is required")
     text = (answer or "").strip()
+    if source:
+        source = {**source, "at": int(time.time())}
     with write_txn(conn):
         # An answer given before the question was repeated is history, not a
         # retry: the repeated question may be answered again with new data.
@@ -7378,8 +7401,11 @@ def respond_to_block(
                 "revision": current_revision,
                 "request_id": request_id,
             })
+        comment_id = None
         if text:
-            add_comment(conn, task_id, author, text)
+            comment_id = add_comment(
+                conn, task_id, owner_source_label(source, author) if source else author, text,
+            )
         if repeated_question:
             # The owner broke the loop by answering: resume with a fresh
             # counter so a genuinely new question is not treated as a loop.
@@ -7409,6 +7435,7 @@ def respond_to_block(
                 "continue_only": text == CONTINUE_AS_PROPOSED,
                 "decision": decision,
                 "status": new_status,
+                **({"source": source, "comment_id": comment_id} if source else {}),
             },
         )
     return {"ok": True, "status": new_status, "duplicate": False, "reason": None}

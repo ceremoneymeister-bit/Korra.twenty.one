@@ -7795,7 +7795,9 @@ class TelegramAdapter(BasePlatformAdapter):
                     try:
                         await asyncio.to_thread(resolve, record["request_id"], choice,
                                                 source_session_id=record["source_session_id"],
-                                                allowed_sessions={record["source_session_id"]})
+                                                allowed_sessions={record["source_session_id"]},
+                                                source={"platform": "telegram", "user_name": query_user_name or None,
+                                                        "message_id": str(getattr(query.message, "message_id", "") or "") or None})
                     except KanbanDecisionConflict as exc:
                         await query.answer(text=str(exc), show_alert=True)
                         return
@@ -10332,7 +10334,10 @@ class TelegramAdapter(BasePlatformAdapter):
         try:
             await asyncio.to_thread(resolve, record["request_id"], choice,
                                     source_session_id=record["source_session_id"], answer=msg.text,
-                                    allowed_sessions={record["source_session_id"]})
+                                    allowed_sessions={record["source_session_id"]},
+                                    source={"platform": "telegram",
+                                            "user_name": getattr(msg.from_user, "first_name", None) or None,
+                                            "message_id": str(getattr(msg, "message_id", "") or "") or None})
             await msg.reply_text("Ответ сохранён на доске. Поручение снова в очереди.")
         except KanbanDecisionConflict as exc:
             await msg.reply_text(str(exc))

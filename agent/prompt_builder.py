@@ -468,6 +468,11 @@ KANBAN_CHAT_GUIDANCE = (
     "- **When the owner changes the task or its criteria,** use `kanban_edit` "
     "(full new description); to stop work, `kanban_block`. Do not unblock a "
     "card that asks for a change with a bare «continue».\n"
+    "- **Before you dispute an owner decision on a card** (it came from "
+    "another chat), read the comment's `source` in `kanban_show` (who, where, "
+    "when, `link`) and check it with `session_search` "
+    "(`session_id` and `profile` from the `@session:<profile>/<id>` link). "
+    "Never block or reopen the card as a false decision without that check.\n"
 )
 
 TOOL_USE_ENFORCEMENT_GUIDANCE = (

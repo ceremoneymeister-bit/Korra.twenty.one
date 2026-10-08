@@ -614,6 +614,13 @@ def _handle_show(args: dict, **kw) -> str:
                 return tool_error(f"task {tid} not found")
             comments = kb.list_comments(conn, tid)
             events = kb.list_events(conn, tid)
+            # Where the owner's answers came from (comment id -> source).
+            sources = {
+                e.payload["comment_id"]: e.payload["source"]
+                for e in events
+                if e.kind == "owner_responded" and isinstance(e.payload, dict)
+                and e.payload.get("source") and e.payload.get("comment_id")
+            }
             runs = kb.list_runs(conn, tid)
             parents = kb.parent_ids(conn, tid)
             children = kb.child_ids(conn, tid)
@@ -663,7 +670,8 @@ def _handle_show(args: dict, **kw) -> str:
                 "children": children,
                 "comments": [
                     {"author": c.author, "body": c.body,
-                     "created_at": c.created_at}
+                     "created_at": c.created_at,
+                     **({"source": sources[c.id]} if c.id in sources else {})}
                     for c in comments
                 ],
                 "events": [
@@ -1768,6 +1776,27 @@ def _maybe_auto_subscribe(conn: Any, task_id: str) -> bool:
         return False
 
 
+def _chat_source() -> Optional[dict[str, Any]]:
+    """Where the owner is talking to this agent: platform, session, message."""
+    try:
+        from gateway.session_context import get_session_env
+        platform = get_session_env("KORRA_SESSION_PLATFORM", "")
+        session_id = get_session_env("KORRA_SESSION_ID", "")
+        if not platform:
+            return None
+        profile = get_session_env("KORRA_SESSION_PROFILE", "") or korra_env("KORRA_PROFILE") or ""
+        source = {
+            "platform": platform,
+            "session_id": session_id or None,
+            "message_id": get_session_env("KORRA_SESSION_MESSAGE_ID", "") or None,
+            "user_name": get_session_env("KORRA_SESSION_USER_NAME", "") or None,
+            "link": (f"@session:{profile}/{session_id}" if profile else f"@session:{session_id}") if session_id else None,
+        }
+        return {k: v for k, v in source.items() if v}
+    except Exception:
+        return None
+
+
 def _handle_unblock(args: dict, **kw) -> str:
     """Transition a blocked task to ready, or todo while parents remain open."""
     delegated_err = _reject_delegated_child_mutation("kanban_unblock")
@@ -1812,6 +1841,7 @@ def _handle_unblock(args: dict, **kw) -> str:
                 outcome = kb.respond_to_block(
                     conn, str(tid), answer=answer, author="Владелец (через чат)",
                     request_id=f"chat-{tid}-{int(revision)}", revision=int(revision),
+                    source=_chat_source(),
                 )
                 if not outcome["ok"]:
                     if outcome["reason"] == "stale":

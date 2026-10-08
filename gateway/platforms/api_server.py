@@ -4926,7 +4926,8 @@ class APIServerAdapter(BasePlatformAdapter):
                 return web.json_response(_openai_error("Некорректный ответ"), status=400)
             try:
                 outcome = await asyncio.to_thread(resolve, request_id, choice,
-                                                  source_session_id=session_id, answer=answer)
+                                                  source_session_id=session_id, answer=answer,
+                                                  source={"platform": "api_server", "session_id": session_id})
             except KanbanDecisionConflict as exc:
                 return web.json_response(_openai_error(str(exc), code="kanban_decision_conflict"), status=409)
             return web.json_response({"resolved": 1, **outcome})
