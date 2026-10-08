@@ -57,3 +57,44 @@ def test_unpinning_a_stale_name_cleans_the_list(client, isolated_profiles):
     )
     assert _put(client, "gone-skill", False).status_code == 200
     assert _load_cfg(home)["skills"]["auto_load"] == ["worker-skill"]
+
+
+def test_disabled_skill_cannot_be_pinned_but_can_be_unpinned(client, isolated_profiles):
+    home = isolated_profiles["worker_alpha"]
+    client.put(
+        "/api/skills/toggle",
+        json={"name": "worker-skill", "enabled": False, "profile": "worker_alpha"},
+    )
+    refused = _put(client, "worker-skill", True)
+    assert refused.status_code == 409 and "выключен" in refused.json()["detail"]
+    assert "auto_load" not in _load_cfg(home).get("skills", {})
+
+    (home / "config.yaml").write_text(
+        yaml.safe_dump({"skills": {"disabled": ["worker-skill"], "auto_load": ["worker-skill"]}}),
+        encoding="utf-8",
+    )
+    assert _put(client, "worker-skill", False).status_code == 200
+    assert _load_cfg(home)["skills"]["auto_load"] == []
+
+
+def test_pin_writes_nothing_but_skills_auto_load(client, isolated_profiles):
+    home = isolated_profiles["worker_alpha"]
+    before = {
+        "model": {"default": "gpt-x"},
+        "display": {"compact": True},
+        "skills": {"disabled": ["other-skill"]},
+    }
+    (home / "config.yaml").write_text(yaml.safe_dump(before), encoding="utf-8")
+    assert _put(client, "worker-skill", True).status_code == 200
+    after = _load_cfg(home)
+    assert after["skills"].pop("auto_load") == ["worker-skill"]
+    assert after["model"] == before["model"]
+    assert after["display"] == before["display"]
+    assert after["skills"] == before["skills"]
+
+
+def test_pin_for_an_unknown_profile_is_refused_and_writes_nowhere(client, isolated_profiles):
+    resp = _put(client, "worker-skill", True, profile="no_such_profile")
+    assert resp.status_code in (400, 404)
+    for home in isolated_profiles.values():
+        assert "auto_load" not in _load_cfg(home).get("skills", {})
