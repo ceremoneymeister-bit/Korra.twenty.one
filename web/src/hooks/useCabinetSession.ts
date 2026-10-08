@@ -28,6 +28,8 @@ export function useCabinetSession() {
   // кнопка остаётся скрытой, вместо того чтобы обещать закрытый маршрут.
   // Клиентский режим кабинета закрывает экраны оператора (K21-253).
   return { logout, clientMode: mode === "client", restrictedFiles: !allowed("files_manage"), canCreateFolders: allowed("files_mkdir"),
-    canManageSkills: allowed("skills_manage"), canBrowseSkillsHub: allowed("skills_hub"),
+    canManageSkills: allowed("skills_manage"),
+    // «В каждом чате» — отдельная подсказка: клиент закрепляет навык, не получая остального управления.
+    canPinSkills: allowed("skills_auto_load"), canBrowseSkillsHub: allowed("skills_hub"),
     canConfigureToolsets: allowed("toolsets_config") };
 }

@@ -129,7 +129,8 @@ function toolsetIcon(
 /* ------------------------------------------------------------------ */
 
 export default function SkillsPage() {
-  const { canManageSkills, canConfigureToolsets, canBrowseSkillsHub } = useCabinetSession();
+  const { canManageSkills, canPinSkills, canConfigureToolsets, canBrowseSkillsHub } = useCabinetSession();
+  const canToggleAutoLoad = canManageSkills || canPinSkills;
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [toolsets, setToolsets] = useState<ToolsetInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -177,7 +178,7 @@ export default function SkillsPage() {
 
   /* ---- «В каждом чате»: skills.auto_load профиля ---- */
   const handleToggleAutoLoad = async (skill: SkillInfo) => {
-    if (!canManageSkills) return;
+    if (!canToggleAutoLoad) return;
     const next = !skill.auto_load;
     setTogglingSkills((prev) => new Set(prev).add(skill.name));
     try {
@@ -413,7 +414,9 @@ export default function SkillsPage() {
       <PluginSlot name="skills:top" />
       <Toast toast={toast} />
       {(!canManageSkills || !canConfigureToolsets) && <p role="status" className="rounded-xl border border-border px-4 py-3 text-sm text-muted-foreground">
-        В этом кабинете навыки и инструменты доступны для просмотра. Для изменения навыков или подключения генератора обратитесь к администратору установки. Текущая чат-модель работает независимо от генератора изображений.
+        {canPinSkills && !canManageSkills
+          ? "В этом кабинете навыки и инструменты доступны для просмотра; навык можно закрепить в каждом чате переключателем «В каждом чате». Остальное (включение, правка, подключение генератора) меняет администратор установки."
+          : "В этом кабинете навыки и инструменты доступны для просмотра. Для изменения навыков или подключения генератора обратитесь к администратору установки."} Текущая чат-модель работает независимо от генератора изображений.
       </p>}
 
       <div className="flex flex-col sm:flex-row sm:items-start gap-4">
@@ -525,6 +528,7 @@ export default function SkillsPage() {
                         key={skill.name}
                         skill={skill}
                         readOnly={!canManageSkills}
+                        canPin={canToggleAutoLoad}
                         toggling={togglingSkills.has(skill.name)}
                         onToggle={() => handleToggleSkill(skill)}
                         onToggleAutoLoad={() => handleToggleAutoLoad(skill)}
@@ -588,6 +592,7 @@ export default function SkillsPage() {
                         key={skill.name}
                         skill={skill}
                         readOnly={!canManageSkills}
+                        canPin={canToggleAutoLoad}
                         toggling={togglingSkills.has(skill.name)}
                         onToggle={() => handleToggleSkill(skill)}
                         onToggleAutoLoad={() => handleToggleAutoLoad(skill)}
@@ -769,6 +774,7 @@ export default function SkillsPage() {
 function SkillRow({
   skill,
   readOnly,
+  canPin,
   toggling,
   onToggle,
   onToggleAutoLoad,
@@ -804,7 +810,7 @@ function SkillRow({
           {skill.description?.trim() || noDescriptionLabel}
         </p>
       </div>
-      {skill.enabled && (!readOnly || skill.auto_load) && (
+      {skill.enabled && (canPin || skill.auto_load) && (
         <label
           className="flex shrink-0 items-center gap-1.5 pt-0.5 text-xs text-muted-foreground"
           title="Навык целиком попадает в системную инструкцию каждого нового чата этого профиля"
@@ -812,7 +818,7 @@ function SkillRow({
           <Switch
             checked={!!skill.auto_load}
             onCheckedChange={onToggleAutoLoad}
-            disabled={toggling || readOnly}
+            disabled={toggling || !canPin}
             aria-label={`${skill.name}: в каждом чате`}
           />
           В каждом чате
@@ -858,6 +864,7 @@ interface PanelItemProps {
 
 interface SkillRowProps {
   readOnly: boolean;
+  canPin: boolean;
   noDescriptionLabel: string;
   onToggle: () => void;
   onToggleAutoLoad: () => void;
