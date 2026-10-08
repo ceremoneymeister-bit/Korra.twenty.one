@@ -12,6 +12,11 @@ export interface AgentVoiceSettings {
   has_key: boolean;
 }
 
+export interface RecognitionStatus {
+  configured: string;
+  actual: string;
+}
+
 export interface BundledVoice {
   id: string;
   name: string;
@@ -36,6 +41,7 @@ export const agentVoiceApi = {
     if (!response.ok) throw new Error(`Образец голоса недоступен: ${response.status}`);
     return URL.createObjectURL(await response.blob());
   },
+  recognition: (profile: string) => fetchJSON<RecognitionStatus>(voicePath(profile) + "/recognition"),
   get: (profile: string) => fetchJSON<AgentVoiceSettings>(voicePath(profile)),
   save: (profile: string, settings: AgentVoiceSettings, key: string, clearKey: boolean) => {
     const data: Partial<AgentVoiceSettings> = { ...settings };
