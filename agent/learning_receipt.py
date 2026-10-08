@@ -19,6 +19,7 @@ DISPLAY_KIND = "learning"
 
 _MEMORY_FILES = {"memory": "MEMORY.md", "user": "USER.md"}
 _MEMORY_LABELS = {"memory": "память агента", "user": "заметки о вас"}
+_MEMORY_WRITE_ACTIONS = frozenset({"add", "replace", "remove"})
 _ACTION_LABELS = {"create": "создан", "delete": "удалён"}
 
 
@@ -113,7 +114,94 @@ def build_review_receipt(
     memory_before: Optional[Dict[str, Optional[List[str]]]],
 ) -> Optional[Dict[str, Any]]:
     """Квитанция разбора или ``None``, если ничего не сохранено."""
-    skills = _skill_changes(review_messages, prior_snapshot)
+    return _assemble(_skill_changes(review_messages, prior_snapshot), memory_before)
+
+
+def current_turn_messages(messages: List[Dict]) -> List[Dict]:
+    """Сообщения после последнего сообщения пользователя — то, что сделал текущий ход."""
+    for index in range(len(messages or []) - 1, -1, -1):
+        msg = messages[index]
+        if isinstance(msg, dict) and msg.get("role") == "user":
+            return list(messages[index + 1 :])
+    return []
+
+
+def _memory_write_succeeded(turn_messages: List[Dict]) -> bool:
+    call_ids = set()
+    for msg in turn_messages:
+        if isinstance(msg, dict) and msg.get("role") == "assistant":
+            for tc in msg.get("tool_calls", []) or []:
+                fn = (tc.get("function") or {}) if isinstance(tc, dict) else {}
+                if fn.get("name") != "memory":
+                    continue
+                try:
+                    args = json.loads(fn.get("arguments", "{}"))
+                except (json.JSONDecodeError, TypeError):
+                    args = {}
+                if isinstance(args, dict) and (
+                    args.get("action") in _MEMORY_WRITE_ACTIONS or args.get("operations")
+                ):
+                    call_ids.add(tc.get("id"))
+    for msg in turn_messages:
+        if not isinstance(msg, dict) or msg.get("role") != "tool":
+            continue
+        if msg.get("tool_call_id") not in call_ids:
+            continue
+        try:
+            data = json.loads(msg.get("content", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if isinstance(data, dict) and data.get("success") and not data.get("staged"):
+            return True
+    return False
+
+
+def build_turn_receipt(
+    messages: List[Dict],
+    memory_before: Optional[Dict[str, Optional[List[str]]]],
+) -> Optional[Dict[str, Any]]:
+    """Квитанция хода, в котором агент сам записал память или навык.
+
+    Берутся только вызовы текущего хода. Разница файлов памяти учитывается лишь
+    при успешном вызове ``memory`` в этом ходе, чтобы чужая запись (например,
+    фонового разбора прошлого хода) не приписывалась этому ходу.
+    """
+    turn = current_turn_messages(messages)
+    skills = _skill_changes(turn, [])
+    before = memory_before if _memory_write_succeeded(turn) else None
+    return _assemble(skills, before)
+
+
+def merge_receipts(base: Dict[str, Any], extra: Dict[str, Any]) -> Dict[str, Any]:
+    """Объединить две квитанции одного хода в одну (одно сообщение «Учёл»)."""
+    skills: Dict[str, Dict[str, Any]] = {}
+    for item in list(base.get("skills") or []) + list(extra.get("skills") or []):
+        known = skills.get(item["name"])
+        if known is None:
+            skills[item["name"]] = {**item, "entry_ids": list(item.get("entry_ids") or [])}
+            continue
+        known["entry_ids"].extend(item.get("entry_ids") or [])
+        if item.get("action") == "create":
+            known["action"] = "create"
+    memory: Dict[str, Dict[str, Any]] = {}
+    for item in list(base.get("memory") or []) + list(extra.get("memory") or []):
+        known = memory.setdefault(
+            item["target"], {"target": item["target"], "added": [], "removed": []}
+        )
+        known["added"].extend(item.get("added") or [])
+        known["removed"].extend(item.get("removed") or [])
+    return {
+        "version": 1,
+        "id": base.get("id") or extra.get("id"),
+        "skills": list(skills.values()),
+        "memory": list(memory.values()),
+    }
+
+
+def _assemble(
+    skills: List[Dict[str, Any]],
+    memory_before: Optional[Dict[str, Optional[List[str]]]],
+) -> Optional[Dict[str, Any]]:
     memory: List[Dict[str, Any]] = []
     if memory_before:
         after_snap = snapshot_memory()
