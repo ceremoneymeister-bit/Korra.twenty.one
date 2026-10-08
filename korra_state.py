@@ -11918,6 +11918,21 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
             return None
         return self._decode_display_metadata(row[0]) or {}
 
+    def replace_message_display(
+        self, message_row_id: int, content: str, display_metadata: Optional[Dict[str, Any]]
+    ) -> None:
+        """Переписать текст и ``display_metadata`` одной строки (уведомление «Учёл»)."""
+        if message_row_id is None:
+            return
+
+        def _do(conn):
+            conn.execute(
+                "UPDATE messages SET content = ?, display_metadata = ? WHERE id = ?",
+                (content, self._encode_display_metadata(display_metadata), message_row_id),
+            )
+
+        self._execute_write(_do)
+
     def merge_message_display_metadata(
         self, message_row_id: int, updates: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
