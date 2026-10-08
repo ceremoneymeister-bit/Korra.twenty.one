@@ -191,8 +191,14 @@ def _review_input_budget_exhausted(agent: Any) -> bool:
     budget = getattr(agent, "_review_input_token_budget", None)
     if not isinstance(budget, int) or isinstance(budget, bool) or budget <= 0:
         return False
-    used = getattr(agent, "session_input_tokens", 0)
-    return isinstance(used, int) and not isinstance(used, bool) and used >= budget
+    # ``session_input_tokens`` counts only uncached input; the fork replays its
+    # snapshot as cache reads, so the budget must count those too (K21-230).
+    used = 0
+    for counter in ("session_input_tokens", "session_cache_read_tokens", "session_cache_write_tokens"):
+        value = getattr(agent, counter, 0)
+        if isinstance(value, int) and not isinstance(value, bool):
+            used += value
+    return used >= budget
 
 
 def _maybe_inject_run_budget_wrapup(agent: Any, messages: List[Dict[str, Any]]) -> bool:
