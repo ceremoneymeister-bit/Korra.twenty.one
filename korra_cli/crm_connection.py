@@ -311,8 +311,26 @@ def _text(value: Any, limit: int) -> str:
     return value.strip()[:limit] if isinstance(value, str) else ""
 
 
-def build(payload: Any) -> dict:
-    """A connection record from what the owner typed. Raises :class:`CrmError` for a bad address/key."""
+def _route(socket_path: str) -> str:
+    if not socket_path:
+        return ""
+    if (
+        not os.path.isabs(socket_path)
+        or "\0" in socket_path
+        or len(socket_path) > 240
+        or os.path.normpath(socket_path) != socket_path
+    ):
+        raise CrmError("bad_url")
+    return socket_path
+
+
+def build(payload: Any, *, socket_path: str = "") -> dict:
+    """A connection record from what the owner typed. Raises :class:`CrmError` for a bad address/key.
+
+    The local socket route is never taken from ``payload`` (it comes from the HTTP
+    API): only from an agent's ``.env`` being adopted or from the route already
+    saved for the same account, passed in ``socket_path``.
+    """
     if not isinstance(payload, dict):
         raise CrmConnectionError("invalid_request", "Не удалось разобрать запрос.")
     kind = payload.get("type")
@@ -326,11 +344,9 @@ def build(payload: Any) -> dict:
         if not token or re.search(r"\s", token):
             raise CrmError("bad_key")
         conn = {"type": AMOCRM, "domain": domain, "token": token}
-        socket_path = _text(payload.get("unix_socket"), 240)
-        if socket_path:
-            if not os.path.isabs(socket_path) or "\0" in socket_path:
-                raise CrmError("bad_url")
-            conn["unix_socket"] = socket_path
+        route = _route(socket_path)
+        if route:
+            conn["unix_socket"] = route
         return conn
     raise CrmConnectionError("invalid_request", "Выберите Битрикс24 или amoCRM.")
 
@@ -378,14 +394,14 @@ def _account_record(found: dict) -> dict:
     }
 
 
-def save(payload: Any, *, root: Optional[Path] = None) -> dict:
+def save(payload: Any, *, root: Optional[Path] = None, socket_path: str = "") -> dict:
     """Save a new or replacement connection.
 
     A key the CRM rejects is never kept. A network failure or a request limit
     is not the key's fault, so the connection is saved and checked again later.
     """
     try:
-        conn = build(payload)
+        conn = build(payload, socket_path=socket_path)
     except CrmError as exc:
         kind = payload.get("type") if isinstance(payload, dict) else None
         return failure(exc, kind if kind in (BITRIX, AMOCRM) else BITRIX, _host_hint(payload))
@@ -562,10 +578,10 @@ def _env_connection(values: dict[str, str]) -> list[dict]:
     if domain and token:
         entry = {"type": AMOCRM, "domain": domain, "token": token}
         socket_path = (values.get("AMOCRM_UNIX_SOCKET") or "").strip()
-        if socket_path:
-            entry["unix_socket"] = socket_path
         try:
-            build(entry)
+            build(entry, socket_path=socket_path)
+            if socket_path:
+                entry["unix_socket"] = socket_path
             found.append(entry)
         except CrmError:
             pass
@@ -606,5 +622,5 @@ def adopt(profile: Any, kind: Any, *, root: Optional[Path] = None) -> dict:
     """Copy an agent's key into the installation connection. The agent's ``.env`` is not touched."""
     for agent, entry in _agent_keys():
         if agent.profile == profile and entry["type"] == kind:
-            return save(entry, root=root)
+            return save(entry, root=root, socket_path=entry.get("unix_socket") or "")
     raise CrmConnectionError("not_found", "У этого агента нет ключа этой CRM.", 404)

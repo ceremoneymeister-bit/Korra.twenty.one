@@ -83,11 +83,11 @@ def test_check_without_tasks_permission_still_ok(portal, tmp_path):
 @pytest.mark.parametrize(
     "body, code",
     [
-        ({"type": "bitrix24", "webhook_url": "https://evil.example.com/rest/1/abcdefgh12345678/"}, "bad_url"),
+        ({"type": "bitrix24", "webhook_url": "https://evil.example.com/rest/1/abcdefgh12345678/"}, "self_hosted"),
+        ({"type": "bitrix24", "webhook_url": "http://acme.bitrix24.ru/rest/1/abcdefgh12345678/"}, "bad_url"),
         ({"type": "bitrix24", "webhook_url": ""}, "bad_url"),
         ({"type": "amocrm", "domain": "evil.com", "token": "t"}, "bad_url"),
         ({"type": "amocrm", "domain": "acme.amocrm.ru", "token": ""}, "bad_key"),
-        ({"type": "amocrm", "domain": "acme.amocrm.ru", "token": "t", "unix_socket": "relative"}, "bad_url"),
     ],
 )
 def test_check_rejects_bad_input_in_russian(portal, tmp_path, body, code):
@@ -123,7 +123,7 @@ def test_save_writes_private_file_outside_profiles(portal, tmp_path):
 
 
 def test_save_amo_keeps_socket_route_and_hides_it(portal, tmp_path):
-    out = cc.save({**AMO_BODY, "unix_socket": "/run/tok-socket/amo.sock"}, root=tmp_path)
+    out = cc.save(AMO_BODY, root=tmp_path, socket_path="/run/tok-socket/amo.sock")
     assert out["connection"]["route"] == "socket"
     assert cc.load(tmp_path)["unix_socket"] == "/run/tok-socket/amo.sock"
     assert not any(s in json.dumps(out) for s in SECRETS)

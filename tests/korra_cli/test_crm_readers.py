@@ -63,8 +63,6 @@ def amo(*answers, **kwargs):
     "value",
     [
         "http://acme.bitrix24.ru/rest/17/abcdef1234567890/",
-        "https://evil.example.com/rest/17/abcdef1234567890/",
-        "https://acme.bitrix24.ru.evil.com/rest/17/abcdef1234567890/",
         "https://127.0.0.1/rest/17/abcdef1234567890/",
         "https://user:pw@acme.bitrix24.ru/rest/17/abcdef1234567890/",
         "https://acme.bitrix24.ru:8443/rest/17/abcdef1234567890/",
@@ -79,6 +77,19 @@ def test_bitrix_rejects_foreign_or_malformed_addresses(value):
     with pytest.raises(cr.CrmError) as caught:
         cr.parse_bitrix_webhook(value)
     assert caught.value.code == "bad_url"
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "https://evil.example.com/rest/17/abcdef1234567890/",
+        "https://acme.bitrix24.ru.evil.com/rest/17/abcdef1234567890/",
+    ],
+)
+def test_bitrix_foreign_domain_is_reported_as_unsupported(value):
+    with pytest.raises(cr.CrmError) as caught:
+        cr.parse_bitrix_webhook(value)
+    assert caught.value.code == "self_hosted"
 
 
 def test_bitrix_accepts_vendor_domains():
@@ -460,7 +471,7 @@ def test_amo_direct_route_tries_next_address(monkeypatch):
     attempts = []
 
     def getaddrinfo(host, port, **kw):
-        return [(2, 1, 6, "", ("192.0.2.1", 443)), (2, 1, 6, "", ("192.0.2.2", 443))]
+        return [(2, 1, 6, "", ("8.8.8.8", 443)), (2, 1, 6, "", ("8.8.4.4", 443))]
 
     class Failing(cr.AmoTransport):
         def _connect(self, address):
@@ -471,7 +482,7 @@ def test_amo_direct_route_tries_next_address(monkeypatch):
     transport = Failing("acme.amocrm.ru")
     with pytest.raises(OSError):
         transport("GET", "https://acme.amocrm.ru/api/v4/account", {}, None)
-    assert attempts[:2] == ["192.0.2.1", "192.0.2.2"]
+    assert attempts[:2] == ["8.8.8.8", "8.8.4.4"]
     assert len(attempts) == 2 * cr.HANDSHAKE_ATTEMPTS
 
 

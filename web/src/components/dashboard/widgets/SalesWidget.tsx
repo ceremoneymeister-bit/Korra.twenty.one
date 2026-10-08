@@ -626,7 +626,7 @@ function SalesBody({ size = "m" }: DashboardWidgetBodyProps) {
   if (sales.status === "not_connected") return <NotConnected candidates={sales.candidates ?? []} size={size} />;
   if (sales.status === "loading") return <LoadingNote text="Читаем CRM…" />;
   if (sales.status === "error") {
-    const replaceable = ["bad_key", "plan_closed", "bad_url", "forbidden"].includes(sales.error.code);
+    const replaceable = ["bad_key", "plan_closed", "bad_url", "self_hosted", "forbidden"].includes(sales.error.code);
     return (
       <WidgetStack>
         <div role="alert" className="contents">

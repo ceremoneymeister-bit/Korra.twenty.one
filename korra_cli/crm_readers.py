@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import copy
 import http.client
+import ipaddress
 import json
 import re
 import socket
@@ -45,7 +46,18 @@ BITRIX_INTERVAL = 0.55
 AMO_INTERVAL = 0.26
 RATE_PAUSE_SECONDS = 60.0
 
-BITRIX_HOST = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}\.bitrix24\.[a-z]{2,6}(?:\.[a-z]{2})?$")
+# Bitrix24 cloud: one account label under the vendor's own domains. Box
+# (self-hosted) Bitrix24 on a customer's domain is not supported.
+BITRIX_CLOUD_SUFFIXES = (
+    "bitrix24.ru", "bitrix24.com", "bitrix24.by", "bitrix24.kz", "bitrix24.ua", "bitrix24.uz",
+    "bitrix24.de", "bitrix24.es", "bitrix24.fr", "bitrix24.it", "bitrix24.pl", "bitrix24.eu",
+    "bitrix24.in", "bitrix24.cn", "bitrix24.vn", "bitrix24.la", "bitrix24.tr", "bitrix24.id",
+    "bitrix24.co.uk", "bitrix24.com.br", "bitrix24.com.tr", "bitrix24.com.vn",
+)
+BITRIX_HOST = re.compile(
+    r"^[a-z0-9][a-z0-9-]{0,62}\.(?:" + "|".join(re.escape(x) for x in BITRIX_CLOUD_SUFFIXES) + r")$"
+)
+_DNS_HOST = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?\.)+[a-z]{2,24}$")
 BITRIX_PATH = re.compile(r"^/rest/\d{1,12}/[A-Za-z0-9_-]{8,64}/?$")
 AMO_HOST = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}\.(?:amocrm\.ru|amocrm\.com|kommo\.com)$")
 
@@ -124,6 +136,11 @@ ERROR_TEXTS: dict[str, tuple[str, str]] = {
     "rate_limited": (
         "Слишком частые запросы",
         "{source} просит подождать: запросов к CRM слишком много. Карточка повторит попытку через несколько минут.",
+    ),
+    "self_hosted": (
+        "Коробочный Битрикс24 не поддерживается",
+        "Подключение работает с облачным Битрикс24 (адрес вида компания.bitrix24.ru). "
+        "Коробочная версия на собственном домене пока не поддерживается.",
     ),
     "protocol": (
         "Неожиданный ответ",
@@ -228,10 +245,11 @@ def parse_bitrix_webhook(value: str) -> tuple[str, str]:
         or parts.password
         or parts.query
         or parts.fragment
-        or not BITRIX_HOST.fullmatch(host)
         or not BITRIX_PATH.fullmatch(parts.path)
     ):
         raise CrmError("bad_url")
+    if not BITRIX_HOST.fullmatch(host):
+        raise CrmError("self_hosted" if _DNS_HOST.fullmatch(host) else "bad_url")
     return host, f"https://{host}{parts.path.rstrip('/')}/"
 
 
@@ -255,10 +273,44 @@ def _validate_bitrix(method: str, params: Any) -> None:
         raise CrmError("not_allowed", "params")
 
 
+def is_global_address(address: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(address.split("%", 1)[0])
+    except ValueError:
+        return False
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return ip.is_global
+
+
+def _require_global_peer(sock: socket.socket) -> None:
+    """Refuse a connection that actually landed on a private/loopback/link-local address."""
+    try:
+        peer = sock.getpeername()[0]
+    except OSError:
+        peer = ""
+    if not is_global_address(str(peer)):
+        sock.close()
+        raise CrmError("bad_url", "address")
+
+
+class _VendorHTTPSConnection(http.client.HTTPSConnection):
+    """HTTPS that checks the address it really connected to before any TLS or secret is sent."""
+
+    def connect(self) -> None:
+        sock = socket.create_connection((self.host, self.port), self.timeout)
+        try:
+            _require_global_peer(sock)
+            self.sock = self._context.wrap_socket(sock, server_hostname=self.host)  # type: ignore[attr-defined]
+        except BaseException:
+            sock.close()
+            raise
+
+
 def default_bitrix_transport(method: str, url: str, headers: dict, body: Optional[bytes]) -> Response:
     """HTTPS without redirects, with a byte cap. Raises ``OSError`` on network trouble."""
     parts = parse.urlsplit(url)
-    conn = http.client.HTTPSConnection(
+    conn = _VendorHTTPSConnection(
         parts.hostname, parts.port or 443, timeout=REQUEST_TIMEOUT, context=ssl.create_default_context()
     )
     try:
@@ -444,8 +496,11 @@ class AmoTransport:
             return ["unix"]
         seen: list[str] = []
         for info in socket.getaddrinfo(self.domain, 443, proto=socket.IPPROTO_TCP):
-            if info[4][0] not in seen:
-                seen.append(info[4][0])
+            address = info[4][0]
+            if address not in seen and is_global_address(address):
+                seen.append(address)
+        if not seen:
+            raise CrmError("bad_url", "address")
         return seen
 
     def _connect(self, address: str) -> http.client.HTTPSConnection:
@@ -459,6 +514,8 @@ class AmoTransport:
             if self.unix_socket:
                 sock.settimeout(ADDRESS_TIMEOUT)
                 sock.connect(self.unix_socket)
+            else:
+                _require_global_peer(sock)
             conn.sock = context.wrap_socket(sock, server_hostname=self.domain)
         except BaseException:
             sock.close()
