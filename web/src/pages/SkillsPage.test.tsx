@@ -3,11 +3,11 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ allowed: false, getSkills: vi.fn(), getToolsets: vi.fn(), toggleSkill: vi.fn(),
+const mocks = vi.hoisted(() => ({ allowed: false, getSkills: vi.fn(), getToolsets: vi.fn(), toggleSkill: vi.fn(), setSkillAutoLoad: vi.fn(),
   setEnd: vi.fn(), setAfterTitle: vi.fn() }));
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
-  return { ...actual, api: { ...actual.api, getSkills: mocks.getSkills, getToolsets: mocks.getToolsets, toggleSkill: mocks.toggleSkill } };
+  return { ...actual, api: { ...actual.api, getSkills: mocks.getSkills, getToolsets: mocks.getToolsets, toggleSkill: mocks.toggleSkill, setSkillAutoLoad: mocks.setSkillAutoLoad } };
 });
 vi.mock("@/hooks/useCabinetSession", () => ({ useCabinetSession: () => ({ canManageSkills: mocks.allowed,
   canBrowseSkillsHub: mocks.allowed, canConfigureToolsets: mocks.allowed }) }));
@@ -44,4 +44,18 @@ it("keeps editing and working toggles when the cabinet permits them", async () =
   expect(host.querySelector('button[title]')).not.toBeNull();
   await act(async () => toggle.click());
   expect(mocks.toggleSkill).toHaveBeenCalledWith("visual-design", false, undefined);
+});
+it("pins a skill to every chat through the auto-load switch", async () => {
+  mocks.allowed = true;
+  mocks.setSkillAutoLoad.mockResolvedValue({ ok: true, name: "visual-design", auto_load: true });
+  await render();
+  const pin = host.querySelector<HTMLButtonElement>('[aria-label="visual-design: в каждом чате"]')!;
+  expect(pin.getAttribute("aria-checked")).toBe("false");
+  await act(async () => pin.click());
+  expect(mocks.setSkillAutoLoad).toHaveBeenCalledWith("visual-design", true, undefined);
+  expect(host.querySelector('[aria-label="visual-design: в каждом чате"]')!.getAttribute("aria-checked")).toBe("true");
+});
+it("does not offer the auto-load switch without permission to manage skills", async () => {
+  await render();
+  expect(host.querySelector('[aria-label="visual-design: в каждом чате"]')).toBeNull();
 });

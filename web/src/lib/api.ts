@@ -1396,6 +1396,12 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, enabled, profile: profile || undefined }),
     }),
+  setSkillAutoLoad: (name: string, enabled: boolean, profile?: string) =>
+    fetchJSON<{ ok: boolean; name: string; auto_load: boolean }>("/api/skills/auto-load", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, enabled, profile: profile || undefined }),
+    }),
   getSkillContent: (name: string, profile?: string) =>
     fetchJSON<SkillContent>(
       `/api/skills/content?name=${encodeURIComponent(name)}${profile ? `&profile=${encodeURIComponent(profile)}` : ""}`,
@@ -3426,6 +3432,7 @@ export interface SkillInfo {
   description: string;
   category: string;
   enabled: boolean;
+  auto_load?: boolean;
 }
 
 export interface SkillContent {
