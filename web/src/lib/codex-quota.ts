@@ -89,6 +89,13 @@ export function spareText(count: number): string {
   return `В запасе ${count} ${plural(count, ["сброс", "сброса", "сбросов"])}`;
 }
 
+/** «Лимит вернётся сам через 4 ч — запасной сброс лучше сохранить.»; нет подсказки — `null`. */
+export function keepResetHint(quota: DashboardQuota, now: number): string | null {
+  const back = quota.natural_reset_at;
+  if (!quota.can_reset || !back || back <= now) return null;
+  return `Лимит вернётся сам через ${formatDuration(back - now)} — запасной сброс лучше сохранить.`;
+}
+
 export type QuotaForecastView =
   | { kind: "fast"; window: QuotaWindow; pace: number; exhaustsAt: number; gap: number }
   | { kind: "calm"; window: QuotaWindow };

@@ -19,6 +19,7 @@ import {
   exhaustDay,
   exhaustMoment,
   formatGap,
+  keepResetHint,
   formatPace,
   percentLeft,
   pickForecast,
@@ -243,6 +244,7 @@ function QuotaReady({
   const credits = quota.reset_credits;
   const spares = credits && credits.available > 0 ? credits.available : 0;
   const [resetMessage, setResetMessage] = useState<string | null>(null);
+  const keepHint = keepResetHint(quota, now);
 
   return (
     <div
@@ -266,7 +268,9 @@ function QuotaReady({
           <span className="kdw-limit-dot" aria-hidden />
           <span>
             <strong>Лимит исчерпан.</strong>
-            {size !== "s" && quota.can_reset ? " Его можно вернуть запасным сбросом." : ""}
+            {size !== "s" && quota.can_reset
+              ? ` ${keepHint ?? "Его можно вернуть запасным сбросом."}`
+              : ""}
           </span>
         </p>
       ) : (
@@ -280,7 +284,7 @@ function QuotaReady({
       {size === "s" ? null : (
         <div className="kdw-limit-foot">
           {quota.can_reset && credits ? (
-            <ResetAction spares={credits.available} onResult={setResetMessage} />
+            <ResetAction spares={credits.available} keepHint={keepHint} onResult={setResetMessage} />
           ) : null}
           {spares > 0 ? <span className="kdw-limit-chip">{spareText(spares)}</span> : null}
           {quota.plan_type ? (
@@ -293,9 +297,11 @@ function QuotaReady({
 }
 
 function ResetAction({
+  keepHint,
   onResult,
   spares,
 }: {
+  keepHint: string | null;
   onResult: (message: string | null) => void;
   spares: number;
 }) {
@@ -326,6 +332,7 @@ function ResetAction({
     <>
       <Button
         size="sm"
+        outlined={keepHint !== null}
         disabled={busy}
         aria-busy={busy}
         onClick={() => {
@@ -338,7 +345,7 @@ function ResetAction({
       <ConfirmDialog
         open={open}
         title="Сбросить лимит Codex?"
-        description={`Запасной сброс сразу вернёт полный лимит. В запасе останется ${Math.max(0, spares - 1)}. Отменить нельзя.`}
+        description={`Запасной сброс сразу вернёт полный лимит. В запасе останется ${Math.max(0, spares - 1)}. ${keepHint ? `${keepHint} ` : ""}Отменить нельзя.`}
         cancelLabel="Отмена"
         confirmLabel="Сбросить"
         loading={busy}

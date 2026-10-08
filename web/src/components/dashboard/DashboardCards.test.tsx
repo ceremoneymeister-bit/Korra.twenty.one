@@ -602,6 +602,56 @@ describe("«Лимит Codex»", () => {
     expect(text()).not.toContain("Лимит исчерпан");
   });
 
+  describe("лимит вернётся сам", () => {
+    const blocked = (naturalResetAt: number | null) =>
+      quotaOf([win({ used_percent: 100, remaining_percent: 0, level: "critical", resets_at: FIXTURE_NOW + 4 * 3600 })], {
+        limit_reached: true,
+        can_reset: true,
+        natural_reset_at: naturalResetAt,
+        reset_credits: { available: 2, applicable: 1 },
+      });
+    const isSecondary = (button: HTMLButtonElement | undefined) =>
+      !!button && button.className.includes("border-border") && !button.className.includes("bg-primary ");
+
+    it("скорый сброс: фраза в карточке, кнопка второстепенная, фраза в диалоге перед «Отменить нельзя.»", async () => {
+      serveQuota(blocked(FIXTURE_NOW + 4 * 3600));
+      await mount(CODEX_QUOTA_WIDGET, "m");
+      const hint = "Лимит вернётся сам через 4 ч — запасной сброс лучше сохранить.";
+      expect(text()).toContain(`Лимит исчерпан. ${hint}`);
+      expect(text()).not.toContain("Его можно вернуть запасным сбросом");
+      const button = buttonByText(container, "Сбросить лимит");
+      expect(isSecondary(button)).toBe(true);
+
+      await press(button);
+      expect(dialog()?.textContent).toContain(
+        `Запасной сброс сразу вернёт полный лимит. В запасе останется 1. ${hint} Отменить нельзя.`,
+      );
+      // Кнопка остаётся рабочей: подтверждение отправляет запрос.
+      await press(buttonByText(dialog()!, "Сбросить"));
+      expect(resetCalls).toEqual(["POST"]);
+    });
+
+    it("до сброса 13 часов: прежний вид — основная кнопка и прежний текст", async () => {
+      serveQuota(blocked(null));
+      await mount(CODEX_QUOTA_WIDGET, "m");
+      expect(text()).toContain("Лимит исчерпан. Его можно вернуть запасным сбросом.");
+      expect(text()).not.toContain("лучше сохранить");
+      const button = buttonByText(container, "Сбросить лимит");
+      expect(isSecondary(button)).toBe(false);
+      await press(button);
+      expect(dialog()?.textContent).toContain(
+        "Запасной сброс сразу вернёт полный лимит. В запасе останется 1. Отменить нельзя.",
+      );
+      expect(dialog()?.textContent).not.toContain("лучше сохранить");
+    });
+
+    it("прошедший срок не даёт подсказки", async () => {
+      serveQuota(blocked(FIXTURE_NOW - 60));
+      await mount(CODEX_QUOTA_WIDGET, "m");
+      expect(text()).not.toContain("лучше сохранить");
+    });
+  });
+
   it("отказ сервера: показывает русское сообщение, лимит остаётся исчерпанным", async () => {
     serveQuota(
       quotaOf([win({ used_percent: 100, remaining_percent: 0, level: "critical" })], {

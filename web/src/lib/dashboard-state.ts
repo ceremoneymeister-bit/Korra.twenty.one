@@ -172,6 +172,8 @@ export interface DashboardQuota {
   limit_reached?: boolean;
   reset_credits?: QuotaResetCredits | null;
   can_reset?: boolean;
+  /** Когда исчерпанный лимит вернётся сам, если это скоро (раньше порога сервера); иначе null. */
+  natural_reset_at?: number | null;
   forecast?: (QuotaForecast & { window_label: string; resets_at: number | null; used_percent: number }) | null;
 }
 
