@@ -20,6 +20,7 @@ section says so (``truncated``, ``limit``).
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -61,6 +62,7 @@ class Deal:
     idle_days: int
     stuck: bool
     exact: bool = True
+    currency: str = ""
 
 
 @dataclass
@@ -68,6 +70,7 @@ class Won:
     amount: float
     ts: datetime
     manager_id: str
+    currency: str = ""
 
 
 @dataclass
@@ -139,6 +142,11 @@ def _money(value: Any) -> float:
     return number if number == number and abs(number) < 1e13 else 0.0
 
 
+def _currency(value: Any) -> str:
+    text = str(value or "").strip().upper()
+    return text if re.fullmatch(r"[A-Z]{3}", text) else ""
+
+
 def _number(value: float) -> float | int:
     value = round(value, 2)
     return int(value) if value == int(value) else value
@@ -176,7 +184,7 @@ def collect_bitrix(reader: cr.Bitrix24Reader, settings: dict, now: datetime, tz:
         "crm.deal.list",
         {
             "filter": {"CATEGORY_ID": category, "STAGE_SEMANTIC_ID": "P"},
-            "select": ["ID", "TITLE", "OPPORTUNITY", "STAGE_ID", "ASSIGNED_BY_ID", "DATE_CREATE", "MOVED_TIME"],
+            "select": ["ID", "TITLE", "OPPORTUNITY", "CURRENCY_ID", "STAGE_ID", "ASSIGNED_BY_ID", "DATE_CREATE", "MOVED_TIME"],
             "order": {"MOVED_TIME": "ASC"},
         },
         max_pages=pages,
@@ -196,6 +204,7 @@ def collect_bitrix(reader: cr.Bitrix24Reader, settings: dict, now: datetime, tz:
                 created=created,
                 idle_days=idle,
                 stuck=idle >= stuck_days,
+                currency=_currency(row.get("CURRENCY_ID")),
             )
         )
 
@@ -208,7 +217,7 @@ def collect_bitrix(reader: cr.Bitrix24Reader, settings: dict, now: datetime, tz:
                 "STAGE_SEMANTIC_ID": "S",
                 ">=CLOSEDATE": since.isoformat(timespec="seconds"),
             },
-            "select": ["ID", "OPPORTUNITY", "CLOSEDATE", "ASSIGNED_BY_ID"],
+            "select": ["ID", "OPPORTUNITY", "CURRENCY_ID", "CLOSEDATE", "ASSIGNED_BY_ID"],
             "order": {"CLOSEDATE": "DESC"},
         },
         max_pages=WON_PAGES,
@@ -217,7 +226,10 @@ def collect_bitrix(reader: cr.Bitrix24Reader, settings: dict, now: datetime, tz:
     for row in won_rows["items"]:
         closed = _parse_dt(row.get("CLOSEDATE"), tz)
         if closed is not None:
-            won.append(Won(_money(row.get("OPPORTUNITY")), closed, str(row.get("ASSIGNED_BY_ID") or "")))
+            won.append(
+                Won(_money(row.get("OPPORTUNITY")), closed, str(row.get("ASSIGNED_BY_ID") or ""),
+                    _currency(row.get("CURRENCY_ID")))
+            )
 
     week_ago = (_midnight(now) - timedelta(days=6)).isoformat(timespec="seconds")
     new_leads, new_cut = _bitrix_new(reader, category, week_ago, tz, now)
@@ -330,6 +342,13 @@ def collect_amo(reader: cr.AmoReader, settings: dict, now: datetime, tz: Optiona
     stages = [
         {"id": str(s["id"]), "name": s["name"]} for s in sorted(pipeline["statuses"], key=lambda s: s["sort"])
     ]
+    currency = ""
+    try:
+        account = reader.get("account")
+        currency = _currency(account.get("currency")) if isinstance(account, dict) else ""
+    except CrmError as exc:
+        if exc.code in {"network", "rate_limited", "bad_key", "budget"}:
+            raise
 
     open_query = cc.amo_open_filter(pipelines, only=pid) + [("order[updated_at]", "asc")]
     opened = reader.paged("leads", open_query, "leads", limit=OPEN_DEAL_LIMIT, page_size=AMO_PAGE, max_pages=2)
@@ -359,6 +378,7 @@ def collect_amo(reader: cr.AmoReader, settings: dict, now: datetime, tz: Optiona
                 idle_days=max(stuck_days, _days(now - updated)) if stuck else _days(now - updated),
                 stuck=stuck,
                 exact=not stuck,
+                currency=currency,
             )
         )
     _amo_exact_idle(reader, deals, tz, now)
@@ -375,7 +395,7 @@ def collect_amo(reader: cr.AmoReader, settings: dict, now: datetime, tz: Optiona
     for row in won_page["items"]:
         closed = _parse_dt(row.get("closed_at"), tz)
         if closed is not None:
-            won.append(Won(_money(row.get("price")), closed, str(row.get("responsible_user_id") or "")))
+            won.append(Won(_money(row.get("price")), closed, str(row.get("responsible_user_id") or ""), currency))
 
     new_since = int((_midnight(now) - timedelta(days=6)).timestamp())
     new_page = reader.paged(
@@ -517,6 +537,17 @@ def _amo_overdue(reader: cr.AmoReader, deal_ids: set[str], now: datetime) -> tup
 # ------------------------------------------------------------------ snapshot
 
 
+def prevailing_currency(raw: Raw) -> tuple[str, list[str]]:
+    """The currency most of the deals are in, and the others present (only the first is ever summed)."""
+    counts: dict[str, int] = {}
+    for item in [*raw.deals, *raw.won]:
+        counts[item.currency] = counts.get(item.currency, 0) + 1
+    if not counts:
+        return "", []
+    main = min(counts, key=lambda code: (-counts[code], code))
+    return main, sorted(code for code in counts if code != main)
+
+
 def _initials(name: str) -> str:
     words = [w for w in name.replace("-", " ").split() if w]
     return "".join(w[0] for w in words[:2]).upper() or "?"
@@ -533,9 +564,14 @@ def build_snapshot(
 ) -> dict:
     """The card's section from neutral data. Pure: no network, no clock."""
     month_start, prev_start, prev_cut = month_bounds(now)
+    main, others = prevailing_currency(raw)
+
+    def total(items: list) -> float:
+        return sum(i.amount for i in items if i.currency == main)
+
     cur = [w for w in raw.won if month_start <= w.ts <= now]
     prev = [w for w in raw.won if prev_start <= w.ts < prev_cut]
-    cur_sum, prev_sum = sum(w.amount for w in cur), sum(w.amount for w in prev)
+    cur_sum, prev_sum = total(cur), total(prev)
     change = None if raw.won_truncated or prev_sum <= 0 else round((cur_sum - prev_sum) / prev_sum * 100)
 
     weeks = []
@@ -543,7 +579,7 @@ def build_snapshot(
     for i, start in enumerate(starts):
         end = starts[i + 1] if i + 1 < len(starts) else now + timedelta(days=1)
         items = [w for w in raw.won if start <= w.ts < end]
-        weeks.append({"start": start.date().isoformat(), "amount": _number(sum(w.amount for w in items)), "count": len(items)})
+        weeks.append({"start": start.date().isoformat(), "amount": _number(total(items)), "count": len(items)})
 
     today = _midnight(now)
     series = [0] * 7
@@ -566,6 +602,7 @@ def build_snapshot(
             "id": d.id,
             "title": d.title[:90],
             "amount": _number(d.amount),
+            "currency": d.currency,
             "days": d.idle_days,
             "stuck": d.stuck,
             "days_min": not d.exact,
@@ -584,7 +621,7 @@ def build_snapshot(
                 "id": stage["id"],
                 "name": stage["name"],
                 "count": len(members),
-                "amount": _number(sum(d.amount for d in members)),
+                "amount": _number(total(members)),
                 "stuck": sum(1 for d in members if d.stuck),
                 "deals": [view(d) for d in sorted(members, key=lambda d: -d.amount)],
             }
@@ -606,7 +643,7 @@ def build_snapshot(
         manager(mid)
     for w in cur:
         entry = manager(w.manager_id)
-        entry["won_amount"] += w.amount
+        entry["won_amount"] += w.amount if w.currency == main else 0.0
         entry["won_count"] += 1
     per_manager.pop("", None)
     people = []
@@ -638,6 +675,8 @@ def build_snapshot(
         "pipeline": raw.pipeline,
         "pipelines": raw.pipelines,
         "stuck_days": stuck_days,
+        "currency": main,
+        "other_currencies": others,
         "won": {
             "amount": _number(cur_sum),
             "count": len(cur),
@@ -650,7 +689,7 @@ def build_snapshot(
         "new_leads": {"today": series[6], "series": series, "unsorted": raw.unsorted, "limited": raw.new_truncated},
         "stuck": {
             "count": len(stuck_deals),
-            "amount": _number(sum(d.amount for d in stuck_deals)),
+            "amount": _number(total(stuck_deals)),
             "days": stuck_days,
             "approx": raw.stuck_approx,
             "limited": raw.deals_truncated,
@@ -667,7 +706,7 @@ def build_snapshot(
             "deals_total": raw.deals_total,
             "total_exact": raw.deals_total_exact,
             "deals_loaded": len(raw.deals),
-            "amount_total": _number(sum(d.amount for d in raw.deals)),
+            "amount_total": _number(total(raw.deals)),
             "truncated": raw.deals_truncated,
             "limit": OPEN_DEAL_LIMIT,
             "busiest_stage": busiest["name"] if busiest else None,

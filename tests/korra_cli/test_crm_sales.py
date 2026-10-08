@@ -364,7 +364,7 @@ def test_amo_river_and_pipeline(portal):
 
 def test_amo_sends_only_get_reads(portal):
     cs.gather(AMO_CONN, now=NOW, tz=TZ)
-    assert {c[0] for c in portal.amo.calls} <= {"leads", "leads/pipelines", "events", "tasks", "leads/unsorted", "users"}
+    assert {c[0] for c in portal.amo.calls} <= {"account", "leads", "leads/pipelines", "events", "tasks", "leads/unsorted", "users"}
 
 
 # ---------------------------------------------------------------- section, cache, stale data
@@ -714,3 +714,70 @@ def test_bitrix_days_are_always_exact(portal):
 def test_amo_unix_timestamps_work_when_no_zone_is_configured(portal):
     snap = cs.gather(AMO_CONN, now=NOW, tz=None)
     assert snap["stuck"]["count"] == 2
+
+
+# ---------------------------------------------------------------- money keeps its own currency (F4)
+
+
+def _with_currency(portal, by_id, default=""):
+    base = portal.bitrix.handlers["crm.deal.list"]
+
+    def deals(p):
+        assert "CURRENCY_ID" in p["select"].values()
+        out = base(p)
+        for row in out["result"]:
+            row["CURRENCY_ID"] = by_id.get(row["ID"], default)
+        return out
+
+    portal.bitrix.handlers["crm.deal.list"] = deals
+
+
+def test_bitrix_asks_for_the_currency_of_every_deal(portal):
+    _with_currency(portal, {})
+    cs.gather(BITRIX_CONN, now=NOW, tz=TZ)
+
+
+def test_single_currency_is_taken_from_the_deals_not_from_the_domain(portal):
+    _with_currency(portal, {}, default="USD")  # an acme.bitrix24.ru portal working in dollars
+    snap = cs.gather(BITRIX_CONN, now=NOW, tz=TZ)
+    assert snap["currency"] == "USD" and snap["other_currencies"] == []
+    assert snap["won"]["amount"] == 1400000 and snap["stuck"]["amount"] == 800000
+
+
+def test_mixed_currencies_are_summed_only_in_the_prevailing_one(portal):
+    # won: 1 (1 000 000) and 2 (400 000) this month, 3 (700 000) and 4 (100 000) in the previous one.
+    # Deal 1 is in dollars: the roubles are the majority and only they are added up.
+    _with_currency(portal, {"1": "USD", "12": "USD"}, default="RUB")
+    snap = cs.gather(BITRIX_CONN, now=NOW, tz=TZ)
+    assert snap["currency"] == "RUB" and snap["other_currencies"] == ["USD"]
+    won = snap["won"]
+    assert (won["amount"], won["count"], won["prev_amount"]) == (400000, 2, 800000)
+    assert won["change_pct"] == -50
+    assert snap["stuck"]["amount"] == 300000 and snap["stuck"]["count"] == 2
+    stages = {s["id"]: s for s in snap["river"]["stages"]}
+    assert stages["PROPOSAL"]["amount"] == 500000 and snap["river"]["amount_total"] == 600000
+    deal12 = next(d for d in stages["PROPOSAL"]["deals"] if d["id"] == "12")
+    assert deal12["currency"] == "USD" and deal12["amount"] == 500000
+    anna = next(p for p in snap["managers"] if p["name"] == "Анна Миронова")
+    assert anna["won_amount"] == 0 and anna["won_count"] == 1
+
+
+def test_a_tie_between_currencies_goes_to_the_first_by_code(portal):
+    _with_currency(portal, {"11": "EUR", "12": "EUR", "1": "EUR", "2": "EUR", "3": "EUR"}, default="RUB")
+    snap = cs.gather(BITRIX_CONN, now=NOW, tz=TZ)
+    assert snap["currency"] == "EUR" and snap["other_currencies"] == ["RUB"]
+
+
+def test_amo_currency_is_the_accounts(portal):
+    portal.amo.handlers["account"] = lambda q: {"id": 1, "name": "ООО", "currency": "KZT"}
+    snap = cs.gather(AMO_CONN, now=NOW, tz=TZ)
+    assert snap["currency"] == "KZT" and snap["other_currencies"] == []
+
+
+def test_amo_without_a_currency_in_the_account_has_none(portal):
+    assert cs.gather(AMO_CONN, now=NOW, tz=TZ)["currency"] == ""
+
+
+def test_amo_card_survives_an_account_without_read_access(portal):
+    portal.amo.handlers["account"] = lambda q: cr.Response(403, {}, b"{}")
+    assert cs.gather(AMO_CONN, now=NOW, tz=TZ)["currency"] == ""

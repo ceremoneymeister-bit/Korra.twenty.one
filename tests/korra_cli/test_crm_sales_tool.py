@@ -212,3 +212,22 @@ def test_amo_stuck_lower_bounds_reach_the_agent(desk):
     answer = run(action="stuck")
     assert any("не менее" in line for line in answer["limits"])
     assert all(deal["days_min"] is True for deal in answer["deals"])
+
+
+def test_agent_gets_the_currency_and_the_note_about_other_ones(desk):
+    connect(desk)
+    base = desk.bitrix.handlers["crm.deal.list"]
+
+    def deals(p):
+        out = base(p)
+        for row in out["result"]:
+            row["CURRENCY_ID"] = "USD" if row["ID"] in {"1", "12"} else "RUB"
+        return out
+
+    desk.bitrix.handlers["crm.deal.list"] = deals
+    overview = run()
+    assert overview["currency"] == "RUB" and overview["other_currencies"] == ["USD"]
+    assert any("USD" in line and "не входят" in line for line in overview["limits"])
+    stuck = run(action="stuck")
+    assert stuck["currency"] == "RUB" and {d["currency"] for d in stuck["deals"]} == {"USD", "RUB"}
+    assert any("USD" in line for line in stuck["limits"])

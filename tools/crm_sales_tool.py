@@ -78,6 +78,12 @@ def _limits(section: dict) -> list[str]:
             f"Открытых сделок {atleast}{total}; прочитаны первые {river.get('deals_loaded')}. "
             "Застрявшие сделки, суммы по этапам и по менеджерам посчитаны по этой выборке — это «не менее»."
         )
+    others = section.get("other_currencies") or []
+    if others:
+        out.append(
+            f"Суммы — в {section.get('currency') or 'основной валюте'}; сделки в других валютах "
+            f"({', '.join(others)}) в суммы не входят."
+        )
     stuck = section.get("stuck") or {}
     if stuck.get("approx"):
         out.append("Журнал событий amoCRM прочитан не весь: застрявших сделок — «не менее».")
@@ -99,7 +105,7 @@ def _limits(section: dict) -> list[str]:
 
 
 def _overview(section: dict) -> dict:
-    keep = ("source_label", "portal", "pipeline", "stuck_days", "won", "new_leads", "stuck", "overdue", "managers")
+    keep = ("source_label", "portal", "pipeline", "stuck_days", "currency", "other_currencies", "won", "new_leads", "stuck", "overdue", "managers")
     out = {key: section[key] for key in keep if key in section}
     out.update(_freshness(section))
     out["limits"] = _limits(section)
@@ -120,7 +126,8 @@ def _stuck(section: dict, limit: int) -> dict:
     ]
     rows.sort(key=lambda d: -(d.get("days") or 0))
     out = {"stuck_days": section.get("stuck_days"), "count": (section.get("stuck") or {}).get("count"),
-           "deals": rows[:limit], **_freshness(section), "limits": _limits(section)}
+           "currency": section.get("currency"), "deals": rows[:limit], **_freshness(section),
+           "limits": _limits(section)}
     return out
 
 
