@@ -39,6 +39,16 @@ import { cn } from "@/lib/utils";
 
 const MAX_DOTS = 36;
 const DEALS: [string, string, string] = ["сделка", "сделки", "сделок"];
+const OTHER_CURRENCIES = "и сделки в других валютах — не в сумме";
+
+/** Число, известное только как нижняя граница: «не менее 7». */
+function AtLeast({ on }: { on: boolean | undefined }) {
+  return on ? <small className="kdw-sales-lb">не менее </small> : null;
+}
+
+function otherCurrencies(sales: SalesReady): boolean {
+  return (sales.other_currencies ?? []).length > 0;
+}
 
 function asOfSeconds(sales: SalesReady): number {
   const parsed = Date.parse(sales.as_of);
@@ -301,7 +311,7 @@ function Hero({ sales, month, state }: { sales: SalesReady; month: number; state
   void state;
   const { won } = sales;
   const money = moneyParts(won.amount);
-  const sign = currencySign(sales.portal);
+  const sign = currencySign(sales.currency);
   const top = Math.max(...won.weeks.map((week) => week.amount), 1);
   const change = won.change_pct;
   const prev = previousMonthTo(month);
@@ -309,15 +319,17 @@ function Hero({ sales, month, state }: { sales: SalesReady; month: number; state
     <div className="kdw-sales-hero">
       <div className="kdw-sales-money">
         <span className="kdw-sales-k">
-          Выиграно в {monthIn(month)} · {won.count} {plural(won.count, DEALS)}
+          Выиграно в {monthIn(month)} · {won.limited ? "не менее " : ""}
+          {won.count} {plural(won.count, DEALS)}
         </span>
-        <span className="kdw-sales-v" aria-label={moneyFull(won.amount, sales.portal)}>
+        <span className="kdw-sales-v" aria-label={`${won.limited ? "не менее " : ""}${moneyFull(won.amount, sales.currency)}`}>
+          <AtLeast on={won.limited} />
           {money.value}{" "}
           <small>{[money.unit, sign].filter(Boolean).join(" ")}</small>
         </span>
         <span className="kdw-sales-chips">
           {change === null ? (
-            <span>{won.prev_amount > 0 ? "" : `в прошлом месяце продаж не было`}</span>
+            <span>{won.limited || won.prev_amount > 0 ? "" : `в прошлом месяце продаж не было`}</span>
           ) : (
             <>
               <span className={cn("kdw-sales-chip", change < 0 && "kdw-sales-chip--down")}>
@@ -327,7 +339,8 @@ function Hero({ sales, month, state }: { sales: SalesReady; month: number; state
               к {prev} на эту дату
             </>
           )}
-          {won.limited ? <span className="kdw-sales-limited">сумма может быть выше: прочитана не вся история</span> : null}
+          {won.limited ? <span className="kdw-sales-limited">прочитана не вся история: к прошлому месяцу не сравниваем</span> : null}
+          {otherCurrencies(sales) ? <span className="kdw-sales-limited">{OTHER_CURRENCIES}</span> : null}
         </span>
       </div>
       <div className="kdw-sales-bars" aria-hidden>
@@ -353,7 +366,10 @@ function Signals({ sales, size }: { sales: SalesReady; size: "m" | "l" }) {
           +
         </i>
         <span className="kdw-sales-sigt">
-          <b>{leads.today}</b>
+          <b>
+            <AtLeast on={leads.limited} />
+            {leads.today}
+          </b>
           <span>{size === "l" ? "новых заявок сегодня" : "заявок сегодня"}</span>
         </span>
         {size === "l" ? (
@@ -371,17 +387,20 @@ function Signals({ sales, size }: { sales: SalesReady; size: "m" | "l" }) {
       <Link
         className="kdw-sales-sig"
         to={stuck.count > 0 ? stuckChatLink(sales) : "#"}
-        aria-label={stuck.count > 0 ? `${stuck.count} застряли: разобрать с агентом` : "Застрявших сделок нет"}
+        aria-label={stuck.count > 0 ? `${stuck.limited ? "не менее " : ""}${stuck.count} застряли: разобрать с агентом` : "Застрявших сделок нет"}
         onClick={stuck.count > 0 ? undefined : (event) => event.preventDefault()}
       >
         <i className={cn("kdw-sales-ico", stuck.count > 0 ? "kdw-sales-ico--amber" : "kdw-sales-ico--dark")} aria-hidden>
           {stuck.count > 0 ? "⧗" : "✓"}
         </i>
         <span className="kdw-sales-sigt">
-          <b>{stuck.count}</b>
+          <b>
+            <AtLeast on={stuck.limited} />
+            {stuck.count}
+          </b>
           <span>
-            {stuck.approx ? "около " : ""}
-            застряли{size === "l" && stuck.count > 0 ? ` · ${moneyText(stuck.amount, sales.portal)}` : ""}
+            {stuck.approx && !stuck.limited ? "около " : ""}
+            застряли{size === "l" && stuck.count > 0 ? ` · ${stuck.limited ? "не менее " : ""}${moneyText(stuck.amount, sales.currency)}` : ""}
           </span>
         </span>
       </Link>
@@ -390,7 +409,10 @@ function Signals({ sales, size }: { sales: SalesReady; size: "m" | "l" }) {
           {overdue.available ? (overdue.tasks > 0 ? "!" : "✓") : "–"}
         </i>
         <span className="kdw-sales-sigt">
-          <b>{overdue.available ? overdue.tasks : "—"}</b>
+          <b>
+            {overdue.available ? <AtLeast on={overdue.limited} /> : null}
+            {overdue.available ? overdue.tasks : "—"}
+          </b>
           <span>{overdue.available ? (size === "l" ? "задач просрочено" : "просрочено") : "задачи недоступны"}</span>
         </span>
       </a>
@@ -402,9 +424,14 @@ function dotSize(amount: number, top: number): number {
   return Math.round(9 + 20 * Math.sqrt(Math.max(amount, 0) / Math.max(top, 1)));
 }
 
+/** Размер кружка сравнивает только суммы в основной валюте: чужая валюта в масштаб не входит. */
+function inMain(deal: SalesDeal, sales: SalesReady): number {
+  return !deal.currency || deal.currency === sales.currency ? deal.amount : 0;
+}
+
 function dealTitle(deal: SalesDeal, sales: SalesReady): string {
-  const parts = [deal.title, moneyFull(deal.amount, sales.portal)];
-  if (deal.days > 0) parts.push(`${deal.days} дн. без движения`);
+  const parts = [deal.title, moneyFull(deal.amount, deal.currency ?? sales.currency)];
+  if (deal.days > 0) parts.push(`${deal.days_min ? "не менее " : ""}${deal.days} дн. без движения`);
   if (deal.late) parts.push("просрочена задача");
   return parts.join(" · ");
 }
@@ -427,13 +454,13 @@ function Stage({ stage, top, sales }: { stage: SalesStage; top: number; sales: S
             title={dealTitle(deal, sales)}
             aria-label={dealTitle(deal, sales)}
             className={cn("kdw-sales-dot", deal.stuck && "kdw-sales-dot--stuck", deal.late && "kdw-sales-dot--late", deal.new && "kdw-sales-dot--new")}
-            style={{ width: dotSize(deal.amount, top), height: dotSize(deal.amount, top) }}
+            style={{ width: dotSize(inMain(deal, sales), top), height: dotSize(inMain(deal, sales), top) }}
           />
         ))}
         {hidden > 0 ? <span className="kdw-sales-more-dots">+{hidden}</span> : null}
       </div>
       <div className="kdw-sales-col-f">
-        <span>{moneyText(stage.amount, sales.portal)}</span>
+        <span>{moneyText(stage.amount, sales.currency)}</span>
         {stage.stuck > 0 ? <em>{stage.stuck} стоят</em> : null}
       </div>
     </div>
@@ -442,19 +469,21 @@ function Stage({ stage, top, sales }: { stage: SalesStage; top: number; sales: S
 
 function River({ sales }: { sales: SalesReady }) {
   const { river } = sales;
-  const top = Math.max(...river.stages.flatMap((stage) => stage.deals.map((deal) => deal.amount)), 1);
+  const top = Math.max(...river.stages.flatMap((stage) => stage.deals.map((deal) => inMain(deal, sales))), 1);
   return (
     <div className="kdw-sales-river-wrap">
       <div className="kdw-sales-river-h">
         <span>
           Воронка «{sales.pipeline.name}» ·{" "}
           <b>
-            {river.deals_total} {plural(river.deals_total, DEALS)} на {moneyText(river.amount_total, sales.portal)}
+            {river.total_exact === false ? "не менее " : ""}
+            {river.deals_total} {plural(river.deals_total, DEALS)}
+            {river.truncated ? "" : ` на ${moneyText(river.amount_total, sales.currency)}`}
           </b>
         </span>
         {river.truncated ? (
           <span>
-            показаны первые {river.deals_loaded} из {river.deals_total}
+            прочитаны первые {river.deals_loaded}: {moneyText(river.amount_total, sales.currency)}
           </span>
         ) : river.busiest_stage ? (
           <span className="kdw-sales-river-hot">больше всего стоит на «{river.busiest_stage}»</span>
@@ -494,17 +523,21 @@ function StuckCards({ sales }: { sales: SalesReady }) {
   const longest = Math.max(...top.map((deal) => deal.days), 1);
   return (
     <div className="kdw-sales-stuck">
+      {sales.stuck.top_exact === false ? (
+        <p className="kdw-sales-stuck-note">давно без движения (дни — не менее); возможно, есть и более давние</p>
+      ) : null}
       {top.map((deal) => (
         <a key={deal.id} className="kdw-sales-deal" href={deal.url} target="_blank" rel="noopener noreferrer">
           <span className="kdw-sales-deal-top">
             <span className="kdw-sales-ring" style={{ "--p": Math.round((deal.days / longest) * 100) } as CSSProperties}>
               <span>
+                {deal.days_min ? <small>не менее</small> : null}
                 {deal.days}
                 <small>{plural(deal.days, ["день", "дня", "дней"])}</small>
               </span>
             </span>
           </span>
-          <span className="kdw-sales-sum">{moneyFull(deal.amount, sales.portal)}</span>
+          <span className="kdw-sales-sum">{moneyFull(deal.amount, deal.currency ?? sales.currency)}</span>
           <span className="kdw-sales-nm">{deal.title}</span>
           <span className="kdw-sales-st">{[deal.stage, deal.manager].filter(Boolean).join(" · ")}</span>
         </a>
@@ -529,7 +562,7 @@ function Team({ sales }: { sales: SalesReady }) {
             <span className="kdw-sales-who">
               <b>{person.name}</b>
               {person.leader
-                ? `лидер месяца · ${moneyText(person.won_amount, sales.portal)}`
+                ? `лидер месяца · ${moneyText(person.won_amount, sales.currency)}`
                 : person.stuck > 0
                   ? `${person.stuck} стоят`
                   : "без застоя"}
@@ -548,7 +581,9 @@ function AskAgent({ sales }: { sales: SalesReady }) {
       {count > 0 ? (
         <Link className="kdw-sales-btn" to={stuckChatLink(sales)}>
           <Sparkles className="size-4" aria-hidden />
-          Разобрать {count} {plural(count, ["застрявшую", "застрявшие", "застрявших"])} с агентом
+          {sales.stuck.limited
+            ? `Разобрать застрявшие (не менее ${count}) с агентом`
+            : `Разобрать ${count} ${plural(count, ["застрявшую", "застрявшие", "застрявших"])} с агентом`}
         </Link>
       ) : (
         <span className="kdw-sales-calm">Застрявших сделок нет</span>
@@ -563,22 +598,28 @@ function AskAgent({ sales }: { sales: SalesReady }) {
 function Tile({ sales }: { sales: SalesReady }) {
   const { stuck, won, river } = sales;
   const stuckMode = stuck.count > 0;
+  const lowerBound = stuckMode ? stuck.limited : won.limited;
   const money = moneyParts(stuckMode ? stuck.amount : won.amount);
   const share = river.amount_total > 0 ? Math.min(100, Math.round((stuck.amount / river.amount_total) * 100)) : 0;
-  const unit = [money.unit, currencySign(sales.portal)].filter(Boolean).join(" ");
+  const unit = [money.unit, currencySign(sales.currency)].filter(Boolean).join(" ");
   return (
     <div className="kdw-sales kdw-sales--tile" style={{ "--p": stuckMode ? share : 0 } as CSSProperties}>
       <span className="kdw-sales-arc" aria-hidden />
-      <span className="kdw-sales-big">{money.value}</span>
+      <span className="kdw-sales-big">
+        <AtLeast on={lowerBound} />
+        {money.value}
+      </span>
       <span className="kdw-sales-cap">
         {stuckMode ? (
           <>
-            {unit} стоят без движения дольше {sales.stuck_days} {plural(sales.stuck_days, ["дня", "дней", "дней"])} · {stuck.count}{" "}
-            {plural(stuck.count, DEALS)}
+            {unit} стоят без движения дольше {sales.stuck_days} {plural(sales.stuck_days, ["дня", "дней", "дней"])} ·{" "}
+            {stuck.limited ? "не менее " : ""}
+            {stuck.count} {plural(stuck.count, DEALS)}
           </>
         ) : (
           <>{unit} выиграно в этом месяце · застрявших нет</>
         )}
+        {otherCurrencies(sales) ? <> · {OTHER_CURRENCIES}</> : null}
       </span>
       {stuckMode ? <span className="kdw-sales-pct">{share} %</span> : null}
     </div>

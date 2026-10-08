@@ -247,6 +247,7 @@ const deal = (id: string, title: string, amount: number, days: number, extra: Pa
   url: `https://acme.bitrix24.ru/crm/deal/details/${id}/`,
   manager: "Иван Орлов",
   stage: "Переговоры",
+  currency: "RUB",
   ...extra,
 });
 
@@ -268,6 +269,8 @@ export function salesFixture(overrides: Partial<SalesReady> = {}, type: CrmType 
     portal: connection.portal,
     pipeline: { id: "0", name: "Продажи" },
     stuck_days: 7,
+    currency: "RUB",
+    other_currencies: [],
     won: {
       amount: 2_840_000,
       count: 14,
@@ -282,11 +285,12 @@ export function salesFixture(overrides: Partial<SalesReady> = {}, type: CrmType 
       ],
       limited: false,
     },
-    new_leads: { today: 6, series: [2, 4, 3, 5, 1, 0, 6], unsorted: 2 },
-    stuck: { count: 7, amount: 1_260_000, days: 7, approx: false, top: stuckTop },
+    new_leads: { today: 6, series: [2, 4, 3, 5, 1, 0, 6], unsorted: 2, limited: false },
+    stuck: { count: 7, amount: 1_260_000, days: 7, approx: false, limited: false, top_exact: true, top: stuckTop },
     overdue: { available: true, tasks: 4, managers: 2, limited: false },
     river: {
       deals_total: 31,
+      total_exact: true,
       deals_loaded: 31,
       amount_total: 6_100_000,
       truncated: false,

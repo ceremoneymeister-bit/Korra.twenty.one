@@ -82,6 +82,10 @@ export interface SalesDeal {
   url: string;
   manager: string;
   stage: string;
+  /** Код валюты сделки; пустой — CRM её не назвала. */
+  currency?: string;
+  /** Дни без движения известны как нижняя граница («не менее N»). */
+  days_min?: boolean;
 }
 
 export interface SalesStage {
@@ -112,6 +116,10 @@ export interface SalesReady {
   portal: string;
   pipeline: CrmPipeline;
   stuck_days: number;
+  /** Валюта, в которой посчитаны все суммы; пустая — неизвестна. */
+  currency: string;
+  /** Валюты остальных сделок: их суммы в итоги не входят. */
+  other_currencies: string[];
   won: {
     amount: number;
     count: number;
@@ -121,11 +129,23 @@ export interface SalesReady {
     weeks: { start: string; amount: number; count: number }[];
     limited: boolean;
   };
-  new_leads: { today: number; series: number[]; unsorted: number | null };
-  stuck: { count: number; amount: number; days: number; approx: boolean; top: SalesDeal[] };
+  new_leads: { today: number; series: number[]; unsorted: number | null; limited?: boolean };
+  stuck: {
+    count: number;
+    amount: number;
+    days: number;
+    approx: boolean;
+    /** Прочитана не вся воронка: число застрявших — нижняя граница. */
+    limited?: boolean;
+    /** Тройка действительно самых давних; при приближённых данных — нет. */
+    top_exact?: boolean;
+    top: SalesDeal[];
+  };
   overdue: { available: boolean; tasks: number; managers: number; limited: boolean };
   river: {
     deals_total: number;
+    /** Число открытых сделок точное; иначе это нижняя граница. */
+    total_exact?: boolean;
     deals_loaded: number;
     amount_total: number;
     truncated: boolean;
@@ -276,12 +296,14 @@ export interface Money {
   unit: string;
 }
 
-const CURRENCY_BY_ZONE: Record<string, string> = { ru: "₽", kz: "₸", by: "Br" };
+const CURRENCY_SIGNS: Record<string, string> = {
+  RUB: "₽", KZT: "₸", BYN: "Br", USD: "$", EUR: "€", UAH: "₴",
+};
 
-/** Знак валюты по зоне портала; для остальных — без знака, а не чужая валюта. */
-export function currencySign(portal: string): string {
-  const zone = portal.trim().toLowerCase().split(".").pop() ?? "";
-  return CURRENCY_BY_ZONE[zone] ?? "";
+/** Знак по коду валюты из данных сделок; незнакомый код показываем как есть, пустой — без знака. */
+export function currencySign(currency: string | undefined): string {
+  const code = (currency ?? "").trim().toUpperCase();
+  return CURRENCY_SIGNS[code] ?? code;
 }
 
 /** 2 840 000 → «2,8 млн», 126 500 → «126,5 тыс.», 840 → «840». */
@@ -294,23 +316,24 @@ export function moneyParts(amount: number): Money {
   return { value: fmt(amount, 0), unit: "" };
 }
 
-export function moneyText(amount: number, portal: string): string {
+export function moneyText(amount: number, currency: string | undefined): string {
   const { value, unit } = moneyParts(amount);
-  return [value, unit, currencySign(portal)].filter(Boolean).join(" ");
+  return [value, unit, currencySign(currency)].filter(Boolean).join(" ");
 }
 
 /** Полная сумма без сокращений: «840 000 ₽». */
-export function moneyFull(amount: number, portal: string): string {
-  return [new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(amount), currencySign(portal)]
+export function moneyFull(amount: number, currency: string | undefined): string {
+  return [new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(amount), currencySign(currency)]
     .filter(Boolean)
     .join(" ");
 }
 
 /** Текст поручения агенту; сделки он читает сам инструментом `crm_sales`. */
 export function stuckDraft(sales: SalesReady): string {
-  const sum = moneyText(sales.stuck.amount, sales.portal);
+  const sum = moneyText(sales.stuck.amount, sales.currency);
+  const count = `${sales.stuck.limited ? "не менее " : ""}${sales.stuck.count}`;
   return (
-    `Разбери застрявшие сделки в ${sales.source_label}: их ${sales.stuck.count} на ${sum}, ` +
+    `Разбери застрявшие сделки в ${sales.source_label}: их ${count} на ${sum}, ` +
     `этап не менялся больше ${sales.stuck_days} дн. Возьми список инструментом crm_sales (action=stuck), ` +
     `начни с самых давних и по каждой предложи следующий шаг и что написать клиенту. В CRM ничего не меняй.`
   );

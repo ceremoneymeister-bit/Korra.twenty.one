@@ -1979,6 +1979,21 @@
   background: color-mix(in srgb, var(--kdw-late) 18%, transparent);
 }
 
+.kdw-sales-lb {
+  font-size: 0.55em;
+  font-weight: 500;
+  letter-spacing: 0;
+  opacity: 0.7;
+}
+
+.kdw-sales-stuck-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.3;
+  color: var(--neo-text-muted, inherit);
+}
+
 .kdw-sales-limited {
   color: var(--kdw-warn);
 }

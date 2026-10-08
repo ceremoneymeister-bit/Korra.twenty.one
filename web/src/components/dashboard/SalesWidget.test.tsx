@@ -189,15 +189,26 @@ describe("карточка «Продажи»: размеры", () => {
     sales = salesFixture({ links: { portal: "https://acme.amocrm.ru/leads/" } }, "amocrm");
     await mount("l");
     expect(text()).toContain("Открыть amoCRM ↗");
-    // Знак валюты зависит от зоны портала: у .ru — рубль.
     expect(text()).toContain("₽");
   });
 
-  it("портал без известной зоны не получает чужого знака валюты", async () => {
-    sales = salesFixture({ portal: "acme.bitrix24.com" });
+  it("знак валюты берётся из данных, а не из зоны портала", async () => {
+    sales = salesFixture({ portal: "acme.bitrix24.ru", currency: "KZT" });
+    await mount("m");
+    expect(text()).toContain("₸");
+    expect(text()).not.toContain("₽");
+  });
+
+  it("валюта без известного знака показана кодом, а пустая — без знака", async () => {
+    sales = salesFixture({ currency: "CHF" });
+    await mount("m");
+    expect(text()).toContain("CHF");
+    await act(async () => root!.unmount());
+    container.remove();
+    sales = salesFixture({ currency: "" });
     await mount("m");
     expect(text()).not.toContain("₽");
-    expect(text()).not.toContain("$");
+    expect(text()).not.toContain("CHF");
   });
 
   it("без прав на задачи показывает прочерк вместо нуля просрочек", async () => {
@@ -205,6 +216,122 @@ describe("карточка «Продажи»: размеры", () => {
     await mount("m");
     expect(text()).toContain("—");
     expect(text()).toContain("задачи недоступны");
+  });
+});
+
+describe("карточка «Продажи»: валюта и полнота (K21-322 F4–F7)", () => {
+  const NOTE = "и сделки в других валютах — не в сумме";
+  const base = () => salesFixture();
+
+  it.each(["s", "m", "l"] as const)("%s: сделки в других валютах названы и в сумму не входят", async (size) => {
+    sales = salesFixture({ other_currencies: ["USD"] });
+    await mount(size);
+    expect(text()).toContain(NOTE);
+  });
+
+  it.each(["s", "m", "l"] as const)("%s: одна валюта — без подписи", async (size) => {
+    await mount(size);
+    expect(text()).not.toContain(NOTE);
+  });
+
+  it("L: сделка в чужой валюте показана в своей валюте", async () => {
+    const own = base();
+    sales = salesFixture({
+      other_currencies: ["USD"],
+      river: {
+        ...own.river,
+        stages: own.river.stages.map((stage, index) =>
+          index === 0 ? { ...stage, deals: stage.deals.map((d) => ({ ...d, currency: "USD", amount: 5000 })) } : stage,
+        ),
+      },
+    });
+    await mount("l");
+    expect(container.querySelector('[data-stage="NEW"] a')?.getAttribute("title")).toContain("$");
+  });
+
+  it("M: неполная история выигранных — «не менее» у суммы, без процента", async () => {
+    sales = salesFixture({ won: { ...base().won, limited: true, change_pct: null } });
+    await mount("m");
+    expect(text()).toContain("не менее");
+    expect(text()).not.toContain("%");
+    expect(text()).not.toContain("в прошлом месяце продаж не было");
+  });
+
+  it("S: неполная история выигранных и застрявших — «не менее» и у суммы, и у числа", async () => {
+    sales = salesFixture({ stuck: { ...base().stuck, limited: true } });
+    await mount("s");
+    expect(text()).toContain("не менее 1,3");
+    expect(text()).toContain("не менее 7 сделок");
+    await act(async () => root!.unmount());
+    container.remove();
+    sales = salesFixture({ stuck: { count: 0, amount: 0, days: 7, approx: false, top: [] }, won: { ...base().won, limited: true, change_pct: null } });
+    await mount("s");
+    expect(text()).toContain("не менее 2,8");
+  });
+
+  it.each(["m", "l"] as const)("%s: новые заявки, застрявшие и просрочки — нижние границы", async (size) => {
+    sales = salesFixture({
+      new_leads: { ...base().new_leads, limited: true },
+      stuck: { ...base().stuck, limited: true },
+      overdue: { ...base().overdue, limited: true },
+    });
+    await mount(size);
+    const signals = container.querySelector(".kdw-sales-signals")!.textContent!;
+    expect(signals).toContain("не менее 6");
+    expect(signals).toContain("не менее 7");
+    expect(signals).toContain("не менее 4");
+  });
+
+  it("amoCRM: приближённое число застрявших — «около», а не точное", async () => {
+    sales = salesFixture({ stuck: { ...base().stuck, approx: true } });
+    await mount("m");
+    expect(container.querySelector(".kdw-sales-signals")!.textContent).toContain("около");
+  });
+
+  it("L: число открытых сделок — нижняя граница, прочитанных меньше", async () => {
+    const own = base();
+    sales = salesFixture({ river: { ...own.river, deals_total: 1500, total_exact: false, deals_loaded: 300, truncated: true } });
+    await mount("l");
+    expect(container.querySelector(".kdw-sales-river-h")!.textContent).toContain("не менее 1500 сделок");
+    expect(container.querySelector(".kdw-sales-river-h")!.textContent).toContain("первые 300");
+  });
+
+  it("L: точное число при обрезке 301–499 не называется нижней границей", async () => {
+    const own = base();
+    sales = salesFixture({ river: { ...own.river, deals_total: 420, total_exact: true, deals_loaded: 300, truncated: true } });
+    await mount("l");
+    const head = container.querySelector(".kdw-sales-river-h")!.textContent!;
+    expect(head).toContain("420 сделок");
+    expect(head).not.toContain("не менее 420");
+    expect(head).toContain("первые 300");
+  });
+
+  it("L: дни у приближённых сделок — «не менее», тройка не обещана самой давней", async () => {
+    const own = base();
+    sales = salesFixture({
+      stuck: { ...own.stuck, top_exact: false, top: own.stuck.top.map((d) => ({ ...d, days_min: true })) },
+    });
+    await mount("l");
+    const cards = container.querySelector(".kdw-sales-stuck")!;
+    expect(cards.textContent).toContain("не менее");
+    expect(cards.textContent).toContain("давно без движения");
+    expect(cards.textContent).toContain("есть и более давние");
+  });
+
+  it("L: точные дни и точная тройка — без оговорок", async () => {
+    await mount("l");
+    const cards = container.querySelector(".kdw-sales-stuck")!;
+    expect(cards.textContent).not.toContain("не менее");
+    expect(cards.textContent).not.toContain("давно без движения");
+  });
+
+  it("разбор с агентом: в поручении та же нижняя граница и валюта", async () => {
+    sales = salesFixture({ stuck: { ...base().stuck, limited: true }, currency: "KZT" });
+    await mount("l");
+    await click(byText(container, "с агентом"));
+    const draft = new URLSearchParams(container.querySelector("[data-testid=where]")!.textContent!.split("?")[1]).get("draft")!;
+    expect(draft).toContain("не менее 7");
+    expect(draft).toContain("₸");
   });
 });
 
