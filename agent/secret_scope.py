@@ -302,6 +302,17 @@ def load_env_file(env_path: Path) -> Dict[str, str]:
 _INSTALLATION_SHARED_KEYS = ("DEEPGRAM_API_KEY",)
 
 
+def installation_shared_secret(key: str, home: Path) -> str:
+    """Installation-root value of a shared key for the profile at *home*, else "".
+
+    Only ``_INSTALLATION_SHARED_KEYS`` and only for ``<root>/profiles/<name>``.
+    """
+    home = Path(home)
+    if key not in _INSTALLATION_SHARED_KEYS or home.parent.name != "profiles":
+        return ""
+    return load_env_file(home.parent.parent / ".env").get(key, "").strip()
+
+
 def build_profile_secret_scope(hermes_home: Path) -> Dict[str, str]:
     """Build a profile's secret mapping from its ``<home>/.env``.
 
@@ -324,14 +335,10 @@ def build_profile_secret_scope(hermes_home: Path) -> Dict[str, str]:
             continue
         secrets[key] = value
 
-    if home.parent.name == "profiles":
-        root_env = None
-        for key in _INSTALLATION_SHARED_KEYS:
-            if secrets.get(key, "").strip():
-                continue
-            if root_env is None:
-                root_env = load_env_file(home.parent.parent / ".env")
-            if root_env.get(key, "").strip():
-                secrets[key] = root_env[key]
+    for key in _INSTALLATION_SHARED_KEYS:
+        if not secrets.get(key, "").strip():
+            value = installation_shared_secret(key, home)
+            if value:
+                secrets[key] = value
 
     return secrets

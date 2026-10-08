@@ -138,6 +138,38 @@ def test_profile_settings_and_keys_are_isolated_and_survive_read(client, monkeyp
     assert os.environ["KORRA_VOICE_HTTP_KEY"] == "foreign-process-secret"
 
 
+def test_panel_reports_the_recognition_provider_actually_used(client, monkeypatch):
+    from tools import transcription_tools as stt
+    http, root = client
+    monkeypatch.delenv("DEEPGRAM_API_KEY", raising=False)
+    monkeypatch.setattr(stt, "_local_stt_ready", lambda config=None: False)
+    assert http.post("/api/profiles", json={"name": "listener", "no_skills": True}).status_code == 200
+    url = "/api/profiles/listener/voice/recognition"
+
+    assert http.get(url).json() == {"configured": "deepgram", "actual": "none"}
+
+    monkeypatch.setattr(stt, "_local_stt_ready", lambda config=None: True)
+    assert http.get(url).json() == {"configured": "deepgram", "actual": "local"}
+
+    (root / ".env").write_text("DEEPGRAM_API_KEY=installation-key\n")
+    reply = http.get(url)
+    assert reply.json() == {"configured": "deepgram", "actual": "deepgram"}
+    assert "installation-key" not in reply.text
+
+
+def test_dashboard_dictation_of_a_new_profile_uses_the_installation_key(client, monkeypatch):
+    from tools import transcription_tools as stt
+    http, root = client
+    monkeypatch.delenv("DEEPGRAM_API_KEY", raising=False)
+    (root / ".env").write_text("DEEPGRAM_API_KEY=installation-key\n")
+    assert http.post("/api/profiles", json={"name": "listener", "no_skills": True}).status_code == 200
+    monkeypatch.setattr(stt, "_local_stt_ready", lambda config=None: True)
+    from korra_cli.config_defaults import DEFAULT_CONFIG
+    from korra_cli.web_server import _config_profile_scope
+    with _config_profile_scope("listener"):
+        assert stt._get_provider(dict(DEFAULT_CONFIG["stt"])) == "deepgram"
+
+
 @pytest.mark.parametrize("url", ["file:///tmp/audio", "https://user:secret@example.com/v1", "https://example.com/v1?key=secret", "", "http://host:bad/v1"])
 def test_bad_endpoint_refused_without_write(client, url):
     http, root = client

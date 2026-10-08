@@ -39,6 +39,22 @@ class SpeechRequest(BaseModel):
     text: str = Field(min_length=1, max_length=5000)
 
 
+def recognition_status():
+    """Which speech-recognition provider will really transcribe this agent's voice."""
+    from korra_cli.config import load_config
+    from tools import transcription_tools as stt
+
+    section = load_config().get("stt") or {}
+    configured = str(section.get("provider") or "").strip().lower() or "local"
+    try:
+        actual = stt._get_provider(section)
+    except Exception:
+        actual = "none"
+    if actual != "none" and stt._stt_missing_required_env(actual, section):
+        actual = "none"
+    return {"configured": configured, "actual": actual}
+
+
 def read_settings():
     from korra_cli.config import load_config
     cfg = load_config()
@@ -86,6 +102,14 @@ async def get_voice(name: str):
     def read():
         with scope(name):
             return read_settings()
+    return await asyncio.to_thread(read)
+
+
+@router.get("/api/profiles/{name}/voice/recognition")
+async def get_recognition(name: str):
+    def read():
+        with scope(name):
+            return recognition_status()
     return await asyncio.to_thread(read)
 
 

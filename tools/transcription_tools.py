@@ -66,6 +66,13 @@ def get_env_value(name, default=None):
     except ImportError:
         return korra_env(name, default)
     value = _get_env_value(name)
+    if not str(value or "").strip():
+        # Ключ распознавания один на установку (K21-317): у профиля нет своего —
+        # берём корневой. Тот же ответ, что даёт scope мультиплекса шлюза.
+        from agent.secret_scope import installation_shared_secret
+        from korra_constants import get_hermes_home
+
+        value = installation_shared_secret(name, get_hermes_home()) or value
     return default if value is None else value
 
 
