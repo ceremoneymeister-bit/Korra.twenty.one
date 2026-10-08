@@ -25,6 +25,7 @@ import errno
 import heapq
 import json
 import logging
+import math
 import os
 import re
 import sqlite3
@@ -277,6 +278,7 @@ def reset_cache() -> None:
     """Forget every cached section (tests and config changes)."""
     with _cache_lock:
         _cache.clear()
+    _codex_poll_next.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -1002,8 +1004,6 @@ def artifacts_section(
 # Codex quota
 # ---------------------------------------------------------------------------
 
-QUOTA_WARN_PERCENT = 80.0
-QUOTA_CRITICAL_PERCENT = 95.0
 _QUOTA_STALE_SECONDS = 24 * 3600
 
 
@@ -1048,19 +1048,184 @@ def _window_label(minutes: Optional[int]) -> str:
     return f"{minutes} мин"
 
 
+#: A stored value younger than this is not asked about again.
+_CODEX_POLL_FRESH_SECONDS = 120.0
+#: After a failed request the panel leaves Codex alone for this long.
+_CODEX_POLL_PAUSE_SECONDS = 600.0
+_CODEX_POLL_TIMEOUT = 5.0
+_codex_poll_lock = threading.Lock()
+_codex_poll_next: dict[str, float] = {}
+_codex_reset_lock = threading.Lock()
+
+QUOTA_CRITICAL_LEFT_PERCENT = 5.0
+QUOTA_WARN_LEFT_PERCENT = 20.0
+#: A banked reset is not worth spending when the limit comes back by itself sooner than this.
+QUOTA_RESET_SOON_SECONDS = 12 * 3600
+_FORECAST_MIN_ELAPSED = 0.10
+_FORECAST_MIN_USED = 5.0
+
+
+def _codex_credentials(
+    agents: list[Agent], root: Path, now: float
+) -> Optional[tuple[str, Optional[str], Optional[str], Path]]:
+    """``(access token, account id, base url, auth.json)`` to read the usage with, or ``None``.
+
+    Read-only on purpose: the refresh token is single-use and belongs to the
+    agents, so the panel never refreshes, recovers or writes a login. An
+    expired or unreadable token simply means "keep the stored value". Only
+    real (JWT) tokens count, as in the quota probe of the credential pool.
+    """
+    from korra_cli.auth import _decode_jwt_claims
+
+    homes = [root, *(agent.home for agent in agents)]
+    seen: set[Path] = set()
+    for home in homes:
+        auth = home / "auth.json"
+        if auth in seen:
+            continue
+        seen.add(auth)
+        try:
+            store = json.loads(auth.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(store, dict):
+            continue
+        providers = store.get("providers") if isinstance(store.get("providers"), dict) else {}
+        pool = store.get("credential_pool") if isinstance(store.get("credential_pool"), dict) else {}
+        single = providers.get("openai-codex")
+        entries = [single.get("tokens") if isinstance(single, dict) else None]
+        entries.extend(pool.get("openai-codex") if isinstance(pool.get("openai-codex"), list) else [])
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            token = entry.get("access_token")
+            claims = _decode_jwt_claims(token)
+            if not claims:
+                continue
+            expires = claims.get("exp")
+            if isinstance(expires, (int, float)) and expires <= now:
+                continue
+            nested = claims.get("https://api.openai.com/auth")
+            account = entry.get("account_id") or (nested.get("chatgpt_account_id") if isinstance(nested, dict) else None)
+            base_url = entry.get("base_url")
+            return (
+                token.strip(),
+                str(account).strip() if isinstance(account, str) and account.strip() else None,
+                base_url.strip() if isinstance(base_url, str) and base_url.strip() else None,
+                auth,
+            )
+    return None
+
+
+def refresh_codex_quota(
+    agents: list[Agent], installation: Path, *, now: float, root: Optional[Path] = None, force: bool = False
+) -> bool:
+    """Ask Codex for the current limit when the stored one is old; ``True`` if stored.
+
+    At most one request per installation at a time and one per two minutes;
+    ten minutes of quiet after a failure. ``force`` skips both clocks (the
+    check right after a reset). Never raises and never touches a login.
+    """
+    from agent.rate_limit_tracker import load_codex_quota, parse_codex_usage_payload, record_codex_quota
+
+    key = str(installation)
+    with _codex_poll_lock:
+        if not force:
+            data = load_codex_quota(root=root)
+            captured = float(data.get("captured_at") or 0) if data else 0.0
+            if data and now - captured <= _CODEX_POLL_FRESH_SECONDS:
+                return False
+            if now < _codex_poll_next.get(key, 0.0):
+                return False
+        credentials = _codex_credentials(agents, installation, now)
+        if credentials is None:
+            return False
+        token, account_id, base_url, _source = credentials
+        _codex_poll_next[key] = now + _CODEX_POLL_FRESH_SECONDS
+        try:
+            from agent.account_usage import fetch_codex_usage_payload
+
+            payload = fetch_codex_usage_payload(
+                token, account_id=account_id, base_url=base_url, timeout=_CODEX_POLL_TIMEOUT
+            )
+            snapshot = parse_codex_usage_payload(payload, now=now)
+            if snapshot is None:
+                raise ValueError("usage answer has no limit window")
+            return record_codex_quota(snapshot, root=root, force=True)
+        except Exception as exc:
+            logger.info("dashboard: Codex limit not refreshed (%s)", type(exc).__name__)
+            _codex_poll_next[key] = now + _CODEX_POLL_PAUSE_SECONDS
+            return False
+
+
+def _quota_window(key: str, raw: dict[str, Any], now: float) -> Optional[dict[str, Any]]:
+    """One window as the card shows it: what is left, the next reset, the pace."""
+    from agent.rate_limit_tracker import is_placeholder_window
+
+    try:
+        used = float(raw.get("used_percent"))
+    except (TypeError, ValueError):
+        return None
+    if key == "secondary" and is_placeholder_window(raw):
+        return None
+    minutes = raw.get("window_minutes") if isinstance(raw.get("window_minutes"), int) and raw["window_minutes"] > 0 else None
+    resets_at = raw.get("resets_at") if isinstance(raw.get("resets_at"), (int, float)) else None
+    renewed = bool(resets_at and resets_at <= now)
+    if renewed:
+        # The window rolled over while nobody was asking: it is full again.
+        used = 0.0
+        resets_at = resets_at + (math.floor((now - resets_at) / (minutes * 60)) + 1) * minutes * 60 if minutes else None
+    window: dict[str, Any] = {
+        "key": key,
+        "used_percent": used,
+        "remaining_percent": max(0.0, 100.0 - used),
+        "window_minutes": minutes,
+        "label": _window_label(minutes),
+        "resets_at": resets_at,
+        "renewed": renewed,
+        "forecast": None,
+    }
+    if minutes and resets_at and 0 < used < 100:
+        length = minutes * 60.0
+        elapsed = now - (resets_at - length)
+        if elapsed >= _FORECAST_MIN_ELAPSED * length and used >= _FORECAST_MIN_USED:
+            exhausts_at = now + (100.0 - used) * elapsed / used
+            window["forecast"] = {
+                "pace": (used / 100.0) / (elapsed / length),
+                "exhausts_at": exhausts_at,
+                "exhausts_before_reset": exhausts_at < resets_at,
+            }
+    return window
+
+
+def _window_level(window: dict[str, Any], blocked: bool) -> str:
+    left = window["remaining_percent"]
+    forecast = window["forecast"]
+    if blocked or left <= QUOTA_CRITICAL_LEFT_PERCENT:
+        return "critical"
+    if left <= QUOTA_WARN_LEFT_PERCENT or (forecast and forecast["exhausts_before_reset"]):
+        return "warn"
+    return "normal"
+
+
+_LEVEL_ORDER = {"normal": 0, "warn": 1, "critical": 2}
+
+
 def quota_section(
-    agents: list[Agent], *, now: float, root: Optional[Path] = None
+    agents: list[Agent], *, now: float, root: Optional[Path] = None, fetch: bool = True
 ) -> dict[str, Any]:
     from agent.rate_limit_tracker import load_codex_quota
     from korra_constants import get_default_hermes_root
 
-    # The subscription is checked before the snapshot is read: a percent
+    # The subscription is checked before anything is read or asked: a percent
     # recorded before a disconnect is history, not the current quota. The
     # check reads the same auth.json files as the attention strip, on the
     # same short section cache, so a disconnect shows on the next refresh.
     installation = Path(root) if root is not None else get_default_hermes_root()
     if not _codex_connected(agents, installation):
         return {"available": False, "status": "absent"}
+    if fetch:
+        refresh_codex_quota(agents, installation, now=now, root=root)
     data = load_codex_quota(root=root)
     if data is None:
         return {"available": True, "status": "waiting"}
@@ -1068,49 +1233,201 @@ def quota_section(
     windows = []
     for key in ("primary", "secondary"):
         raw = data.get(key)
-        if not isinstance(raw, dict):
-            continue
-        try:
-            used = float(raw.get("used_percent"))
-        except (TypeError, ValueError):
-            continue
-        minutes = raw.get("window_minutes") if isinstance(raw.get("window_minutes"), int) else None
-        resets_at = raw.get("resets_at") if isinstance(raw.get("resets_at"), (int, float)) else None
-        windows.append({
-            "key": key,
-            "used_percent": used,
-            "window_minutes": minutes,
-            "label": _window_label(minutes),
-            "resets_at": resets_at,
-            # The window already rolled over: the stored percent is history.
-            "expired": bool(resets_at and resets_at <= now),
-        })
-    live = [window for window in windows if not window["expired"]]
+        window = _quota_window(key, raw, now) if isinstance(raw, dict) else None
+        if window:
+            windows.append(window)
+    if not windows:
+        return {"available": True, "status": "waiting"}
     captured_at = float(data.get("captured_at") or 0)
-    base = {
+    # The backend's ``limit_reached`` belongs to the windows that were empty in
+    # that snapshot. Once they have rolled over, the flag says nothing about
+    # the others: a half-used week must not inherit the block of the 5 hours.
+    flagged = data.get("limit_reached") is True
+    blockers = _snapshot_blockers(windows, data, flagged)
+    blocked_now = {w["key"] for w in windows if w["key"] in blockers and not w["renewed"]}
+    limit_reached = flagged and bool(blocked_now)
+    for window in windows:
+        window["level"] = _window_level(window, limit_reached and window["key"] in blocked_now)
+    level = max((window["level"] for window in windows), key=_LEVEL_ORDER.__getitem__)
+
+    credits = data.get("reset_credits")
+    reset_credits = None
+    if isinstance(credits, dict) and isinstance(credits.get("available"), int):
+        reset_credits = {
+            "available": credits["available"],
+            "applicable": credits.get("applicable") if isinstance(credits.get("applicable"), int) else 0,
+        }
+    exhausted = any(window["remaining_percent"] <= 0 for window in windows)
+    # An offer made for windows that have since rolled over is out of date.
+    offer_gone = bool(blockers) and not blocked_now
+    can_reset = bool(
+        reset_credits
+        and reset_credits["available"] > 0
+        and ((reset_credits["applicable"] > 0 and not offer_gone) or limit_reached or exhausted)
+    )
+    headline = min(windows, key=lambda window: window["remaining_percent"])
+    natural_reset_at = _natural_reset_at(windows, blockers, now) if can_reset else None
+    forecasts = [window for window in windows if window["forecast"]]
+    soonest = min(forecasts, key=lambda window: window["forecast"]["exhausts_at"], default=None)
+    return {
         "available": True,
+        "status": "ok",
+        "level": level,
         "windows": windows,
         "plan_type": data.get("plan_type"),
         "captured_at": captured_at,
         "stale": now - captured_at > _QUOTA_STALE_SECONDS,
-    }
-    if not live:
-        return {**base, "status": "reset", "level": "normal"}
-    headline = max(live, key=lambda window: window["used_percent"])
-    used = headline["used_percent"]
-    level = (
-        "critical" if used >= QUOTA_CRITICAL_PERCENT
-        else "warn" if used >= QUOTA_WARN_PERCENT
-        else "normal"
-    )
-    return {
-        **base,
-        "status": "ok",
-        "level": level,
-        "used_percent": used,
+        "limit_reached": limit_reached,
+        "reset_credits": reset_credits,
+        "can_reset": can_reset,
+        "natural_reset_at": natural_reset_at,
+        "used_percent": headline["used_percent"],
         "window_minutes": headline["window_minutes"],
         "window_label": headline["label"],
         "resets_at": headline["resets_at"],
+        "forecast": (
+            {**soonest["forecast"], "window_label": soonest["label"], "resets_at": soonest["resets_at"],
+             "used_percent": soonest["used_percent"]}
+            if soonest else None
+        ),
+    }
+
+
+def _snapshot_blockers(windows: list[dict[str, Any]], data: dict[str, Any], limit_reached: bool) -> set[str]:
+    """Keys of the windows that were empty in the stored snapshot (before any roll-over)."""
+
+    def used(window: dict[str, Any]) -> float:
+        return float(data[window["key"]]["used_percent"])
+
+    empty = {w["key"] for w in windows if used(w) >= 100}
+    if empty or not limit_reached or not windows:
+        return empty
+    return {max(windows, key=used)["key"]}
+
+
+def _natural_reset_at(windows: list[dict[str, Any]], blockers: set[str], now: float) -> Optional[float]:
+    """When the exhausted limit returns by itself, if that is sooner than ``QUOTA_RESET_SOON_SECONDS``.
+
+    The limit is back when the *last* blocking window resets. Several empty
+    windows: the latest of their resets. Nothing blocking or no reset time: ``None``.
+    """
+    blocking = [window for window in windows if window["key"] in blockers and not window["renewed"]]
+    if not blocking or any(window["resets_at"] is None for window in blocking):
+        return None
+    back = max(window["resets_at"] for window in blocking)
+    return back if 0 < back - now < QUOTA_RESET_SOON_SECONDS else None
+
+
+_RESET_MESSAGES = {
+    "nothing_to_reset": "Сбрасывать нечего: лимит не исчерпан. Запасной сброс не потрачен.",
+    "no_credits_banked": "Запасных сбросов нет.",
+    "no_credit": "Запасных сбросов нет.",
+    "already_redeemed": "Этот сброс уже применён, лишний не потрачен.",
+    "not_exhausted": "Лимит ещё не исчерпан, запасной сброс сохранён: он пригодится, когда лимит кончится.",
+    "unavailable": "Не удалось применить сброс: Codex не ответил или вход устарел. Попробуйте позже.",
+}
+
+
+def _spares(count: int) -> str:
+    tail = count % 100
+    if tail % 10 == 1 and tail != 11:
+        return f"{count} сброс"
+    if tail % 10 in (2, 3, 4) and tail not in (12, 13, 14):
+        return f"{count} сброса"
+    return f"{count} сбросов"
+
+
+def reset_codex_limit(
+    *, now: Optional[float] = None, agents: Optional[list[Agent]] = None, root: Optional[Path] = None
+) -> dict[str, Any]:
+    """Spend one banked reset (what ``/usage reset`` does in Codex) and re-read the limit.
+
+    The login is only read, never refreshed. Messages are Russian for every
+    outcome; the function's own English texts stay inside the engine.
+    """
+    from agent.account_usage import redeem_codex_reset_credit
+    from korra_constants import get_default_hermes_root
+
+    if not _codex_reset_lock.acquire(blocking=False):
+        return {"ok": False, "status": "busy", "message": "Сброс уже выполняется.", "quota": None}
+    try:
+        return _reset_codex_limit(redeem_codex_reset_credit, get_default_hermes_root, now, agents, root)
+    finally:
+        _codex_reset_lock.release()
+
+
+def _reset_codex_limit(redeem_codex_reset_credit, get_default_hermes_root, now, agents, root) -> dict[str, Any]:
+    current = time.time() if now is None else float(now)
+    installation = Path(root) if root is not None else get_default_hermes_root()
+    roster = agents if agents is not None else _cached(
+        ("agents-list", str(installation)), 30.0, list_agents
+    )
+    if not _codex_connected(roster, installation):
+        return {"ok": False, "status": "absent", "message": "Подписка ChatGPT/Codex не подключена.", "quota": None}
+    credentials = _codex_credentials(roster, installation, current)
+    if credentials is None:
+        return {
+            "ok": False,
+            "status": "unavailable",
+            "message": "Сейчас нет действующего входа в Codex, запасной сброс не потрачен. Попробуйте позже.",
+            "quota": quota_section(roster, now=current, root=root),
+        }
+    token, account_id, base_url, source = credentials
+    key = str(installation)
+    with _codex_poll_lock:
+        held_back = current < _codex_poll_next.get(key, 0.0)
+    if held_back:
+        # Codex was asked a moment ago (or failed and is resting): a click is
+        # no reason to ask again unless the stored value still offers a reset.
+        stored = quota_section(roster, now=current, root=root, fetch=False)
+        if not stored.get("can_reset"):
+            status = "not_exhausted" if stored.get("status") == "ok" else "unavailable"
+            return {"ok": False, "status": status, "message": _RESET_MESSAGES[status], "quota": stored}
+
+    def keep_decision_read(payload: dict) -> None:
+        from agent.rate_limit_tracker import parse_codex_usage_payload, record_codex_quota
+
+        snapshot = parse_codex_usage_payload(payload, now=current)
+        if snapshot is not None:
+            record_codex_quota(snapshot, root=root, force=True)
+        with _codex_poll_lock:
+            _codex_poll_next[key] = max(_codex_poll_next.get(key, 0.0), current + _CODEX_POLL_FRESH_SECONDS)
+
+    try:
+        # The decision is made on the backend's own fresh answer (``require_offer``),
+        # which is also the one read of this attempt; it is kept as the stored value.
+        result = redeem_codex_reset_credit(
+            api_key=token,
+            base_url=base_url,
+            account_id=account_id,
+            force=True,
+            require_offer=True,
+            auth_path=source,
+            on_usage=keep_decision_read,
+        )
+    except Exception:
+        logger.exception("dashboard: Codex reset failed")
+        status, message, left = "unavailable", _RESET_MESSAGES["unavailable"], 0
+    else:
+        status, left = result.status, result.available_count
+        if status == "reset":
+            message = "Лимит сброшен — снова полный."
+            message += f" В запасе осталось {_spares(left)}." if left else " Запасных сбросов больше нет."
+        else:
+            message = _RESET_MESSAGES.get(status, _RESET_MESSAGES["unavailable"])
+    if status == "reset":
+        refresh_codex_quota(roster, installation, now=current, root=root, force=True)
+    elif status == "unavailable":
+        with _codex_poll_lock:
+            _codex_poll_next[key] = max(_codex_poll_next.get(key, 0.0), current + _CODEX_POLL_PAUSE_SECONDS)
+    with _cache_lock:
+        for key in [key for key in _cache if key[0] in ("quota", "attention")]:
+            del _cache[key]
+    return {
+        "ok": status == "reset",
+        "status": status,
+        "message": message,
+        "quota": quota_section(roster, now=current, root=root),
     }
 
 
@@ -1144,7 +1461,7 @@ SOURCE_LABELS = {
     "cron": "расписание",
     "provider": "подключение модели",
     "updates": "обновление",
-    "quota": "квоту Codex",
+    "quota": "лимит Codex",
 }
 
 
@@ -1437,6 +1754,74 @@ def _update_items(*, now: float) -> list[dict[str, Any]]:
     }]
 
 
+def _days_ahead(seconds: float) -> str:
+    """«2,5 дня», «11 ч», «40 мин» — how far ahead, in the owner's words."""
+    if seconds >= 86400:
+        days = round(seconds / 86400 * 2) / 2
+        whole = days == int(days)
+        text = str(int(days)) if whole else str(days).replace(".", ",")
+        if not whole:
+            return f"{text} дня"
+        tail = int(days) % 100
+        word = "день" if tail % 10 == 1 and tail != 11 else (
+            "дня" if tail % 10 in (2, 3, 4) and tail not in (12, 13, 14) else "дней")
+        return f"{text} {word}"
+    if seconds >= 3600:
+        return f"{round(seconds / 3600)} ч"
+    return f"{max(1, round(seconds / 60))} мин"
+
+
+def _quota_attention(quota: dict[str, Any], *, now: float, tz: Optional[tzinfo]) -> Optional[dict[str, Any]]:
+    """The one quota row: exhausted or nearly so, else the early warning."""
+    if quota.get("status") != "ok":
+        return None
+    resets_at = quota.get("resets_at")
+    reset_text = f"Лимит обновится {_human_moment(resets_at, now, tz)}." if resets_at else ""
+    row = {
+        "id": "quota:codex",
+        "source": "quota",
+        "agent": None,
+        "profile": None,
+        "href": "/dashboard#codex-quota",
+        "action": "Подробнее",
+        "at": quota.get("captured_at"),
+    }
+    if quota.get("level") == "critical":
+        left = round(100 - quota["used_percent"])
+        exhausted = quota.get("limit_reached") or left <= 0
+        return {
+            **row,
+            "kind": "quota_critical",
+            "severity": "problem",
+            "title": "Лимит Codex исчерпан" if exhausted else f"Лимит Codex почти исчерпан: осталось {left} %",
+            "detail": (reset_text + " Агенты могут перестать отвечать до сброса.").strip(),
+        }
+    # Any window may be the dangerous one: the closest running-out among those
+    # that are half used, not the headline window or the soonest of all.
+    risky = [
+        window for window in quota.get("windows") or []
+        if window.get("forecast") and window["forecast"]["exhausts_before_reset"] and window["used_percent"] >= 50
+    ]
+    if risky:
+        window = min(risky, key=lambda item: item["forecast"]["exhausts_at"])
+        forecast = window["forecast"]
+        left = round(100 - window["used_percent"])
+        detail = (
+            f"Осталось {left} % — окно «{window['label']}». "
+            f"При таком темпе лимит кончится {_human_moment(forecast['exhausts_at'], now, tz)}"
+            f", за {_days_ahead(window['resets_at'] - forecast['exhausts_at'])} до сброса"
+            f" ({_human_moment(window['resets_at'], now, tz)})."
+        )
+        return {
+            **row,
+            "kind": "quota_forecast",
+            "severity": "info",
+            "title": "Лимит Codex кончится раньше сброса",
+            "detail": detail,
+        }
+    return None
+
+
 def attention_section(
     agents: list[Agent], *, now: float, tz: Optional[tzinfo], quota: dict[str, Any]
 ) -> dict[str, Any]:
@@ -1477,22 +1862,9 @@ def attention_section(
 
     if quota.get("available"):
         checked.append("quota")
-        if quota.get("status") == "ok" and quota.get("level") == "critical":
-            resets_at = quota.get("resets_at")
-            when = f"Лимит обновится {_human_moment(resets_at, now, tz)}." if resets_at else ""
-            items.append({
-                "id": "quota:codex",
-                "source": "quota",
-                "kind": "quota_critical",
-                "severity": "problem",
-                "title": f"Квота Codex почти исчерпана: {round(quota['used_percent'])} %",
-                "detail": (when + " Агенты могут перестать отвечать до сброса.").strip(),
-                "agent": None,
-                "profile": None,
-                "href": "/dashboard#codex-quota",
-                "action": "Подробнее",
-                "at": quota.get("captured_at"),
-            })
+        row = _quota_attention(quota, now=now, tz=tz)
+        if row:
+            items.append(row)
 
     items.sort(key=lambda item: (_SEVERITY_RANK.get(item["severity"], 9), -(item.get("at") or 0)))
     shown = items[:_ATTENTION_LIMIT]

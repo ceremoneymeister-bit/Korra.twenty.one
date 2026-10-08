@@ -439,6 +439,7 @@ function WidgetTile({ id, layout, onRemove, pinned }: WidgetTileProps) {
         purpose={widget.purpose}
         size={pinned ? undefined : size}
         action={widget.action}
+        headerNote={widget.HeaderNote ? <widget.HeaderNote size={pinned ? undefined : size} /> : undefined}
         onRemove={onRemove ? () => onRemove(id, widget.title) : undefined}
       >
         <DashboardWidgetBoundary title={widget.title} widgetId={id}>

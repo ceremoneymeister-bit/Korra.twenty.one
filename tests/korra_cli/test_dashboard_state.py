@@ -21,6 +21,9 @@ import pytest
 
 from korra_cli import dashboard_state as ds
 
+# Nothing here may reach chatgpt.com: a socket to a foreign host fails the test.
+pytestmark = pytest.mark.usefixtures("no_real_network")
+
 MSK = ZoneInfo("Europe/Moscow")
 # Wednesday 23.09.2026 13:00 in Moscow.
 NOW = datetime(2026, 9, 23, 13, 0, tzinfo=MSK).timestamp()
@@ -502,12 +505,20 @@ def test_quota_levels(tmp_path, used, level):
     assert value["resets_at"] == NOW + 86400
 
 
-def test_quota_after_the_window_reset_is_not_shown_as_current(tmp_path):
+def test_quota_after_the_window_reset_is_a_full_limit(tmp_path):
     main = _agent(tmp_path, "default", "Корра")
     _connect_codex(main.home)
     _quota(tmp_path, 99.0, resets_in=-60)
     value = ds.quota_section([main], now=NOW, root=tmp_path)
-    assert value["status"] == "reset" and "used_percent" not in value
+    week = 10080 * 60
+    assert value["status"] == "ok" and value["level"] == "normal"
+    window = value["windows"][0]
+    assert window["used_percent"] == 0 and window["remaining_percent"] == 100
+    assert window["renewed"] is True and window["resets_at"] == NOW - 60 + week
+    # Several windows passed unnoticed: the next reset is the first one ahead.
+    _quota(tmp_path, 99.0, resets_in=-60 - 2 * week)
+    ds.reset_cache()
+    assert ds.quota_section([main], now=NOW, root=tmp_path)["windows"][0]["resets_at"] == NOW - 60 + week
 
 
 def test_old_quota_is_not_shown_without_a_subscription(tmp_path):
@@ -731,8 +742,8 @@ def test_attention_raises_the_quota_when_it_is_almost_spent(tmp_path, monkeypatc
              "resets_at": _msk(24, 14), "captured_at": NOW}
     value = ds.attention_section([main], now=NOW, tz=MSK, quota=quota)
     item = value["items"][0]
-    assert item["kind"] == "quota_critical" and "96 %" in item["title"]
-    assert "завтра в 14:00" in item["detail"]
+    assert item["kind"] == "quota_critical" and "осталось 4 %" in item["title"]
+    assert "Квота" not in item["title"] and "завтра в 14:00" in item["detail"]
 
 
 def test_update_that_failed_its_model_check_is_reported(tmp_path, monkeypatch):
@@ -790,3 +801,711 @@ def test_state_route_serves_every_section_without_writing(tmp_path, monkeypatch)
 
     # Anonymous callers get nothing.
     assert TestClient(web_server.app).get("/api/dashboard/state").status_code == 401
+
+
+# ── 0.21.17: «Лимит Codex» — свежие данные, прогноз, запасной сброс ────────
+
+import base64
+import threading
+
+import httpx
+
+WEEK = 10080 * 60
+
+
+def _jwt(*, exp: float = NOW + 3600, account: str = "acc-1") -> str:
+    def part(value: dict) -> str:
+        return base64.urlsafe_b64encode(json.dumps(value).encode()).decode().rstrip("=")
+
+    return ".".join([
+        part({"alg": "none"}),
+        part({"exp": exp, "https://api.openai.com/auth": {"chatgpt_account_id": account}}),
+        "sig",
+    ])
+
+
+def _login(home: Path, token: str) -> bytes:
+    tokens = {"access_token": token, "refresh_token": "rt-secret"}
+    (home / "auth.json").write_text(json.dumps({
+        "version": 1,
+        "providers": {"openai-codex": {"tokens": tokens}},
+        "credential_pool": {"openai-codex": [{"id": "p1", **tokens}]},
+    }), encoding="utf-8")
+    return (home / "auth.json").read_bytes()
+
+
+def _usage(used: float = 36, *, resets_at: float = NOW + 5 * 86400, credits: int = 2,
+           applicable: int = 0, reached: bool = False, window: int = WEEK) -> dict:
+    return {
+        "plan_type": "pro",
+        "rate_limit": {
+            "allowed": not reached, "limit_reached": reached,
+            "primary_window": {"used_percent": used, "limit_window_seconds": window, "reset_at": resets_at},
+            "secondary_window": None,
+        },
+        "credits": {"has_credits": True, "balance": "62500.0"},
+        "rate_limit_reset_credits": {"available_count": credits, "applicable_available_count": applicable},
+    }
+
+
+@pytest.fixture
+def wham(monkeypatch):
+    """Replace the usage request; collect the calls. Any token refresh fails the test."""
+    import agent.account_usage as account_usage
+    from korra_cli import auth
+
+    calls: list[dict] = []
+    state = {"answer": _usage(), "error": None}
+
+    def fake_fetch(token, *, account_id=None, base_url=None, timeout=5.0):
+        calls.append({"token": token, "account_id": account_id, "timeout": timeout})
+        if state["error"]:
+            raise state["error"]
+        return state["answer"]
+
+    forbidden_calls: list[str] = []
+
+    def forbidden(*args, **kwargs):
+        forbidden_calls.append("login touched")
+        raise AssertionError("the panel must not refresh or recover a login")
+
+    monkeypatch.setattr(account_usage, "fetch_codex_usage_payload", fake_fetch)
+    for name in ("_refresh_codex_auth_tokens", "resolve_codex_runtime_credentials",
+                 "_recover_codex_tokens_from_cli", "_save_auth_store"):
+        monkeypatch.setattr(auth, name, forbidden)
+    state["calls"] = calls
+    yield state
+    # The panel catches errors, so a swallowed call would otherwise go unseen.
+    assert forbidden_calls == []
+
+
+@pytest.fixture
+def owner(tmp_path):
+    main = _agent(tmp_path, "default", "Корра")
+    _login(main.home, _jwt())
+    return main
+
+
+def test_card_asks_codex_when_nothing_is_stored(tmp_path, owner, wham):
+    value = ds.quota_section([owner], now=NOW, root=tmp_path)
+    assert value["status"] == "ok" and value["used_percent"] == 36
+    assert value["windows"][0]["remaining_percent"] == 64 and value["plan_type"] == "pro"
+    assert value["reset_credits"] == {"available": 2, "applicable": 0}
+    assert value["captured_at"] == NOW
+    assert len(wham["calls"]) == 1
+    call = wham["calls"][0]
+    assert call["account_id"] == "acc-1" and call["timeout"] <= 5
+    # It is the same file the agents write.
+    from agent.rate_limit_tracker import load_codex_quota
+
+    assert load_codex_quota(root=tmp_path)["primary"]["used_percent"] == 36
+
+
+def test_card_does_not_ask_again_within_two_minutes(tmp_path, owner, wham):
+    ds.quota_section([owner], now=NOW, root=tmp_path)
+    wham["answer"] = _usage(40)
+    assert ds.quota_section([owner], now=NOW + 100, root=tmp_path)["used_percent"] == 36
+    assert len(wham["calls"]) == 1
+    assert ds.quota_section([owner], now=NOW + 130, root=tmp_path)["used_percent"] == 40
+    assert len(wham["calls"]) == 2
+
+
+def test_a_value_an_agent_just_wrote_is_not_asked_about(tmp_path, owner, wham):
+    _quota(tmp_path, 12.0, resets_in=3 * 86400, captured=NOW - 30)
+    assert ds.quota_section([owner], now=NOW, root=tmp_path)["used_percent"] == 12
+    assert wham["calls"] == []
+
+
+def test_an_old_value_is_replaced_by_the_fresh_one(tmp_path, owner, wham):
+    _quota(tmp_path, 3.0, resets_in=3 * 86400, captured=NOW - 3 * 86400)
+    value = ds.quota_section([owner], now=NOW, root=tmp_path)
+    assert value["used_percent"] == 36 and value["captured_at"] == NOW
+    assert len(wham["calls"]) == 1
+
+
+@pytest.mark.parametrize("error", [
+    httpx.ConnectError("no network"),
+    httpx.ReadTimeout("slow"),
+    httpx.HTTPStatusError("401", request=httpx.Request("GET", "https://x"), response=httpx.Response(401)),
+    ValueError("not json"),
+])
+def test_a_failed_request_keeps_the_stored_value_and_pauses(tmp_path, owner, wham, error):
+    _quota(tmp_path, 12.0, resets_in=3 * 86400, captured=NOW - 3600)
+    wham["error"] = error
+    value = ds.quota_section([owner], now=NOW, root=tmp_path)
+    assert value["status"] == "ok" and value["used_percent"] == 12 and value["captured_at"] == NOW - 3600
+    ds.quota_section([owner], now=NOW + 300, root=tmp_path)
+    assert len(wham["calls"]) == 1
+    wham["error"] = None
+    assert ds.quota_section([owner], now=NOW + 601, root=tmp_path)["used_percent"] == 36
+    assert len(wham["calls"]) == 2
+
+
+def test_a_garbled_answer_is_a_failure_too(tmp_path, owner, wham):
+    _quota(tmp_path, 12.0, resets_in=3 * 86400, captured=NOW - 3600)
+    wham["answer"] = {"rate_limit": {}}
+    assert ds.quota_section([owner], now=NOW, root=tmp_path)["used_percent"] == 12
+
+
+def test_an_expired_or_foreign_token_is_not_used(tmp_path, wham):
+    main = _agent(tmp_path, "default", "Корра")
+    _login(main.home, _jwt(exp=NOW - 10))
+    assert ds.quota_section([main], now=NOW, root=tmp_path) == {"available": True, "status": "waiting"}
+    _login(main.home, "at-test")
+    assert ds.quota_section([main], now=NOW, root=tmp_path) == {"available": True, "status": "waiting"}
+    assert wham["calls"] == []
+
+
+def test_no_subscription_means_no_request(tmp_path, wham):
+    main = _agent(tmp_path, "default", "Корра")
+    assert ds.quota_section([main], now=NOW, root=tmp_path)["status"] == "absent"
+    assert wham["calls"] == []
+
+
+def test_the_login_is_read_from_the_root_then_the_profiles_and_never_written(tmp_path, wham):
+    root_token, profile_token = _jwt(account="root"), _jwt(account="writer")
+    root_before = _login(tmp_path, root_token)
+    writer = _agent(tmp_path, "writer", "Автор")
+    writer_before = _login(writer.home, profile_token)
+    ds.quota_section([writer], now=NOW, root=tmp_path)
+    assert wham["calls"][0]["token"] == root_token and wham["calls"][0]["account_id"] == "root"
+    assert (tmp_path / "auth.json").read_bytes() == root_before
+    assert (writer.home / "auth.json").read_bytes() == writer_before
+    # A profile on its own login is used when the root has none.
+    (tmp_path / "auth.json").unlink()
+    ds.reset_cache()
+    ds.quota_section([writer], now=NOW + 500, root=tmp_path)
+    assert wham["calls"][1]["token"] == profile_token
+
+
+def test_pool_only_login_is_enough(tmp_path, wham):
+    token = _jwt(account="pool")
+    (tmp_path / "auth.json").write_text(json.dumps({
+        "credential_pool": {"openai-codex": [{"id": "p", "access_token": token}]},
+    }), encoding="utf-8")
+    assert ds.quota_section([], now=NOW, root=tmp_path)["status"] == "ok"
+    assert wham["calls"][0]["token"] == token
+
+
+def test_parallel_polls_make_one_request(tmp_path, owner, wham, monkeypatch):
+    import agent.account_usage as account_usage
+
+    started, release = threading.Event(), threading.Event()
+    real = account_usage.fetch_codex_usage_payload
+
+    def slow(*args, **kwargs):
+        started.set()
+        release.wait(5)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(account_usage, "fetch_codex_usage_payload", slow)
+    results = []
+    threads = [threading.Thread(target=lambda: results.append(
+        ds.quota_section([owner], now=NOW, root=tmp_path))) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    assert started.wait(5)
+    release.set()
+    for thread in threads:
+        thread.join(5)
+    assert len(wham["calls"]) == 1
+    assert [r["used_percent"] for r in results] == [36] * 4
+
+
+def test_ghost_second_window_in_an_old_file_is_not_shown(tmp_path, owner):
+    from agent.rate_limit_tracker import CodexQuotaSnapshot, CodexQuotaWindow, record_codex_quota
+
+    record_codex_quota(CodexQuotaSnapshot(
+        primary=CodexQuotaWindow(3.0, 10080, NOW + 86400),
+        secondary=CodexQuotaWindow(0.0, None, NOW - 3 * 86400),
+        captured_at=NOW, source="headers"), root=tmp_path)
+    value = ds.quota_section([owner], now=NOW, root=tmp_path)
+    assert [w["key"] for w in value["windows"]] == ["primary"]
+
+
+# Прогноз и уровни. Окно — неделя, до сброса осталось ``left_days``.
+
+
+def _forecast(tmp_path, owner, used, left_days, **extra):
+    _quota(tmp_path, used, resets_in=left_days * 86400)
+    return ds.quota_section([owner], now=NOW, root=tmp_path)
+
+
+def test_forecast_of_a_fast_pace(tmp_path, owner):
+    value = _forecast(tmp_path, owner, 36, 5.4)  # 1.6 days passed, 36 % used
+    forecast = value["windows"][0]["forecast"]
+    assert forecast["pace"] == pytest.approx(0.36 / (1.6 / 7))
+    assert forecast["exhausts_at"] == pytest.approx(NOW + 64 * 1.6 * 86400 / 36)
+    assert forecast["exhausts_before_reset"] is True
+    assert value["level"] == "warn" and value["forecast"]["window_label"] == "неделя"
+
+
+def test_forecast_of_a_calm_pace(tmp_path, owner):
+    value = _forecast(tmp_path, owner, 20, 3.5)
+    forecast = value["windows"][0]["forecast"]
+    assert forecast["exhausts_before_reset"] is False and forecast["pace"] < 1
+    assert value["level"] == "normal"
+
+
+@pytest.mark.parametrize(("used", "left_days"), [
+    (36, 6.5),   # only 7 % of the window has passed
+    (4, 3.5),    # less than 5 % used
+    (100, 3.5),  # nothing left to forecast
+    (0, 3.5),
+])
+def test_no_forecast_when_it_would_be_a_guess(tmp_path, owner, used, left_days):
+    assert _forecast(tmp_path, owner, used, left_days)["windows"][0]["forecast"] is None
+
+
+@pytest.mark.parametrize(("used", "level"), [(79, "normal"), (80, "warn"), (95, "critical")])
+def test_levels_follow_what_is_left(tmp_path, owner, used, level):
+    assert _forecast(tmp_path, owner, used, 0.2)["level"] == level
+
+
+def test_a_reached_limit_is_critical(tmp_path, owner, wham):
+    wham["answer"] = _usage(97, resets_at=NOW + 86400, reached=True)
+    assert ds.quota_section([owner], now=NOW, root=tmp_path)["level"] == "critical"
+    ds.reset_cache()
+    wham["answer"] = _usage(60, resets_at=NOW + 86400, reached=True)
+    value = ds.quota_section([owner], now=NOW + 200, root=tmp_path)
+    assert value["limit_reached"] is True and value["level"] == "critical"
+
+
+def test_the_five_hour_window_and_the_week_are_two_windows(tmp_path, owner, wham):
+    answer = _usage(18, resets_at=NOW + 3600, window=18000)
+    answer["rate_limit"]["secondary_window"] = {
+        "used_percent": 71, "limit_window_seconds": WEEK, "reset_at": NOW + 3 * 86400}
+    wham["answer"] = answer
+    value = ds.quota_section([owner], now=NOW, root=tmp_path)
+    assert [(w["label"], w["remaining_percent"]) for w in value["windows"]] == [("5 ч", 82), ("неделя", 29)]
+    assert value["resets_at"] == NOW + 3 * 86400  # the headline is the tighter window
+
+
+# Запасной сброс
+
+
+@pytest.mark.parametrize(("used", "applicable", "reached", "visible"), [
+    (36, 0, False, False),
+    (36, 1, False, True),
+    (60, 0, True, True),
+    (100, 0, False, True),
+])
+def test_when_the_reset_button_is_offered(tmp_path, owner, wham, used, applicable, reached, visible):
+    wham["answer"] = _usage(used, applicable=applicable, reached=reached)
+    assert ds.quota_section([owner], now=NOW, root=tmp_path)["can_reset"] is visible
+
+
+def test_no_button_without_banked_resets(tmp_path, owner, wham):
+    wham["answer"] = _usage(100, credits=0, reached=True)
+    assert ds.quota_section([owner], now=NOW, root=tmp_path)["can_reset"] is False
+
+
+def _two_windows(root: Path, *, five_used: float, week_used: float, five_resets_in: float,
+                 reached: bool = True, applicable: int = 1) -> None:
+    from agent.rate_limit_tracker import CodexQuotaSnapshot, CodexQuotaWindow, record_codex_quota
+
+    record_codex_quota(
+        CodexQuotaSnapshot(
+            primary=CodexQuotaWindow(used_percent=five_used, window_minutes=300, resets_at=NOW + five_resets_in),
+            secondary=CodexQuotaWindow(used_percent=week_used, window_minutes=10080, resets_at=NOW + 3 * 86400),
+            plan_type="pro", captured_at=NOW - 10, source="usage", limit_reached=reached,
+            reset_credits={"available": 2, "applicable": applicable},
+        ),
+        root=root, force=True,
+    )
+
+
+def test_a_rolled_over_blocker_does_not_pass_the_block_to_the_other_window(tmp_path, owner, wham):
+    # The 5 hours were empty and have rolled over; the week is 30 % used; no fresh answer yet.
+    _two_windows(tmp_path, five_used=100, week_used=30, five_resets_in=-1)
+    value = ds.quota_section([owner], now=NOW, root=tmp_path)
+    five, week = value["windows"]
+    assert five["renewed"] and five["remaining_percent"] == 100 and five["level"] == "normal"
+    assert week["remaining_percent"] == 70 and week["level"] == "normal"
+    assert value["level"] == "normal" and value["limit_reached"] is False
+    assert value["can_reset"] is False and value["natural_reset_at"] is None
+    assert wham["calls"] == []
+    assert ds._quota_attention(value, now=NOW, tz=MSK) is None
+
+
+def test_the_block_stays_while_a_blocking_window_has_not_rolled_over(tmp_path, owner, wham):
+    _two_windows(tmp_path, five_used=100, week_used=30, five_resets_in=2 * 3600)
+    value = ds.quota_section([owner], now=NOW, root=tmp_path)
+    five, week = value["windows"]
+    assert (five["level"], week["level"]) == ("critical", "normal")
+    assert value["limit_reached"] is True and value["can_reset"] is True
+    assert value["natural_reset_at"] == NOW + 2 * 3600
+    # The week alone blocking after the 5 hours returned: the block moves, with its own reset.
+    ds.reset_cache()
+    _two_windows(tmp_path, five_used=100, week_used=100, five_resets_in=-1)
+    value = ds.quota_section([owner], now=NOW, root=tmp_path)
+    assert value["limit_reached"] is True and value["level"] == "critical" and value["can_reset"] is True
+
+
+def test_a_reached_flag_without_an_empty_window_blocks_the_busiest_one(tmp_path, owner, wham):
+    _two_windows(tmp_path, five_used=40, week_used=90, five_resets_in=3600)
+    value = ds.quota_section([owner], now=NOW, root=tmp_path)
+    five, week = value["windows"]
+    assert week["level"] == "critical" and five["level"] == "normal" and value["limit_reached"] is True
+
+
+HOUR = 3600
+
+
+def test_a_limit_that_returns_soon_is_marked_for_the_card(tmp_path, owner, wham):
+    wham["answer"] = _usage(100, resets_at=NOW + 11 * HOUR, reached=True)
+    value = ds.quota_section([owner], now=NOW, root=tmp_path)
+    assert value["can_reset"] is True and value["natural_reset_at"] == NOW + 11 * HOUR
+
+
+@pytest.mark.parametrize("hours", [12, 13, 72])
+def test_a_limit_that_returns_in_twelve_hours_or_more_is_not(tmp_path, owner, wham, hours):
+    wham["answer"] = _usage(100, resets_at=NOW + hours * HOUR, reached=True)
+    value = ds.quota_section([owner], now=NOW, root=tmp_path)
+    assert value["can_reset"] is True and value["natural_reset_at"] is None
+
+
+def test_several_empty_windows_return_with_the_latest_reset(tmp_path, owner, wham):
+    answer = _usage(100, resets_at=NOW + 2 * HOUR, window=18000, reached=True)
+    answer["rate_limit"]["secondary_window"] = {
+        "used_percent": 100, "limit_window_seconds": WEEK, "reset_at": NOW + 30 * HOUR}
+    wham["answer"] = answer
+    assert ds.quota_section([owner], now=NOW, root=tmp_path)["natural_reset_at"] is None
+    ds.reset_cache()
+    answer["rate_limit"]["secondary_window"]["reset_at"] = NOW + 5 * HOUR
+    value = ds.quota_section([owner], now=NOW + 200, root=tmp_path)
+    assert value["natural_reset_at"] == NOW + 5 * HOUR
+
+
+def test_only_the_empty_window_counts_not_a_full_one(tmp_path, owner, wham):
+    answer = _usage(100, resets_at=NOW + 3 * HOUR, window=18000, reached=True)
+    answer["rate_limit"]["secondary_window"] = {
+        "used_percent": 20, "limit_window_seconds": WEEK, "reset_at": NOW + 5 * 86400}
+    wham["answer"] = answer
+    assert ds.quota_section([owner], now=NOW, root=tmp_path)["natural_reset_at"] == NOW + 3 * HOUR
+
+
+def test_nothing_to_wait_for_when_the_reset_is_not_on_offer_or_nothing_is_exhausted(tmp_path, owner, wham):
+    wham["answer"] = _usage(36, applicable=1, resets_at=NOW + 2 * HOUR)
+    value = ds.quota_section([owner], now=NOW, root=tmp_path)
+    assert value["can_reset"] is True and value["natural_reset_at"] is None
+    ds.reset_cache()
+    wham["answer"] = _usage(100, credits=0, resets_at=NOW + 2 * HOUR, reached=True)
+    value = ds.quota_section([owner], now=NOW + 200, root=tmp_path)
+    assert value["can_reset"] is False and value["natural_reset_at"] is None
+
+
+def _redeem(monkeypatch, wham, result):
+    import agent.account_usage as account_usage
+
+    seen = []
+
+    def fake(**kwargs):
+        seen.append(kwargs)
+        if kwargs.get("on_usage"):
+            kwargs["on_usage"](wham["answer"])
+        if isinstance(result, Exception):
+            raise result
+        if result.redeemed:
+            wham["answer"] = _usage(0, resets_at=NOW + WEEK, credits=result.available_count)
+        return result
+
+    monkeypatch.setattr(account_usage, "redeem_codex_reset_credit", fake)
+    return seen
+
+
+def _outcome(status, count=0):
+    from agent.account_usage import CodexResetRedeemResult
+
+    return CodexResetRedeemResult(status=status, message="English text that must not leak", available_count=count)
+
+
+def test_reset_success_returns_the_new_state(tmp_path, owner, wham, monkeypatch):
+    wham["answer"] = _usage(100, reached=True)
+    seen = _redeem(monkeypatch, wham, _outcome("reset", 1))
+    result = ds.reset_codex_limit(now=NOW, agents=[owner], root=tmp_path)
+    assert result["ok"] is True and result["status"] == "reset"
+    assert result["message"] == "Лимит сброшен — снова полный. В запасе осталось 1 сброс."
+    assert result["quota"]["windows"][0]["remaining_percent"] == 100
+    assert result["quota"]["reset_credits"]["available"] == 1 and result["quota"]["can_reset"] is False
+    # The token goes in explicitly; the nearly-empty limit is redeemed on purpose.
+    assert seen[0]["api_key"].count(".") == 2 and seen[0]["account_id"] == "acc-1" and seen[0]["force"] is True
+
+
+def test_reset_leaves_the_decision_to_the_fresh_answer_of_the_backend(tmp_path, owner, wham, monkeypatch):
+    seen = _redeem(monkeypatch, wham, _outcome("not_exhausted", 2))
+    result = ds.reset_codex_limit(now=NOW, agents=[owner], root=tmp_path)
+    assert seen[0]["require_offer"] is True and result["ok"] is False
+    assert "сохранён" in result["message"] and "English" not in result["message"]
+    assert len(wham["calls"]) == 0
+
+
+@pytest.mark.parametrize(("status", "text"), [
+    ("nothing_to_reset", "Сбрасывать нечего"),
+    ("no_credits_banked", "Запасных сбросов нет"),
+    ("no_credit", "Запасных сбросов нет"),
+    ("already_redeemed", "уже применён"),
+    ("unavailable", "Не удалось применить сброс"),
+])
+def test_reset_messages_are_russian(tmp_path, owner, wham, monkeypatch, status, text):
+    _redeem(monkeypatch, wham, _outcome(status))
+    result = ds.reset_codex_limit(now=NOW, agents=[owner], root=tmp_path)
+    assert result["ok"] is False and result["status"] == status
+    assert text in result["message"] and "English" not in result["message"]
+    assert result["quota"]["status"] == "ok"
+
+
+def test_reset_survives_a_crash_in_the_redeem(tmp_path, owner, wham, monkeypatch):
+    _redeem(monkeypatch, wham, RuntimeError("boom"))
+    result = ds.reset_codex_limit(now=NOW, agents=[owner], root=tmp_path)
+    assert result["status"] == "unavailable" and "boom" not in result["message"]
+
+
+def test_reset_without_a_valid_login_spends_nothing(tmp_path, wham, monkeypatch):
+    main = _agent(tmp_path, "default", "Корра")
+    _login(main.home, _jwt(exp=NOW - 5))
+    seen = _redeem(monkeypatch, wham, _outcome("reset"))
+    result = ds.reset_codex_limit(now=NOW, agents=[main], root=tmp_path)
+    assert seen == [] and result["status"] == "unavailable" and "не потрачен" in result["message"]
+
+
+def test_reset_without_a_subscription(tmp_path, wham, monkeypatch):
+    seen = _redeem(monkeypatch, wham, _outcome("reset"))
+    result = ds.reset_codex_limit(now=NOW, agents=[], root=tmp_path)
+    assert result["status"] == "absent" and seen == []
+
+
+def test_two_resets_at_once_spend_one(tmp_path, owner, wham, monkeypatch):
+    wham["answer"] = _usage(100, reached=True)
+    inside, release = threading.Event(), threading.Event()
+    calls = []
+
+    def slow(**kwargs):
+        calls.append(kwargs)
+        inside.set()
+        release.wait(5)
+        return _outcome("reset", 1)
+
+    import agent.account_usage as account_usage
+
+    monkeypatch.setattr(account_usage, "redeem_codex_reset_credit", slow)
+    first = threading.Thread(target=lambda: ds.reset_codex_limit(now=NOW, agents=[owner], root=tmp_path))
+    first.start()
+    assert inside.wait(5)
+    assert ds.reset_codex_limit(now=NOW, agents=[owner], root=tmp_path)["status"] == "busy"
+    release.set()
+    first.join(5)
+    assert len(calls) == 1
+
+
+def test_reset_route(tmp_path, owner, wham, monkeypatch):
+    import time
+
+    from fastapi.testclient import TestClient
+
+    import korra_constants
+    from korra_cli import web_server
+
+    # The route reads the real clock, so the login and the window follow it.
+    _login(owner.home, _jwt(exp=time.time() + 3600))
+    monkeypatch.setattr(korra_constants, "get_default_hermes_root", lambda: tmp_path)
+    monkeypatch.setattr(ds, "list_agents", lambda: [owner])
+    wham["answer"] = _usage(100, resets_at=time.time() + 86400, reached=True)
+    _redeem(monkeypatch, wham, _outcome("reset", 1))
+    client = TestClient(web_server.app)
+    response = client.post(
+        "/api/dashboard/codex-limit/reset", headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["ok"] is True and body["quota"]["windows"][0]["remaining_percent"] == 100
+    assert "сброс" in body["message"]
+    assert TestClient(web_server.app).post("/api/dashboard/codex-limit/reset").status_code == 401
+
+
+# Запасной сброс на уровне сети: настоящий redeem_codex_reset_credit, подменён только транспорт httpx.
+
+
+@pytest.fixture
+def backend(monkeypatch):
+    """The Codex backend behind ``httpx.MockTransport``; every request is recorded."""
+    import agent.account_usage as account_usage
+
+    box = types.SimpleNamespace(requests=[], usage=_usage(), usage_errors=[])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        box.requests.append((request.method, request.url.host, request.url.path))
+        if request.method == "GET" and request.url.path.endswith("/wham/usage"):
+            if box.usage_errors:
+                return httpx.Response(box.usage_errors.pop(0))
+            return httpx.Response(200, json=box.usage)
+        if request.method == "POST" and request.url.path.endswith("/rate-limit-reset-credits/consume"):
+            box.usage = _usage(0, resets_at=NOW + WEEK, credits=1)
+            return httpx.Response(200, json={"code": "reset", "windows_reset": 1})
+        return httpx.Response(404)
+
+    real_client = httpx.Client
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr(account_usage.httpx, "Client", lambda **kwargs: real_client(transport=transport, **kwargs))
+    box.consumes = lambda: [r for r in box.requests if r[0] == "POST"]
+    return box
+
+
+def test_a_stray_reset_post_spends_nothing_when_the_limit_is_not_exhausted(tmp_path, owner, backend):
+    backend.usage = _usage(36, applicable=0, credits=2)
+    result = ds.reset_codex_limit(now=NOW, agents=[owner], root=tmp_path)
+    assert backend.consumes() == []
+    assert result["ok"] is False and result["status"] == "not_exhausted"
+    assert "запасной сброс сохранён" in result["message"]
+    assert result["quota"]["reset_credits"]["available"] == 2
+    # The requests really went to the Codex host, through the real code path.
+    assert {host for _, host, _ in backend.requests} == {"chatgpt.com"}
+
+
+def test_a_reset_post_for_an_exhausted_limit_spends_exactly_one(tmp_path, owner, backend):
+    backend.usage = _usage(100, applicable=1, credits=2, reached=True)
+    result = ds.reset_codex_limit(now=NOW, agents=[owner], root=tmp_path)
+    assert len(backend.consumes()) == 1
+    assert backend.consumes()[0][2].endswith("/rate-limit-reset-credits/consume")
+    assert result["ok"] is True and result["status"] == "reset"
+    assert result["quota"]["windows"][0]["remaining_percent"] == 100
+
+
+def test_a_reset_lifts_the_cooldown_in_the_profile_store_the_token_came_from(tmp_path, backend):
+    writer = _agent(tmp_path, "writer", "Писатель")
+    token = _jwt()
+    tokens = {"access_token": token, "refresh_token": "rt-secret"}
+    frozen = {
+        "id": "p1", **tokens, "last_status": "exhausted", "last_status_at": NOW - 60,
+        "last_error_code": 429, "last_error_reason": "usage_limit_reached",
+        "last_error_message": "The usage limit has been reached", "last_error_reset_at": NOW + 3600,
+    }
+    auth = writer.home / "auth.json"
+    auth.write_text(json.dumps({
+        "version": 1, "providers": {"openai-codex": {"tokens": tokens}},
+        "credential_pool": {"openai-codex": [frozen]},
+    }), encoding="utf-8")
+    environment = dict(os.environ)
+    backend.usage = _usage(100, applicable=1, credits=2, reached=True)
+    result = ds.reset_codex_limit(now=NOW, agents=[writer], root=tmp_path)
+    assert result["status"] == "reset" and len(backend.consumes()) == 1
+    store = json.loads(auth.read_text(encoding="utf-8"))
+    entry = store["credential_pool"]["openai-codex"][0]
+    assert entry["last_status"] is None and entry["last_error_reset_at"] is None
+    assert entry["access_token"] == token and entry["refresh_token"] == "rt-secret"
+    assert store["providers"]["openai-codex"]["tokens"] == tokens
+    assert dict(os.environ) == environment
+
+
+def test_an_old_exhausted_file_does_not_unlock_a_reset_the_backend_would_not_offer(tmp_path, owner, backend):
+    from agent.rate_limit_tracker import CodexQuotaSnapshot, CodexQuotaWindow, record_codex_quota
+
+    # The file says "exhausted" ...
+    record_codex_quota(
+        CodexQuotaSnapshot(
+            primary=CodexQuotaWindow(used_percent=100.0, window_minutes=10080, resets_at=NOW + 86400),
+            plan_type="pro", captured_at=NOW - 3600, source="usage", limit_reached=True,
+            reset_credits={"available": 2, "applicable": 1},
+        ),
+        root=tmp_path, force=True,
+    )
+    # ... and the fresh answer says the limit is fine.
+    backend.usage = _usage(36, applicable=0, credits=2)
+    result = ds.reset_codex_limit(now=NOW, agents=[owner], root=tmp_path)
+    assert backend.consumes() == []
+    assert result["status"] == "not_exhausted" and "запасной сброс сохранён" in result["message"]
+
+
+def test_a_failed_decision_read_spends_nothing(tmp_path, owner, backend):
+    backend.usage_errors = [500]
+    result = ds.reset_codex_limit(now=NOW, agents=[owner], root=tmp_path)
+    assert backend.consumes() == [] and result["status"] == "unavailable"
+
+
+def test_rejected_resets_do_not_bypass_the_request_rate(tmp_path, owner, backend):
+    backend.usage = _usage(36, applicable=0, credits=2)
+    reads = lambda: [r for r in backend.requests if r[0] == "GET"]
+    first = ds.reset_codex_limit(now=NOW, agents=[owner], root=tmp_path)
+    assert first["status"] == "not_exhausted" and len(reads()) == 1
+    # The answer of that one read is what the card shows now.
+    assert first["quota"]["status"] == "ok" and first["quota"]["reset_credits"]["available"] == 2
+    second = ds.reset_codex_limit(now=NOW + 30, agents=[owner], root=tmp_path)
+    assert second["status"] == "not_exhausted" and len(reads()) == 1
+    assert backend.consumes() == []
+    # After two minutes a click may ask again, once.
+    ds.reset_codex_limit(now=NOW + 125, agents=[owner], root=tmp_path)
+    assert len(reads()) == 2 and backend.consumes() == []
+
+
+def test_a_failed_attempt_rests_for_ten_minutes(tmp_path, owner, backend):
+    backend.usage_errors = [500]
+    ds.reset_codex_limit(now=NOW, agents=[owner], root=tmp_path)
+    again = ds.reset_codex_limit(now=NOW + 300, agents=[owner], root=tmp_path)
+    assert again["status"] == "unavailable" and len([r for r in backend.requests if r[0] == "GET"]) == 1
+    ds.reset_codex_limit(now=NOW + 601, agents=[owner], root=tmp_path)
+    assert len([r for r in backend.requests if r[0] == "GET"]) == 2
+
+
+def test_a_confirmed_reset_reads_the_limit_once_more(tmp_path, owner, backend):
+    backend.usage = _usage(100, applicable=1, credits=2, reached=True)
+    result = ds.reset_codex_limit(now=NOW, agents=[owner], root=tmp_path)
+    assert result["status"] == "reset" and len(backend.consumes()) == 1
+    assert [r[0] for r in backend.requests] == ["GET", "POST", "GET"]
+    assert result["quota"]["windows"][0]["remaining_percent"] == 100
+
+
+def test_the_guard_refuses_a_real_host(no_real_network):
+    with pytest.raises(Exception):
+        httpx.get("https://chatgpt.com/backend-api/wham/usage")
+    assert any("chatgpt.com" in host for host in no_real_network)
+    no_real_network.clear()
+
+
+def test_cached_quota_is_dropped_after_a_reset(tmp_path, owner, wham, monkeypatch):
+    wham["answer"] = _usage(100, reached=True)
+    cache_key = ("quota", str(tmp_path))
+    ds._cache[cache_key] = (NOW + 9999, {"stale": True})
+    _redeem(monkeypatch, wham, _outcome("nothing_to_reset"))
+    ds.reset_codex_limit(now=NOW, agents=[owner], root=tmp_path)
+    assert cache_key not in ds._cache
+
+
+def test_attention_early_warning_names_the_dangerous_window_not_the_headline(tmp_path, owner, monkeypatch):
+    monkeypatch.setattr(ds, "_update_items", lambda now: [])
+    _two_windows(tmp_path, five_used=10, week_used=60, five_resets_in=4 * 3600, reached=False, applicable=0)
+    quota = ds.quota_section([owner], now=NOW, root=tmp_path)
+    five, week = quota["windows"]
+    assert not five["forecast"]["exhausts_before_reset"] and week["forecast"]["exhausts_before_reset"]
+    rows = [i for i in ds.attention_section([owner], now=NOW, tz=MSK, quota=quota)["items"] if i["source"] == "quota"]
+    assert len(rows) == 1 and rows[0]["title"] == "Лимит Codex кончится раньше сброса"
+    assert "Осталось 40 %" in rows[0]["detail"] and "неделя" in rows[0]["detail"]
+
+
+def test_attention_early_warning_takes_the_closest_running_out(tmp_path, owner):
+    def window(label, used, soon):
+        return {"label": label, "used_percent": used, "resets_at": NOW + 3 * 86400,
+                "forecast": {"exhausts_before_reset": True, "exhausts_at": NOW + soon}}
+
+    quota = {"status": "ok", "level": "warn", "captured_at": NOW,
+             "windows": [window("неделя", 60, 2 * 86400), window("5 часов", 80, 3600)]}
+    row = ds._quota_attention(quota, now=NOW, tz=MSK)
+    assert "5 часов" in row["detail"] and "Осталось 20 %" in row["detail"]
+
+
+def test_attention_early_warning_replaces_the_critical_row(tmp_path, owner, monkeypatch):
+    monkeypatch.setattr(ds, "_update_items", lambda now: [])
+    quota = _forecast(tmp_path, owner, 58, 3.0)
+    assert quota["forecast"]["exhausts_before_reset"] and quota["level"] == "warn"
+    items = ds.attention_section([owner], now=NOW, tz=MSK, quota=quota)["items"]
+    rows = [item for item in items if item["source"] == "quota"]
+    assert len(rows) == 1 and rows[0]["title"] == "Лимит Codex кончится раньше сброса"
+    assert "Осталось 42 %" in rows[0]["detail"] and "до сброса" in rows[0]["detail"]
+    # Below half of the limit the forecast alone is not worth the owner's attention.
+    calm = _forecast(tmp_path, owner, 36, 5.4)
+    assert calm["windows"][0]["forecast"]["exhausts_before_reset"]
+    assert not [i for i in ds.attention_section([owner], now=NOW, tz=MSK, quota=calm)["items"]
+                if i["source"] == "quota"]
+    # An exhausted limit is one row, not two.
+    critical = {**quota, "level": "critical", "limit_reached": True, "used_percent": 100}
+    rows = [i for i in ds.attention_section([owner], now=NOW, tz=MSK, quota=critical)["items"]
+            if i["source"] == "quota"]
+    assert len(rows) == 1 and rows[0]["title"] == "Лимит Codex исчерпан"

@@ -34,6 +34,8 @@ export interface DashboardWidgetCardProps {
   size?: WidgetSize;
   /** Куда уйти за полной картиной. */
   action?: DashboardWidgetAction;
+  /** Пометка справа от заголовка; не обрезается, переносится на тесной плитке. */
+  headerNote?: ReactNode;
   /** Кнопка «Убрать» появляется только в режиме настройки. */
   onRemove?: () => void;
   children: ReactNode;
@@ -44,6 +46,7 @@ export function DashboardWidgetCard({
   action,
   children,
   className,
+  headerNote,
   onRemove,
   purpose,
   size,
@@ -72,6 +75,8 @@ export function DashboardWidgetCard({
           >
             {title}
           </h3>
+
+          {headerNote ? <div className="min-w-0 flex-1 text-right">{headerNote}</div> : null}
 
           <div className="flex shrink-0 items-center gap-1">
             {action ? (

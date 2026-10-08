@@ -129,19 +129,38 @@ export interface DashboardArtifacts {
   truncated: boolean;
 }
 
+export type QuotaLevel = "normal" | "warn" | "critical";
+
+/** Прогноз по окну: ровно тот, что считает движок (`_quota_window`). */
+export interface QuotaForecast {
+  /** Во сколько раз расход быстрее ровного темпа (1 — ровно). */
+  pace: number;
+  exhausts_at: number;
+  exhausts_before_reset: boolean;
+}
+
 export interface QuotaWindow {
   key: "primary" | "secondary";
   used_percent: number;
+  remaining_percent: number;
   window_minutes: number | null;
   label: string;
   resets_at: number | null;
-  expired: boolean;
+  /** Окно сбросилось, пока никто не спрашивал: лимит снова полный. */
+  renewed: boolean;
+  forecast: QuotaForecast | null;
+  level: QuotaLevel;
+}
+
+export interface QuotaResetCredits {
+  available: number;
+  applicable: number;
 }
 
 export interface DashboardQuota {
   available: boolean;
-  status: "absent" | "waiting" | "ok" | "reset" | "error";
-  level?: "normal" | "warn" | "critical";
+  status: "absent" | "waiting" | "ok" | "error";
+  level?: QuotaLevel;
   used_percent?: number;
   window_minutes?: number | null;
   window_label?: string;
@@ -150,6 +169,12 @@ export interface DashboardQuota {
   plan_type?: string | null;
   captured_at?: number;
   stale?: boolean;
+  limit_reached?: boolean;
+  reset_credits?: QuotaResetCredits | null;
+  can_reset?: boolean;
+  /** Когда исчерпанный лимит вернётся сам, если это скоро (раньше порога сервера); иначе null. */
+  natural_reset_at?: number | null;
+  forecast?: (QuotaForecast & { window_label: string; resets_at: number | null; used_percent: number }) | null;
 }
 
 export interface DashboardAgentsActivity {
@@ -517,9 +542,6 @@ export function attentionView(
 }
 
 // ── Квота ─────────────────────────────────────────────────────────────────
-
-export const QUOTA_WARN = 80;
-export const QUOTA_CRITICAL = 95;
 
 /** Оставшееся окно словами: «2 дн. 4 ч», «3 ч 10 мин», «12 мин». */
 export function formatDuration(seconds: number): string {
