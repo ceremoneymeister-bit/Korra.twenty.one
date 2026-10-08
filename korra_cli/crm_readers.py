@@ -27,9 +27,11 @@ import copy
 import http.client
 import ipaddress
 import json
+import os
 import re
 import socket
 import ssl
+import stat
 import threading
 import time
 from dataclasses import dataclass
@@ -149,6 +151,11 @@ ERROR_TEXTS: dict[str, tuple[str, str]] = {
     "not_connected": (
         "CRM не подключена",
         "Подключение CRM делается в карточке «Продажи» на главной странице Korra.",
+    ),
+    "superseded": (
+        "Подключение уже заменено",
+        "Пока шла проверка, ключ или адрес заменили. Результат прежней проверки не применён: "
+        "проверьте текущее подключение ещё раз.",
     ),
     "limit": (
         "Слишком много данных",
@@ -283,13 +290,75 @@ def is_global_address(address: str) -> bool:
     return ip.is_global
 
 
-def _require_global_peer(sock: socket.socket) -> None:
-    """Refuse a connection that actually landed on a private/loopback/link-local address."""
+HOSTS_FILE = "/etc/hosts"
+
+_stat_file = os.stat
+_can_write = os.access
+
+
+def _normal_ip(address: str) -> Optional[Any]:
+    try:
+        ip = ipaddress.ip_address(str(address).split("%", 1)[0])
+    except ValueError:
+        return None
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        return ip.ipv4_mapped
+    return ip
+
+
+def _hosts_file_is_trusted(path: str) -> bool:
+    """The file is the host administrator's: owned by root and writable by nobody else, this process included."""
+    try:
+        info = _stat_file(path)
+        writable = _can_write(path, os.W_OK)
+    except OSError:
+        return False
+    return (
+        stat.S_ISREG(info.st_mode)
+        and info.st_uid == 0
+        and not info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+        and not writable
+    )
+
+
+def admin_pinned_addresses(host: str, hosts_file: str = HOSTS_FILE) -> set:
+    """Addresses the host administrator pinned to exactly this name in ``hosts_file``; empty if the file is not trusted.
+
+    The name must be listed as is: no suffix, wildcard or parent-domain match.
+    """
+    name = (host or "").strip().lower()
+    if not name or not _hosts_file_is_trusted(hosts_file):
+        return set()
+    try:
+        with open(hosts_file, encoding="utf-8", errors="replace") as handle:
+            lines = handle.read(1_000_000).splitlines()
+    except OSError:
+        return set()
+    pinned = set()
+    for line in lines:
+        fields = line.split("#", 1)[0].split()
+        if len(fields) >= 2 and name in (field.lower() for field in fields[1:]):
+            ip = _normal_ip(fields[0])
+            if ip is not None:
+                pinned.add(ip)
+    return pinned
+
+
+def is_allowed_address(host: str, address: str, hosts_file: str = HOSTS_FILE) -> bool:
+    """A global address, or a non-global one the host administrator pinned to exactly this name."""
+    if is_global_address(address):
+        return True
+    ip = _normal_ip(address)
+    return ip is not None and ip in admin_pinned_addresses(host, hosts_file)
+
+
+def _require_allowed_peer(sock: socket.socket, host: str, hosts_file: str = HOSTS_FILE) -> None:
+    """Refuse a connection that actually landed on a private/loopback/link-local address nobody pinned."""
     try:
         peer = sock.getpeername()[0]
     except OSError:
         peer = ""
-    if not is_global_address(str(peer)):
+    if not is_allowed_address(host, str(peer), hosts_file):
         sock.close()
         raise CrmError("bad_url", "address")
 
@@ -297,10 +366,14 @@ def _require_global_peer(sock: socket.socket) -> None:
 class _VendorHTTPSConnection(http.client.HTTPSConnection):
     """HTTPS that checks the address it really connected to before any TLS or secret is sent."""
 
+    def __init__(self, *args: Any, hosts_file: str = HOSTS_FILE, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._hosts_file = hosts_file
+
     def connect(self) -> None:
         sock = socket.create_connection((self.host, self.port), self.timeout)
         try:
-            _require_global_peer(sock)
+            _require_allowed_peer(sock, self.host, self._hosts_file)
             self.sock = self._context.wrap_socket(sock, server_hostname=self.host)  # type: ignore[attr-defined]
         except BaseException:
             sock.close()
@@ -483,9 +556,10 @@ class AmoTransport:
     open TCP to part of amoCRM's addresses and hang in the handshake.
     """
 
-    def __init__(self, domain: str, unix_socket: str = "") -> None:
+    def __init__(self, domain: str, unix_socket: str = "", hosts_file: str = HOSTS_FILE) -> None:
         self.domain = domain
         self.unix_socket = unix_socket
+        self.hosts_file = hosts_file
         if unix_socket and not Path(unix_socket).is_absolute():
             raise CrmError("bad_url", "socket")
         self._conn: Optional[http.client.HTTPSConnection] = None
@@ -497,7 +571,7 @@ class AmoTransport:
         seen: list[str] = []
         for info in socket.getaddrinfo(self.domain, 443, proto=socket.IPPROTO_TCP):
             address = info[4][0]
-            if address not in seen and is_global_address(address):
+            if address not in seen and is_allowed_address(self.domain, address, self.hosts_file):
                 seen.append(address)
         if not seen:
             raise CrmError("bad_url", "address")
@@ -515,7 +589,7 @@ class AmoTransport:
                 sock.settimeout(ADDRESS_TIMEOUT)
                 sock.connect(self.unix_socket)
             else:
-                _require_global_peer(sock)
+                _require_allowed_peer(sock, self.domain, self.hosts_file)
             conn.sock = context.wrap_socket(sock, server_hostname=self.domain)
         except BaseException:
             sock.close()

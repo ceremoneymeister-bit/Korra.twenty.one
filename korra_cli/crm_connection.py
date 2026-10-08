@@ -40,6 +40,8 @@ AMO_PROBE_PAGES = 4
 _PROBE_DEAL_CAP = AMO_PROBE_PAGES * 250
 
 _lock = threading.RLock()
+_issued: dict[str, int] = {}
+_applied: dict[str, int] = {}
 
 
 class CrmConnectionError(RuntimeError):
@@ -86,15 +88,39 @@ def identity(conn: dict) -> str:
     the account record or the agents' switch is written.
     """
     settings = _settings(conn)
-    parts = [
+    parts = [*_credentials(conn), settings["pipeline_id"], settings["stuck_days"]]
+    return hashlib.sha256(json.dumps(parts).encode("utf-8")).hexdigest()
+
+
+def _credentials(conn: dict) -> list:
+    return [
         conn["type"],
         conn.get("webhook_url") or conn.get("domain") or "",
         conn.get("token") or "",
         conn.get("unix_socket") or "",
-        settings["pipeline_id"],
-        settings["stuck_days"],
     ]
-    return hashlib.sha256(json.dumps(parts).encode("utf-8")).hexdigest()
+
+
+def link_id(conn: dict) -> str:
+    """Which access a check was made with: the key and the route, not the settings."""
+    return hashlib.sha256(json.dumps(_credentials(conn)).encode("utf-8")).hexdigest()
+
+
+def _begin(root: Optional[Path]) -> int:
+    """A place in the queue of changes to the stored connection; later requests outrank earlier ones."""
+    key = str(_path(root))
+    with _lock:
+        _issued[key] = _issued.get(key, 0) + 1
+        return _issued[key]
+
+
+def _claim(root: Optional[Path], ticket: int) -> bool:
+    """Take the right to write; ``False`` if a request that began later has already written (or disconnected). Hold ``_lock``."""
+    key = str(_path(root))
+    if ticket < _applied.get(key, 0):
+        return False
+    _applied[key] = ticket
+    return True
 
 
 def _write(conn: dict, root: Optional[Path]) -> None:
@@ -431,6 +457,7 @@ def save(payload: Any, *, root: Optional[Path] = None, socket_path: str = "") ->
         return failure(exc, kind if kind in (BITRIX, AMOCRM) else BITRIX, _host_hint(payload))
     kind = conn["type"]
     host = portal_of(conn)
+    ticket = _begin(root)
     found: Optional[dict] = None
     warning: Optional[dict] = None
     try:
@@ -440,8 +467,11 @@ def save(payload: Any, *, root: Optional[Path] = None, socket_path: str = "") ->
             return failure(exc, kind, host)
         warning = failure(exc, kind, host, saved=True)["error"]
     with _lock:
+        if not _claim(root, ticket):
+            return failure(CrmError("superseded"), kind, host)
         previous = load(root)
         keep = previous is not None and previous["type"] == kind and portal_of(previous) == host
+        same_access = keep and link_id(previous) == link_id(conn)
         settings = _settings(previous) if keep else _settings({})
         requested = payload.get("settings") if isinstance(payload.get("settings"), dict) else {}
         settings = _merge_settings(settings, requested, found)
@@ -451,7 +481,7 @@ def save(payload: Any, *, root: Optional[Path] = None, socket_path: str = "") ->
         record.update(
             version=VERSION,
             settings=settings,
-            account=_account_record(found) if found else (previous or {}).get("account", {}) if keep else {},
+            account=_account_record(found) if found else (previous or {}).get("account", {}) if same_access else {},
             last_check={
                 "ok": found is not None,
                 "at": _now(),
@@ -511,11 +541,14 @@ def recheck(*, root: Optional[Path] = None) -> dict:
     try:
         found = probe(conn)
     except CrmError as exc:
-        _record_check(root, conn, ok=False, code=exc.code)
+        if not _record_check(root, conn, ok=False, code=exc.code):
+            return failure(CrmError("superseded"), conn["type"], host)
         return failure(exc, conn["type"], host, saved=True)
     with _lock:
         fresh = load(root)
-        if fresh is not None and portal_of(fresh) == host:
+        if fresh is not None and link_id(fresh) != link_id(conn):
+            return failure(CrmError("superseded"), conn["type"], host)
+        if fresh is not None:
             fresh["account"] = _account_record(found)
             settings = _settings(fresh)
             if not settings["pipeline_id"] or settings["pipeline_id"] not in {str(p["id"]) for p in found["pipelines"]}:
@@ -528,17 +561,22 @@ def recheck(*, root: Optional[Path] = None) -> dict:
     return {"ok": True, "found": _found_view(conn, found)}
 
 
-def _record_check(root: Optional[Path], conn: dict, *, ok: bool, code: Optional[str]) -> None:
+def _record_check(root: Optional[Path], conn: dict, *, ok: bool, code: Optional[str]) -> bool:
+    """Write the outcome of a check; ``False`` if the stored access is no longer the one that was checked."""
     with _lock:
         fresh = load(root)
-        if fresh is None or portal_of(fresh) != portal_of(conn):
-            return
+        if fresh is None:
+            return True
+        if link_id(fresh) != link_id(conn):
+            return False
         fresh["last_check"] = {"ok": ok, "at": _now(), "code": code}
         _write(fresh, root)
+        return True
 
 
 def disconnect(*, root: Optional[Path] = None) -> dict:
     with _lock:
+        _claim(root, _begin(root))
         path = _path(root)
         path.unlink(missing_ok=True)
         try:
