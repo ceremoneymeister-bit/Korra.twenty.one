@@ -545,3 +545,58 @@ def test_access_switch_does_not_trigger_a_new_read(portal, stored):
     cc.update_settings({"agents_access": False}, root=stored)
     cs.sales_section(root=stored, tz=TZ)
     assert len(portal.bitrix.calls) == calls  # the switch does not change the figures
+
+
+# ---------------------------------------------------------------- amoCRM: how many open deals there really are (F5)
+
+
+def _open_deals(portal, count):
+    base = portal.amo.handlers["leads"]
+
+    def leads(q):
+        if "order[updated_at]" not in q:
+            return base(q)
+        size, page = int(q["limit"][0]), int(q["page"][0])
+        rows = [
+            {"id": 1000 + i, "name": f"d{i}", "price": 10, "status_id": 11, "responsible_user_id": 7,
+             "created_at": ts("2026-09-01T10:00:00"), "updated_at": ts("2026-10-07T10:00:00")}
+            for i in range(count)
+        ]
+        return {"_embedded": {"leads": rows[(page - 1) * size: page * size]}}
+
+    portal.amo.handlers["leads"] = leads
+    portal.amo.handlers["events"] = lambda q: {"_embedded": {"events": []}}
+
+
+@pytest.mark.parametrize(
+    ("count", "truncated", "total", "exact"),
+    [
+        (299, False, 299, True),
+        (300, False, 300, True),
+        (301, True, 301, True),
+        (400, True, 400, True),
+        (499, True, 499, True),
+        (500, True, 500, True),
+        (501, True, 501, True),
+        (620, True, 620, True),
+        (1499, True, 1499, True),
+        (1500, True, 1500, False),
+        (1700, True, 1500, False),
+    ],
+)
+def test_amo_open_deal_total_is_exact_or_a_lower_bound(portal, count, truncated, total, exact):
+    _open_deals(portal, count)
+    river = cs.gather(AMO_CONN, now=NOW, tz=TZ)["river"]
+    assert river["deals_loaded"] == min(count, 300)
+    assert (river["truncated"], river["deals_total"], river["total_exact"]) == (truncated, total, exact)
+
+
+def test_bitrix_total_comes_from_the_api_and_is_exact(portal):
+    portal.bitrix.handlers["crm.deal.list"] = lambda p: (
+        {"result": [], "total": 0}
+        if p["filter"]["STAGE_SEMANTIC_ID"] == "S"
+        else {"result": [{"ID": "1", "STAGE_ID": "NEW", "DATE_CREATE": iso("2026-10-01T10:00:00")}] * 50,
+              "next": int(p.get("start", 0)) + 50, "total": 900}
+    )
+    river = cs.gather(BITRIX_CONN, now=NOW, tz=TZ)["river"]
+    assert (river["deals_total"], river["total_exact"], river["truncated"]) == (900, True, True)

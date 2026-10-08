@@ -645,10 +645,16 @@ class AmoReader:
 
     def paged(self, path: str, params: Optional[Any], key: str, *, limit: int, page_size: int = 250,
               max_pages: int = 10) -> dict:
-        """Up to ``limit`` rows of ``_embedded[key]``; ``truncated`` if more exist."""
+        """Up to ``limit`` rows of ``_embedded[key]``.
+
+        ``read`` is how many rows were actually fetched (before the cut); ``complete``
+        means the last page was short, so ``read`` is everything there is.
+        ``truncated`` is true when rows exist that are not in ``items``.
+        """
         pairs = list(params.items()) if isinstance(params, dict) else list(params or [])
         size = max(1, min(page_size, 250))
         items: list = []
+        complete = False
         for page in range(1, max_pages + 1):
             data = self.get(path, pairs + [("limit", size), ("page", page)])
             if data is not None and not isinstance(data, dict):
@@ -658,7 +664,13 @@ class AmoReader:
                 raise CrmError("protocol")
             items.extend(batch)
             if len(batch) < size:
-                return {"items": items[:limit], "truncated": False}
+                complete = True
+                break
             if len(items) >= limit:
-                return {"items": items[:limit], "truncated": True}
-        return {"items": items[:limit], "truncated": True}
+                break
+        return {
+            "items": items[:limit],
+            "read": len(items),
+            "complete": complete,
+            "truncated": not complete or len(items) > limit,
+        }

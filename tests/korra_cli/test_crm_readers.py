@@ -327,7 +327,7 @@ def test_amo_paged_truncates_at_limit():
 
 def test_amo_paged_empty_204():
     reader, _ = amo(cr.Response(204, {}, b""))
-    assert reader.paged("leads", None, "leads", limit=10) == {"items": [], "truncated": False}
+    assert reader.paged("leads", None, "leads", limit=10) == {"items": [], "read": 0, "complete": True, "truncated": False}
 
 
 @pytest.mark.parametrize(

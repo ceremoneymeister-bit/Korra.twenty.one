@@ -86,6 +86,7 @@ class Raw:
     overdue_truncated: bool
     names: dict = field(default_factory=dict)
     stuck_approx: bool = False
+    deals_total_exact: bool = True
 
 
 # ------------------------------------------------------------------ time helpers
@@ -230,6 +231,7 @@ def collect_bitrix(reader: cr.Bitrix24Reader, settings: dict, now: datetime, tz:
         stages=stages,
         deals=deals,
         deals_total=int(opened["total"] if opened["total"] is not None else len(deals)),
+        deals_total_exact=opened["total"] is not None or not opened["truncated"],
         deals_truncated=bool(opened["truncated"]) or len(opened["items"]) > OPEN_DEAL_LIMIT,
         won=won,
         won_truncated=bool(won_rows["truncated"]),
@@ -328,9 +330,9 @@ def collect_amo(reader: cr.AmoReader, settings: dict, now: datetime, tz: Optiona
     opened = reader.paged("leads", open_query, "leads", limit=OPEN_DEAL_LIMIT, page_size=AMO_PAGE, max_pages=2)
     rows = opened["items"]
     truncated = opened["truncated"]
-    total = len(rows)
-    if truncated:
-        total = _amo_open_total(reader, open_query, rows)
+    total, total_exact = opened["read"], True
+    if not opened["complete"]:
+        total, total_exact = _amo_open_total(reader, open_query, opened["read"])
 
     window = now - timedelta(days=stuck_days)
     changed, events_cut = _amo_changed_since(reader, window, tz)
@@ -402,6 +404,7 @@ def collect_amo(reader: cr.AmoReader, settings: dict, now: datetime, tz: Optiona
         stages=stages,
         deals=deals,
         deals_total=total,
+        deals_total_exact=total_exact,
         deals_truncated=truncated,
         won=won,
         won_truncated=won_page["truncated"],
@@ -415,16 +418,19 @@ def collect_amo(reader: cr.AmoReader, settings: dict, now: datetime, tz: Optiona
     )
 
 
-def _amo_open_total(reader: cr.AmoReader, query: list, loaded: list) -> int:
-    """Open deals beyond what was loaded: keep paging for a count only, within a small budget."""
-    count = len(loaded)
-    for page in range(3, 7):
+def _amo_open_total(reader: cr.AmoReader, query: list, read: int) -> tuple[int, bool]:
+    """Open deals beyond the pages already read: count further pages within a small budget.
+
+    Returns ``(count, exact)``; when the budget runs out first the count is a lower bound.
+    """
+    count = read
+    for page in range(read // AMO_PAGE + 1, read // AMO_PAGE + 5):
         data = reader.get("leads", query + [("limit", AMO_PAGE), ("page", page)])
         batch = ((data or {}).get("_embedded") or {}).get("leads") or []
         count += len(batch)
         if len(batch) < AMO_PAGE:
-            return count
-    return count
+            return count, True
+    return count, False
 
 
 def _amo_changed_since(reader: cr.AmoReader, window: datetime, tz) -> tuple[set, bool]:
@@ -640,6 +646,7 @@ def build_snapshot(
         },
         "river": {
             "deals_total": raw.deals_total,
+            "total_exact": raw.deals_total_exact,
             "deals_loaded": len(raw.deals),
             "amount_total": _number(sum(d.amount for d in raw.deals)),
             "truncated": raw.deals_truncated,
