@@ -174,7 +174,7 @@ def test_memory_only_review_names_memory(env, monkeypatch):
     _review(_agent(env["db"]))
     rows = _rows(env["db"])
     assert len(rows) == 1
-    assert "память" in rows[0]["content"]
+    assert "памяти агента" in rows[0]["content"]
     assert rows[0]["display_metadata"][RECEIPT_KEY]["memory"][0]["added"] == [
         "Отчёты сдаём по пятницам"
     ]

@@ -21,9 +21,42 @@ from typing import List, Optional
 from tools import write_approval as wa
 
 
+_GATE_TITLE = {
+    wa.MEMORY: "Подтверждение записей в память",
+    wa.SKILLS: "Подтверждение записи навыков",
+}
+_NO_PENDING = {
+    wa.MEMORY: "Ожидающих записей в память нет.",
+    wa.SKILLS: "Ожидающих изменений навыков нет.",
+}
+_PENDING_TITLE = {
+    wa.MEMORY: "Ожидающие записи в память",
+    wa.SKILLS: "Ожидающие изменения навыков",
+}
+_APPLIED = {
+    wa.MEMORY: "Применено записей в память",
+    wa.SKILLS: "Применено изменений навыков",
+}
+_REJECTED_COUNT = {
+    wa.MEMORY: "Отклонено ожидающих записей в память",
+    wa.SKILLS: "Отклонено ожидающих изменений навыков",
+}
+_REJECTED_ONE = {
+    wa.MEMORY: "Отклонена ожидающая запись в память",
+    wa.SKILLS: "Отклонено ожидающее изменение навыка",
+}
+_NOT_FOUND = {
+    wa.MEMORY: "Ожидающей записи в память с id '{id}' нет.",
+    wa.SKILLS: "Ожидающего изменения навыка с id '{id}' нет.",
+}
+
+
+def _fmt_state_value(subsystem: str, enabled: bool) -> str:
+    return f"{_GATE_TITLE[subsystem]} {'включено' if enabled else 'выключено'}."
+
+
 def _fmt_state(subsystem: str) -> str:
-    on = wa.write_approval_enabled(subsystem)
-    return f"{subsystem}.write_approval = {'on' if on else 'off'}"
+    return _fmt_state_value(subsystem, wa.write_approval_enabled(subsystem))
 
 
 # ---------------------------------------------------------------------------
@@ -33,17 +66,18 @@ def _fmt_state(subsystem: str) -> str:
 def _fmt_pending_list(subsystem: str) -> str:
     records = wa.list_pending(subsystem)
     if not records:
-        return f"No pending {subsystem} writes."
-    lines = [f"Pending {subsystem} writes ({len(records)}):"]
+        return _NO_PENDING[subsystem]
+    lines = [f"{_PENDING_TITLE[subsystem]} ({len(records)}):"]
     for r in records:
         origin = r.get("origin", "foreground")
-        tag = " [auto]" if origin == "background_review" else ""
+        tag = " [авто]" if origin == "background_review" else ""
         lines.append(f"  {r['id']}{tag}  {r.get('summary', '')}")
-    where = "/{s} approve <id>".format(s=subsystem)
     lines.append("")
-    lines.append(f"Apply: {where}   Reject: /{subsystem} reject <id>")
+    lines.append(
+        f"Применить: /{subsystem} approve <id>   Отклонить: /{subsystem} reject <id>"
+    )
     if subsystem == wa.SKILLS:
-        lines.append("Review full diff: /skills diff <id>")
+        lines.append("Показать целиком: /skills diff <id>")
     return "\n".join(lines)
 
 
@@ -101,25 +135,25 @@ def handle_pending_subcommand(
 
 def _resolve_one(subsystem: str, rest: List[str]):
     if not rest:
-        return None, f"Usage: /{subsystem} approve|reject <id>  (or 'all')"
+        return None, f"Использование: /{subsystem} approve|reject <id> (или all)"
     return rest[0], None
 
 
 def _approve(subsystem: str, rest: List[str], memory_store) -> str:
     target, err = _resolve_one(subsystem, rest)
     if err or target is None:
-        return err or f"Usage: /{subsystem} approve <id>"
+        return err or f"Использование: /{subsystem} approve <id>"
 
     records = wa.list_pending(subsystem)
     if not records:
-        return f"No pending {subsystem} writes."
+        return _NO_PENDING[subsystem]
 
     if target.lower() == "all":
         targets = list(records)
     else:
         rec = wa.get_pending(subsystem, target)
         if not rec:
-            return f"No pending {subsystem} write with id '{target}'."
+            return _NOT_FOUND[subsystem].format(id=target)
         targets = [rec]
 
     applied, failed = 0, []
@@ -131,9 +165,9 @@ def _approve(subsystem: str, rest: List[str], memory_store) -> str:
         else:
             failed.append(f"{rec['id']}: {msg}")
 
-    out = [f"Approved {applied} {subsystem} write(s)."]
+    out = [f"{_APPLIED[subsystem]}: {applied}."]
     if failed:
-        out.append("Failed:")
+        out.append("Не удалось применить:")
         out.extend(f"  {f}" for f in failed)
     return "\n".join(out)
 
@@ -143,7 +177,7 @@ def _apply_one(subsystem: str, rec, memory_store):
     try:
         if subsystem == wa.MEMORY:
             if memory_store is None:
-                return False, "memory store unavailable"
+                return False, "хранилище памяти недоступно"
             from tools.memory_tool import apply_memory_pending
             result = apply_memory_pending(payload, memory_store)
             return bool(result.get("success")), result.get("error", "")
@@ -158,26 +192,26 @@ def _apply_one(subsystem: str, rec, memory_store):
 def _reject(subsystem: str, rest: List[str]) -> str:
     target, err = _resolve_one(subsystem, rest)
     if err or target is None:
-        return err or f"Usage: /{subsystem} reject <id>"
+        return err or f"Использование: /{subsystem} reject <id>"
     if target.lower() == "all":
         n = 0
         for rec in wa.list_pending(subsystem):
             if wa.discard_pending(subsystem, rec["id"]):
                 n += 1
-        return f"Rejected {n} pending {subsystem} write(s)."
+        return f"{_REJECTED_COUNT[subsystem]}: {n}."
     if wa.discard_pending(subsystem, target):
-        return f"Rejected pending {subsystem} write '{target}'."
-    return f"No pending {subsystem} write with id '{target}'."
+        return f"{_REJECTED_ONE[subsystem]} '{target}'."
+    return _NOT_FOUND[subsystem].format(id=target)
 
 
 def _diff(rest: List[str]) -> str:
     if not rest:
-        return "Usage: /skills diff <id>"
+        return "Использование: /skills diff <id>"
     rec = wa.get_pending(wa.SKILLS, rest[0])
     if not rec:
-        return f"No pending skill write with id '{rest[0]}'."
+        return _NOT_FOUND[wa.SKILLS].format(id=rest[0])
     diff = wa.skill_pending_diff(rec)
-    header = f"# Pending skill write {rec['id']}: {rec.get('summary', '')}\n"
+    header = f"# Ожидающее изменение навыка {rec['id']}: {rec.get('summary', '')}\n"
     return header + "\n" + diff
 
 
@@ -188,7 +222,7 @@ def _set_approval(subsystem: str, rest: List[str], set_mode_fn) -> str:
     """
     if not rest:
         return (f"{_fmt_state(subsystem)}\n"
-                f"Set with: /{subsystem} approval <on|off>")
+                f"Изменить: /{subsystem} approval <on|off>")
     arg = rest[0].strip().lower()
     truthy = {"on", "true", "yes", "1", "enable", "enabled"}
     falsey = {"off", "false", "no", "0", "disable", "disabled"}
@@ -197,13 +231,13 @@ def _set_approval(subsystem: str, rest: List[str], set_mode_fn) -> str:
     elif arg in falsey:
         enabled = False
     else:
-        return f"Invalid value '{arg}'. Use: on or off."
+        return f"Некорректное значение '{arg}'. Допустимо: on или off."
     if set_mode_fn is None:
         val = "true" if enabled else "false"
-        return (f"To change the {subsystem} approval gate, run:\n"
+        return (f"Чтобы изменить настройку, выполните в терминале:\n"
                 f"  hermes config set {subsystem}.write_approval {val}")
     try:
         set_mode_fn(enabled)
     except Exception as e:
-        return f"Failed to set {subsystem}.write_approval: {e}"
-    return f"{subsystem}.write_approval set to '{'on' if enabled else 'off'}'."
+        return f"Не удалось изменить {subsystem}.write_approval: {e}"
+    return _fmt_state_value(subsystem, enabled)

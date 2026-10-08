@@ -113,7 +113,7 @@ async def test_memory_written_by_the_agent_gives_one_notice_with_working_undo(en
     notices = _notices(env["db"])
     assert len(notices) == 1
     assert notices[0]["role"] == "assistant"
-    assert "Учёл" in notices[0]["content"] and "заметки о вас" in notices[0]["content"]
+    assert "Учёл" in notices[0]["content"] and "заметках о вас" in notices[0]["content"]
     receipt = notices[0]["display_metadata"][RECEIPT_KEY]
     assert receipt["memory"][0]["added"] == [RULE]
 
@@ -187,7 +187,7 @@ async def test_agent_write_plus_background_review_stay_one_message(env):
 
     notices = _notices(env["db"])
     assert len(notices) == 1
-    assert "память агента" in notices[0]["content"] and "заметки о вас" in notices[0]["content"]
+    assert "памяти агента" in notices[0]["content"] and "заметках о вас" in notices[0]["content"]
     receipt = notices[0]["display_metadata"][RECEIPT_KEY]
     assert {m["target"] for m in receipt["memory"]} == {"user", "memory"}
     assert undo_receipt(receipt)["status"] == "undone"

@@ -38,13 +38,13 @@ export function LearningUndo({
   return (
     <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
       {state.undone ? (
-        <span>Отменено</span>
+        <span role="status">{state.note || "Отменено"}</span>
       ) : (
         <Button ghost size="sm" disabled={state.busy} onClick={() => void onUndo()}>
           Отменить
         </Button>
       )}
-      {state.note && <span role="status">{state.note}</span>}
+      {!state.undone && state.note && <span role="status">{state.note}</span>}
     </div>
   );
 }

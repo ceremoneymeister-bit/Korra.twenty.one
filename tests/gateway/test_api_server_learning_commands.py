@@ -431,3 +431,16 @@ async def test_learn_and_refine_still_need_the_model(text, tmp_path, monkeypatch
         )
     assert result["failed"] is True
     assert "Подписка ChatGPT / Codex не подключена" in result["final_response"]
+
+
+@pytest.mark.asyncio
+async def test_memory_in_web_chat_answers_in_russian(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    _agent_obj, result = await _send("/memory")
+    assert result["final_response"] == (
+        "Подтверждение записей в память выключено.\n\nОжидающих записей в память нет."
+    )
+    _agent_obj, result = await _send("/memory approval on")
+    assert result["final_response"] == "Подтверждение записей в память включено."
+    _agent_obj, result = await _send("/memory pending")
+    assert result["final_response"] == "Ожидающих записей в память нет."

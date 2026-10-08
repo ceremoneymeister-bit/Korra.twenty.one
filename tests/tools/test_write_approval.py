@@ -100,8 +100,8 @@ def test_cli_memory_approve_without_live_agent_uses_fresh_store(hermes_home, cap
     handler._handle_memory_command("/memory approve all")
 
     out = capsys.readouterr().out
-    assert "memory store unavailable" not in out, out
-    assert "Approved 1" in out, out
+    assert "хранилище памяти недоступно" not in out, out
+    assert "Применено записей в память: 1" in out, out
     assert wa.pending_count("memory") == 0
     # The approved write landed in a freshly loaded on-disk store (MEMORY.md).
     reloaded = MemoryStore(); reloaded.load_from_disk()
@@ -172,7 +172,7 @@ def test_handle_approve_all(hermes_home):
     wa.stage_write("memory", {"action": "add", "target": "user", "content": "b"},
                    summary="b", origin="foreground")
     out = handle_pending_subcommand(wa.MEMORY, ["approve", "all"], memory_store=store)
-    assert "Approved 2" in out
+    assert "Применено записей в память: 2" in out
     assert wa.pending_count("memory") == 0
     assert len(store.user_entries) == 2
 
@@ -186,7 +186,7 @@ def test_handle_approval_on(hermes_home):
         set_mode_fn=lambda enabled: captured.update(enabled=enabled),
     )
     assert captured["enabled"] is True
-    assert "on" in out
+    assert "включено" in out
 
 
 def test_handle_approval_off(hermes_home):
@@ -198,7 +198,7 @@ def test_handle_approval_off(hermes_home):
         set_mode_fn=lambda enabled: captured.update(enabled=enabled),
     )
     assert captured["enabled"] is False
-    assert "off" in out
+    assert "выключено" in out
 
 
 # ---------------------------------------------------------------------------
