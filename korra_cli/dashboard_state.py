@@ -1197,10 +1197,10 @@ def _quota_window(key: str, raw: dict[str, Any], now: float) -> Optional[dict[st
     return window
 
 
-def _window_level(window: dict[str, Any], limit_reached: bool) -> str:
+def _window_level(window: dict[str, Any], blocked: bool) -> str:
     left = window["remaining_percent"]
     forecast = window["forecast"]
-    if (limit_reached and not window["renewed"]) or left <= QUOTA_CRITICAL_LEFT_PERCENT:
+    if blocked or left <= QUOTA_CRITICAL_LEFT_PERCENT:
         return "critical"
     if left <= QUOTA_WARN_LEFT_PERCENT or (forecast and forecast["exhausts_before_reset"]):
         return "warn"
@@ -1237,9 +1237,15 @@ def quota_section(
     if not windows:
         return {"available": True, "status": "waiting"}
     captured_at = float(data.get("captured_at") or 0)
-    limit_reached = data.get("limit_reached") is True
+    # The backend's ``limit_reached`` belongs to the windows that were empty in
+    # that snapshot. Once they have rolled over, the flag says nothing about
+    # the others: a half-used week must not inherit the block of the 5 hours.
+    flagged = data.get("limit_reached") is True
+    blockers = _snapshot_blockers(windows, data, flagged)
+    blocked_now = {w["key"] for w in windows if w["key"] in blockers and not w["renewed"]}
+    limit_reached = flagged and bool(blocked_now)
     for window in windows:
-        window["level"] = _window_level(window, limit_reached)
+        window["level"] = _window_level(window, limit_reached and window["key"] in blocked_now)
     level = max((window["level"] for window in windows), key=_LEVEL_ORDER.__getitem__)
 
     credits = data.get("reset_credits")
@@ -1250,13 +1256,15 @@ def quota_section(
             "applicable": credits.get("applicable") if isinstance(credits.get("applicable"), int) else 0,
         }
     exhausted = any(window["remaining_percent"] <= 0 for window in windows)
+    # An offer made for windows that have since rolled over is out of date.
+    offer_gone = bool(blockers) and not blocked_now
     can_reset = bool(
         reset_credits
         and reset_credits["available"] > 0
-        and (reset_credits["applicable"] > 0 or (limit_reached and not all(w["renewed"] for w in windows)) or exhausted)
+        and ((reset_credits["applicable"] > 0 and not offer_gone) or limit_reached or exhausted)
     )
     headline = min(windows, key=lambda window: window["remaining_percent"])
-    natural_reset_at = _natural_reset_at(windows, limit_reached, now) if can_reset else None
+    natural_reset_at = _natural_reset_at(windows, blockers, now) if can_reset else None
     forecasts = [window for window in windows if window["forecast"]]
     soonest = min(forecasts, key=lambda window: window["forecast"]["exhausts_at"], default=None)
     return {
@@ -1283,17 +1291,25 @@ def quota_section(
     }
 
 
-def _natural_reset_at(windows: list[dict[str, Any]], limit_reached: bool, now: float) -> Optional[float]:
+def _snapshot_blockers(windows: list[dict[str, Any]], data: dict[str, Any], limit_reached: bool) -> set[str]:
+    """Keys of the windows that were empty in the stored snapshot (before any roll-over)."""
+
+    def used(window: dict[str, Any]) -> float:
+        return float(data[window["key"]]["used_percent"])
+
+    empty = {w["key"] for w in windows if used(w) >= 100}
+    if empty or not limit_reached or not windows:
+        return empty
+    return {max(windows, key=used)["key"]}
+
+
+def _natural_reset_at(windows: list[dict[str, Any]], blockers: set[str], now: float) -> Optional[float]:
     """When the exhausted limit returns by itself, if that is sooner than ``QUOTA_RESET_SOON_SECONDS``.
 
-    The limit is back when the *last* exhausted window resets. Several empty
-    windows: the latest of their resets. A reached limit with no empty window:
-    the most used live one. Nothing exhausted or no reset time: ``None``.
+    The limit is back when the *last* blocking window resets. Several empty
+    windows: the latest of their resets. Nothing blocking or no reset time: ``None``.
     """
-    blocking = [window for window in windows if window["remaining_percent"] <= 0 and not window["renewed"]]
-    if not blocking and limit_reached:
-        live = [window for window in windows if not window["renewed"]]
-        blocking = live and [min(live, key=lambda window: window["remaining_percent"])] or []
+    blocking = [window for window in windows if window["key"] in blockers and not window["renewed"]]
     if not blocking or any(window["resets_at"] is None for window in blocking):
         return None
     back = max(window["resets_at"] for window in blocking)

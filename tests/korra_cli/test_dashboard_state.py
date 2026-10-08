@@ -1100,6 +1100,55 @@ def test_no_button_without_banked_resets(tmp_path, owner, wham):
     assert ds.quota_section([owner], now=NOW, root=tmp_path)["can_reset"] is False
 
 
+def _two_windows(root: Path, *, five_used: float, week_used: float, five_resets_in: float,
+                 reached: bool = True, applicable: int = 1) -> None:
+    from agent.rate_limit_tracker import CodexQuotaSnapshot, CodexQuotaWindow, record_codex_quota
+
+    record_codex_quota(
+        CodexQuotaSnapshot(
+            primary=CodexQuotaWindow(used_percent=five_used, window_minutes=300, resets_at=NOW + five_resets_in),
+            secondary=CodexQuotaWindow(used_percent=week_used, window_minutes=10080, resets_at=NOW + 3 * 86400),
+            plan_type="pro", captured_at=NOW - 10, source="usage", limit_reached=reached,
+            reset_credits={"available": 2, "applicable": applicable},
+        ),
+        root=root, force=True,
+    )
+
+
+def test_a_rolled_over_blocker_does_not_pass_the_block_to_the_other_window(tmp_path, owner, wham):
+    # The 5 hours were empty and have rolled over; the week is 30 % used; no fresh answer yet.
+    _two_windows(tmp_path, five_used=100, week_used=30, five_resets_in=-1)
+    value = ds.quota_section([owner], now=NOW, root=tmp_path)
+    five, week = value["windows"]
+    assert five["renewed"] and five["remaining_percent"] == 100 and five["level"] == "normal"
+    assert week["remaining_percent"] == 70 and week["level"] == "normal"
+    assert value["level"] == "normal" and value["limit_reached"] is False
+    assert value["can_reset"] is False and value["natural_reset_at"] is None
+    assert wham["calls"] == []
+    assert ds._quota_attention(value, now=NOW, tz=MSK) is None
+
+
+def test_the_block_stays_while_a_blocking_window_has_not_rolled_over(tmp_path, owner, wham):
+    _two_windows(tmp_path, five_used=100, week_used=30, five_resets_in=2 * 3600)
+    value = ds.quota_section([owner], now=NOW, root=tmp_path)
+    five, week = value["windows"]
+    assert (five["level"], week["level"]) == ("critical", "normal")
+    assert value["limit_reached"] is True and value["can_reset"] is True
+    assert value["natural_reset_at"] == NOW + 2 * 3600
+    # The week alone blocking after the 5 hours returned: the block moves, with its own reset.
+    ds.reset_cache()
+    _two_windows(tmp_path, five_used=100, week_used=100, five_resets_in=-1)
+    value = ds.quota_section([owner], now=NOW, root=tmp_path)
+    assert value["limit_reached"] is True and value["level"] == "critical" and value["can_reset"] is True
+
+
+def test_a_reached_flag_without_an_empty_window_blocks_the_busiest_one(tmp_path, owner, wham):
+    _two_windows(tmp_path, five_used=40, week_used=90, five_resets_in=3600)
+    value = ds.quota_section([owner], now=NOW, root=tmp_path)
+    five, week = value["windows"]
+    assert week["level"] == "critical" and five["level"] == "normal" and value["limit_reached"] is True
+
+
 HOUR = 3600
 
 
