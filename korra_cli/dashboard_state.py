@@ -1212,7 +1212,7 @@ _LEVEL_ORDER = {"normal": 0, "warn": 1, "critical": 2}
 
 
 def quota_section(
-    agents: list[Agent], *, now: float, root: Optional[Path] = None
+    agents: list[Agent], *, now: float, root: Optional[Path] = None, fetch: bool = True
 ) -> dict[str, Any]:
     from agent.rate_limit_tracker import load_codex_quota
     from korra_constants import get_default_hermes_root
@@ -1224,7 +1224,8 @@ def quota_section(
     installation = Path(root) if root is not None else get_default_hermes_root()
     if not _codex_connected(agents, installation):
         return {"available": False, "status": "absent"}
-    refresh_codex_quota(agents, installation, now=now, root=root)
+    if fetch:
+        refresh_codex_quota(agents, installation, now=now, root=root)
     data = load_codex_quota(root=root)
     if data is None:
         return {"available": True, "status": "waiting"}
@@ -1372,16 +1373,37 @@ def _reset_codex_limit(redeem_codex_reset_credit, get_default_hermes_root, now, 
             "quota": quota_section(roster, now=current, root=root),
         }
     token, account_id, base_url, source = credentials
-    refresh_codex_quota(roster, installation, now=current, root=root, force=True)
-    before = quota_section(roster, now=current, root=root)
+    key = str(installation)
+    with _codex_poll_lock:
+        held_back = current < _codex_poll_next.get(key, 0.0)
+    if held_back:
+        # Codex was asked a moment ago (or failed and is resting): a click is
+        # no reason to ask again unless the stored value still offers a reset.
+        stored = quota_section(roster, now=current, root=root, fetch=False)
+        if not stored.get("can_reset"):
+            status = "not_exhausted" if stored.get("status") == "ok" else "unavailable"
+            return {"ok": False, "status": status, "message": _RESET_MESSAGES[status], "quota": stored}
+
+    def keep_decision_read(payload: dict) -> None:
+        from agent.rate_limit_tracker import parse_codex_usage_payload, record_codex_quota
+
+        snapshot = parse_codex_usage_payload(payload, now=current)
+        if snapshot is not None:
+            record_codex_quota(snapshot, root=root, force=True)
+        with _codex_poll_lock:
+            _codex_poll_next[key] = max(_codex_poll_next.get(key, 0.0), current + _CODEX_POLL_FRESH_SECONDS)
+
     try:
+        # The decision is made on the backend's own fresh answer (``require_offer``),
+        # which is also the one read of this attempt; it is kept as the stored value.
         result = redeem_codex_reset_credit(
             api_key=token,
             base_url=base_url,
             account_id=account_id,
-            force=bool(before.get("can_reset")),
+            force=True,
             require_offer=True,
             auth_path=source,
+            on_usage=keep_decision_read,
         )
     except Exception:
         logger.exception("dashboard: Codex reset failed")
@@ -1393,7 +1415,11 @@ def _reset_codex_limit(redeem_codex_reset_credit, get_default_hermes_root, now, 
             message += f" В запасе осталось {_spares(left)}." if left else " Запасных сбросов больше нет."
         else:
             message = _RESET_MESSAGES.get(status, _RESET_MESSAGES["unavailable"])
-    refresh_codex_quota(roster, installation, now=current, root=root, force=True)
+    if status == "reset":
+        refresh_codex_quota(roster, installation, now=current, root=root, force=True)
+    elif status == "unavailable":
+        with _codex_poll_lock:
+            _codex_poll_next[key] = max(_codex_poll_next.get(key, 0.0), current + _CODEX_POLL_PAUSE_SECONDS)
     with _cache_lock:
         for key in [key for key in _cache if key[0] in ("quota", "attention")]:
             del _cache[key]

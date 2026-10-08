@@ -1202,6 +1202,8 @@ def _redeem(monkeypatch, wham, result):
 
     def fake(**kwargs):
         seen.append(kwargs)
+        if kwargs.get("on_usage"):
+            kwargs["on_usage"](wham["answer"])
         if isinstance(result, Exception):
             raise result
         if result.redeemed:
@@ -1230,11 +1232,12 @@ def test_reset_success_returns_the_new_state(tmp_path, owner, wham, monkeypatch)
     assert seen[0]["api_key"].count(".") == 2 and seen[0]["account_id"] == "acc-1" and seen[0]["force"] is True
 
 
-def test_reset_is_not_forced_when_the_limit_is_not_exhausted(tmp_path, owner, wham, monkeypatch):
+def test_reset_leaves_the_decision_to_the_fresh_answer_of_the_backend(tmp_path, owner, wham, monkeypatch):
     seen = _redeem(monkeypatch, wham, _outcome("not_exhausted", 2))
     result = ds.reset_codex_limit(now=NOW, agents=[owner], root=tmp_path)
-    assert seen[0]["force"] is False and result["ok"] is False
+    assert seen[0]["require_offer"] is True and result["ok"] is False
     assert "сохранён" in result["message"] and "English" not in result["message"]
+    assert len(wham["calls"]) == 0
 
 
 @pytest.mark.parametrize(("status", "text"), [
@@ -1405,12 +1408,49 @@ def test_an_old_exhausted_file_does_not_unlock_a_reset_the_backend_would_not_off
         ),
         root=tmp_path, force=True,
     )
-    # ... the panel cannot re-read it just now, and the fresh answer says the limit is fine.
-    backend.usage_errors = [500]
+    # ... and the fresh answer says the limit is fine.
     backend.usage = _usage(36, applicable=0, credits=2)
     result = ds.reset_codex_limit(now=NOW, agents=[owner], root=tmp_path)
     assert backend.consumes() == []
     assert result["status"] == "not_exhausted" and "запасной сброс сохранён" in result["message"]
+
+
+def test_a_failed_decision_read_spends_nothing(tmp_path, owner, backend):
+    backend.usage_errors = [500]
+    result = ds.reset_codex_limit(now=NOW, agents=[owner], root=tmp_path)
+    assert backend.consumes() == [] and result["status"] == "unavailable"
+
+
+def test_rejected_resets_do_not_bypass_the_request_rate(tmp_path, owner, backend):
+    backend.usage = _usage(36, applicable=0, credits=2)
+    reads = lambda: [r for r in backend.requests if r[0] == "GET"]
+    first = ds.reset_codex_limit(now=NOW, agents=[owner], root=tmp_path)
+    assert first["status"] == "not_exhausted" and len(reads()) == 1
+    # The answer of that one read is what the card shows now.
+    assert first["quota"]["status"] == "ok" and first["quota"]["reset_credits"]["available"] == 2
+    second = ds.reset_codex_limit(now=NOW + 30, agents=[owner], root=tmp_path)
+    assert second["status"] == "not_exhausted" and len(reads()) == 1
+    assert backend.consumes() == []
+    # After two minutes a click may ask again, once.
+    ds.reset_codex_limit(now=NOW + 125, agents=[owner], root=tmp_path)
+    assert len(reads()) == 2 and backend.consumes() == []
+
+
+def test_a_failed_attempt_rests_for_ten_minutes(tmp_path, owner, backend):
+    backend.usage_errors = [500]
+    ds.reset_codex_limit(now=NOW, agents=[owner], root=tmp_path)
+    again = ds.reset_codex_limit(now=NOW + 300, agents=[owner], root=tmp_path)
+    assert again["status"] == "unavailable" and len([r for r in backend.requests if r[0] == "GET"]) == 1
+    ds.reset_codex_limit(now=NOW + 601, agents=[owner], root=tmp_path)
+    assert len([r for r in backend.requests if r[0] == "GET"]) == 2
+
+
+def test_a_confirmed_reset_reads_the_limit_once_more(tmp_path, owner, backend):
+    backend.usage = _usage(100, applicable=1, credits=2, reached=True)
+    result = ds.reset_codex_limit(now=NOW, agents=[owner], root=tmp_path)
+    assert result["status"] == "reset" and len(backend.consumes()) == 1
+    assert [r[0] for r in backend.requests] == ["GET", "POST", "GET"]
+    assert result["quota"]["windows"][0]["remaining_percent"] == 100
 
 
 def test_the_guard_refuses_a_real_host(no_real_network):

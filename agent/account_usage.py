@@ -5,7 +5,7 @@ import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 import httpx
 
@@ -669,6 +669,7 @@ def redeem_codex_reset_credit(
     account_id: Optional[str] = None,
     require_offer: bool = False,
     auth_path: Optional[Path] = None,
+    on_usage: Optional[Callable[[dict], None]] = None,
 ) -> CodexResetRedeemResult:
     """Redeem one banked Codex rate-limit reset credit (`/usage reset`).
 
@@ -693,6 +694,8 @@ def redeem_codex_reset_credit(
 
     ``auth_path`` names the ``auth.json`` the token came from: after a
     confirmed reset the pool cooldowns are lifted in exactly that store.
+    ``on_usage`` receives the usage answer read for the decision, so a caller
+    needs no second request to show what the decision was based on.
 
     Never raises: every failure mode returns a ``CodexResetRedeemResult``
     with a user-renderable message.
@@ -721,6 +724,11 @@ def redeem_codex_reset_credit(
             usage_resp = client.get(usage_url, headers=headers)
             usage_resp.raise_for_status()
             payload = usage_resp.json() or {}
+            if on_usage is not None:
+                try:
+                    on_usage(payload)
+                except Exception:
+                    logger.debug("Codex usage listener failed", exc_info=True)
 
             reset_credits = payload.get("rate_limit_reset_credits") or {}
             raw_count = reset_credits.get("available_count")
