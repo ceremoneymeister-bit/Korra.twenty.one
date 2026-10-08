@@ -1067,8 +1067,8 @@ _FORECAST_MIN_USED = 5.0
 
 def _codex_credentials(
     agents: list[Agent], root: Path, now: float
-) -> Optional[tuple[str, Optional[str], Optional[str]]]:
-    """``(access token, account id, base url)`` to read the usage with, or ``None``.
+) -> Optional[tuple[str, Optional[str], Optional[str], Path]]:
+    """``(access token, account id, base url, auth.json)`` to read the usage with, or ``None``.
 
     Read-only on purpose: the refresh token is single-use and belongs to the
     agents, so the panel never refreshes, recovers or writes a login. An
@@ -1112,6 +1112,7 @@ def _codex_credentials(
                 token.strip(),
                 str(account).strip() if isinstance(account, str) and account.strip() else None,
                 base_url.strip() if isinstance(base_url, str) and base_url.strip() else None,
+                auth,
             )
     return None
 
@@ -1139,7 +1140,7 @@ def refresh_codex_quota(
         credentials = _codex_credentials(agents, installation, now)
         if credentials is None:
             return False
-        token, account_id, base_url = credentials
+        token, account_id, base_url, _source = credentials
         _codex_poll_next[key] = now + _CODEX_POLL_FRESH_SECONDS
         try:
             from agent.account_usage import fetch_codex_usage_payload
@@ -1370,7 +1371,7 @@ def _reset_codex_limit(redeem_codex_reset_credit, get_default_hermes_root, now, 
             "message": "Сейчас нет действующего входа в Codex, запасной сброс не потрачен. Попробуйте позже.",
             "quota": quota_section(roster, now=current, root=root),
         }
-    token, account_id, base_url = credentials
+    token, account_id, base_url, source = credentials
     refresh_codex_quota(roster, installation, now=current, root=root, force=True)
     before = quota_section(roster, now=current, root=root)
     try:
@@ -1380,6 +1381,7 @@ def _reset_codex_limit(redeem_codex_reset_credit, get_default_hermes_root, now, 
             account_id=account_id,
             force=bool(before.get("can_reset")),
             require_offer=True,
+            auth_path=source,
         )
     except Exception:
         logger.exception("dashboard: Codex reset failed")

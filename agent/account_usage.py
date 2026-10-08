@@ -4,6 +4,7 @@ import logging
 import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
 import httpx
@@ -667,6 +668,7 @@ def redeem_codex_reset_credit(
     force: bool = False,
     account_id: Optional[str] = None,
     require_offer: bool = False,
+    auth_path: Optional[Path] = None,
 ) -> CodexResetRedeemResult:
     """Redeem one banked Codex rate-limit reset credit (`/usage reset`).
 
@@ -688,6 +690,9 @@ def redeem_codex_reset_credit(
     (the dashboard button): a reset below 100 % is spent only when this very
     answer of the backend offers one (``applicable_available_count`` > 0 or
     ``limit_reached``), never on the caller's older reading.
+
+    ``auth_path`` names the ``auth.json`` the token came from: after a
+    confirmed reset the pool cooldowns are lifted in exactly that store.
 
     Never raises: every failure mode returns a ``CodexResetRedeemResult``
     with a user-renderable message.
@@ -797,7 +802,7 @@ def redeem_codex_reset_credit(
         try:
             from korra_cli.auth import clear_codex_pool_quota_cooldowns
 
-            clear_codex_pool_quota_cooldowns()
+            clear_codex_pool_quota_cooldowns(auth_path=auth_path)
         except Exception:
             logger.debug(
                 "Failed to clear Codex pool cooldowns after reset redemption",

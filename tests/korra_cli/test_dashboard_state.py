@@ -1367,6 +1367,32 @@ def test_a_reset_post_for_an_exhausted_limit_spends_exactly_one(tmp_path, owner,
     assert result["quota"]["windows"][0]["remaining_percent"] == 100
 
 
+def test_a_reset_lifts_the_cooldown_in_the_profile_store_the_token_came_from(tmp_path, backend):
+    writer = _agent(tmp_path, "writer", "Писатель")
+    token = _jwt()
+    tokens = {"access_token": token, "refresh_token": "rt-secret"}
+    frozen = {
+        "id": "p1", **tokens, "last_status": "exhausted", "last_status_at": NOW - 60,
+        "last_error_code": 429, "last_error_reason": "usage_limit_reached",
+        "last_error_message": "The usage limit has been reached", "last_error_reset_at": NOW + 3600,
+    }
+    auth = writer.home / "auth.json"
+    auth.write_text(json.dumps({
+        "version": 1, "providers": {"openai-codex": {"tokens": tokens}},
+        "credential_pool": {"openai-codex": [frozen]},
+    }), encoding="utf-8")
+    environment = dict(os.environ)
+    backend.usage = _usage(100, applicable=1, credits=2, reached=True)
+    result = ds.reset_codex_limit(now=NOW, agents=[writer], root=tmp_path)
+    assert result["status"] == "reset" and len(backend.consumes()) == 1
+    store = json.loads(auth.read_text(encoding="utf-8"))
+    entry = store["credential_pool"]["openai-codex"][0]
+    assert entry["last_status"] is None and entry["last_error_reset_at"] is None
+    assert entry["access_token"] == token and entry["refresh_token"] == "rt-secret"
+    assert store["providers"]["openai-codex"]["tokens"] == tokens
+    assert dict(os.environ) == environment
+
+
 def test_an_old_exhausted_file_does_not_unlock_a_reset_the_backend_would_not_offer(tmp_path, owner, backend):
     from agent.rate_limit_tracker import CodexQuotaSnapshot, CodexQuotaWindow, record_codex_quota
 
