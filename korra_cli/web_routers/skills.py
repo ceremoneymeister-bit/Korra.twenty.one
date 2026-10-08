@@ -490,6 +490,7 @@ async def set_skill_auto_load(body: SkillAutoLoad, profile: Optional[str] = None
     """«В каждом чате»: закрепить навык (или снять) в ``skills.auto_load`` профиля."""
     from agent.skill_commands import AUTO_LOAD_MAX_CHARS, resolve_auto_load_skills
     from korra_cli.config import save_config
+    from korra_cli.skills_config import get_disabled_skills
     from tools.skill_manager_tool import _find_skill
 
     def _skill_chars(name: str) -> int:
@@ -507,6 +508,11 @@ async def set_skill_auto_load(body: SkillAutoLoad, profile: Optional[str] = None
                 if body.enabled and body.name not in pinned:
                     if not _find_skill(body.name):
                         raise HTTPException(status_code=404, detail=f"Навык «{body.name}» не найден.")
+                    if body.name in get_disabled_skills(config):
+                        raise HTTPException(
+                            status_code=409,
+                            detail=f"Навык «{body.name}» выключен: сначала его должен включить администратор.",
+                        )
                     total = sum(_skill_chars(n) + 500 for n in [*pinned, body.name])
                     if total > AUTO_LOAD_MAX_CHARS:
                         raise HTTPException(

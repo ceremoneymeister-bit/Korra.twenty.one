@@ -40,6 +40,16 @@ it("offers folder creation only on the exact files_mkdir hint, not on the wider 
   expect(legacyAdmin.restrictedFiles).toBe(false);
   expect(legacyAdmin.canCreateFolders).toBe(false);
 });
+it("opens the auto-load switch only on the exact skills_auto_load hint", async () => {
+  const client = await probe({ kind: "cabinet", mode: "client", capabilities: { skills_auto_load: true, skills_manage: false } });
+  expect(client.canPinSkills).toBe(true);
+  expect(client.canManageSkills).toBe(false);
+  // Старый кабинет подсказку не присылает — переключателя нет.
+  const legacy = await probe({ kind: "cabinet", mode: "client", capabilities: { skills_manage: false } });
+  expect(legacy.canPinSkills).toBe(false);
+  const loose = await probe({ kind: "cabinet", mode: "client", capabilities: { skills_auto_load: "true" } });
+  expect(loose.canPinSkills).toBe(false);
+});
 it("keeps standalone controls and does not probe a nonexistent cabinet", async () => {
   state.base = "";
   const result = await probe({});
