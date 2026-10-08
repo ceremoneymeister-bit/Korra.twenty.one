@@ -474,6 +474,65 @@ describe("«Лимит Codex»", () => {
     served = dashboardStateFixture({ quota });
   }
 
+  function usage(count = 7): NonNullable<DashboardQuota["usage_by_agent"]> {
+    const agents = Array.from({ length: count }, (_, i) => ({
+      profile: `agent-${i}`, name: `Агент ${i + 1}`, status: "ok" as const,
+      calls: 10 - i, output_tokens: (10 - i) * 100, share_percent: (10 - i) * 2,
+      tracked_since: FIXTURE_NOW - 14 * 86400,
+    }));
+    return {
+      status: "ok", period: { starts_at: FIXTURE_NOW - 86400, ends_at: FIXTURE_NOW, window_minutes: WEEK, resets_at: RESETS_AT },
+      measure: "output_tokens", agents,
+      total: { calls: agents.reduce((sum, a) => sum + a.calls, 0), output_tokens: agents.reduce((sum, a) => sum + a.output_tokens, 0) },
+      calculated_at: FIXTURE_NOW, unreadable: [], incomplete: [],
+    };
+  }
+
+  it("L: пять агентов, доли установки отдельно от лимита, остаток одной строкой", async () => {
+    serveQuota(quotaOf([win()], { usage_by_agent: usage() }));
+    await mount(CODEX_QUOTA_WIDGET, "l");
+    expect(text()).toContain("Кто тратил с начала недели");
+    expect(text()).toContain("Только агенты этой установки");
+    expect(text()).toContain("Доля расхода установки");
+    expect(text()).toContain("ещё 2 агента");
+    expect(container.querySelectorAll(".kdw-usage-list li")).toHaveLength(5);
+    expect(text()).not.toContain("Агент 6");
+    expect(text()).toContain("10 обращений");
+    const share = container.querySelector('[aria-label="Агент 1: доля расхода установки"]');
+    expect(share?.getAttribute("aria-valuenow")).toBe("20");
+    expect(share?.querySelector("i")?.style.width).toBe("20%");
+    expect(text()).toContain("64 % осталось");
+  });
+
+  it.each(["s", "m"] as const)("%s: блок расхода не появляется", async (size) => {
+    serveQuota(quotaOf([win()], { usage_by_agent: usage() }));
+    await mount(CODEX_QUOTA_WIDGET, size);
+    expect(container.querySelector(".kdw-usage")).toBeNull();
+  });
+
+  it("L: пустая неделя", async () => {
+    serveQuota(quotaOf([win()], { usage_by_agent: usage(0) }));
+    await mount(CODEX_QUOTA_WIDGET, "l");
+    expect(text()).toContain("На этой неделе агенты ещё не обращались к Codex");
+    expect(container.querySelector(".kdw-usage-list")).toBeNull();
+  });
+
+  it("L: неполный учёт не выдаёт пустую неделю за отсутствие обращений", async () => {
+    serveQuota(quotaOf([win()], { usage_by_agent: { ...usage(0), status: "partial", incomplete: [""] } }));
+    await mount(CODEX_QUOTA_WIDGET, "l");
+    expect(text()).toContain("Данные за период неполные");
+    expect(text()).not.toContain("агенты ещё не обращались");
+  });
+
+  it("L: без окна расход за 7 дней виден даже до получения квоты", async () => {
+    const recent = usage(2);
+    recent.period.window_minutes = null;
+    serveQuota({ available: true, status: "waiting", usage_by_agent: recent });
+    await mount(CODEX_QUOTA_WIDGET, "l");
+    expect(text()).toContain("Кто тратил за 7 дней");
+    expect(text()).toContain("Агент 1");
+  });
+
   const meters = () => Array.from(container.querySelectorAll<HTMLElement>('[role="meter"]'));
   const dialog = () => document.body.querySelector<HTMLElement>('[role="dialog"]');
   const buttonByText = (scope: ParentNode, label: string) =>

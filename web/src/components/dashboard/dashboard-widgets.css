@@ -1648,3 +1648,124 @@
     background: Highlight;
   }
 }
+
+/* Доли внутри установки, отдельно от оставшегося лимита подписки. */
+.kdw-usage {
+  min-width: 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--kdw-hairline);
+}
+
+.kdw-usage h3 {
+  margin: 0 0 4px;
+  font-size: 13px;
+  line-height: 1.2;
+  font-weight: 600;
+  color: var(--kdw-ink);
+}
+
+.kdw-usage-note {
+  margin: 4px 0 0;
+  color: var(--kdw-muted);
+  font-size: 11px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.kdw-usage-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 9px;
+}
+
+.kdw-usage-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 1px 8px;
+  font-size: 12px;
+  line-height: 1.2;
+  color: var(--kdw-ink);
+}
+
+.kdw-usage-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kdw-usage-percent,
+.kdw-usage-calls {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.kdw-usage-calls {
+  grid-column: 3;
+  grid-row: 1;
+  font-size: 11px;
+  color: var(--kdw-muted);
+}
+
+.kdw-usage-bar {
+  grid-column: 1 / -1;
+  align-self: center;
+  height: 2px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--kdw-hairline);
+}
+
+.kdw-usage-bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--kdw-accent);
+}
+
+.kdw-quota--with-usage {
+  gap: 8px;
+}
+
+.kdw-quota--with-usage .kdw-limit-windows {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px;
+}
+
+.kdw-quota--with-usage .kdw-limit {
+  gap: 3px;
+}
+
+.kdw-quota--with-usage .kdw-limit-pct strong {
+  font-size: 18px;
+}
+
+.kdw-quota--with-usage .kdw-limit-sub,
+.kdw-quota--with-usage .kdw-limit-say {
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.kdw-quota--with-usage .kdw-usage {
+  padding-top: 6px;
+}
+
+.kdw-quota--with-usage .kdw-usage-list {
+  margin-top: 4px;
+  gap: 3px;
+}
+
+.kdw-quota--with-usage .kdw-limit-top {
+  gap: 6px;
+}
+
+.kdw-quota--with-usage .kdw-limit-pct {
+  font-size: 11px;
+}
+
+.kdw-quota--with-usage .kdw-limit-pct small {
+  font-size: 11px;
+}

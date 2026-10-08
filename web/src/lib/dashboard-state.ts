@@ -157,7 +157,27 @@ export interface QuotaResetCredits {
   applicable: number;
 }
 
+export interface CodexUsageByAgent {
+  status: "ok" | "partial";
+  period: { starts_at: number; ends_at: number; window_minutes: number | null; resets_at: number | null };
+  measure: "output_tokens";
+  agents: {
+    profile: string;
+    name: string;
+    status: "ok" | "partial" | "untracked" | "error";
+    calls: number | null;
+    output_tokens: number | null;
+    share_percent: number | null;
+    tracked_since: number | null;
+  }[];
+  total: { calls: number; output_tokens: number };
+  calculated_at: number;
+  unreadable: string[];
+  incomplete: string[];
+}
+
 export interface DashboardQuota {
+  usage_by_agent?: CodexUsageByAgent;
   available: boolean;
   status: "absent" | "waiting" | "ok" | "error";
   level?: QuotaLevel;

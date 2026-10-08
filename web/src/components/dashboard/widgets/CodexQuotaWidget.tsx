@@ -36,6 +36,8 @@ import {
   dashboardTimeZone,
   formatMoment,
   formatRelative,
+  plural,
+  type CodexUsageByAgent,
   refreshDashboardState,
   type DashboardQuota,
   type DashboardState,
@@ -115,13 +117,19 @@ function QuotaBody({ size = "m" }: DashboardWidgetBodyProps) {
     );
   }
   if (quota.status === "waiting" || !quota.windows?.length) {
-    return (
+    const waiting = (
       <FirstStep
         size={size}
         title="Лимит пока не известен"
         text="Codex ещё не сообщил лимит. Он появится при ближайшем запросе или ответе агента через подписку ChatGPT."
       />
     );
+    return size === "l" && quota.usage_by_agent ? (
+      <div className="kdw-quota">
+        {waiting}
+        <UsageByAgent usage={quota.usage_by_agent} />
+      </div>
+    ) : waiting;
   }
 
   return <QuotaReady quota={quota} size={size} now={now} state={state} />;
@@ -129,6 +137,7 @@ function QuotaBody({ size = "m" }: DashboardWidgetBodyProps) {
 
 function QuotaLine({
   blocked,
+  compact = false,
   now,
   size,
   thin,
@@ -136,6 +145,7 @@ function QuotaLine({
   window,
 }: {
   blocked: boolean;
+  compact?: boolean;
   now: number;
   size: "s" | "m" | "l";
   thin: boolean;
@@ -170,7 +180,7 @@ function QuotaLine({
       </div>
       {window.resets_at ? (
         <p className="kdw-limit-sub">
-          {size === "s"
+          {size === "s" || compact
             ? `сброс ${resetShort(window.resets_at, now, timeZone)}`
             : blocked
               ? `Агенты не ответят до сброса: ${resetLine(window.resets_at, now, timeZone)}`
@@ -226,6 +236,48 @@ function ForecastLine({
   );
 }
 
+function UsageByAgent({ usage }: { usage: CodexUsageByAgent }) {
+  const minutes = usage.period.window_minutes;
+  const weekly = minutes === 10080;
+  const heading = weekly ? "Кто тратил с начала недели"
+    : minutes ? "Кто тратил с начала окна" : "Кто тратил за 7 дней";
+  const active = usage.agents.filter((agent) => (agent.calls ?? 0) > 0 || (agent.output_tokens ?? 0) > 0);
+  const shown = active.slice(0, 5);
+  const more = active.length - shown.length;
+  return (
+    <section className="kdw-usage" aria-label={heading}>
+      <h3>{heading}</h3>
+      {shown.length ? (
+        <>
+          <span className="sr-only">Доля расхода установки по токенам ответа и рассуждений</span>
+          <ul className="kdw-usage-list">
+            {shown.map((agent) => {
+              const share = Math.max(0, Math.min(100, agent.share_percent ?? 0));
+              const calls = agent.calls ?? 0;
+              return (
+                <li key={agent.profile}>
+                  <span className="kdw-usage-name" title={agent.name}>{agent.name}</span>
+                  <span className="kdw-usage-percent">{Math.round(share)} %</span>
+                  <span className="kdw-usage-calls">{calls.toLocaleString("ru-RU")} {plural(calls, ["обращение", "обращения", "обращений"])}</span>
+                  <div className="kdw-usage-bar" role="meter" aria-label={`${agent.name}: доля расхода установки`}
+                    aria-valuemin={0} aria-valuemax={100} aria-valuenow={share}>
+                    <i style={{ width: `${share}%` }} />
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+          {more > 0 ? <p className="kdw-usage-note">ещё {more} {plural(more, ["агент", "агента", "агентов"])}</p> : null}
+        </>
+      ) : usage.status === "ok" ? (
+        <p className="kdw-usage-note">{weekly ? "На этой неделе" : "За этот период"} агенты ещё не обращались к Codex</p>
+      ) : <p className="kdw-usage-note">Пока нет данных об обращениях агентов к Codex</p>}
+      {usage.status === "partial" ? <p className="kdw-usage-note">Данные за период неполные.</p> : null}
+      <p className="kdw-usage-note" title="Доля расхода установки по токенам ответа и рассуждений">Только агенты этой установки</p>
+    </section>
+  );
+}
+
 function QuotaReady({
   now,
   quota,
@@ -245,24 +297,27 @@ function QuotaReady({
   const spares = credits && credits.available > 0 ? credits.available : 0;
   const [resetMessage, setResetMessage] = useState<string | null>(null);
   const keepHint = keepResetHint(quota, now);
+  const usage = size === "l" ? quota.usage_by_agent : undefined;
+  const lines = windows.map((window) => (
+    <QuotaLine
+      key={window.key}
+      window={window}
+      blocked={blocked?.key === window.key}
+      compact={!!usage}
+      now={now}
+      size={size}
+      thin={windows.length > 1}
+      timeZone={timeZone}
+    />
+  ));
 
   return (
     <div
       id="codex-quota"
-      className={cn("kdw-quota", `kdw-quota--${size}`)}
+      className={cn("kdw-quota", `kdw-quota--${size}`, usage && "kdw-quota--with-usage")}
       data-quota-level={level}
     >
-      {windows.map((window) => (
-        <QuotaLine
-          key={window.key}
-          window={window}
-          blocked={blocked?.key === window.key}
-          now={now}
-          size={size}
-          thin={windows.length > 1}
-          timeZone={timeZone}
-        />
-      ))}
+      {usage ? <div className="kdw-limit-windows">{lines}</div> : lines}
       {blocked ? (
         <p className="kdw-limit-say" data-level="critical" role="alert">
           <span className="kdw-limit-dot" aria-hidden />
@@ -276,6 +331,7 @@ function QuotaReady({
       ) : (
         <ForecastLine quota={quota} size={size} now={now} timeZone={timeZone} />
       )}
+      {usage ? <UsageByAgent usage={usage} /> : null}
       {resetMessage && size !== "s" ? (
         <p className="kdw-limit-message" role="status">
           {resetMessage}
