@@ -190,9 +190,9 @@ def _chat_approval_event(
     event.update({
         "event": "approval.request",
         "session_id": session_id,
-        "choices": (event.get("choices") if event.get("decision_kind") in {
+        "choices": event.get("choices") if event.get("decision_kind") in {
             "kanban_question", "kanban_approval", "kanban_accept",
-        } else None) or _approval_event_choices(
+        } and event.get("choices") is not None else _approval_event_choices(
             smart_denied=bool(event.get("smart_denied")),
             allow_session=event.get("allow_session") is not False,
             allow_permanent=allow_permanent,

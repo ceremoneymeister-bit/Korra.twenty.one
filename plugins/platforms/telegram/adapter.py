@@ -6808,7 +6808,8 @@ class TelegramAdapter(BasePlatformAdapter):
                     )
             board_kind = (metadata or {}).get("decision_kind", "")
             if board_kind == "kanban_question":
-                buttons = [InlineKeyboardButton("Продолжить как предложено", callback_data=f"ea:once:{approval_id}")]
+                buttons = ([InlineKeyboardButton("Продолжить как предложено", callback_data=f"ea:once:{approval_id}")]
+                           if (metadata or {}).get("choices", ["once"]) else [])
             elif board_kind == "kanban_accept":
                 buttons = [InlineKeyboardButton("Принять результат", callback_data=f"ea:once:{approval_id}"),
                            InlineKeyboardButton("Вернуть с замечанием", callback_data=f"ea:deny:{approval_id}")]
@@ -6817,7 +6818,7 @@ class TelegramAdapter(BasePlatformAdapter):
             # Pair into rows (2x2 for the full set) so labels stay readable on
             # mobile — a single 4-button row truncates to "Allo… / Ses… / …".
             rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
-            keyboard = InlineKeyboardMarkup(rows)
+            keyboard = InlineKeyboardMarkup(rows) if rows else None
 
             kwargs: Dict[str, Any] = {
                 "chat_id": normalize_telegram_chat_id(chat_id),

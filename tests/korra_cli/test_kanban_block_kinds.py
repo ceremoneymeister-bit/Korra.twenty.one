@@ -67,7 +67,11 @@ def test_block_loop_detected_event_emitted(kanban_home: Path) -> None:
     with kb.connect_closing() as conn:
         tid = _running_task(conn)
         kb.block_task(conn, tid, reason="x", kind="capability")
-        kb.unblock_task(conn, tid)
+        # The owner answered, yet the worker blocks for the same cause again.
+        assert kb.respond_to_block(
+            conn, tid, answer="Доступ добавлен", author="Владелец",
+            request_id="r-1", revision=kb.block_revision(conn, tid),
+        )["ok"]
         _make_running_again(conn, tid)
         kb.block_task(conn, tid, reason="x", kind="capability")
         events = [e for e in kb.list_events(conn, tid)

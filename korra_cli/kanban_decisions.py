@@ -55,6 +55,9 @@ def project_task(conn, task, board: str) -> dict | None:
     event = conn.execute("SELECT created_at FROM task_events WHERE id=?", (version,)).fetchone()
     url = "/kanban?" + urlencode({"board": board, "task": task.id})
     choices = ["once"] if kind == "question" else ["once", "deny"]
+    if kind == "question" and (task.block_kind == "capability" or task.status == "triage"):
+        # Continuing "as proposed" changes nothing here: the card needs words.
+        choices = []
     description = "Ждёт вас. Ответ относится только к показанной версии поручения."
     if kind == "accept" and not task.assignee:
         choices = ["once"]
@@ -150,10 +153,12 @@ def resolve(request_id: str, choice: str, *, source_session_id: str, answer: str
                 raise KanbanDecisionConflict("На этот вопрос нужен ответ.")
             outcome = kb.respond_to_block(
                 conn, task_id, author="Владелец", request_id=action_id, revision=version,
-                answer=answer.strip() or ("Продолжайте, как вы предложили." if kind == "question" else None),
+                answer=answer.strip() or (kb.CONTINUE_AS_PROPOSED if kind == "question" else None),
                 decision=("grant" if choice == "once" else "deny") if kind == "approval" else None,
             )
         if not outcome["ok"]:
+            if outcome.get("reason") == "answer_required":
+                raise KanbanDecisionConflict("Напишите, что изменить или добавить: без этого поручение снова остановится.")
             if outcome.get("reason") == "assignee_required":
                 raise KanbanDecisionConflict("Назначьте исполнителя перед возвратом на доработку.")
             raise KanbanDecisionConflict("Вопрос уже решён или версия изменилась. Откройте текущую карточку.")

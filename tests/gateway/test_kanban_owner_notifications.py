@@ -237,3 +237,25 @@ def test_new_version_after_owner_remark_is_marked(tmp_path, monkeypatch):
     assert len(sent) == 2, sent
     assert "новая версия" not in sent[0]["text"]
     assert "новая версия" in sent[1]["text"]
+
+
+def test_same_question_repeated_without_news_pings_once(tmp_path, monkeypatch):
+    _board(tmp_path, monkeypatch, "repeat")
+    conn = kb.connect()
+    try:
+        tid = kb.create_task(conn, title="Замены", assignee="rop")
+        kb.add_notify_sub(conn, task_id=tid, platform="telegram", chat_id="chat-1")
+        kb.claim_task(conn, tid, claimer="w")
+        kb.block_task(conn, tid, reason="Укажите, на какой адрес отправлять договор клиенту", kind="needs_input")
+        sent = _run(monkeypatch)
+        for reason in ("Укажите, на какой адрес отправлять договор клиенту",
+                       "На какой адрес нужно отправить договор клиента? Укажите адрес"):
+            kb.unblock_task(conn, tid)
+            with kb.write_txn(conn):
+                conn.execute("UPDATE tasks SET status='ready' WHERE id=?", (tid,))
+            kb.claim_task(conn, tid, claimer="w")
+            kb.block_task(conn, tid, reason=reason, kind="needs_input")
+            sent += _run(monkeypatch)
+    finally:
+        conn.close()
+    assert len(sent) == 1
