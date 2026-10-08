@@ -1,7 +1,7 @@
 """Квитанция фонового разбора: что агент сохранил и как это отменить.
 
 Разбор (``agent.background_review``) пишет навыки и память штатными
-инструментами. Здесь по его сообщениям и по снимку файлов памяти собирается
+инструментами. Здесь по сообщениям разбора (ответы вызовов навыков и памяти) собирается
 короткая квитанция: какие навыки изменены (id записей журнала
 ``tools.skill_ledger``) и какие записи памяти добавлены или убраны. По ней
 веб-чат показывает человеку «Учёл: …» и умеет отменить именно это изменение —
@@ -35,24 +35,16 @@ def snapshot_memory() -> Dict[str, Optional[List[str]]]:
     return snap
 
 
-def _multiset_diff(before: List[str], after: List[str]) -> List[str]:
-    """Записи из ``after``, которых нет в ``before`` (с учётом повторов)."""
-    remaining = list(before)
-    extra: List[str] = []
-    for entry in after:
-        if entry in remaining:
-            remaining.remove(entry)
-        else:
-            extra.append(entry)
-    return extra
-
-
-def _skill_changes(review_messages: List[Dict], prior_snapshot: List[Dict]) -> List[Dict[str, Any]]:
-    seen_ids = {
+def _seen_tool_ids(prior_snapshot: List[Dict]) -> set:
+    return {
         m.get("tool_call_id")
         for m in prior_snapshot or []
         if isinstance(m, dict) and m.get("role") == "tool" and m.get("tool_call_id")
     }
+
+
+def _skill_changes(review_messages: List[Dict], prior_snapshot: List[Dict]) -> List[Dict[str, Any]]:
+    seen_ids = _seen_tool_ids(prior_snapshot)
     calls: Dict[str, Dict[str, Any]] = {}
     for msg in review_messages or []:
         if not isinstance(msg, dict) or msg.get("role") != "assistant":
@@ -107,13 +99,16 @@ def _skill_changes(review_messages: List[Dict], prior_snapshot: List[Dict]) -> L
 
 
 def build_review_receipt(
-    review_messages: List[Dict],
-    prior_snapshot: List[Dict],
-    memory_before: Optional[Dict[str, Optional[List[str]]]],
+    review_messages: List[Dict], prior_snapshot: List[Dict]
 ) -> Optional[Dict[str, Any]]:
-    """Квитанция разбора или ``None``, если ничего не сохранено."""
+    """Квитанция разбора или ``None``, если ничего не сохранено.
+
+    Память — только то, что вернули вызовы ``memory`` самого разбора (сообщения
+    форка); без сообщений форка память в квитанцию не попадает.
+    """
     return _assemble(
-        _skill_changes(review_messages, prior_snapshot), _memory_diff(memory_before)
+        _skill_changes(review_messages, prior_snapshot),
+        _memory_changes(review_messages, prior_snapshot),
     )
 
 
@@ -134,12 +129,15 @@ def _cancel(added: List[str], removed: List[str]) -> None:
             removed.remove(entry)
 
 
-def _memory_changes(turn_messages: List[Dict]) -> List[Dict[str, Any]]:
-    """Изменения памяти, которые вернули успешные вызовы ``memory`` этого хода.
+def _memory_changes(
+    turn_messages: List[Dict], prior_snapshot: Optional[List[Dict]] = None
+) -> List[Dict[str, Any]]:
+    """Изменения памяти, которые вернули успешные вызовы ``memory`` этого хода или разбора.
 
     Инструмент в ответе перечисляет, какие записи он добавил и убрал
     (``changes``), поэтому чужие записи других чатов в квитанцию не попадают.
     """
+    seen_ids = _seen_tool_ids(prior_snapshot or [])
     memory_calls = set()
     for msg in turn_messages:
         if isinstance(msg, dict) and msg.get("role") == "assistant":
@@ -151,7 +149,7 @@ def _memory_changes(turn_messages: List[Dict]) -> List[Dict[str, Any]]:
     for msg in turn_messages:
         if not isinstance(msg, dict) or msg.get("role") != "tool":
             continue
-        if msg.get("tool_call_id") not in memory_calls:
+        if msg.get("tool_call_id") not in memory_calls or msg.get("tool_call_id") in seen_ids:
             continue
         try:
             data = json.loads(msg.get("content", "{}"))
@@ -206,24 +204,6 @@ def merge_receipts(base: Dict[str, Any], extra: Dict[str, Any]) -> Dict[str, Any
         "skills": list(skills.values()),
         "memory": [m for m in memory.values() if m["added"] or m["removed"]],
     }
-
-
-def _memory_diff(
-    memory_before: Optional[Dict[str, Optional[List[str]]]],
-) -> List[Dict[str, Any]]:
-    """Изменения памяти фонового разбора: разница снимка до и файлов после."""
-    memory: List[Dict[str, Any]] = []
-    if memory_before:
-        after_snap = snapshot_memory()
-        for target, before in memory_before.items():
-            after = after_snap.get(target)
-            if before is None or after is None:
-                continue
-            added = _multiset_diff(before, after)
-            removed = _multiset_diff(after, before)
-            if added or removed:
-                memory.append({"target": target, "added": added, "removed": removed})
-    return memory
 
 
 def _assemble(

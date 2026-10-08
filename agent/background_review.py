@@ -857,25 +857,14 @@ _COMBINED_REVIEW_PROMPT = (
 
 
 
-def _snapshot_memory_for_receipt() -> Optional[Dict[str, Any]]:
-    try:
-        from agent.learning_receipt import snapshot_memory
-
-        return snapshot_memory()
-    except Exception:
-        logger.debug("memory snapshot for review receipt failed", exc_info=True)
-        return None
-
-
 def _build_receipt_for_callback(
     review_messages: List[Dict],
     messages_snapshot: List[Dict],
-    memory_before: Optional[Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
     try:
         from agent.learning_receipt import build_review_receipt
 
-        return build_review_receipt(review_messages, messages_snapshot, memory_before)
+        return build_review_receipt(review_messages, messages_snapshot)
     except Exception:
         logger.debug("review receipt build failed", exc_info=True)
         return None
@@ -1787,7 +1776,6 @@ def _run_review_in_thread(
         finish_background_review_run(agent, review_run)
 
     try:
-        memory_before = _snapshot_memory_for_receipt()
         # Silence stdout/stderr for THIS worker thread only.  A process-global
         # ``contextlib.redirect_stdout(devnull)`` here would also blank
         # ``sys.stdout``/``sys.stderr`` for every other thread — including a
@@ -1975,7 +1963,7 @@ def _run_review_in_thread(
             _bg_cb = agent.background_review_callback
             if _bg_cb:
                 agent.background_review_receipt = _build_receipt_for_callback(
-                    review_messages, messages_snapshot, memory_before
+                    review_messages, messages_snapshot
                 )
                 try:
                     _bg_cb(
