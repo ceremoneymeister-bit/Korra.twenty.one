@@ -310,7 +310,7 @@ describe("Раскладка дашборда хранится на сервер
     await click(button("Настроить"));
     await click(byLabel("Переместить карточку «Агенты» правее"));
 
-    // Квота Codex на этой установке недоступна: на доске её нет, но
+    // Лимит Codex на этой установке недоступна: на доске её нет, но
     // сохранённая раскладка её помнит и не теряет место.
     expect(api.setDashboardLayout.mock.calls[0][0].order).toEqual([
       "attention",
@@ -407,10 +407,12 @@ describe("Карточки на живой сводке", () => {
     await mount();
   }
 
-  it("квота Codex встаёт на доску и в каталог только там, где есть подписка", async () => {
+  it("лимит Codex встаёт на доску и в каталог только там, где есть подписка", async () => {
     await remount(dashboardStateFixture());
     expect(tiles().map((tile) => tile.id)).toContain("codex-quota");
-    expect(container.querySelector('[data-widget="codex-quota"]')?.textContent).toContain("62 %");
+    expect(container.querySelector('[data-widget="codex-quota"]')?.textContent).toContain("64 % осталось");
+    // Часы страницы настоящие: свежесть в шапке карточки есть, какой бы она ни была.
+    expect(container.querySelector('[data-widget="codex-quota"] [data-testid="quota-updated"]')).not.toBeNull();
     await click(button("Настроить"));
     expect(container.querySelector('[data-catalog-widget="codex-quota"]')).not.toBeNull();
 

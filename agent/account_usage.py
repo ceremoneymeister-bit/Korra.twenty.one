@@ -4,7 +4,8 @@ import logging
 import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Optional
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 import httpx
 
@@ -610,6 +611,35 @@ def _fetch_codex_account_usage(
     )
 
 
+def fetch_codex_usage_payload(
+    token: str,
+    *,
+    account_id: Optional[str] = None,
+    base_url: Optional[str] = None,
+    timeout: float = 5.0,
+) -> dict:
+    """``GET .../usage`` with an access token the caller already has.
+
+    Never refreshes or stores a token: the dashboard calls this from the panel
+    process, and a one-use refresh token must stay with the agents. Raises
+    ``httpx`` errors; a non-JSON answer raises ``ValueError``.
+    """
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json",
+        "User-Agent": "codex-cli",
+    }
+    if account_id:
+        headers["ChatGPT-Account-Id"] = account_id
+    with httpx.Client(timeout=timeout) as client:
+        response = client.get(_codex_backend_urls(base_url or "")[0], headers=headers)
+        response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, dict):
+        raise ValueError("unexpected usage payload")
+    return payload
+
+
 @dataclass(frozen=True)
 class CodexResetRedeemResult:
     """Outcome of a `/usage reset` attempt against the Codex backend."""
@@ -636,6 +666,10 @@ def redeem_codex_reset_credit(
     base_url: Optional[str] = None,
     api_key: Optional[str] = None,
     force: bool = False,
+    account_id: Optional[str] = None,
+    require_offer: bool = False,
+    auth_path: Optional[Path] = None,
+    on_usage: Optional[Callable[[dict], None]] = None,
 ) -> CodexResetRedeemResult:
     """Redeem one banked Codex rate-limit reset credit (`/usage reset`).
 
@@ -653,13 +687,24 @@ def redeem_codex_reset_credit(
        backend picks the next available credit, exactly like the CLI's
        default "Full reset" option.
 
+    ``require_offer`` narrows ``force`` for callers that act on a stored value
+    (the dashboard button): a reset below 100 % is spent only when this very
+    answer of the backend offers one (``applicable_available_count`` > 0 or
+    ``limit_reached``), never on the caller's older reading.
+
+    ``auth_path`` names the ``auth.json`` the token came from: after a
+    confirmed reset the pool cooldowns are lifted in exactly that store.
+    ``on_usage`` receives the usage answer read for the decision, so a caller
+    needs no second request to show what the decision was based on.
+
     Never raises: every failure mode returns a ``CodexResetRedeemResult``
     with a user-renderable message.
     """
     import uuid
 
     try:
-        token, resolved_base_url, account_id = _resolve_codex_usage_credentials(base_url, api_key)
+        token, resolved_base_url, resolved_account_id = _resolve_codex_usage_credentials(base_url, api_key)
+        account_id = account_id or resolved_account_id
     except Exception:
         return CodexResetRedeemResult(
             status="unavailable",
@@ -679,6 +724,11 @@ def redeem_codex_reset_credit(
             usage_resp = client.get(usage_url, headers=headers)
             usage_resp.raise_for_status()
             payload = usage_resp.json() or {}
+            if on_usage is not None:
+                try:
+                    on_usage(payload)
+                except Exception:
+                    logger.debug("Codex usage listener failed", exc_info=True)
 
             reset_credits = payload.get("rate_limit_reset_credits") or {}
             raw_count = reset_credits.get("available_count")
@@ -696,6 +746,12 @@ def redeem_codex_reset_credit(
                 if isinstance(used, (int, float)):
                     worst_used = max(worst_used or 0.0, float(used))
             exhausted = worst_used is not None and worst_used >= _CODEX_WINDOW_EXHAUSTED_PERCENT
+            if force and require_offer and not exhausted:
+                applicable = reset_credits.get("applicable_available_count")
+                offered = (isinstance(applicable, (int, float)) and applicable > 0) or rate_limit.get(
+                    "limit_reached"
+                ) is True
+                force = bool(offered)
             if not exhausted and not force:
                 usage_note = (
                     f"your busiest window is only {worst_used:.0f}% used"
@@ -754,7 +810,7 @@ def redeem_codex_reset_credit(
         try:
             from korra_cli.auth import clear_codex_pool_quota_cooldowns
 
-            clear_codex_pool_quota_cooldowns()
+            clear_codex_pool_quota_cooldowns(auth_path=auth_path)
         except Exception:
             logger.debug(
                 "Failed to clear Codex pool cooldowns after reset redemption",

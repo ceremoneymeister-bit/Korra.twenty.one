@@ -1773,3 +1773,51 @@ def _moa_caches_isolated():
     yield
     moa._preset_cache.clear()
     moa._runtime_cache.clear()
+
+
+@pytest.fixture
+def no_real_network(monkeypatch):
+    """Any socket to a non-local host fails the test, even if the code swallows the error.
+
+    Attempts are recorded and asserted empty at teardown, because the dashboard
+    and the reset code catch ``Exception`` around their requests. A test that
+    replaces the transport (``httpx.MockTransport``) never reaches a socket.
+    Yields the list of refused ``host`` strings.
+    """
+    import socket
+
+    attempts: list[str] = []
+    local = {"localhost", "127.0.0.1", "::1", ""}
+    real_connect, real_connect_ex = socket.socket.connect, socket.socket.connect_ex
+    real_getaddrinfo, real_create = socket.getaddrinfo, socket.create_connection
+
+    def refuse(host) -> None:
+        attempts.append(str(host))
+        raise AssertionError(f"test tried to reach the network: {host}")
+
+    def guarded(real):
+        def wrapper(self, address, *args, **kwargs):
+            if self.family != getattr(socket, "AF_UNIX", None):
+                host = address[0] if isinstance(address, tuple) else address
+                if str(host) not in local:
+                    refuse(host)
+            return real(self, address, *args, **kwargs)
+
+        return wrapper
+
+    def getaddrinfo(host, *args, **kwargs):
+        if host is not None and str(host) not in local:
+            refuse(host)
+        return real_getaddrinfo(host, *args, **kwargs)
+
+    def create_connection(address, *args, **kwargs):
+        if str(address[0]) not in local:
+            refuse(address[0])
+        return real_create(address, *args, **kwargs)
+
+    monkeypatch.setattr(socket.socket, "connect", guarded(real_connect))
+    monkeypatch.setattr(socket.socket, "connect_ex", guarded(real_connect_ex))
+    monkeypatch.setattr(socket, "getaddrinfo", getaddrinfo)
+    monkeypatch.setattr(socket, "create_connection", create_connection)
+    yield attempts
+    assert attempts == [], f"network was touched: {attempts}"

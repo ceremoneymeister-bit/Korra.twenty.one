@@ -982,6 +982,12 @@ class SessionSchemaMixin:
         # column gets created here.
         self._reconcile_columns(cursor)
 
+        # Additive accounting only: never guess timestamps for legacy totals.
+        cursor.execute(
+            "INSERT OR IGNORE INTO state_meta (key, value) VALUES (?, ?)",
+            ("codex_usage_since", str(time.time())),
+        )
+
         # Rebuild gateway_routing if it still carries the pre-scope PRIMARY
         # KEY (session_key alone). ADD COLUMN cannot fix a PK, so this is
         # the one table-shape repair reconciliation can't express.

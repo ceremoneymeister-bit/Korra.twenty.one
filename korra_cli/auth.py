@@ -4162,7 +4162,9 @@ def _probe_codex_quota_restored(
     return result
 
 
-def clear_codex_pool_quota_cooldowns(access_token: Optional[str] = None) -> int:
+def clear_codex_pool_quota_cooldowns(
+    access_token: Optional[str] = None, *, auth_path: Optional[Path] = None
+) -> int:
     """Clear rate-limit cooldowns on persisted openai-codex pool entries.
 
     Called after the upstream quota is KNOWN to be restored (a successful
@@ -4175,6 +4177,10 @@ def clear_codex_pool_quota_cooldowns(access_token: Optional[str] = None) -> int:
     otherwise every rate-limited entry clears (a redeemed banked reset
     restores the whole account, and any entry that is genuinely still
     exhausted just re-freezes with fresh metadata on its next 429).
+
+    When *auth_path* is given, only that ``auth.json`` is cleared, under its own
+    lock, whatever the active home of this process is (a caller that took the
+    credential from a specific store, e.g. an agent profile).
 
     Returns the number of entries cleared.
     """
@@ -4207,6 +4213,14 @@ def clear_codex_pool_quota_cooldowns(access_token: Optional[str] = None) -> int:
         return cleared
 
     try:
+        if auth_path is not None:
+            with _auth_store_lock(target_path=auth_path):
+                store = _load_auth_store(auth_path)
+                cleared = _clear_in_store(store)
+                if cleared:
+                    _save_auth_store(store, target_path=auth_path)
+                return cleared
+
         # Keep profile-wins semantics. A profile with its own Codex rows clears
         # only those rows; a profile borrowing root rows clears the cooldown in
         # the root store where the credential actually lives.

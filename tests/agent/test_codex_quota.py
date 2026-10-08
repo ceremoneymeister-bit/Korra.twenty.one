@@ -18,6 +18,9 @@ from agent import rate_limit_tracker as rlt
 
 RESETS_AT = 1790412544
 
+# Nothing here may reach chatgpt.com: a socket to a foreign host fails the test.
+pytestmark = pytest.mark.usefixtures("no_real_network")
+
 
 @pytest.fixture(autouse=True)
 def _fresh_memo():
@@ -158,3 +161,98 @@ def test_app_server_notification_records_the_quota(tmp_path, monkeypatch):
         "limitId": "codex", "primary": {"usedPercent": 71, "windowDurationMins": 10080, "resetsAt": RESETS_AT},
     }}})
     assert rlt.load_codex_quota()["primary"]["used_percent"] == 71.0
+
+
+# ── 0.21.17: «Лимит Codex» ─────────────────────────────────────────────────
+
+# The answer Codex gave to ``GET wham/usage`` on 08.10 (personal fields removed).
+WHAM_USAGE = {
+    "plan_type": "pro",
+    "rate_limit": {
+        "allowed": True, "limit_reached": False,
+        "primary_window": {"used_percent": 36, "limit_window_seconds": 604800,
+                           "reset_after_seconds": 463773, "reset_at": 1791950457},
+        "secondary_window": None,
+    },
+    "credits": {"has_credits": True, "unlimited": False, "balance": "62500.0"},
+    "rate_limit_reset_credits": {"available_count": 2, "applicable_available_count": 0},
+}
+
+
+def _load_codex_quota_0_21_16(path):
+    """``load_codex_quota`` exactly as 0.21.16 shipped it (de727d7827)."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(data, dict) or data.get("version") != 1:
+        return None
+    primary = data.get("primary")
+    if not isinstance(primary, dict) or rlt._as_float(primary.get("used_percent")) is None:
+        return None
+    if rlt._as_float(data.get("captured_at")) is None:
+        return None
+    return data
+
+
+def test_usage_answer_becomes_a_snapshot():
+    snapshot = rlt.parse_codex_usage_payload(WHAM_USAGE, now=1_791_486_684)
+    assert snapshot.primary == rlt.CodexQuotaWindow(36.0, 10080, 1791950457.0)
+    assert snapshot.secondary is None
+    assert snapshot.plan_type == "pro" and snapshot.source == "usage_api"
+    assert snapshot.limit_reached is False
+    assert snapshot.reset_credits == {"available": 2, "applicable": 0}
+
+
+def test_usage_answer_without_a_reset_time_counts_from_now():
+    payload = {"rate_limit": {"primary_window": {
+        "used_percent": 10, "limit_window_seconds": 18000, "reset_after_seconds": 600}}}
+    snapshot = rlt.parse_codex_usage_payload(payload, now=1000.0)
+    assert snapshot.primary.resets_at == 1600.0 and snapshot.primary.window_minutes == 300
+    assert snapshot.reset_credits is None and snapshot.limit_reached is None
+
+
+@pytest.mark.parametrize("payload", [None, [], {}, {"rate_limit": None}, {"rate_limit": {"primary_window": {}}}])
+def test_unusable_usage_answer_is_not_a_snapshot(payload):
+    assert rlt.parse_codex_usage_payload(payload, now=1.0) is None
+
+
+def test_headers_do_not_invent_a_second_window():
+    """The window with no length and 0 % was shown as «окно · сброшено 0 %»."""
+    headers = {
+        "x-codex-primary-used-percent": "3.0", "x-codex-primary-window-minutes": "10080",
+        "x-codex-primary-reset-at": str(RESETS_AT),
+        "x-codex-secondary-used-percent": "0.0", "x-codex-secondary-reset-at": "1790000000",
+    }
+    assert rlt.parse_codex_rate_limit_headers(headers, now=1.0).secondary is None
+    headers["x-codex-secondary-window-minutes"] = "300"
+    assert rlt.parse_codex_rate_limit_headers(headers, now=1.0).secondary.window_minutes == 300
+
+
+def test_new_file_is_read_by_0_21_16(tmp_path):
+    snapshot = rlt.parse_codex_usage_payload(WHAM_USAGE, now=1_791_486_684)
+    assert rlt.record_codex_quota(snapshot, root=tmp_path) is True
+    path = rlt.codex_quota_path(tmp_path)
+    old = _load_codex_quota_0_21_16(path)
+    assert old["primary"]["used_percent"] == 36.0 and old["captured_at"] == 1_791_486_684
+    assert rlt.load_codex_quota(root=tmp_path)["reset_credits"] == {"available": 2, "applicable": 0}
+
+
+def test_agent_headers_keep_the_banked_resets(tmp_path):
+    rlt.record_codex_quota(rlt.parse_codex_usage_payload(WHAM_USAGE, now=1000.0), root=tmp_path)
+    headers = {"x-codex-primary-used-percent": "37", "x-codex-primary-window-minutes": "10080",
+               "x-codex-primary-reset-at": "1791950457"}
+    rlt.record_codex_quota(rlt.parse_codex_rate_limit_headers(headers, now=1100.0), root=tmp_path)
+    stored = rlt.load_codex_quota(root=tmp_path)
+    assert stored["primary"]["used_percent"] == 37.0 and stored["source"] == "headers"
+    assert stored["reset_credits"] == {"available": 2, "applicable": 0}
+    assert "limit_reached" not in stored
+
+
+def test_forced_record_moves_the_captured_time(tmp_path):
+    first = rlt.parse_codex_usage_payload(WHAM_USAGE, now=1000.0)
+    again = rlt.parse_codex_usage_payload(WHAM_USAGE, now=1130.0)
+    assert rlt.record_codex_quota(first, root=tmp_path) is True
+    assert rlt.record_codex_quota(again, root=tmp_path) is False
+    assert rlt.record_codex_quota(again, root=tmp_path, force=True) is True
+    assert rlt.load_codex_quota(root=tmp_path)["captured_at"] == 1130.0

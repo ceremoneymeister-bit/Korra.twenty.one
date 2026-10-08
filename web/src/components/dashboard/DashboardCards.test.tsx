@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router";
@@ -18,8 +19,12 @@ import {
   $dashboardState,
   $dashboardStatus,
   refreshDashboardState,
+  type DashboardQuota,
   type DashboardState,
+  type QuotaWindow,
 } from "@/lib/dashboard-state";
+
+const widgetStyles = readFileSync(`${process.cwd()}/src/components/dashboard/dashboard-widgets.css`, "utf8");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -28,14 +33,24 @@ let container: HTMLDivElement;
 let served: DashboardState | Error;
 let runs: ChatRun[] | Error;
 const requests: string[] = [];
+const resetCalls: string[] = [];
+let resetReply: { status: number; body: unknown } | Error;
 
 /** Настоящий транспорт `fetchJSON`: сводка и работы приходят ответом сервера. */
 function serve() {
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (url: unknown) => {
+    vi.fn(async (url: unknown, init?: RequestInit) => {
       const text = String(url);
       requests.push(text);
+      if (text.includes("/api/dashboard/codex-limit/reset")) {
+        resetCalls.push(init?.method ?? "GET");
+        if (resetReply instanceof Error) throw resetReply;
+        return new Response(JSON.stringify(resetReply.body), {
+          status: resetReply.status,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
       if (text.includes("/api/dashboard/state")) {
         if (served instanceof Error) throw served;
         return new Response(JSON.stringify(served), { headers: { "Content-Type": "application/json" } });
@@ -57,8 +72,8 @@ async function flush() {
   }
 }
 
-async function mount(widget: DashboardWidget, size?: WidgetSize) {
-  const { Body } = widget;
+async function mount(widget: DashboardWidget, size?: WidgetSize, part: "Body" | "HeaderNote" = "Body") {
+  const Body = (part === "Body" ? widget.Body : widget.HeaderNote)!;
   container = document.createElement("div");
   container.className = "korra-dashboard";
   document.body.appendChild(container);
@@ -90,6 +105,8 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(FIXTURE_NOW * 1000);
   requests.length = 0;
+  resetCalls.length = 0;
+  resetReply = { status: 200, body: {} };
   served = dashboardStateFixture();
   runs = [];
   $dashboardState.set(null);
@@ -414,31 +431,418 @@ describe("«Готовые файлы»", () => {
   });
 });
 
-describe("«Квота Codex»", () => {
-  it("процент, окно и время сброса", async () => {
-    await mount(CODEX_QUOTA_WIDGET, "m");
-    expect(text()).toContain("Израсходовано 62 % · неделя");
-    expect(text()).toMatch(/Сброс пт, 25 сент\.? в 14:00/);
-    expect(container.querySelector("[data-quota-level]")?.getAttribute("data-quota-level")).toBe("normal");
-    expect(container.querySelector(".kdw-quota-warning")).toBeNull();
-    expect(container.querySelector("#codex-quota")).not.toBeNull();
+describe("«Лимит Codex»", () => {
+  const WEEK = 10080;
+  const RESETS_AT = Date.UTC(2026, 8, 30, 11, 0) / 1000; // ср, 30 сент. 14:00 по Москве
+
+  function win(overrides: Partial<QuotaWindow> = {}): QuotaWindow {
+    return {
+      key: "primary",
+      used_percent: 36,
+      remaining_percent: 64,
+      window_minutes: WEEK,
+      label: "неделя",
+      resets_at: RESETS_AT,
+      renewed: false,
+      forecast: null,
+      level: "normal",
+      ...overrides,
+    };
+  }
+
+  function quotaOf(windows: QuotaWindow[], overrides: Partial<DashboardQuota> = {}): DashboardQuota {
+    const headline = windows.reduce((a, b) => (b.remaining_percent < a.remaining_percent ? b : a));
+    return {
+      available: true,
+      status: "ok",
+      level: headline.level,
+      windows,
+      used_percent: headline.used_percent,
+      window_minutes: headline.window_minutes,
+      window_label: headline.label,
+      resets_at: headline.resets_at,
+      plan_type: "pro",
+      captured_at: FIXTURE_NOW - 60,
+      stale: false,
+      limit_reached: false,
+      reset_credits: { available: 2, applicable: 0 },
+      can_reset: false,
+      forecast: null,
+      ...overrides,
+    };
+  }
+
+  function serveQuota(quota: DashboardQuota) {
+    served = dashboardStateFixture({ quota });
+  }
+
+  function usage(count = 7): NonNullable<DashboardQuota["usage_by_agent"]> {
+    const agents = Array.from({ length: count }, (_, i) => ({
+      profile: `agent-${i}`, name: `Агент ${i + 1}`, status: "ok" as const,
+      calls: 10 - i, output_tokens: (10 - i) * 100, share_percent: (10 - i) * 2,
+      tracked_since: FIXTURE_NOW - 14 * 86400,
+    }));
+    return {
+      status: "ok", period: { starts_at: FIXTURE_NOW - 86400, ends_at: FIXTURE_NOW, window_minutes: WEEK, resets_at: RESETS_AT },
+      measure: "output_tokens", agents,
+      total: { calls: agents.reduce((sum, a) => sum + a.calls, 0), output_tokens: agents.reduce((sum, a) => sum + a.output_tokens, 0) },
+      calculated_at: FIXTURE_NOW, unreadable: [], incomplete: [],
+    };
+  }
+
+  it("L: пять агентов, доли установки отдельно от лимита, остаток одной строкой", async () => {
+    serveQuota(quotaOf([win()], { usage_by_agent: usage() }));
+    await mount(CODEX_QUOTA_WIDGET, "l");
+    expect(text()).toContain("Кто тратил с начала недели");
+    expect(text()).toContain("Только агенты этой установки");
+    expect(text()).toContain("Доля расхода установки");
+    expect(text()).toContain("ещё 2 агента");
+    expect(container.querySelectorAll(".kdw-usage-list li")).toHaveLength(5);
+    expect(text()).not.toContain("Агент 6");
+    expect(text()).toContain("10 обращений");
+    const share = container.querySelector('[aria-label="Агент 1: доля расхода установки"]');
+    expect(share?.getAttribute("aria-valuenow")).toBe("20");
+    expect(share?.querySelector("i")?.style.width).toBe("20%");
+    expect(text()).toContain("64 % осталось");
   });
 
-  it.each([
-    [85, "warn", "status"],
-    [97, "critical", "alert"],
-  ] as const)("при %i %% предупреждает заранее (%s)", async (used, level, role) => {
-    const base = dashboardStateFixture();
-    served = dashboardStateFixture({ quota: { ...base.quota, used_percent: used, level } });
+  it.each(["s", "m"] as const)("%s: блок расхода не появляется", async (size) => {
+    serveQuota(quotaOf([win()], { usage_by_agent: usage() }));
+    await mount(CODEX_QUOTA_WIDGET, size);
+    expect(container.querySelector(".kdw-usage")).toBeNull();
+  });
+
+  it("L: пустая неделя", async () => {
+    serveQuota(quotaOf([win()], { usage_by_agent: usage(0) }));
     await mount(CODEX_QUOTA_WIDGET, "l");
-    expect(container.querySelector(".kdw-quota-warning")?.getAttribute("role")).toBe(role);
+    expect(text()).toContain("На этой неделе агенты ещё не обращались к Codex");
+    expect(container.querySelector(".kdw-usage-list")).toBeNull();
+  });
+
+  it("L: неполный учёт не выдаёт пустую неделю за отсутствие обращений", async () => {
+    serveQuota(quotaOf([win()], { usage_by_agent: { ...usage(0), status: "partial", incomplete: [""] } }));
+    await mount(CODEX_QUOTA_WIDGET, "l");
+    expect(text()).toContain("Данные за период неполные");
+    expect(text()).not.toContain("агенты ещё не обращались");
+  });
+
+  it("L: без окна расход за 7 дней виден даже до получения квоты", async () => {
+    const recent = usage(2);
+    recent.period.window_minutes = null;
+    serveQuota({ available: true, status: "waiting", usage_by_agent: recent });
+    await mount(CODEX_QUOTA_WIDGET, "l");
+    expect(text()).toContain("Кто тратил за 7 дней");
+    expect(text()).toContain("Агент 1");
+  });
+
+  const meters = () => Array.from(container.querySelectorAll<HTMLElement>('[role="meter"]'));
+  const dialog = () => document.body.querySelector<HTMLElement>('[role="dialog"]');
+  const buttonByText = (scope: ParentNode, label: string) =>
+    Array.from(scope.querySelectorAll("button")).find((node) => node.textContent?.trim() === label);
+
+  async function press(node: Element | undefined) {
+    expect(node).toBeDefined();
+    await act(async () => {
+      node!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+  }
+
+  it("сводка из фикстуры: оставшаяся доля, сброс, запас и тариф", async () => {
+    await mount(CODEX_QUOTA_WIDGET, "m");
+    expect(text()).toContain("Неделя");
+    expect(text()).toContain("64 % осталось");
+    expect(text()).toMatch(/Сброс пт, 25 сент\.? в 14:00 · через 2 дн\. 1 ч/);
+    expect(text()).toContain("В запасе 2 сброса");
+    expect(text()).toContain("Тариф Pro");
+    expect(container.querySelector("#codex-quota")).not.toBeNull();
+    expect(CODEX_QUOTA_WIDGET.title).toBe("Лимит Codex");
+    expect(CODEX_QUOTA_WIDGET.id).toBe("codex-quota");
+  });
+
+  it("полный лимит: линия залита целиком, прогноза нет", async () => {
+    serveQuota(
+      quotaOf([win({ used_percent: 0, remaining_percent: 100 })], { reset_credits: { available: 1, applicable: 0 } }),
+    );
+    await mount(CODEX_QUOTA_WIDGET, "m");
+    const [meter] = meters();
+    expect(meters()).toHaveLength(1);
+    expect(meter.getAttribute("aria-valuenow")).toBe("100");
+    expect(meter.getAttribute("aria-valuetext")).toBe("осталось 100 %");
+    expect(meter.querySelector("i")?.style.width).toBe("100%");
+    expect(text()).toContain("100 % осталось");
+    expect(text()).toMatch(/Сброс ср, 30 сент\.? в 14:00 · через 7 дн\. 1 ч/);
+    expect(text()).not.toContain("Тратится");
+    expect(text()).not.toContain("Темп спокойный");
+    expect(text()).toContain("В запасе 1 сброс");
+    expect(text()).not.toContain("1 сбросов");
+  });
+
+  it("окно, обновившееся без ответа агента, показано полным лимитом без ожидания", async () => {
+    serveQuota(quotaOf([win({ used_percent: 0, remaining_percent: 100, renewed: true })]));
+    await mount(CODEX_QUOTA_WIDGET, "m");
+    expect(meters()[0].getAttribute("aria-valuenow")).toBe("100");
+    expect(text()).not.toContain("Окно квоты обновилось");
+    expect(text()).not.toContain("Ждём");
+  });
+
+  it("быстрый темп: во сколько раз, когда кончится и насколько раньше сброса", async () => {
+    const exhaustsAt = RESETS_AT - 60 * 3600;
+    serveQuota(
+      quotaOf([
+        win({
+          level: "warn",
+          forecast: { pace: 1.5, exhausts_at: exhaustsAt, exhausts_before_reset: true },
+        }),
+      ]),
+    );
+    await mount(CODEX_QUOTA_WIDGET, "m");
+    expect(text()).toContain("Тратится в 1,5 раза быстрее ровного темпа.");
+    expect(text()).toMatch(/Так лимит кончится в пн, 28 сент\.? около 02:00 — за 2,5 дня до сброса\./);
+    expect(container.querySelector("[data-quota-level]")?.getAttribute("data-quota-level")).toBe("warn");
+    expect(container.querySelector(".kdw-limit-bar")?.getAttribute("data-level")).toBe("warn");
+  });
+
+  it("спокойный темп: одна короткая строка", async () => {
+    serveQuota(
+      quotaOf([
+        win({ forecast: { pace: 0.7, exhausts_at: RESETS_AT + 86_400, exhausts_before_reset: false } }),
+      ]),
+    );
+    await mount(CODEX_QUOTA_WIDGET, "m");
+    expect(text()).toContain("Темп спокойный — хватит до сброса.");
+    expect(text()).not.toContain("Тратится");
+  });
+
+  it("лимит исчерпан: кнопка сброса, подтверждение, один запрос и новое состояние", async () => {
+    serveQuota(
+      quotaOf(
+        [win({ used_percent: 100, remaining_percent: 0, level: "critical" })],
+        { limit_reached: true, can_reset: true, reset_credits: { available: 2, applicable: 1 } },
+      ),
+    );
+    const fresh = quotaOf([win({ used_percent: 0, remaining_percent: 100 })], {
+      reset_credits: { available: 1, applicable: 0 },
+    });
+    resetReply = {
+      status: 200,
+      body: { ok: true, status: "reset", message: "Лимит сброшен — снова полный. В запасе остался 1 сброс.", quota: fresh },
+    };
+    await mount(CODEX_QUOTA_WIDGET, "m");
+    expect(text()).toContain("Лимит исчерпан");
+    expect(text()).toMatch(/Агенты не ответят до сброса: ср, 30 сент\.? в 14:00 · через 7 дн\. 1 ч/);
+    expect(text()).toContain("0 % осталось");
+    expect(meters()[0].getAttribute("aria-valuenow")).toBe("0");
+    expect(dialog()).toBeNull();
+
+    await press(buttonByText(container, "Сбросить лимит"));
+    expect(dialog()?.textContent).toContain("Сбросить лимит Codex?");
+    expect(dialog()?.textContent).toContain(
+      "Запасной сброс сразу вернёт полный лимит. В запасе останется 1. Отменить нельзя.",
+    );
+    expect(resetCalls).toEqual([]);
+
+    await press(buttonByText(dialog()!, "Отмена"));
+    expect(dialog()).toBeNull();
+    expect(resetCalls).toEqual([]);
+
+    await press(buttonByText(container, "Сбросить лимит"));
+    // После сброса сервер уже отдаёт полный лимит — и в ответе, и на следующем опросе.
+    served = dashboardStateFixture({ quota: fresh });
+    // Двойной щелчок по «Сбросить» не отправляет второй запрос.
+    const confirm = buttonByText(dialog()!, "Сбросить")!;
+    await act(async () => {
+      confirm.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      confirm.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await flush();
+    expect(resetCalls).toEqual(["POST"]);
+    expect(dialog()).toBeNull();
+    expect(text()).toContain("100 % осталось");
+    expect(text()).toContain("Лимит сброшен — снова полный.");
+    expect(buttonByText(container, "Сбросить лимит")).toBeUndefined();
+    expect(text()).not.toContain("Лимит исчерпан");
+  });
+
+  describe("лимит вернётся сам", () => {
+    const blocked = (naturalResetAt: number | null) =>
+      quotaOf([win({ used_percent: 100, remaining_percent: 0, level: "critical", resets_at: FIXTURE_NOW + 4 * 3600 })], {
+        limit_reached: true,
+        can_reset: true,
+        natural_reset_at: naturalResetAt,
+        reset_credits: { available: 2, applicable: 1 },
+      });
+    const isSecondary = (button: HTMLButtonElement | undefined) =>
+      !!button && button.className.includes("border-border") && !button.className.includes("bg-primary ");
+
+    it("скорый сброс: фраза в карточке, кнопка второстепенная, фраза в диалоге перед «Отменить нельзя.»", async () => {
+      serveQuota(blocked(FIXTURE_NOW + 4 * 3600));
+      await mount(CODEX_QUOTA_WIDGET, "m");
+      const hint = "Лимит вернётся сам через 4 ч — запасной сброс лучше сохранить.";
+      expect(text()).toContain(`Лимит исчерпан. ${hint}`);
+      expect(text()).not.toContain("Его можно вернуть запасным сбросом");
+      const button = buttonByText(container, "Сбросить лимит");
+      expect(isSecondary(button)).toBe(true);
+
+      await press(button);
+      expect(dialog()?.textContent).toContain(
+        `Запасной сброс сразу вернёт полный лимит. В запасе останется 1. ${hint} Отменить нельзя.`,
+      );
+      // Кнопка остаётся рабочей: подтверждение отправляет запрос.
+      await press(buttonByText(dialog()!, "Сбросить"));
+      expect(resetCalls).toEqual(["POST"]);
+    });
+
+    it("до сброса 13 часов: прежний вид — основная кнопка и прежний текст", async () => {
+      serveQuota(blocked(null));
+      await mount(CODEX_QUOTA_WIDGET, "m");
+      expect(text()).toContain("Лимит исчерпан. Его можно вернуть запасным сбросом.");
+      expect(text()).not.toContain("лучше сохранить");
+      const button = buttonByText(container, "Сбросить лимит");
+      expect(isSecondary(button)).toBe(false);
+      await press(button);
+      expect(dialog()?.textContent).toContain(
+        "Запасной сброс сразу вернёт полный лимит. В запасе останется 1. Отменить нельзя.",
+      );
+      expect(dialog()?.textContent).not.toContain("лучше сохранить");
+    });
+
+    it("прошедший срок не даёт подсказки", async () => {
+      serveQuota(blocked(FIXTURE_NOW - 60));
+      await mount(CODEX_QUOTA_WIDGET, "m");
+      expect(text()).not.toContain("лучше сохранить");
+    });
+  });
+
+  it("отказ сервера: показывает русское сообщение, лимит остаётся исчерпанным", async () => {
+    serveQuota(
+      quotaOf([win({ used_percent: 100, remaining_percent: 0, level: "critical" })], {
+        limit_reached: true,
+        can_reset: true,
+        reset_credits: { available: 1, applicable: 1 },
+      }),
+    );
+    resetReply = {
+      status: 200,
+      body: {
+        ok: false,
+        status: "unavailable",
+        message: "Не удалось применить сброс: Codex не ответил или вход устарел. Попробуйте позже.",
+        quota: null,
+      },
+    };
+    await mount(CODEX_QUOTA_WIDGET, "m");
+    await press(buttonByText(container, "Сбросить лимит"));
+    await press(buttonByText(dialog()!, "Сбросить"));
+    await flush();
+    expect(text()).toContain("Не удалось применить сброс");
+    expect(text()).toContain("Лимит исчерпан");
+    expect(buttonByText(container, "Сбросить лимит")).toBeDefined();
+  });
+
+  it("сбой сети при сбросе не ломает карточку", async () => {
+    serveQuota(
+      quotaOf([win({ used_percent: 100, remaining_percent: 0, level: "critical" })], {
+        limit_reached: true,
+        can_reset: true,
+        reset_credits: { available: 1, applicable: 1 },
+      }),
+    );
+    resetReply = new Error("offline");
+    await mount(CODEX_QUOTA_WIDGET, "m");
+    await press(buttonByText(container, "Сбросить лимит"));
+    await press(buttonByText(dialog()!, "Сбросить"));
+    await flush();
+    expect(text()).toContain("Не удалось связаться с панелью");
+    expect(buttonByText(container, "Сбросить лимит")).toBeDefined();
+  });
+
+  it("кнопки сброса нет, пока сервер её не разрешил", async () => {
+    serveQuota(quotaOf([win()], { can_reset: false, reset_credits: { available: 2, applicable: 0 } }));
+    await mount(CODEX_QUOTA_WIDGET, "l");
+    expect(buttonByText(container, "Сбросить лимит")).toBeUndefined();
+    expect(text()).toContain("В запасе 2 сброса");
+  });
+
+  it("два окна: две тонкие линии со своими сбросами и без лишнего баланса кредитов", async () => {
+    serveQuota(
+      quotaOf([
+        win({
+          key: "primary",
+          window_minutes: 300,
+          label: "5 ч",
+          used_percent: 82,
+          remaining_percent: 18,
+          level: "warn",
+          resets_at: FIXTURE_NOW + 3 * 3600,
+        }),
+        win({ key: "secondary", used_percent: 29, remaining_percent: 71 }),
+      ]),
+    );
+    await mount(CODEX_QUOTA_WIDGET, "l");
+    expect(meters().map((meter) => meter.getAttribute("aria-valuenow"))).toEqual(["18", "71"]);
+    expect(container.querySelectorAll(".kdw-limit--thin")).toHaveLength(2);
+    expect(text()).toContain("5 часов");
+    expect(text()).toContain("Неделя");
+    expect(text()).toContain("18 % осталось");
+    expect(text()).toContain("71 % осталось");
+    expect(text()).toMatch(/Сброс сегодня в 16:00 · через 3 ч/);
+    expect(text()).not.toMatch(/кредит|баланс/i);
+  });
+
+  it("размер S: проценты, линия, короткий сброс и короткий прогноз", async () => {
+    serveQuota(
+      quotaOf([
+        win({
+          level: "warn",
+          forecast: { pace: 1.5, exhausts_at: RESETS_AT - 60 * 3600, exhausts_before_reset: true },
+        }),
+      ]),
+    );
+    await mount(CODEX_QUOTA_WIDGET, "s");
+    expect(text()).toContain("64 % осталось");
+    expect(meters()).toHaveLength(1);
+    expect(text()).toContain("сброс ср в 14:00");
+    expect(text()).toContain("при таком темпе кончится в пн");
+    expect(text()).not.toContain("Тариф");
+    expect(text()).not.toContain("В запасе");
+  });
+
+  it("шапка: свежесть данных, а старые данные заметны и на узком экране", async () => {
+    await mount(CODEX_QUOTA_WIDGET, "m", "HeaderNote");
+    expect(text()).toBe("обновлено 5 мин назад");
+    expect(container.querySelector(".kdw-quota-updated--stale")).toBeNull();
+  });
+
+  it("шапка: данные старше 30 минут — «данные от …» цветом предупреждения даже в S", async () => {
+    serveQuota(quotaOf([win()], { captured_at: FIXTURE_NOW - 3 * 3600 }));
+    await mount(CODEX_QUOTA_WIDGET, "s", "HeaderNote");
+    expect(text()).toBe("данные от 10:00");
+    expect(container.querySelector(".kdw-quota-updated--stale")).not.toBeNull();
+    // Подпись не прячется ни на одном размере полотна, ни в контейнерном запросе.
+    const hidden = /display:\s*none/;
+    const blocks = widgetStyles.split("}").filter((block) => block.includes("kdw-quota-updated"));
+    expect(blocks.length).toBeGreaterThan(0);
+    for (const block of blocks) expect(block).not.toMatch(hidden);
+  });
+
+  it("шапка: на 30-й минуте данные ещё свежие, на 31-й уже нет", async () => {
+    serveQuota(quotaOf([win()], { captured_at: FIXTURE_NOW - 29 * 60 }));
+    await mount(CODEX_QUOTA_WIDGET, "m", "HeaderNote");
+    expect(text()).toBe("обновлено 29 мин назад");
+    await act(async () => root!.unmount());
+    root = null;
+    container.remove();
+    serveQuota(quotaOf([win()], { captured_at: FIXTURE_NOW - 31 * 60 }));
+    await mount(CODEX_QUOTA_WIDGET, "m", "HeaderNote");
+    expect(text()).toMatch(/^данные от /);
   });
 
   it("до первого ответа честно ждёт, а не показывает ноль", async () => {
     served = dashboardStateFixture({ quota: { available: true, status: "waiting" } });
     await mount(CODEX_QUOTA_WIDGET, "m");
-    expect(text()).toContain("Ждём первого ответа Codex");
+    expect(text()).toContain("Лимит пока не известен");
     expect(text()).not.toContain("0 %");
+    expect(meters()).toHaveLength(0);
   });
 
   it("доступна только там, где подключена подписка", () => {

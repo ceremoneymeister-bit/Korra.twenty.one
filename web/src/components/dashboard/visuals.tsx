@@ -10,7 +10,7 @@
  * агента и его готового шаблона, а не из портрета «на вкус».
  */
 
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useState } from "react";
 import { BarChart3, Sparkles } from "lucide-react";
 
 import { authedFetch } from "@/lib/api";
@@ -131,32 +131,6 @@ export function MetricBars({ className, label, values }: MetricBarsProps) {
         />
       ))}
     </div>
-  );
-}
-
-// ── Кольцо квоты ──────────────────────────────────────────────────────────
-
-export interface QuotaRingProps {
-  percent: number;
-  level: "normal" | "warn" | "critical";
-  /** Размер задаёт CSS (`.kdw-ring--s/m/l`): на узком полотне кольцо меньше. */
-  size?: "s" | "m" | "l";
-}
-
-export function QuotaRing({ level, percent, size = "m" }: QuotaRingProps) {
-  const clamped = Math.max(0, Math.min(100, percent));
-  const style = { "--kdw-ring": `${clamped * 3.6}deg` } as CSSProperties;
-  return (
-    <span
-      aria-hidden
-      className={cn("kdw-ring", `kdw-ring--${level}`, `kdw-ring--size-${size}`)}
-      style={style}
-    >
-      <span className="kdw-ring-core">
-        <strong>{Math.round(clamped)}</strong>
-        <small>%</small>
-      </span>
-    </span>
   );
 }
 

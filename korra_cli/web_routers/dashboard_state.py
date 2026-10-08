@@ -23,3 +23,15 @@ async def get_dashboard_state(period: str = "week"):
     from korra_cli.dashboard_state import build_state
 
     return await asyncio.to_thread(build_state, period=period)
+
+
+@router.post("/api/dashboard/codex-limit/reset")
+async def reset_codex_limit():
+    """Spend one banked Codex reset and return the limit as it is afterwards.
+
+    Always answers 200 with ``ok``, ``status``, a Russian ``message`` and the
+    new ``quota`` section: the card shows the message in either case.
+    """
+    from korra_cli.dashboard_state import reset_codex_limit as run
+
+    return await asyncio.to_thread(run)

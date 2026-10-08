@@ -51,11 +51,11 @@ def _call(call_id, name, args, raw):
     ]
 
 
-def _memory_add(call_id="m1", text=RULE):
+def _memory_add(call_id="m1", text=RULE, target="user"):
     from tools.memory_tool import load_on_disk_store
 
-    raw = json.dumps(load_on_disk_store().add("user", text))
-    return _call(call_id, "memory", {"action": "add", "target": "user", "content": text}, raw)
+    raw = json.dumps(load_on_disk_store().add(target, text))
+    return _call(call_id, "memory", {"action": "add", "target": target, "content": text}, raw)
 
 
 def _memory_read(call_id="m0"):
@@ -178,15 +178,9 @@ async def test_memory_written_by_someone_else_is_not_credited_to_a_read_only_tur
 
 @pytest.mark.asyncio
 async def test_agent_write_plus_background_review_stay_one_message(env):
-    from agent.learning_receipt import snapshot_memory
-    from tools.memory_tool import load_on_disk_store
-
     def review_later(agent):
-        before = snapshot_memory()
-        load_on_disk_store().add("memory", "Отчёты сдаём по пятницам")
-        from agent.learning_receipt import build_review_receipt
-
-        agent.background_review_receipt = build_review_receipt([], [], before)
+        review = _memory_add("r1", "Отчёты сдаём по пятницам", "memory")
+        agent.background_review_receipt = build_review_receipt(review, [])
         agent.background_review_callback("💾 Self-improvement review")
         agent.background_review_receipt = None
 
@@ -206,13 +200,9 @@ async def test_agent_write_plus_background_review_stay_one_message(env):
 
 @pytest.mark.asyncio
 async def test_background_review_alone_still_adds_its_own_single_message(env):
-    from agent.learning_receipt import build_review_receipt, snapshot_memory
-    from tools.memory_tool import load_on_disk_store
-
     def review_later(agent):
-        before = snapshot_memory()
-        load_on_disk_store().add("memory", "Отчёты сдаём по пятницам")
-        agent.background_review_receipt = build_review_receipt([], [], before)
+        review = _memory_add("r1", "Отчёты сдаём по пятницам", "memory")
+        agent.background_review_receipt = build_review_receipt(review, [])
         agent.background_review_callback("x")
 
     await _turn(env, lambda: [], after_turn=review_later)
@@ -232,9 +222,8 @@ def test_late_background_notice_must_not_reintroduce_cancelled_receipt(env):
     assert undo_receipt(first)["status"] == "undone"
     db.merge_message_display_metadata(row["id"], {RECEIPT_KEY: {**first, "undone": True}})
 
-    before_review = snapshot_memory()
-    assert load_on_disk_store().add("memory", "Отчёты по пятницам")["success"]
-    agent.background_review_receipt = build_review_receipt([], [], before_review)
+    review = _memory_add("r1", "Отчёты по пятницам", "memory")
+    agent.background_review_receipt = build_review_receipt(review, [])
     agent.background_review_callback("review finished")
 
     notices = _notices(db)

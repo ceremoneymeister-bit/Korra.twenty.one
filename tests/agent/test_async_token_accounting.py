@@ -536,7 +536,7 @@ class TestCoalesceFieldContract:
             set(db._TOKEN_DELTA_SUM_FIELDS)
             | set(db._TOKEN_DELTA_COST_FIELDS)
             | set(db._TOKEN_DELTA_ROUTE_FIELDS)
-            | {"absolute"}  # control flag: absolute deltas never merge
+            | {"absolute", "usage_events"}  # control flag and concatenated per-call events
         )
 
         unclassified = params - classified

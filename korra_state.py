@@ -9117,6 +9117,10 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
         API call.  After close() has stopped the writer, falls back to the
         synchronous path and may raise like :meth:`update_token_counts`.
         """
+        # Preserve response time even if the writer is delayed or coalesces calls.
+        if not kwargs.get("absolute"):
+            kwargs["usage_events"] = [(time.time(), kwargs.get("api_call_count") or 0,
+                                       kwargs.get("output_tokens") or 0)]
         with self._token_queue_cond:
             thread = self._token_writer_thread
             writer_stopped = self._token_writer_stop and (
@@ -9284,6 +9288,8 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                 )
             if groups and key is not None and groups[-1][0] == key:
                 merged = groups[-1][2]
+                if "usage_events" in kwargs:
+                    merged["usage_events"] = [*merged.get("usage_events", []), *kwargs["usage_events"]]
                 for f in self._TOKEN_DELTA_SUM_FIELDS:
                     merged[f] = merged.get(f, 0) + kwargs.get(f, 0)
                 for f in self._TOKEN_DELTA_COST_FIELDS:
@@ -9375,6 +9381,7 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
         billing_mode: Optional[str] = None,
         api_call_count: int = 0,
         absolute: bool = False,
+        usage_events: Optional[List[Tuple[float, int, int]]] = None,
     ) -> None:
         """Update token counters and backfill model if not already set.
 
@@ -9522,6 +9529,7 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                     cost_status=cost_status,
                     cost_source=cost_source,
                     api_call_count=api_call_count,
+                    usage_events=usage_events,
                 )
         self._execute_write(_do)
 
@@ -9545,6 +9553,7 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
         cost_source: Optional[str],
         api_call_count: int,
         task: str = "",
+        usage_events: Optional[List[Tuple[float, int, int]]] = None,
     ) -> None:
         """Accumulate a per-API-call usage delta into session_model_usage.
 
@@ -9626,6 +9635,14 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                 now,
             ),
         )
+
+        if eff_provider == "openai-codex":
+            conn.executemany(
+                "INSERT INTO codex_usage_events (recorded_at, api_call_count, output_tokens) "
+                "VALUES (?, ?, ?)",
+                usage_events if usage_events is not None else
+                [(now, api_call_count or 0, output_tokens or 0)],
+            )
 
     def ensure_session(
         self,
