@@ -1,5 +1,5 @@
 import type { DashboardTheme } from "./types";
-import { colorTokens, DEFAULT_COLOR } from "./color";
+import { colorTokens, DEFAULT_COLOR, type ColorScheme } from "./color";
 import data from "../../../korra_cli/data/dashboard-themes.json";
 
 /** The owner-approved palettes are also consumed by the server bootstrap. */
@@ -19,8 +19,8 @@ export function migrateThemeName(name: unknown): BuiltinThemeName {
 }
 
 /** Derive every surface from the chosen color, using the existing preset shape. */
-export function colorTheme(color: string): DashboardTheme {
-  const { dark, gradient, destructive, destructiveForeground, success, warning, ...neo } = colorTokens(color);
+export function colorTheme(color: string, scheme?: ColorScheme): DashboardTheme {
+  const { dark, gradient, destructive, destructiveForeground, success, warning, ...neo } = colorTokens(color, scheme);
   const base = dark ? darkTheme : lightTheme;
   return {
     ...base, name: "color", label: "Цвет", description: "Любой цвет с мягким градиентом",
@@ -35,7 +35,7 @@ export function colorTheme(color: string): DashboardTheme {
       ...base.colorOverrides,
       cardForeground: neo.textPrimary, popoverForeground: neo.textPrimary, secondaryForeground: neo.textPrimary,
       destructive, destructiveForeground, success, warning,
-      card: neo.surface, popover: neo.surface, secondary: neo.surface, muted: neo.surface,
+      card: neo.surface, popover: neo.elevated, secondary: neo.selected, muted: neo.field,
       primary: neo.accent, accent: neo.accent,
       primaryForeground: neo.accentForeground, accentForeground: neo.accentForeground,
       mutedForeground: neo.textSecondary, border: neo.shadow, input: neo.shadow, ring: neo.accentLine,

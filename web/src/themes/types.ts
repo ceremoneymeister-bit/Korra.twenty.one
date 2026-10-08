@@ -161,6 +161,10 @@ export interface ThemeNeumorphism {
   background: string;
   /** Cards and controls sit on this colour; shadows are cast from it. */
   surface: string;
+  rail?: string;
+  field?: string;
+  elevated?: string;
+  selected?: string;
   shadow: string;
   highlight: string;
   textPrimary: string;

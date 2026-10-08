@@ -2,6 +2,7 @@
 import { act, useLayoutEffect, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { ThemeSwitcher } from '../components/ThemeSwitcher';
 import { ThemeProvider, useTheme } from './context';
 const api = vi.hoisted(() => ({getThemes:vi.fn(),setTheme:vi.fn(),getFontPref:vi.fn(async()=>({font:'theme'})),setFontPref:vi.fn()}));
 vi.mock('@/lib/api',()=>({api}));
@@ -41,9 +42,9 @@ it('applies server color before GET and clears the gradient on returning to a ne
 it('saves color alongside the theme, uses durable revisions and rejects an incomplete ACK', async () => {
   window.__KORRA_THEME_PREF__ = pref();
   await mount();
-  api.setTheme.mockImplementation(async(name, _revision, _evening, color) => ({ok:true, preference:{...pref(name, 'r2'), color}}));
+  api.setTheme.mockImplementation(async(name, _revision, _evening, color, color_scheme) => ({ok:true, preference:{...pref(name, 'r2'), color, color_scheme}}));
   await act(async () => { await current.setTheme('color', '#FFFFEE'); });
-  expect(api.setTheme).toHaveBeenCalledWith('color', 'r1', undefined, '#ffffee');
+  expect(api.setTheme).toHaveBeenCalledWith('color', 'r1', undefined, '#ffffee', 'light');
   expect(current.color).toBe('#ffffee');
   expect(current.saveState).toBe('saved');
   expect(JSON.parse(localStorage.getItem('korra-dashboard-v1:'+ 'a'.repeat(32)+':owner:%2Fc%2Ftest:theme')!).color).toBe('#ffffee');
@@ -68,4 +69,42 @@ it.each([['#182c54', 'dark'], ['#f4e7b2', 'light']])('applies %s native controls
   await act(async () => { await current.setTheme('light'); });
   expect(style.colorScheme).toBe('light');
   expect(style.getPropertyValue('--midground-base')).toBe('#1f1f1f');
+});
+
+it('previews a drag without writes, cancels it, and commits only the completed choice', async () => {
+  window.__KORRA_THEME_PREF__ = pref();
+  api.setTheme.mockImplementation(async(name, _revision, _evening, color, color_scheme) => ({ok:true, preference:{...pref(name, 'r2'), color, color_scheme}}));
+  await mount();
+  const original = current.theme.neumorphism?.background;
+  await act(async () => { current.previewColor('#ff0000'); current.previewColor('#00ff00'); });
+  expect(current.scheme).toBe('light');
+  expect(current.themeName).toBe('color');
+  expect(api.setTheme).not.toHaveBeenCalled();
+  await act(async () => current.previewColor(null));
+  expect(current.theme.neumorphism?.background).toBe(original);
+  await act(async () => { current.previewColor('#ded5f0'); await current.setTheme('color', '#ded5f0', 'dark'); });
+  expect(api.setTheme).toHaveBeenCalledTimes(1);
+  expect(current.saveState).toBe('saved');
+  expect(current.scheme).toBe('dark');
+});
+it('opening and dismissing the real picker does not change the saved theme', async () => {
+  window.__KORRA_THEME_PREF__ = pref();
+  await mount(<><Probe/><ThemeSwitcher/></>);
+  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Цвет"]')!.click());
+  const field = document.querySelector<HTMLDivElement>('.theme-color-field')!;
+  await act(async () => field.dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowLeft', bubbles:true})));
+  expect(current.themeName).toBe('color');
+  expect(api.setTheme).not.toHaveBeenCalled();
+  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Закрыть палитру"]')!.click());
+  expect(current.themeName).toBe('light');
+  expect(api.setTheme).not.toHaveBeenCalled();
+});
+it('restores neutral roles even over a colored bootstrap style', async () => {
+  const style = document.createElement('style'); style.textContent=':root{--neo-field:#abcabc;--neo-elevated:#abcabc}';document.head.append(style);
+  window.__KORRA_THEME_PREF__={...pref('color'),color:'#5275d9',color_scheme:'light'};
+  await mount();
+  await act(async()=>{await current.setTheme('light')});
+  expect(document.documentElement.style.getPropertyValue('--neo-field')).toBe('#e0e0e0');
+  expect(document.documentElement.style.getPropertyValue('--neo-elevated')).toBe('#e0e0e0');
+  style.remove();
 });

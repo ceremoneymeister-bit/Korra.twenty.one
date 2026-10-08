@@ -13,6 +13,8 @@ const state = vi.hoisted(() => ({
   setTheme: vi.fn(async () => true),
   themeName: "light",
   color: "#5275d9",
+  scheme: "light",
+  previewColor: vi.fn(),
 }));
 
 vi.mock("@/themes", () => ({ useTheme: () => state }));
@@ -23,6 +25,7 @@ let root: Root;
 beforeEach(() => {
   vi.clearAllMocks();
   state.themeName = "light";
+  state.scheme = "light";
   state.saveState = "idle";
   state.saveError = "";
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -43,18 +46,19 @@ it("offers three explicit choices and opens a palette without losing the selecte
   const color = host.querySelector<HTMLButtonElement>('[aria-label="Цвет"]')!;
   expect(light.getAttribute("aria-pressed")).toBe("true");
   expect(dark.getAttribute("aria-pressed")).toBe("false");
-  expect(color.getAttribute("aria-pressed")).toBe("false");
+  expect(color.getAttribute("aria-expanded")).toBe("false");
   await act(async () => dark.click());
   expect(state.setTheme).toHaveBeenCalledWith("dark");
+  state.setTheme.mockClear();
   await act(async () => color.click());
-  expect(state.setTheme).toHaveBeenCalledWith("color");
+  expect(state.setTheme).not.toHaveBeenCalled();
   expect(document.querySelector('[role="dialog"]')).not.toBeNull();
-  expect(document.querySelector('input[aria-label="Любой цвет"]')).not.toBeNull();
+  expect(document.querySelector('input[aria-label="Код цвета HEX"]')).not.toBeNull();
   await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Розовый"]')!.click());
-  expect(state.setTheme).toHaveBeenCalledWith("color", THEME_COLORS.find(([label]) => label === "Розовый")![1]);
+  expect(state.setTheme).toHaveBeenCalledWith("color", THEME_COLORS.find(([label]) => label === "Розовый")![1], "light");
 });
 
-it.each(["light", "dark", "color"])("collapsed %s opens all three choices without silently cycling", async name => {
+it.each(["light", "dark", "color"])("collapsed %s opens both schemes and the palette without silently cycling", async name => {
   state.themeName = name;
   await act(async () => root.render(<ThemeSwitcher collapsed />));
   const toggle = host.querySelector<HTMLButtonElement>('[aria-label="Выбрать тему"]')!;
@@ -64,7 +68,7 @@ it.each(["light", "dark", "color"])("collapsed %s opens all three choices withou
   const dialog = document.querySelector('[role="dialog"]')!;
   expect(dialog.querySelector('[aria-label="Светлая тема"]')).not.toBeNull();
   expect(dialog.querySelector('[aria-label="Тёмная тема"]')).not.toBeNull();
-  expect(dialog.querySelector('[aria-label="Цвет"]')).not.toBeNull();
+  expect(dialog.querySelector('[aria-label="Цветовой тон"]')).not.toBeNull();
   await act(async () => dialog.querySelector<HTMLButtonElement>('[aria-label="Закрыть палитру"]')!.click());
   expect(document.querySelector('[role="dialog"]')).toBeNull();
 });
@@ -94,10 +98,25 @@ it("keeps the retry target at 44 px regardless of theme density", async () => {
   expect(retry?.className).not.toMatch(/\bmin-h-\d+\b/);
 });
 
-it("retries the selected theme from Appearance after a failed save", async () => {
+it("retries a failed save from inside the Appearance palette", async () => {
   state.themeName = "color";
   state.saveState = "error";
   await act(async () => root.render(<ThemeSwitcher labeled />));
   await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Цвет"]')!.click());
+  await act(async () => document.querySelector<HTMLButtonElement>('.theme-palette-popover > .theme-color-reset')!.click());
   expect(state.retryTheme).toHaveBeenCalledOnce();
+});
+
+it("keeps the color when switching the light/dark basis", async () => {
+  state.themeName = "color";
+  await act(async () => root.render(<ThemeSwitcher />));
+  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Тёмная тема"]')!.click());
+  expect(state.setTheme).toHaveBeenCalledWith("color", state.color, "dark");
+});
+it("does not save the seed when focusing and leaving an unchanged hue slider", async () => {
+  await act(async () => root.render(<ThemeSwitcher />));
+  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Цвет"]')!.click());
+  const hue = document.querySelector<HTMLInputElement>('[aria-label="Цветовой тон"]')!;
+  await act(async () => { hue.focus(); hue.blur(); });
+  expect(state.setTheme).not.toHaveBeenCalled();
 });

@@ -13,7 +13,7 @@ describe("Korra neumorphism tokens", () => {
     const dark = neumorphismVars(darkNeumorphism);
 
     expect(Object.keys(light)).toEqual(Object.keys(dark));
-    expect(light).toEqual({
+    expect(light).toMatchObject({
       "--neo-background": "#e8e8e8",
       "--neo-surface": "#e0e0e0",
       "--neo-shadow": "#bebebe",
@@ -24,6 +24,10 @@ describe("Korra neumorphism tokens", () => {
       "--neo-accent-line": "#1f1f1f",
       "--neo-accent-foreground": "#1f1f1f",
     });
+    for (const palette of [light, dark]) {
+      expect(palette["--neo-rail"]).toBe(palette["--neo-background"]);
+      for (const role of ["field", "elevated", "selected"]) expect(palette[`--neo-${role}`]).toBe(palette["--neo-surface"]);
+    }
     expect(dark["--neo-accent"]).toBe(BRAND_LIME);
     expect(dark["--neo-accent-line"]).toBe(BRAND_LIME);
   });

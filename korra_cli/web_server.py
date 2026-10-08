@@ -20553,8 +20553,8 @@ async def get_dashboard_themes(request: Request = None):
 @app.put("/api/dashboard/theme")
 async def set_dashboard_theme(body: ThemeSetBody, request: Request = None):
     """Persist an explicit choice; optional revision protects concurrent browsers."""
-    from korra_cli.dashboard_theme import normalize_theme, normalize_color
-    if body.color is not None and normalize_theme(body.name) != "color":
+    from korra_cli.dashboard_theme import normalize_theme, normalize_color, color_scheme
+    if (body.color is not None or body.color_scheme is not None) and normalize_theme(body.name) != "color":
         raise HTTPException(status_code=400, detail="Цвет доступен для цветной темы.")
     if body.name is None and body.evening_action is None:
         raise HTTPException(status_code=400, detail="Выберите настройку темы.")
@@ -20573,6 +20573,8 @@ async def set_dashboard_theme(body: ThemeSetBody, request: Request = None):
                 dashboard["theme"] = normalize_theme(body.name)
                 if dashboard["theme"] == "color":
                     dashboard["theme_color"] = normalize_color(body.color or dashboard.get("theme_color"))
+                    dashboard["theme_color_scheme"] = color_scheme(
+                        dashboard["theme_color"], body.color_scheme or dashboard.get("theme_color_scheme"))
                 if dashboard["theme"] == "dark":
                     evening["disabled"] = True
             if body.evening_action == "later":
@@ -20591,6 +20593,7 @@ async def set_dashboard_theme(body: ThemeSetBody, request: Request = None):
                 preserve.add(("dashboard", "theme"))
             if body.name is not None and normalize_theme(body.name) == "color":
                 preserve.add(("dashboard", "theme_color"))
+                preserve.add(("dashboard", "theme_color_scheme"))
             save_config(config, preserve_keys=preserve)
             # Managed policies can deliberately skip/strip a write without
             # raising. ACK only a fresh read of the durable configuration.

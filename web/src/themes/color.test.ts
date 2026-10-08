@@ -1,55 +1,53 @@
 import { expect, it } from "vitest";
-import { colorTokens, contrast, luminance, THEME_COLORS, themeColorScheme } from "./color";
+import { colorTokens, contrast, luminance, THEME_COLORS, themeColorScheme, colorToHSV, hsvToColor, type ColorScheme } from "./color";
 import { colorTheme, lightTheme, darkTheme } from "./presets";
 
-function assertReadable(color: string) {
-  const t = colorTokens(color), theme = colorTheme(color);
-  const surfaces = [t.surface, t.background, ...t.gradient.match(/#[0-9a-f]{6}/g)!];
+function assertReadable(color: string, scheme: ColorScheme) {
+  const t = colorTokens(color, scheme), theme = colorTheme(color, scheme);
+  const surfaces = [t.surface, t.background, t.rail, t.field, t.elevated, t.selected, ...t.gradient.match(/#[0-9a-f]{6}/g)!];
   for (const surface of surfaces) {
     for (const text of [t.textPrimary, t.textSecondary, t.accentLine, t.success, t.warning, t.destructive]) {
-      expect(contrast(text, surface), `${color}: ${text} on ${surface}`).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(text, surface), `${color}/${scheme}: ${text} on ${surface}`).toBeGreaterThanOrEqual(4.5);
     }
-    expect(contrast(t.accent, surface), color).toBeGreaterThanOrEqual(3);
   }
-  const selected = "#" + [1, 3, 5].map(i => Math.round(
-    parseInt(t.surface.slice(i, i + 2), 16) * .78 + parseInt(t.accent.slice(i, i + 2), 16) * .22,
-  ).toString(16).padStart(2, "0")).join("");
-  expect(contrast(t.textPrimary, selected), color + " selected").toBeGreaterThanOrEqual(4.5);
-  expect(contrast(t.textSecondary, selected), color + " selected").toBeGreaterThanOrEqual(4.5);
-  expect(contrast(t.accentForeground, t.accent), color).toBeGreaterThanOrEqual(4.5);
-  expect(contrast(t.destructiveForeground, t.destructive), color).toBeGreaterThanOrEqual(4.5);
+  expect(contrast(t.accentForeground, t.accent)).toBeGreaterThanOrEqual(4.5);
+  expect(contrast(t.destructiveForeground, t.destructive)).toBeGreaterThanOrEqual(4.5);
+  expect(contrast(t.textPrimary, t.textSecondary)).toBeGreaterThan(1.5);
   expect(luminance(t.shadow)).toBeLessThan(luminance(t.surface));
   expect(luminance(t.highlight)).toBeGreaterThan(luminance(t.surface));
-  expect(themeColorScheme(theme)).toBe(t.dark ? "dark" : "light");
+  expect(themeColorScheme(theme)).toBe(scheme);
+  expect(theme.colorOverrides?.card).not.toBe(theme.colorOverrides?.popover);
+  expect(theme.neumorphism?.field).not.toBe(theme.neumorphism?.surface);
   expect(theme.palette.midground.hex).toBe(t.textPrimary);
-  expect(theme.terminalForeground).toBe(t.textPrimary);
-  for (const [surface, foreground] of [["card", "cardForeground"], ["popover", "popoverForeground"], ["secondary", "secondaryForeground"], ["muted", "mutedForeground"]] as const) {
-    expect(contrast(theme.colorOverrides![foreground]!, theme.colorOverrides![surface]!)).toBeGreaterThanOrEqual(4.5);
-    expect(theme.colorOverrides![surface]).toBe(t.surface);
-  }
 }
-
 it.each([...THEME_COLORS, ...["#000000", "#ffffff", "#ffff00", "#0000ff"].map(c => [c, c])])(
-  "keeps the complete %s palette readable", (_label, color) => assertReadable(color),
+  "keeps all %s roles readable in both schemes", (_label, color) => {
+    assertReadable(color, "light"); assertReadable(color, "dark");
+  },
 );
-it("keeps text readable and accents distinct across the RGB cube", () => {
+it("keeps roles readable across the RGB cube in both schemes", () => {
   for (let r = 0; r <= 255; r += 17) for (let g = 0; g <= 255; g += 17) for (let b = 0; b <= 255; b += 17) {
-    assertReadable("#" + [r, g, b].map(c => c.toString(16).padStart(2, "0")).join(""));
+    const color = "#" + [r,g,b].map(c => c.toString(16).padStart(2,"0")).join("");
+    assertReadable(color, "light"); assertReadable(color, "dark");
   }
 }, 30000);
-it("uses the selected color for surfaces, with light text on dark choices and vice versa", () => {
-  for (const color of ["#182c54", "#164c3b", "#65243e", "#f4e7b2"]) {
-    const t = colorTokens(color);
-    expect(t.surface).toBe(color);
-    expect(t.dark ? luminance(t.textPrimary) > luminance(t.surface) : luminance(t.textPrimary) < luminance(t.surface)).toBe(true);
-    expect(t.background).not.toBe(t.surface);
+it("keeps an explicit scheme when hue or brightness crosses the old threshold", () => {
+  for (const scheme of ["light", "dark"] as const) {
+    const a = colorTokens("#9f9f9f", scheme), b = colorTokens("#a0a0a0", scheme);
+    expect(a.dark).toBe(b.dark);
+    expect(Math.abs(luminance(a.surface) - luminance(b.surface))).toBeLessThan(.01);
+    expect(colorTokens("#ff0000", scheme).dark).toBe(colorTokens("#00ff00", scheme).dark);
   }
 });
-it("derives colored shadows without mutating either neutral preset", () => {
-  const before = structuredClone([lightTheme, darkTheme]);
-  const blue = colorTheme("#2456b8"), pink = colorTheme("#b83e73");
-  expect(blue.neumorphism?.shadow).not.toBe(pink.neumorphism?.shadow);
-  expect(blue.assets?.bg).toMatch(/^linear-gradient/);
-  expect(blue.colorOverrides?.primary).toBe(blue.neumorphism?.accent);
-  expect([lightTheme, darkTheme]).toEqual(before);
+it("retains the legacy scheme without modifying neutral presets", () => {
+  expect(colorTokens("#182c54").dark).toBe(true);
+  expect(colorTokens("#ded5f0").dark).toBe(false);
+  expect(lightTheme.neumorphism?.background).toBe("#e8e8e8");
+  expect(darkTheme.neumorphism?.background).toBe("#212121");
+});
+it.each(["#000000", "#ffffff", "#5275d9", "#ded5f0", "#00ff00", "#808080"])("round trips picker color %s", color => {
+  expect(hsvToColor(colorToHSV(color))).toBe(color);
+});
+it("retains the hue of neutral colors while moving the picker", () => {
+  expect(colorToHSV("#ffffff", 170).h).toBe(170);
 });

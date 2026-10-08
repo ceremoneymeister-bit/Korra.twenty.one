@@ -9,6 +9,10 @@ export const darkNeumorphism: ThemeNeumorphism = data.themes.dark.neumorphism;
 const TOKEN_TO_VAR: Record<keyof ThemeNeumorphism, `--neo-${string}`> = {
   background: "--neo-background",
   surface: "--neo-surface",
+  rail: "--neo-rail",
+  field: "--neo-field",
+  elevated: "--neo-elevated",
+  selected: "--neo-selected",
   shadow: "--neo-shadow",
   highlight: "--neo-highlight",
   textPrimary: "--neo-text-primary",
@@ -25,7 +29,7 @@ export function neumorphismVars(
 ): Record<string, string> {
   if (!tokens) return {};
   return Object.fromEntries(
-    Object.entries(tokens).map(([key, value]) => [
+    Object.entries({ rail: tokens.background, field: tokens.surface, elevated: tokens.surface, selected: tokens.surface, ...tokens }).map(([key, value]) => [
       TOKEN_TO_VAR[key as keyof ThemeNeumorphism],
       value,
     ]),

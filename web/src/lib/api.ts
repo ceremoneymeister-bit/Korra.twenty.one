@@ -1684,11 +1684,11 @@ export const api = {
   // Dashboard themes
   getThemes: () =>
     fetchJSON<DashboardThemesResponse>("/api/dashboard/themes"),
-  setTheme: (name: string | undefined, revision?: string, evening_action?: "later" | "disable" | "enable", color?: string) =>
+  setTheme: (name: string | undefined, revision?: string, evening_action?: "later" | "disable" | "enable", color?: string, color_scheme?: "light" | "dark") =>
     fetchJSON<{ ok: boolean; theme: string; preference: ThemePreference }>("/api/dashboard/theme", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, revision, evening_action, color }),
+      body: JSON.stringify({ name, revision, evening_action, color, color_scheme }),
     }),
   getAgentTabs: () =>
     fetchJSON<AgentTabsPreference>("/api/dashboard/agent-tabs"),

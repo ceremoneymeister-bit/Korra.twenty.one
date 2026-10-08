@@ -138,3 +138,57 @@ def test_managed_policy_cannot_ack_dropped_color(pref_state, monkeypatch):
     with pytest.raises(ws.HTTPException) as error:
         asyncio.run(ws.set_dashboard_theme(ThemeSetBody(name="color", color="#d95791")))
     assert error.value.status_code == 409
+
+
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_explicit_scheme_survives_color_change_reload_and_prepaint(pref_state, scheme):
+    import asyncio
+    from korra_cli.web_models import ThemeSetBody
+    from korra_cli.dashboard_theme import color_theme, bootstrap_css
+    state, writes = pref_state
+    before = asyncio.run(ws.get_dashboard_themes())["preference"]
+    for color in ["#000000", "#ffffff", "#ff0000", "#00ff00"]:
+        ack = asyncio.run(ws.set_dashboard_theme(ThemeSetBody(
+            name="color", color=color, color_scheme=scheme, revision=before["revision"])))
+        actual = asyncio.run(ws.get_dashboard_themes())["preference"]
+        assert actual == ack["preference"]
+        assert actual["color_scheme"] == scheme
+        assert state["dashboard"]["theme_color_scheme"] == scheme
+        assert f"color-scheme:{scheme};" in bootstrap_css(actual)
+        tokens = color_theme(color, scheme)["neumorphism"]
+        assert f'--neo-field:{tokens["field"]};' in bootstrap_css(actual)
+        before = actual
+    assert len(writes) == 4
+
+
+@pytest.mark.parametrize("seed,scheme", [("#182c54", "dark"), ("#ded5f0", "light")])
+def test_legacy_color_infers_scheme_without_healing_write(pref_state, seed, scheme):
+    import asyncio
+    state, writes = pref_state
+    state["dashboard"] = {"theme": "color", "theme_color": seed}
+    pref = asyncio.run(ws.get_dashboard_themes())["preference"]
+    assert pref["color"] == seed and pref["color_scheme"] == scheme
+    assert "theme_color_scheme" not in state["dashboard"]
+    assert not writes
+
+
+def test_dropped_scheme_is_not_acknowledged(pref_state, monkeypatch):
+    import asyncio
+    from korra_cli.web_models import ThemeSetBody
+    state, _ = pref_state
+    def strip_scheme(config, **kwargs):
+        state.clear()
+        state.update(copy.deepcopy(config))
+        state["dashboard"].pop("theme_color_scheme", None)
+    monkeypatch.setattr(ws, "save_config", strip_scheme)
+    with pytest.raises(ws.HTTPException) as err:
+        asyncio.run(ws.set_dashboard_theme(ThemeSetBody(name="color", color="#5275d9", color_scheme="light")))
+    assert err.value.status_code == 409
+
+
+@pytest.mark.parametrize("scheme", ["auto", "", "</style>", 42])
+def test_rejects_invalid_color_scheme(scheme):
+    from korra_cli.web_models import ThemeSetBody
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        ThemeSetBody(name="color", color_scheme=scheme)

@@ -851,6 +851,7 @@ class RawConfigUpdate(BaseModel):
 # --- from web_server.py (originally lines 19410-19411) ---
 
 class ThemeSetBody(BaseModel):
+    color_scheme: Optional[Literal["light", "dark"]] = None
     color: Optional[str] = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
     name: Optional[str] = None
     revision: Optional[str] = None

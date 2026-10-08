@@ -20,8 +20,8 @@
   --kdw-raised:
     2px 2px 5px color-mix(in srgb, var(--neo-shadow) 70%, transparent),
     -2px -2px 5px color-mix(in srgb, var(--neo-highlight) 70%, transparent);
-  --kdw-warn: #c98a00;
-  --kdw-danger: #c2410c;
+  --kdw-warn: var(--warning, #c98a00);
+  --kdw-danger: var(--destructive, #c2410c);
 }
 
 /* ── Общие мелочи ─────────────────────────────────────────────────────── */

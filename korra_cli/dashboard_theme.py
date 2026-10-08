@@ -17,68 +17,84 @@ def normalize_color(value: Any) -> str:
     return value.lower() if isinstance(value, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", value) else DEFAULT_COLOR
 
 
-def color_theme(value: str) -> dict:
-    """Same surface-derived palette as web/src/themes/color.ts, for first paint."""
-    def rgb(color):
-        return [int(color[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+def _rgb(color):
+    return [int(color[i:i + 2], 16) / 255 for i in (1, 3, 5)]
 
-    def hex_color(channels):
-        return "#" + "".join(f"{math.floor(c * 255 + .500000001):02x}" for c in channels)
 
-    def mix(a, b, weight):
-        return hex_color([x * (1 - weight) + y * weight for x, y in zip(rgb(a), rgb(b))])
+def _luminance(color):
+    return sum((c / 12.92 if c <= .04045 else ((c + .055) / 1.055) ** 2.4) * w
+               for c, w in zip(_rgb(color), (.2126, .7152, .0722)))
 
-    def luminance(color):
-        linear = [c / 12.92 if c <= .04045 else ((c + .055) / 1.055) ** 2.4 for c in rgb(color)]
-        return sum(c * w for c, w in zip(linear, (.2126, .7152, .0722)))
 
-    def contrast(a, b):
-        x, y = luminance(a), luminance(b)
-        return (max(x, y) + .05) / (min(x, y) + .05)
+def color_scheme(value: Any, scheme: Any = None) -> str:
+    """Infer only legacy choices; an explicit scheme does not depend on the hue."""
+    if scheme in ("light", "dark"):
+        return scheme
+    return "dark" if _luminance(normalize_color(value)) < .35 else "light"
 
+
+def _chroma_hue(color):
+    r, g, b = [c / 12.92 if c <= .04045 else ((c + .055) / 1.055) ** 2.4 for c in _rgb(color)]
+    l = (.4122214708*r + .5363325363*g + .0514459929*b) ** (1/3)
+    m = (.2119034982*r + .6806995451*g + .1073969566*b) ** (1/3)
+    s = (.0883024619*r + .2817188376*g + .6299787005*b) ** (1/3)
+    a = 1.9779984951*l - 2.428592205*m + .4505937099*s
+    bb = .0259040371*l + .7827717662*m - .808675766*s
+    return math.hypot(a, bb), math.atan2(bb, a)
+
+
+def _tone(lightness, chroma, hue):
+    for _ in range(81):
+        a, b = chroma * math.cos(hue), chroma * math.sin(hue)
+        l = (lightness + .3963377774*a + .2158037573*b) ** 3
+        m = (lightness - .1055613458*a - .0638541728*b) ** 3
+        s = (lightness - .0894841775*a - 1.291485548*b) ** 3
+        channels = [4.0767416621*l - 3.3077115913*m + .2309699292*s,
+                    -1.2684380046*l + 2.6097574011*m - .3413193965*s,
+                    -.0041960863*l - .7034186147*m + 1.707614701*s]
+        if all(0 <= c <= 1 for c in channels):
+            break
+        chroma *= .94
+    channels = [12.92*c if c <= .0031308 else 1.055*c ** (1/2.4) - .055 for c in channels]
+    return "#" + "".join(f"{math.floor(max(0, min(1, c)) * 255 + .500000001):02x}" for c in channels)
+
+
+def color_theme(value: str, scheme: str | None = None) -> dict:
+    """Same OKLCH roles as web/src/themes/color.ts, for the server's first paint."""
     color = normalize_color(value)
-    dark = luminance(color) < .35
-    ink = "#ffffff" if dark else "#000000"
-    surface = color
-    low, high = (.012, .095) if dark else (.5, .85)
-    while luminance(surface) < low:
-        surface = mix(surface, "#ffffff", .02)
-    while luminance(surface) > high:
-        surface = mix(surface, "#000000", .02)
-    background = mix(surface, "#000000" if dark else "#ffffff", .045)
-    end = mix(surface, "#000000" if dark else "#ffffff", .015)
-    surfaces = [surface, background, end]
+    dark = color_scheme(color, scheme) == "dark"
+    c, h = _chroma_hue(color)
+    tint = min(c, .042)
+    accent_chroma = 0 if c < .003 else min(.17, max(.07, c * 1.6))
 
-    def readable(start):
-        for step in range(101):
-            candidate = mix(start, ink, step / 100)
-            if all(contrast(candidate, bg) >= 4.5 for bg in surfaces):
-                return candidate
-        return ink
+    def role(light, night, amount):
+        return _tone(night if dark else light, tint * amount, h)
 
-    accent = readable(mix(surface, ink, .55))
-    surfaces.append(mix(surface, accent, .22))
-    primary = readable(mix(surface, ink, .94))
-    secondary = readable(mix(surface, ink, .68))
-    destructive = readable("#ff6b74" if dark else "#b42318")
-    foreground = "#000000" if contrast(accent, "#000000") >= contrast(accent, "#ffffff") else "#ffffff"
-    shadow = mix(surface, "#000000", .3 if dark else .16)
-    highlight = mix(surface, "#ffffff", .065 if dark else .6)
+    def on(bg):
+        lum = _luminance(bg)
+        return "#000000" if (lum + .05) / .05 >= 1.05 / (lum + .05) else "#ffffff"
+
+    background, surface = role(.92, .19, .55), role(.955, .265, .45)
+    accent = _tone(.79 if dark else .44, accent_chroma, h)
+    primary, secondary = _tone(.95 if dark else .255, .012, h), _tone(.77 if dark else .445, .018, h)
+    shadow, highlight = role(.78, .16, .45), role(.99, .32, .2)
+    rail, field = role(.89, .215, .72), role(.91, .225, .48)
+    elevated, selected = role(.978, .31, .25), role(.855, .355, .9)
+    destructive = "#ffb4b9" if dark else "#9f2433"
     theme = copy.deepcopy(THEMES["dark" if dark else "light"])
     theme.update(name="color", label="Цвет", description="Любой цвет с мягким градиентом")
     theme["palette"].update(background={"hex": background, "alpha": 1},
         midground={"hex": primary, "alpha": 1}, foreground={"hex": highlight, "alpha": 0})
     theme["neumorphism"].update(background=background, surface=surface, shadow=shadow,
         highlight=highlight, textPrimary=primary, textSecondary=secondary, accent=accent,
-        accentLine=readable(accent), accentForeground=foreground)
+        accentLine=accent, accentForeground=on(accent), rail=rail, field=field, elevated=elevated, selected=selected)
     theme["colorOverrides"].update(card=surface, cardForeground=primary,
-        popover=surface, popoverForeground=primary, secondary=surface, secondaryForeground=primary, muted=surface,
-        primary=accent, accent=accent, primaryForeground=foreground, accentForeground=foreground,
-        mutedForeground=secondary, border=shadow, input=shadow, ring=readable(accent),
-        destructive=destructive,
-        destructiveForeground="#000000" if contrast(destructive, "#000000") >= contrast(destructive, "#ffffff") else "#ffffff",
-        success=readable("#9ede01" if dark else "#047857"), warning=readable("#f6c453" if dark else "#8a5200"))
-    theme["assets"] = {"bg": f"linear-gradient(135deg, {background}, {end})"}
+        popover=elevated, popoverForeground=primary, secondary=selected, secondaryForeground=primary, muted=field,
+        primary=accent, accent=accent, primaryForeground=on(accent), accentForeground=on(accent),
+        mutedForeground=secondary, border=shadow, input=shadow, ring=accent,
+        destructive=destructive, destructiveForeground=on(destructive),
+        success="#ace4bc" if dark else "#20583f", warning="#efd69b" if dark else "#6e4909")
+    theme["assets"] = {"bg": f"linear-gradient(135deg, {background}, {role(.93, .205, .55)})"}
     theme["terminalBackground"] = surface
     theme["terminalForeground"] = primary
     theme["swatchColors"] = [background, primary, accent]
@@ -106,6 +122,8 @@ def preference(config: dict, installation_id: str | None, owner: str, base_path:
     revision_data = [raw, dashboard.get("theme_revision"), evening]
     if "theme_color" in dashboard:
         revision_data.append(dashboard["theme_color"])
+    if "theme_color_scheme" in dashboard:
+        revision_data.append(dashboard["theme_color_scheme"])
     revision = hashlib.sha256(json.dumps(
         revision_data, sort_keys=True, default=str,
     ).encode()).hexdigest()[:24]
@@ -114,14 +132,18 @@ def preference(config: dict, installation_id: str | None, owner: str, base_path:
         "installation_id": installation_id,
         "owner": hashlib.sha256(owner.encode()).hexdigest()[:16],
         "base_path": base_path, "revision": revision, "evening": evening,
-        **({"color": normalize_color(dashboard.get("theme_color"))}
+        **({"color": normalize_color(dashboard.get("theme_color")),
+            "color_scheme": color_scheme(dashboard.get("theme_color"), dashboard.get("theme_color_scheme"))}
            if normalize_theme(raw) == "color" or "theme_color" in dashboard else {}),
     }
 
 
 def bootstrap_css(value: dict) -> str:
     theme_name = normalize_theme(value.get("theme"))
-    theme = color_theme(value.get("color")) if theme_name == "color" else THEMES[theme_name]
+    theme = color_theme(value.get("color"), value.get("color_scheme")) if theme_name == "color" else copy.deepcopy(THEMES[theme_name])
+    neo = theme["neumorphism"]
+    for key in ("rail", "field", "elevated", "selected"):
+        neo.setdefault(key, neo["background"] if key == "rail" else neo["surface"])
     variables = {}
     for name, layer in theme["palette"].items():
         if not isinstance(layer, dict):

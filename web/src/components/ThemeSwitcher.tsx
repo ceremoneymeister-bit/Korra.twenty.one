@@ -15,20 +15,26 @@ const CHOICES = [
 
 /** Collapsing the rail keeps an explicit menu, never a hidden three-way cycle. */
 export function ThemeSwitcher({ collapsed = false, labeled = false }: ThemeSwitcherProps) {
-  const { themeName, setTheme, saveState, saveError, retryTheme } = useTheme();
+  const { themeName, scheme, color, setTheme, previewColor, saveState, saveError, retryTheme } = useTheme();
   const [open, setOpen] = useState(false);
-  const CurrentIcon = CHOICES.find(choice => choice.name === themeName)?.Icon ?? Sun;
+  const CurrentIcon = themeName === "color" ? Palette : scheme === "dark" ? Moon : Sun;
+  const changeOpen = (value: boolean) => { previewColor(null); setOpen(value); };
   const choices = (inMenu = false) => (
     <div className={`theme-choices${labeled || inMenu ? " is-labeled" : ""}`} role="group" aria-label="Цветовая тема" aria-busy={saveState === "pending" || undefined}>
-      {CHOICES.map(({ name, label, Icon }) => {
+      {CHOICES.filter(choice => !inMenu || choice.name !== "color").map(({ name, label, Icon }) => {
         const button = (
           <button
             type="button" data-theme-control aria-label={name === "color" ? "Цвет" : `${label} тема`}
-            title={label} aria-pressed={themeName === name}
+            title={label} aria-pressed={name === "color" ? undefined : scheme === name}
+            data-colored={name === "color" && themeName === "color" || undefined}
             onClick={() => {
-              if (saveState === "error" && name === themeName) void retryTheme();
-              else if (name !== themeName) void setTheme(name);
-              if (name !== "color") setOpen(false);
+              if (name === "color") return;
+              if (saveState === "error" && name === scheme) void retryTheme();
+              else if (name !== scheme) {
+                if (themeName === "color") void setTheme("color", color, name as "light" | "dark");
+                else void setTheme(name);
+              }
+              changeOpen(false);
             }}
           >
             <span><Icon size={15} aria-hidden />{(labeled || inMenu) && label}</span>
@@ -42,7 +48,7 @@ export function ThemeSwitcher({ collapsed = false, labeled = false }: ThemeSwitc
   );
   return (
     <div className="theme-switcher">
-      <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Root open={open} onOpenChange={changeOpen}>
         {collapsed ? (
           <Popover.Trigger asChild>
             <button type="button" data-theme-control className="theme-collapsed" aria-label="Выбрать тему" title="Выбрать тему">
@@ -58,12 +64,13 @@ export function ThemeSwitcher({ collapsed = false, labeled = false }: ThemeSwitc
             </div>
             {collapsed && choices(true)}
             <ThemeColorPalette />
+            {saveState === "error" && <button className="theme-color-reset" type="button" onClick={() => void retryTheme()}>Повторить сохранение</button>}
           </Popover.Content>
         </Popover.Portal>
       </Popover.Root>
       {saveState === "error" && !labeled && typeof document !== "undefined" && createPortal(
         <div
-          className="fixed bottom-4 left-4 right-4 z-[120] rounded-[var(--neo-radius-control)] bg-[var(--neo-surface)] p-3 text-sm text-[var(--neo-text-primary)] shadow-[var(--neo-depth-3)] sm:left-auto sm:max-w-sm"
+          className="fixed bottom-4 left-4 right-4 z-[140] rounded-[var(--neo-radius-control)] bg-[var(--neo-surface)] p-3 text-sm text-[var(--neo-text-primary)] shadow-[var(--neo-depth-3)] sm:left-auto sm:max-w-sm"
           data-theme-save-status role="alert"
         >
           <p>{saveError || "Тема не сохранена. Проверьте соединение и повторите."}</p>

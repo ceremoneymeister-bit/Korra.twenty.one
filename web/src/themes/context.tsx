@@ -28,7 +28,7 @@ import {
 } from "./semantic-colors";
 import { NEUMORPHISM_CSS_VARS, neumorphismVars } from "./neumorphism";
 import { applyThemeColorMeta, resolveThemeColor } from "./theme-color";
-import { DEFAULT_COLOR, validColor, themeColorScheme } from "./color";
+import { DEFAULT_COLOR, validColor, themeColorScheme, colorScheme, type ColorScheme } from "./color";
 import { api } from "@/lib/api";
 import { cachePreference, readBootstrap, validPreference, type ThemePreference } from "./preference";
 
@@ -350,20 +350,24 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const preferenceRef = useRef(preference);
   const generation = useRef(0);
   const saveQueue = useRef<Promise<unknown>>(Promise.resolve());
-  const initialChoice = { name: preference?.theme ?? "light", color: preference?.color ?? DEFAULT_COLOR };
+  const initialChoice = { name: preference?.theme ?? "light", color: preference?.color ?? DEFAULT_COLOR,
+    scheme: preference?.theme === "color" ? colorScheme(preference.color ?? DEFAULT_COLOR, preference.color_scheme) : preference?.theme === "dark" ? "dark" as const : "light" as const };
   const lastChoice = useRef(initialChoice);
   const mounted = useRef(true);
   const [choice, setChoice] = useState(initialChoice);
-  const themeName = choice.name;
-  const color = choice.color;
+  const [preview, setPreview] = useState<typeof initialChoice | null>(null);
+  const visible = preview ?? choice;
+  const themeName = visible.name;
+  const color = visible.color;
+  const scheme = visible.scheme;
   const [saveState, setSaveState] = useState<"idle" | "pending" | "saved" | "error">("idle");
   const [saveError, setSaveError] = useState("");
-  const resolveTheme = useCallback((name: string, color: string): DashboardTheme =>
-    name === "color" ? colorTheme(color) : BUILTIN_THEMES[migrateThemeName(name)] ?? defaultTheme, []);
+  const resolveTheme = useCallback((name: string, color: string, scheme: ColorScheme): DashboardTheme =>
+    name === "color" ? colorTheme(color, scheme) : BUILTIN_THEMES[migrateThemeName(name)] ?? defaultTheme, []);
 
   useLayoutEffect(() => {
-    applyTheme(resolveTheme(themeName, color));
-  }, [themeName, color, resolveTheme]);
+    applyTheme(resolveTheme(themeName, color, scheme));
+  }, [themeName, color, scheme, resolveTheme]);
 
   const acceptPreference = useCallback((next: ThemePreference) => {
     preferenceRef.current = next;
@@ -383,7 +387,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       const next = validPreference(resp.preference);
       if (!next) return;
       acceptPreference(next);
-      const choice = { name: next.theme, color: next.color ?? DEFAULT_COLOR };
+      const choice = { name: next.theme, color: next.color ?? DEFAULT_COLOR,
+        scheme: next.theme === "color" ? colorScheme(next.color ?? DEFAULT_COLOR, next.color_scheme) : next.theme };
       lastChoice.current = choice;
       setChoice(choice);
     }).catch(() => { /* Bootstrap remains authoritative; no healing write. */ });
@@ -405,10 +410,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true; };
   }, []);
 
-  const saveTheme = useCallback((name: string, color = lastChoice.current.color, refresh = false): Promise<boolean> => {
+  const saveTheme = useCallback((name: string, color = lastChoice.current.color, scheme = lastChoice.current.scheme, refresh = false): Promise<boolean> => {
     const next = migrateThemeName(name);
     color = validColor(color) ? color.toLowerCase() : DEFAULT_COLOR;
-    const choice = { name: next, color };
+    const choice = { name: next, color, scheme: next === "color" ? scheme : next };
+    setPreview(null);
     lastChoice.current = choice;
     const thisGeneration = ++generation.current;
     setChoice(choice);
@@ -424,10 +430,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
           acceptPreference(latest);
         }
         const response = next === "color"
-          ? await api.setTheme(next, preferenceRef.current!.revision, undefined, color)
+          ? await api.setTheme(next, preferenceRef.current!.revision, undefined, color, choice.scheme)
           : await api.setTheme(next, preferenceRef.current!.revision);
         const ack = validPreference(response.preference);
-        if (!response.ok || !ack || ack.theme !== next || (next === "color" && ack.color !== color)) throw new Error("missing durable ACK");
+        if (!response.ok || !ack || ack.theme !== next || (next === "color" && (ack.color !== color || ack.color_scheme !== choice.scheme))) throw new Error("missing durable ACK");
         acceptPreference(ack);
         if (mounted.current && generation.current === thisGeneration) {
           setSaveState("saved");
@@ -444,23 +450,28 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     saveQueue.current = saving;
     return saving;
   }, [acceptPreference]);
-  const setTheme = useCallback((name: string, color?: string) => saveTheme(name, color), [saveTheme]);
-  const retryTheme = useCallback(() => saveTheme(lastChoice.current.name, lastChoice.current.color, true), [saveTheme]);
+  const setTheme = useCallback((name: string, color?: string, scheme?: ColorScheme) => saveTheme(name, color, scheme), [saveTheme]);
+  const previewColor = useCallback((color: string | null) => {
+    setPreview(color && validColor(color) ? { ...lastChoice.current, name: "color", color } : null);
+  }, []);
+  const retryTheme = useCallback(() => saveTheme(lastChoice.current.name, lastChoice.current.color, lastChoice.current.scheme, true), [saveTheme]);
 
   const value = useMemo<ThemeContextValue>(() => ({
-    theme: resolveTheme(themeName, color), themeName, color,
+    theme: resolveTheme(themeName, color, scheme), themeName, color, scheme, previewColor,
     setTheme, saveState, saveError, retryTheme,
-  }), [themeName, color, setTheme, resolveTheme, saveState, saveError, retryTheme]);
+  }), [themeName, color, scheme, previewColor, setTheme, resolveTheme, saveState, saveError, retryTheme]);
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
 export function useTheme(): ThemeContextValue { return useContext(ThemeContext); }
 const ThemeContext = createContext<ThemeContextValue>({
-  theme: defaultTheme, themeName: "light", color: DEFAULT_COLOR,
+  theme: defaultTheme, themeName: "light", color: DEFAULT_COLOR, scheme: "light", previewColor: () => {},
   setTheme: async () => false, saveState: "idle", saveError: "",
   retryTheme: async () => false,
 });
 interface ThemeContextValue {
-  setTheme: (name: string, color?: string) => Promise<boolean>;
+  setTheme: (name: string, color?: string, scheme?: ColorScheme) => Promise<boolean>;
+  scheme: ColorScheme;
+  previewColor: (color: string | null) => void;
   color: string;
   saveState: "idle" | "pending" | "saved" | "error";
   saveError: string;

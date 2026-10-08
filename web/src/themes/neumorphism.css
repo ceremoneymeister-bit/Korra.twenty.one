@@ -78,6 +78,10 @@
 
 /* Agent state surfaces follow the same palette as the rest of a color theme. */
 :root[data-korra-theme="color"] {
+  --component-sidebar-background: var(--neo-rail);
+  --neo-depth-1: 1px 2px 4px color-mix(in srgb, var(--neo-shadow) 45%, transparent), -1px -1px 3px color-mix(in srgb, var(--neo-highlight) 40%, transparent);
+  --neo-depth-2: 3px 4px 8px color-mix(in srgb, var(--neo-shadow) 40%, transparent), -2px -2px 6px color-mix(in srgb, var(--neo-highlight) 35%, transparent);
+  --neo-depth-3: 4px 6px 14px color-mix(in srgb, var(--neo-shadow) 38%, transparent), -3px -3px 9px color-mix(in srgb, var(--neo-highlight) 30%, transparent);
   --theme-artwork-surface: var(--neo-surface);
   --theme-artwork-foreground: var(--neo-text-primary);
   --theme-artwork-accent: var(--neo-accent);
@@ -91,7 +95,7 @@
   --k-decision-fg: var(--neo-accent-foreground);
   --k-error: var(--destructive);
   --k-error-fg: var(--destructive-foreground);
-  --k-active: color-mix(in srgb, var(--neo-accent) 22%, var(--neo-surface));
+  --k-active: var(--neo-selected);
   --k-scrim: color-mix(in srgb, var(--neo-shadow) 68%, transparent);
 }
 
@@ -748,3 +752,7 @@
     outline-offset: 2px;
   }
 }
+
+:root[data-korra-theme="color"] :is(.neo-field, .neo-select-trigger, .korra-chat-composer__surface, .korra-chat-history__search) { background: var(--neo-field); }
+:root[data-korra-theme="color"] :is(.neo-select-menu, .neo-dialog, .neo-toast, .neo-tooltip) { background: var(--neo-elevated); }
+:root[data-korra-theme="color"] :is(.korra-agent-tabs button[aria-selected="true"], .korra-chat-history__item[aria-current="page"]) { background: var(--neo-selected); }
