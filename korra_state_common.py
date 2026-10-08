@@ -513,6 +513,14 @@ CREATE TABLE IF NOT EXISTS session_model_usage (
     PRIMARY KEY (session_id, model, billing_provider, billing_base_url, billing_mode, task)
 );
 
+-- Time-local Codex usage; independent of session deletion and transcript pruning.
+CREATE TABLE IF NOT EXISTS codex_usage_events (
+    recorded_at REAL NOT NULL,
+    api_call_count INTEGER NOT NULL,
+    output_tokens INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_codex_usage_events_time ON codex_usage_events(recorded_at);
+
 CREATE TABLE IF NOT EXISTS state_meta (
     key TEXT PRIMARY KEY,
     value TEXT

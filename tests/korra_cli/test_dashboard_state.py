@@ -482,7 +482,9 @@ def test_quota_waits_for_the_first_reply_when_codex_is_connected(tmp_path):
     main = _agent(tmp_path, "default", "Корра")
     _codex_model(main.home)
     _connect_codex(main.home)
-    assert ds.quota_section([main], now=NOW, root=tmp_path) == {"available": True, "status": "waiting"}
+    quota = ds.quota_section([main], now=NOW, root=tmp_path)
+    assert quota["available"] is True and quota["status"] == "waiting"
+    assert quota["usage_by_agent"]["total"]["calls"] == 0
 
 
 def test_a_profile_on_the_installation_login_counts_as_connected(tmp_path):
@@ -950,9 +952,13 @@ def test_a_garbled_answer_is_a_failure_too(tmp_path, owner, wham):
 def test_an_expired_or_foreign_token_is_not_used(tmp_path, wham):
     main = _agent(tmp_path, "default", "Корра")
     _login(main.home, _jwt(exp=NOW - 10))
-    assert ds.quota_section([main], now=NOW, root=tmp_path) == {"available": True, "status": "waiting"}
+    quota = ds.quota_section([main], now=NOW, root=tmp_path)
+    assert quota["available"] is True and quota["status"] == "waiting"
+    assert quota["usage_by_agent"]["total"]["calls"] == 0
     _login(main.home, "at-test")
-    assert ds.quota_section([main], now=NOW, root=tmp_path) == {"available": True, "status": "waiting"}
+    quota = ds.quota_section([main], now=NOW, root=tmp_path)
+    assert quota["available"] is True and quota["status"] == "waiting"
+    assert quota["usage_by_agent"]["total"]["calls"] == 0
     assert wham["calls"] == []
 
 
@@ -1509,3 +1515,18 @@ def test_attention_early_warning_replaces_the_critical_row(tmp_path, owner, monk
     rows = [i for i in ds.attention_section([owner], now=NOW, tz=MSK, quota=critical)["items"]
             if i["source"] == "quota"]
     assert len(rows) == 1 and rows[0]["title"] == "Лимит Codex исчерпан"
+
+
+def test_usage_is_delivered_beside_the_quota(tmp_path, owner, wham, monkeypatch):
+    from korra_state import SessionDB
+
+    wham["answer"] = _usage(36, resets_at=NOW + 86400)
+    with SessionDB(owner.home / "state.db") as db:
+        with monkeypatch.context() as m:
+            m.setattr(ds.time, "time", lambda: NOW - 1)
+            db.update_token_counts("codex", billing_provider="openai-codex", api_call_count=1, output_tokens=123)
+    state = ds.build_state(now=NOW, agents=[owner], workspace=tmp_path / "workspace", quota_root=tmp_path)
+    usage = state["quota"]["usage_by_agent"]
+    assert usage["total"] == {"calls": 1, "output_tokens": 123}
+    assert usage["agents"][0]["name"] == owner.label
+    assert usage["period"]["starts_at"] == NOW + 86400 - 7 * 86400

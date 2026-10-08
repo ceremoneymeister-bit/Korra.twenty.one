@@ -165,9 +165,9 @@ def agent_href(profile: str, session_id: Optional[str] = None) -> str:
     return f"/agents?{urlencode(params)}"
 
 
-def _ro(path: Path) -> sqlite3.Connection:
+def _ro(path: Path, *, timeout: float = 1.0) -> sqlite3.Connection:
     """Open an existing SQLite file strictly read-only."""
-    conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=1.0)
+    conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=timeout)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -1211,6 +1211,82 @@ def _window_level(window: dict[str, Any], blocked: bool) -> str:
 _LEVEL_ORDER = {"normal": 0, "warn": 1, "critical": 2}
 
 
+def codex_usage_by_agent(agents: list[Agent], windows: list[dict[str, Any]], *, now: float) -> dict[str, Any]:
+    """Output volume inside the longest current quota window, never lifetime totals.
+
+    The weekly window takes precedence over the short burst limit. Missing
+    windows fall back to seven rolling days. Shares describe this installation,
+    not subscription credits. No token prices or invented cache weights.
+    """
+    window = max(
+        (w for w in windows if w.get("window_minutes") and w.get("resets_at")),
+        key=lambda w: w["window_minutes"], default=None,
+    )
+    key = ("codex-usage", tuple((str(a.home), a.profile, a.label) for a in agents),
+           (window["resets_at"], window["window_minutes"]) if window else None)
+    return _cached(key, 120.0, lambda: _read_codex_usage(agents, window, now=now))
+
+
+def _read_codex_usage(agents: list[Agent], window: Optional[dict[str, Any]], *, now: float) -> dict[str, Any]:
+    start = window["resets_at"] - window["window_minutes"] * 60 if window else now - 7 * 86400
+    rows = []
+    unreadable = []
+    incomplete = []
+    # Bound the entire cold scan too, including 25 locked/corrupt profiles.
+    deadline = time.monotonic() + 0.5
+    for agent in agents:
+        calls = tokens = 0
+        since = None
+        status = "ok"
+        try:
+            path = agent.home / "state.db"
+            if path.exists():
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("usage scan budget")
+                with closing(_ro(path, timeout=0.02)) as conn:
+                    conn.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
+                    if not _columns(conn, "codex_usage_events"):
+                        status = "untracked"
+                    else:
+                        coverage = conn.execute(
+                            "SELECT value FROM state_meta WHERE key = 'codex_usage_since'"
+                        ).fetchone()
+                        since = float(coverage[0]) if coverage else now
+                        calls, tokens = conn.execute(
+                            "SELECT COALESCE(SUM(api_call_count), 0), COALESCE(SUM(output_tokens), 0) "
+                            "FROM codex_usage_events WHERE recorded_at >= ? AND recorded_at <= ?",
+                            (start, now),
+                        ).fetchone()
+                        if since > start:
+                            status = "partial"
+        except (OSError, sqlite3.Error, TypeError, ValueError, OverflowError, TimeoutError):
+            status = "error"
+            unreadable.append(agent.profile)
+        if status != "ok":
+            incomplete.append(agent.profile)
+        rows.append({
+            "profile": agent.profile, "name": agent.label, "status": status,
+            "calls": calls if status in ("ok", "partial") else None,
+            "output_tokens": tokens if status in ("ok", "partial") else None,
+            "tracked_since": since, "share_percent": None,
+        })
+    total_calls = sum(row["calls"] or 0 for row in rows)
+    total_tokens = sum(row["output_tokens"] or 0 for row in rows)
+    for row in rows:
+        if row["output_tokens"] is not None:
+            row["share_percent"] = row["output_tokens"] / total_tokens * 100 if total_tokens else 0.0
+    rows.sort(key=lambda row: (-(row["output_tokens"] or 0), -(row["calls"] or 0), row["profile"]))
+    return {
+        "status": "partial" if incomplete else "ok",
+        "period": {"starts_at": start, "ends_at": now,
+                   "window_minutes": window["window_minutes"] if window else None,
+                   "resets_at": window["resets_at"] if window else None},
+        "measure": "output_tokens", "agents": rows,
+        "total": {"calls": total_calls, "output_tokens": total_tokens},
+        "calculated_at": now, "unreadable": unreadable, "incomplete": incomplete,
+    }
+
+
 def quota_section(
     agents: list[Agent], *, now: float, root: Optional[Path] = None, fetch: bool = True
 ) -> dict[str, Any]:
@@ -1228,7 +1304,8 @@ def quota_section(
         refresh_codex_quota(agents, installation, now=now, root=root)
     data = load_codex_quota(root=root)
     if data is None:
-        return {"available": True, "status": "waiting"}
+        return {"available": True, "status": "waiting",
+                "usage_by_agent": codex_usage_by_agent(agents, [], now=now)}
 
     windows = []
     for key in ("primary", "secondary"):
@@ -1237,7 +1314,8 @@ def quota_section(
         if window:
             windows.append(window)
     if not windows:
-        return {"available": True, "status": "waiting"}
+        return {"available": True, "status": "waiting",
+                "usage_by_agent": codex_usage_by_agent(agents, [], now=now)}
     captured_at = float(data.get("captured_at") or 0)
     # The backend's ``limit_reached`` belongs to the windows that were empty in
     # that snapshot. Once they have rolled over, the flag says nothing about
@@ -1274,6 +1352,7 @@ def quota_section(
         "status": "ok",
         "level": level,
         "windows": windows,
+        "usage_by_agent": codex_usage_by_agent(agents, windows, now=now),
         "plan_type": data.get("plan_type"),
         "captured_at": captured_at,
         "stale": now - captured_at > _QUOTA_STALE_SECONDS,
