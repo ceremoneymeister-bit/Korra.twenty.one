@@ -723,6 +723,13 @@ def _clock() -> float:
     return time.time()
 
 
+def _iso_ts(text: Optional[str]) -> float:
+    try:
+        return datetime.fromisoformat(text).timestamp() if text else 0.0
+    except ValueError:
+        return 0.0
+
+
 def _stamp_text(ts: float) -> str:
     return datetime.fromtimestamp(ts).astimezone().isoformat(timespec="seconds")
 
@@ -786,7 +793,7 @@ def sales_section(*, root: Optional[Path] = None, tz: Optional[tzinfo] = None, w
         return {"status": "not_connected", "candidates": candidates}
 
     tz = tz or installation_tz()
-    key = (str(root or ""), cc.stamp(root), _zone_key(tz))
+    key = (str(root or ""), cc.identity(conn), _zone_key(tz))
     check = cc.public(conn)["last_check"]
     now = _clock()
     with _state_lock:
@@ -799,8 +806,12 @@ def sales_section(*, root: Optional[Path] = None, tz: Optional[tzinfo] = None, w
         if start:
             entry.running = True
             entry.done.clear()
-    if blocked and entry.error is None:
-        with _state_lock:
+    with _state_lock:
+        failed_after_read = (
+            entry.value is not None and not check["ok"] and check["code"]
+            and _iso_ts(check["at"]) >= int(entry.at)
+        )
+        if (blocked or failed_after_read) and entry.error is None:
             entry.error = cr.describe_error(check["code"], conn["type"], cc.portal_of(conn))
     if start:
         _spawn(lambda: _refresh(entry, conn, tz))

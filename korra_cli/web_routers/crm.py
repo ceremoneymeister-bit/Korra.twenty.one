@@ -24,7 +24,7 @@ async def _body(request: Request):
     return data if isinstance(data, dict) else {}
 
 
-async def _run(func, *args, **kwargs):
+async def _run(func, *args, keep_cache=False, **kwargs):
     from korra_cli import crm_sales
     from korra_cli.crm_connection import CrmConnectionError
 
@@ -34,7 +34,8 @@ async def _run(func, *args, **kwargs):
         return JSONResponse(
             {"ok": False, "error": {"code": exc.code, "message": str(exc)}}, status_code=exc.status_code
         )
-    crm_sales.reset()
+    if not keep_cache:
+        crm_sales.reset()
     return result
 
 
@@ -50,7 +51,7 @@ async def check_crm_connection(request: Request):
     """Check typed credentials without saving; an empty body rechecks the saved connection."""
     from korra_cli import crm_connection
 
-    return await _run(crm_connection.check, await _body(request))
+    return await _run(crm_connection.check, await _body(request), keep_cache=True)
 
 
 @router.put("/api/dashboard/crm")

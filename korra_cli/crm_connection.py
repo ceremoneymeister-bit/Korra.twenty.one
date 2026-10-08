@@ -16,6 +16,7 @@ reader factory; everything that leaves this module goes through
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import re
@@ -78,13 +79,22 @@ def load(root: Optional[Path] = None) -> Optional[dict]:
     return raw
 
 
-def stamp(root: Optional[Path] = None) -> tuple[int, int]:
-    """Changes whenever the connection file is rewritten; keys the card cache."""
-    try:
-        st = _path(root).stat()
-    except (OSError, CrmConnectionError):
-        return (0, 0)
-    return (st.st_mtime_ns, st.st_size)
+def identity(conn: dict) -> str:
+    """What the figures depend on: the link to the CRM and the calculation settings.
+
+    Unlike the file's timestamp it does not change when only the outcome of a check,
+    the account record or the agents' switch is written.
+    """
+    settings = _settings(conn)
+    parts = [
+        conn["type"],
+        conn.get("webhook_url") or conn.get("domain") or "",
+        conn.get("token") or "",
+        conn.get("unix_socket") or "",
+        settings["pipeline_id"],
+        settings["stuck_days"],
+    ]
+    return hashlib.sha256(json.dumps(parts).encode("utf-8")).hexdigest()
 
 
 def _write(conn: dict, root: Optional[Path]) -> None:

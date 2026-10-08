@@ -145,3 +145,13 @@ def test_state_route_carries_the_sales_section(api):
     api.client.put("/api/dashboard/crm", json=BITRIX)
     sales = api.client.get("/api/dashboard/state").json()["sales"]
     assert sales["status"] in {"ok", "error"} and sales["connection"]["source_label"] == "Битрикс24"
+
+
+def test_checking_unsaved_credentials_keeps_the_card_cache(api):
+    assert api.client.put("/api/dashboard/crm", json=BITRIX).json()["ok"] is True
+    cs.sales_section(root=api.root)
+    assert cs._state
+    other = {"type": "bitrix24", "webhook_url": "https://other.bitrix24.ru/rest/5/zzzzzzzzzzzz1234/"}
+    api.client.post("/api/dashboard/crm/check", json=other)
+    api.client.post("/api/dashboard/crm/check", json={})
+    assert cs._state

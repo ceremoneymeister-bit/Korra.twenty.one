@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
@@ -504,3 +505,43 @@ def test_changed_zone_is_not_served_from_the_old_cache(portal, stored, monkeypat
     cs.sales_section(root=stored, tz=TZ)
     cs.sales_section(root=stored, tz=PLUS7)
     assert seen == [TZ, PLUS7]
+
+
+# ---------------------------------------------------------------- a manual check keeps the last figures (F9)
+
+
+def test_manual_recheck_failure_keeps_the_last_figures(portal, stored):
+    good = cs.sales_section(root=stored, tz=TZ)
+    portal.bitrix.handlers["profile"] = lambda p: OSError("down")
+    assert cc.recheck(root=stored)["ok"] is False
+    out = cs.sales_section(root=stored, tz=TZ)
+    assert out["status"] == "ok" and out["won"] == good["won"] and out["as_of"] == good["as_of"]
+    assert out["stale"] is True and out["error"]["code"] == "network"
+
+
+def test_successful_recheck_does_not_mark_data_stale(portal, stored):
+    cs.sales_section(root=stored, tz=TZ)
+    assert cc.recheck(root=stored)["ok"] is True
+    out = cs.sales_section(root=stored, tz=TZ)
+    assert out["status"] == "ok" and out["stale"] is False
+
+
+def test_later_good_read_clears_an_earlier_failed_check(portal, stored, monkeypatch):
+    clock = [time.time()]
+    monkeypatch.setattr(cs, "_clock", lambda: clock[0])
+    cs.sales_section(root=stored, tz=TZ)
+    portal.bitrix.handlers["profile"] = lambda p: OSError("down")
+    cc.recheck(root=stored)
+    portal.bitrix.handlers = bitrix_handlers()
+    clock[0] += 400
+    cs.sales_section(root=stored, tz=TZ)  # the refresh succeeds
+    out = cs.sales_section(root=stored, tz=TZ)
+    assert out["stale"] is False and "error" not in out
+
+
+def test_access_switch_does_not_trigger_a_new_read(portal, stored):
+    cs.sales_section(root=stored, tz=TZ)
+    calls = len(portal.bitrix.calls)
+    cc.update_settings({"agents_access": False}, root=stored)
+    cs.sales_section(root=stored, tz=TZ)
+    assert len(portal.bitrix.calls) == calls  # the switch does not change the figures

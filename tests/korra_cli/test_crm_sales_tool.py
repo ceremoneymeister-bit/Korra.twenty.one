@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -137,3 +138,27 @@ def test_tool_is_registered_as_a_configurable_toolset():
     assert registry.get_entry("crm_sales").toolset == "crm_sales"
     assert any(key == "crm_sales" for key, *_ in CONFIGURABLE_TOOLSETS)
     assert TOOLSETS["crm_sales"]["tools"] == ["crm_sales"]
+
+
+def _stale_desk(desk, monkeypatch):
+    connect(desk)
+    assert run()["ok"] is True
+    clock = [time.time() + 400]
+    monkeypatch.setattr(cs, "_clock", lambda: clock[0])
+    desk.bitrix.handlers["crm.deal.list"] = lambda p: OSError("down")
+
+
+@pytest.mark.parametrize("action", ["overview", "stuck"])
+def test_every_summary_action_reports_a_failed_refresh(desk, monkeypatch, action):
+    _stale_desk(desk, monkeypatch)
+    run(action=action)  # the refresh fails in the background
+    answer = run(action=action)
+    assert answer["ok"] is True and answer["stale"] is True
+    assert answer["error"]["code"] == "network" and answer["as_of"] and "последн" in answer["note"]
+
+
+@pytest.mark.parametrize("action", ["overview", "stuck"])
+def test_fresh_data_has_no_failure_marks(desk, action):
+    connect(desk)
+    answer = run(action=action)
+    assert answer["stale"] is False and "error" not in answer and "note" not in answer

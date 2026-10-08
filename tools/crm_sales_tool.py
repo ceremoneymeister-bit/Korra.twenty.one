@@ -57,12 +57,20 @@ def _snapshot() -> dict | str:
     return _error(code or "unavailable", error.get("message") or "Данные CRM пока недоступны.", step)
 
 
+def _freshness(section: dict) -> dict:
+    """The same marks in every summary action: when the figures are from, and why they may be old."""
+    out: dict[str, Any] = {"as_of": section.get("as_of"), "stale": bool(section.get("stale"))}
+    if out["stale"]:
+        error = section.get("error") or {}
+        out["error"] = {"code": error.get("code"), "message": error.get("message")}
+        out["note"] = "Свежие данные получить не удалось: это последние известные, «данные от as_of»."
+    return out
+
+
 def _overview(section: dict) -> dict:
     keep = ("source_label", "portal", "pipeline", "stuck_days", "won", "new_leads", "stuck", "overdue", "managers")
     out = {key: section[key] for key in keep if key in section}
-    out["as_of"] = section.get("as_of")
-    if section.get("stale"):
-        out["note"] = "Свежие данные получить не удалось: это последние известные, «данные от as_of»."
+    out.update(_freshness(section))
     river = section.get("river") or {}
     out["river"] = [
         {"stage": s["name"], "deals": s["count"], "amount": s["amount"], "stuck": s["stuck"]}
@@ -82,7 +90,7 @@ def _stuck(section: dict, limit: int) -> dict:
     ]
     rows.sort(key=lambda d: -(d.get("days") or 0))
     out = {"stuck_days": section.get("stuck_days"), "count": (section.get("stuck") or {}).get("count"),
-           "deals": rows[:limit], "as_of": section.get("as_of")}
+           "deals": rows[:limit], **_freshness(section)}
     if (section.get("stuck") or {}).get("approx"):
         out["note"] = "Журнал событий amoCRM обрезан: список может быть неполным."
     return out
