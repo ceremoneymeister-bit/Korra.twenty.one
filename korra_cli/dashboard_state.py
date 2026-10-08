@@ -1973,6 +1973,12 @@ def _section(name: str, compute: Callable[[], dict[str, Any]]) -> dict[str, Any]
         return {"status": "error"}
 
 
+def _sales_section(tz: Any) -> dict[str, Any]:
+    from korra_cli import crm_sales
+
+    return crm_sales.sales_section(tz=tz)
+
+
 def build_state(
     *,
     period: str = DEFAULT_PERIOD,
@@ -2025,4 +2031,5 @@ def build_state(
             lambda: _section("artifacts", lambda: artifacts_section(roster, root=workspace, now=current)),
         ),
         "quota": quota,
+        "sales": _section("sales", lambda: _sales_section(tz)),
     }

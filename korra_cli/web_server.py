@@ -20822,6 +20822,10 @@ from korra_cli.web_routers import dashboard_state as _dashboard_state_routes  # 
 
 app.include_router(_dashboard_state_routes.router)
 
+from korra_cli.web_routers import crm as _crm_routes  # noqa: E402
+
+app.include_router(_crm_routes.router)
+
 
 # Curated font-override ids. Kept in sync with FONT_CHOICES in
 # web/src/themes/fonts.ts — the frontend owns the self-hosted font stacks;

@@ -793,7 +793,7 @@ def test_state_route_serves_every_section_without_writing(tmp_path, monkeypatch)
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["version"] == 1
-    for section in ("attention", "agents", "metrics", "upcoming", "artifacts", "quota"):
+    for section in ("attention", "agents", "metrics", "upcoming", "artifacts", "quota", "sales"):
         assert "status" in body[section], section
     assert body["metrics"]["period"] == "month"
     assert body["metrics"]["totals"]["dialogs"] == 1
