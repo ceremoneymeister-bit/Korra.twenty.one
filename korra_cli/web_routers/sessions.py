@@ -16,6 +16,7 @@ import asyncio  # noqa: F401 — used by handlers
 import json
 import logging
 import sqlite3
+import threading
 import time  # noqa: F401
 from typing import Any, Dict, List, Optional  # noqa: F401
 
@@ -48,6 +49,7 @@ _cron_profile_home = late("_cron_profile_home")
 _import_sessions_for_profile = late("_import_sessions_for_profile")
 _maybe_auto_archive_for_profile = late("_maybe_auto_archive_for_profile")
 _open_session_db_for_profile = late("_open_session_db_for_profile")
+_profile_scope = late("_profile_scope")
 _prune_sessions = late("_prune_sessions")
 _read_session_import_body = late("_read_session_import_body")
 _session_latest_descendant = late("_session_latest_descendant")
@@ -821,6 +823,50 @@ async def get_session_messages(
             "returned": len(projected_messages),
         },
     }
+
+
+_learning_undo_lock = threading.Lock()
+
+
+@manage_router.post("/api/sessions/{session_id}/messages/{message_id}/learning-undo")
+async def undo_learning_notice(
+    session_id: str, message_id: int, profile: Optional[str] = None
+):
+    """Отменить изменение, о котором сообщил «Учёл…» (``display_kind=learning``).
+
+    Откат идёт через журнал навыков и файлы памяти профиля (``agent.learning_receipt``);
+    результат помечается на самом сообщении, поэтому повторная отмена безвредна.
+    """
+    from agent.learning_receipt import RECEIPT_KEY, undo_receipt
+
+    def _undo():
+        with _learning_undo_lock:
+            db = _open_session_db_for_profile(profile, read_only=False)
+            try:
+                if not _resolve_session_id(db, session_id):
+                    return None
+                meta = db.get_message_display_metadata(message_id)
+                receipt = (meta or {}).get(RECEIPT_KEY)
+                if not isinstance(receipt, dict):
+                    return {
+                        "ok": False,
+                        "status": "conflict",
+                        "message": "Для этого сообщения нечего отменять.",
+                    }
+                with _profile_scope(profile):
+                    result = undo_receipt(receipt)
+                if result["status"] == "undone":
+                    db.merge_message_display_metadata(
+                        message_id, {RECEIPT_KEY: {**receipt, "undone": True}}
+                    )
+                return result
+            finally:
+                db.close()
+
+    result = await asyncio.to_thread(_undo)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return result
 
 
 @manage_router.delete("/api/sessions/{session_id}")
