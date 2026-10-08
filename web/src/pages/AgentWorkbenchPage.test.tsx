@@ -71,6 +71,7 @@ vi.mock("@/pages/BubbleChatPage", () => ({
 import AgentWorkbenchPage from "./AgentWorkbenchPage";
 import { composeSoul } from "@/lib/agent-wizard";
 import { $activeAgentProfile } from "@/lib/active-agent";
+import { $chatRuns, $dismissedRunToasts, $unreadChatRuns, type ChatRun } from "@/lib/chat-runs";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -940,6 +941,56 @@ describe("много агентов", () => {
       container.querySelector<HTMLButtonElement>('button[aria-label="Добавить вкладку агента"]')!.focus();
     });
     expect(agentList()).toBeNull();
+  });
+
+  it("при видимом уведомлении «Все агенты» открывается кликом и клавиатурой; скрытие не читает ответ (K21-295)", async () => {
+    const completed = {
+      message_id: "m-done", session_id: "s-done", profile: "studio_sales_bot", status: "completed",
+      updated_at: 1, history_count: 1, user_message: { role: "user", content: "Договор" },
+    } as ChatRun;
+    const second = { ...completed, message_id: "m-done-2", session_id: "s-done-2" } as ChatRun;
+    const fetcher = vi.fn<typeof fetch>(async () => Response.json({ runs: [] }));
+    vi.stubGlobal("fetch", fetcher);
+    workbenchMocks.tabs = TWELVE_TABS;
+    restoreGeometry = mockStripGeometry({ overflow: true });
+    await render(
+      <MemoryRouter initialEntries={["/agents"]}>
+        <AgentWorkbenchPage />
+      </MemoryRouter>,
+    );
+    fetcher.mockClear();
+    await act(async () => { $chatRuns.set([completed, second]); $unreadChatRuns.set([completed, second]); });
+    const toast = document.body.querySelector<HTMLElement>("[data-run-toast]")!;
+    expect(toast).not.toBeNull();
+    // Одна строка: на десктопе карточка в две строки закрывала полосу.
+    expect(toast.querySelectorAll("a")).toHaveLength(1);
+    expect(toast.className).not.toMatch(/\blg:/);
+
+    const trigger = listTrigger()!;
+    await act(async () => trigger.click());
+    expect(agentList()).not.toBeNull();
+    await act(async () => {
+      (document.activeElement as HTMLElement).dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+      );
+    });
+    expect(agentList()).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 0 }));
+    });
+    expect(agentList()).not.toBeNull();
+    expect(document.body.querySelector("[data-run-toast]")).not.toBeNull();
+
+    await act(async () => {
+      document.body.querySelector<HTMLButtonElement>('[data-run-toast] button[aria-label="Скрыть уведомление"]')!.click();
+    });
+    expect(document.body.querySelector("[data-run-toast]")).toBeNull();
+    expect($unreadChatRuns.get()).toHaveLength(2);
+    expect(fetcher).not.toHaveBeenCalled();
+    $dismissedRunToasts.set([]);
+    $chatRuns.set([]);
+    $unreadChatRuns.set([]);
   });
 
   it("на 3–7 агентах полоса прежняя: списка нет, даже когда полоса прокручивается", async () => {

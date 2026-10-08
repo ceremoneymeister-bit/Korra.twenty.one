@@ -129,13 +129,14 @@ it("отметка стоит у конкретного чата; «Скрыть
   expect(toast.className).toMatch(/right-\[max\(0\.75rem,env\(safe-area-inset-right/);
   expect(toast.className).not.toMatch(/bottom-/);
   expect(toast.className).not.toMatch(/(?:^|\s)(?:left-\d|top-16)/);
-  expect(toast.querySelectorAll("a")).toHaveLength(2);
-  // Телефон показывает одну строку и счётчик остальных, широкий экран — все.
-  const [first, second] = [...toast.querySelectorAll("li")];
-  expect(first.className).not.toMatch(/hidden/);
-  expect(second.className).toMatch(/hidden lg:block/);
-  expect(toast.querySelector("[data-run-toast-rest='compact']")?.textContent).toContain("+1");
-  expect(toast.querySelector("[data-run-toast-rest='wide']")).toBeNull();
+  // Одна строка высотой с кнопку и счётчик остальных на любой ширине:
+  // карточка в несколько строк закрывала «Все агенты» (K21-295).
+  expect(toast.querySelectorAll("a")).toHaveLength(1);
+  expect(toast.className).toMatch(/\bitems-center\b/);
+  expect(toast.className).not.toMatch(/\bflex-col\b/);
+  expect(toast.querySelector("[data-run-toast-rest]")?.textContent).toContain("+1");
+  const fetcher = vi.fn<typeof fetch>(async () => Response.json({ ok: true }));
+  vi.stubGlobal("fetch", fetcher);
   // Скрыть — цель пальца 44 px, подпись доступна скринридеру.
   const dismiss = toast.querySelector("button") as HTMLButtonElement;
   expect(dismiss.getAttribute("aria-label")).toBe("Скрыть уведомление");
@@ -145,6 +146,7 @@ it("отметка стоит у конкретного чата; «Скрыть
   await act(async () => dismiss.click());
   expect(document.querySelector("[data-run-toast]")).toBeNull();
   expect($unreadChatRuns.get()).toHaveLength(2);
+  expect(fetcher).not.toHaveBeenCalled();
   expect(container.querySelectorAll("[data-unread-response]")).toHaveLength(2);
   await act(async () => { markChatViewed("lawyer", "session-a"); });
   expect(container.querySelectorAll("[data-unread-response]")).toHaveLength(1);
