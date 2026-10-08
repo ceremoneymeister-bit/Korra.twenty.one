@@ -717,7 +717,7 @@ def _start_manual_refine(agent: Any, history: Any, focus: str) -> str:
     tail = f" (тема: {focus})" if focus else ""
     return (
         f"⚗ Изучаю диалог в фоне{tail}. Если найду, что стоит сохранить, "
-        "это появится в памяти и навыках агента; итог в этот чат не придёт."
+        "итог появится в этом чате."
     )
 
 
@@ -3405,7 +3405,48 @@ class APIServerAdapter(BasePlatformAdapter):
                 else "global"
             ),
         }
+        self._wire_learning_notice(agent, user_config)
         return agent
+
+    def _wire_learning_notice(self, agent: Any, user_config: Dict[str, Any]) -> None:
+        """Итог фонового разбора и ``/refine`` попадает в историю этой сессии.
+
+        Сообщение «Учёл…» — обычная строка ассистента с квитанцией в
+        ``display_metadata``: оно доезжает до браузера тем же путём, что и
+        ответы, и переживает F5. Настройка ``display.memory_notifications``
+        уважается (``off`` — разбор молчит).
+        """
+        from agent.learning_receipt import DISPLAY_KIND, RECEIPT_KEY, format_notice, receipt_has_undo
+        from gateway.display_config import resolve_display_setting
+
+        raw = resolve_display_setting(user_config, "api_server", "memory_notifications", "on")
+        if isinstance(raw, bool):
+            raw = "on" if raw else "off"
+        mode = str(raw or "on").lower()
+        agent.memory_notifications = mode
+        db = getattr(agent, "_session_db", None)
+        if db is None:
+            return
+
+        def _deliver(_message: str) -> None:
+            receipt = getattr(agent, "background_review_receipt", None)
+            session_id = getattr(agent, "session_id", None)
+            if not receipt or not session_id:
+                return
+            try:
+                db.append_message(
+                    session_id,
+                    "assistant",
+                    format_notice(receipt, mode),
+                    display_kind=DISPLAY_KIND,
+                    display_metadata=(
+                        {RECEIPT_KEY: receipt} if receipt_has_undo(receipt) else None
+                    ),
+                )
+            except Exception:
+                logger.warning("Could not record the learning notice", exc_info=True)
+
+        agent.background_review_callback = _deliver
 
     # ------------------------------------------------------------------
     # HTTP Handlers
