@@ -747,7 +747,7 @@ const HISTORY_LOAD_TIMEOUT_MS = 30_000;
 /** Строка истории со всем, что реально отдаёт панельный маршрут
  *  `GET /api/sessions/{id}/messages` (он возвращает строку таблицы целиком,
  *  без проекции api_server). */
-type HistoryMessage = SessionMessage & SessionMessageReasoning;
+export type HistoryMessage = SessionMessage & SessionMessageReasoning;
 
 /**
  * История сессии → лента чата.
@@ -759,7 +759,7 @@ type HistoryMessage = SessionMessage & SessionMessageReasoning;
  * в одно сообщение — иначе после перезагрузки та же переписка выглядела бы
  * иначе, чем минуту назад вживую.
  */
-function sessionMessagesToChat(
+export function sessionMessagesToChat(
   sessionId: string,
   messages: HistoryMessage[],
 ): ChatMessage[] {

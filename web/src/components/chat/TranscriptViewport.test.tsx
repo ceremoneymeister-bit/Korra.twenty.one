@@ -216,6 +216,17 @@ it("тихо говорит о сжатой части разговора, то�
   expect(host.textContent).not.toContain("Более ранняя часть этого разговора сохранена");
 });
 
+it("в строке сжатой части предлагает её прочитать, когда архив доступен (K21-203)", async () => {
+  const load = vi.fn();
+  const showArchive = vi.fn();
+  await renderPaged("Живая история", "m1", { hasOlder: false, loading: false, failed: false, archivedBefore: true, load, showArchive } as never);
+  const open = [...host.querySelectorAll("button")].find(item => item.textContent === "Показать раннюю часть")!;
+  await act(async () => open.click());
+  expect(showArchive).toHaveBeenCalledTimes(1);
+  await renderPaged("Живая история", "m1", { hasOlder: false, loading: false, failed: false, archivedBefore: false, load, showArchive } as never);
+  expect([...host.querySelectorAll("button")].some(item => item.textContent === "Показать раннюю часть")).toBe(false);
+});
+
 async function renderKeyed(items: Array<[string, string?]>, older: { hasOlder: boolean; loading: boolean; failed: boolean; load: () => void }) {
   await act(async () => root.render(
     <TranscriptViewport storageKey="chat:scroll" anchorKey={items[0]?.[0]} older={older}>
