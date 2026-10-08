@@ -291,6 +291,7 @@ def test_parallel_review_threads_keep_profile_memory_isolated(
         review_run=None,
         review_memory=False,
         attended=False,
+        trigger=None,
     ):
         try:
             assert review_memory is True

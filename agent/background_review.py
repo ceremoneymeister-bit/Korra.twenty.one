@@ -25,6 +25,11 @@ from pathlib import Path
 import threading
 from typing import Any, Dict, List, Optional, Tuple
 
+from agent.learning_trigger import (
+    EVENT_MAX_ITERATIONS,
+    note_review_result,
+    record_learning_event,
+)
 from agent.thread_scoped_output import thread_scoped_silence
 from korra_constants import korra_env
 
@@ -487,11 +492,69 @@ _MEMORY_ROUTING_BLOCK = (
     "only one enabled — use it and skip the other.\n\n"
 )
 
+# Quality of the basis for anything a review saves (K21-230). Appended to every
+# review prompt: a saved method is trusted by every later session.
+_BASIS_QUALITY_BLOCK = (
+    "Quality of the basis (applies to everything you save):\n"
+    "  • Save a method only when it rests on (a) a direct correction or "
+    "confirmation from the human, or (b) a tool outcome that was actually "
+    "verified (the command succeeded, the file or check was confirmed).\n"
+    "  • The agent's own unconfirmed conclusion, guess, refusal or failed attempt "
+    "is NOT a basis. Never store 'X does not work', 'X is impossible' or 'use Y' "
+    "because the agent concluded it, gave up on it, or its attempt failed — "
+    "unless the human confirmed it or a tool outcome proved it.\n"
+    "  • A one-off exception or a client-specific detail is not a general rule. "
+    "Save a rule only when it is stated as standing ('always', 'from now on', "
+    "'never again') or has repeated; otherwise save nothing, or keep the scope "
+    "narrow.\n\n"
+)
+
+_EVENT_KIND_DESCRIPTIONS = {
+    "remember": (
+        "The user asked the agent to remember something or stated a rule "
+        "for the future."
+    ),
+    "correction": "The user directly corrected the agent's result.",
+}
+
+
+def build_event_review_prompt(
+    kind: str, review_memory: bool, review_skills: bool, excerpt: str
+) -> str:
+    """Prompt for the short event-triggered review: the excerpt is its whole input."""
+    parts = [
+        "A learning event just happened. "
+        + _EVENT_KIND_DESCRIPTIONS.get(kind, "")
+        + " Below is a short excerpt around it, not the whole conversation. "
+        "Decide whether it holds something durable that is worth saving. This "
+        "is ONE short pass: use only the few tool calls you need.\n\n"
+    ]
+    if review_memory:
+        parts.append("**Memory**: " + _MEMORY_ROUTING_BLOCK)
+    if review_skills:
+        parts.append(
+            "**Skills** (how to do this class of task for this user): look for an "
+            "existing class-level skill first (skills_list, then skill_view) and "
+            "update it; create a new class-level skill only when nothing fits. "
+            "Read-before-write is enforced — skill_view the skill before you "
+            "patch it.\n\n" + _LESSON_LAYER_BLOCK
+        )
+    parts.append(_BASIS_QUALITY_BLOCK)
+    parts.append(
+        "'Nothing to save.' is a normal, good outcome — do not invent a lesson "
+        "to have something to show. If nothing qualifies, say 'Nothing to save.' "
+        "and stop.\n\n"
+        "EXCERPT:\n" + excerpt
+    )
+    return "".join(parts)
+
+
 _MEMORY_REVIEW_PROMPT = (
     "Review the conversation above and consider saving to memory if appropriate.\n\n"
     "Memory has " + _MEMORY_ROUTING_BLOCK +
     "If something stands out, save it once, in the right store, using the memory tool with "
-    "the matching target. If nothing is worth saving, just say 'Nothing to save.' and stop."
+    "the matching target. If nothing is worth saving, just say 'Nothing to save.' and stop.\n\n"
+    + _BASIS_QUALITY_BLOCK.rstrip()
 )
 
 # Shared shape contract for every skill mutation. Korra needs reusable working
@@ -673,7 +736,8 @@ _SKILL_REVIEW_PROMPT = (
     "'Nothing to save.' is a real option but should NOT be the "
     "default. If the session ran smoothly with no corrections and "
     "produced no new technique, just say 'Nothing to save.' and stop. "
-    "Otherwise, act."
+    "Otherwise, act.\n\n"
+    + _BASIS_QUALITY_BLOCK.rstrip()
 )
 
 _COMBINED_REVIEW_PROMPT = (
@@ -787,7 +851,8 @@ _COMBINED_REVIEW_PROMPT = (
     "standalone constraint.\n\n"
     "Act on whichever of the two dimensions has real signal. If "
     "genuinely nothing stands out on either, say 'Nothing to save.' "
-    "and stop — but don't reach for that conclusion as a default."
+    "and stop — but don't reach for that conclusion as a default.\n\n"
+    + _BASIS_QUALITY_BLOCK.rstrip()
 )
 
 
@@ -1185,17 +1250,56 @@ def _classify_review_result(actions: List[str]) -> str:
     return "none"
 
 
-def _log_review_completion(usage: Dict[str, Any], result: str) -> None:
-    """Emit a per-fork completion line so cost is visible where it is incurred."""
+def _log_review_completion(
+    usage: Dict[str, Any], result: str, trigger: Optional[str] = None
+) -> None:
+    """Emit a per-fork completion line so cost is visible where it is incurred.
+
+    The line carries what started the review (``trigger``), its outcome
+    (``result``: none / memory / skill / skill+memory / error) and the billing
+    status of the fork's route (``cost_status``, e.g. ``included`` on a
+    subscription).
+    """
     logger.info(
-        "Background review complete: thread=bg-review calls=%d in=%d out=%d "
-        "cache_read=%d result=%s",
+        "Background review complete: thread=bg-review trigger=%s calls=%d in=%d "
+        "out=%d cache_read=%d cache_write=%d result=%s cost_status=%s",
+        trigger or "unknown",
         int(usage.get("api_calls") or 0),
         int(usage.get("input_tokens") or 0),
         int(usage.get("output_tokens") or 0),
         int(usage.get("cache_read_tokens") or 0),
+        int(usage.get("cache_write_tokens") or 0),
         result,
+        usage.get("cost_status") or "unknown",
     )
+
+
+def _plugin_skip_reason(
+    agent: Any, trigger: Optional[str], excerpt: str
+) -> Optional[str]:
+    """Ask ``pre_background_review`` plugins whether to skip this event review.
+
+    Returns the skip reason, or ``None`` to continue. A plugin error or an
+    unreadable answer never blocks learning (fail-open).
+    """
+    try:
+        from agent.system_prompt import _plugin_session_info
+        from korra_cli.lifecycle import invoke_hook
+
+        results = invoke_hook(
+            "pre_background_review",
+            event_kind=trigger,
+            excerpt=excerpt,
+            profile=_plugin_session_info(agent).get("profile_name", "default"),
+            session_id=str(getattr(agent, "session_id", None) or ""),
+        )
+    except Exception:
+        logger.warning("pre_background_review hook failed; continuing", exc_info=True)
+        return None
+    for result in results or []:
+        if isinstance(result, dict) and result.get("skip") is True:
+            return str(result.get("reason") or "no reason given")[:200]
+    return None
 
 
 def build_cache_parity_fork(
@@ -1556,6 +1660,8 @@ def _run_review_in_thread(
     review_run: Optional[_BackgroundReviewRun] = None,
     review_memory: bool = False,
     attended: bool = False,
+    trigger: Optional[str] = None,
+    excerpt: Optional[str] = None,
 ) -> None:
     """Worker function executed in the background-review daemon thread.
 
@@ -1571,6 +1677,14 @@ def _run_review_in_thread(
     if review_run is not None and review_run.cancel_requested.is_set():
         finish_background_review_run(agent, review_run)
         return
+
+    # Event review: a plugin may veto it before any model call (fail-open).
+    if excerpt is not None:
+        skip_reason = _plugin_skip_reason(agent, trigger, excerpt)
+        if skip_reason is not None:
+            record_learning_event(agent, trigger, "skipped", f"plugin: {skip_reason}")
+            finish_background_review_run(agent, review_run)
+            return
 
     # Local import to avoid a hard circular dep at module load.
     from run_agent import AIAgent
@@ -1659,7 +1773,11 @@ def _run_review_in_thread(
         # streams.
         with thread_scoped_silence():
             review_agent, _rt, _routed = build_cache_parity_fork(
-                agent, task_cfg, max_iterations=_REVIEW_MAX_ITERATIONS,
+                agent, task_cfg,
+                max_iterations=(
+                    EVENT_MAX_ITERATIONS if excerpt is not None
+                    else _REVIEW_MAX_ITERATIONS
+                ),
                 attended=attended,
             )
 
@@ -1737,8 +1855,10 @@ def _run_review_in_thread(
                     # Routed to a different model -> replay a digest (cache is cold
                     # on that model anyway, so minimise cold-written tokens). Same
                     # model -> replay the full snapshot (warm cache reads).
+                    # An event review reads only the excerpt inside its prompt.
                     _review_history = (
-                        _digest_history(messages_snapshot) if _routed
+                        [] if excerpt is not None
+                        else _digest_history(messages_snapshot) if _routed
                         else messages_snapshot
                     )
                     review_agent.run_conversation(
@@ -1818,9 +1938,9 @@ def _run_review_in_thread(
             )
             actions = []
 
-        _log_review_completion(
-            review_usage, _classify_review_result(actions)
-        )
+        _result = _classify_review_result(actions)
+        _log_review_completion(review_usage, _result, trigger)
+        note_review_result(agent, trigger, _result)
 
         if actions and notification_mode != "off":
             summary = " · ".join(dict.fromkeys(actions))
@@ -1839,7 +1959,7 @@ def _run_review_in_thread(
     except Exception as e:
         logger.warning("Background memory/skill review failed: %s", e)
         if review_usage:
-            _log_review_completion(review_usage, "error")
+            _log_review_completion(review_usage, "error", trigger)
         agent._emit_auxiliary_failure("background review", e)
     finally:
         # Safety-net cleanup for the exception path.  Normal completion already
@@ -1877,6 +1997,7 @@ def spawn_background_review_thread(
     task_cfg: Optional[Dict[str, Any]] = None,
     review_run: Optional[_BackgroundReviewRun] = None,
     attended: bool = False,
+    trigger: Optional[str] = None,
 ):
     """Build the review thread target and prompt for a background review.
 
@@ -1897,6 +2018,30 @@ def spawn_background_review_thread(
     """
     if task_cfg is None:
         task_cfg = _background_review_task_config()
+    from agent.learning_trigger import BOUNDED_EVENT_KINDS, build_event_excerpt
+
+    excerpt = None
+    if trigger in BOUNDED_EVENT_KINDS and not (focus or "").strip():
+        excerpt = build_event_excerpt(messages_snapshot)
+        if excerpt:
+            prompt = build_event_review_prompt(
+                trigger, review_memory, review_skills, excerpt
+            )
+
+            def _event_target() -> None:
+                _run_review_in_thread(
+                    agent,
+                    messages_snapshot,
+                    prompt,
+                    task_cfg=task_cfg,
+                    review_run=review_run,
+                    review_memory=review_memory,
+                    attended=attended,
+                    trigger=trigger,
+                    excerpt=excerpt,
+                )
+
+            return _event_target, prompt
     # Pick the right prompt based on which triggers fired.  Allow per-agent
     # override (the prompts moved to module-level constants but old code paths
     # that set agent._MEMORY_REVIEW_PROMPT etc. directly keep working).
@@ -1925,6 +2070,7 @@ def spawn_background_review_thread(
             review_run=review_run,
             review_memory=review_memory,
             attended=attended,
+            trigger=trigger,
         )
 
     return _target, prompt
@@ -1936,6 +2082,7 @@ __all__ = [
     "_COMBINED_REVIEW_PROMPT",
     "is_background_review_enabled",
     "load_background_review_settings",
+    "build_event_review_prompt",
     "spawn_background_review_thread",
     "summarize_background_review_actions",
     "build_memory_write_metadata",

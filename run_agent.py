@@ -1926,6 +1926,7 @@ class AIAgent:
         review_skills: bool = False,
         focus: Optional[str] = None,
         manual: bool = False,
+        trigger: Optional[str] = None,
     ) -> bool:
         """Spawn the background memory/skill review thread.
 
@@ -1938,6 +1939,11 @@ class AIAgent:
         ``focus`` is optional user-supplied steering (from ``/refine``)
         appended to the review prompt — e.g. "save the deploy workflow as a
         skill". The automatic post-turn triggers never set it.
+
+        ``trigger`` names the event that started an automatic review
+        (``remember`` / ``correction`` / ``counter``). Event reviews get a
+        bounded excerpt instead of the whole history, a small iteration cap, a
+        memory-capacity check and the ``pre_background_review`` plugin hook.
         """
         # A delegation subagent (``_delegate_depth > 0``) must not run the
         # automatic post-turn review. Subagents are ephemeral workers already
@@ -1958,6 +1964,28 @@ class AIAgent:
         enabled, task_cfg = load_background_review_settings()
         if not manual and focus is None and not enabled:
             return False
+        from agent.learning_trigger import (
+            BOUNDED_EVENT_KINDS,
+            SIGNAL_REFINE,
+            memory_has_room,
+            record_learning_event,
+            review_paused,
+        )
+
+        if manual or focus is not None:
+            # An explicit /refine lifts the pause after empty event reviews.
+            trigger = SIGNAL_REFINE
+            self._learning_empty_streak = 0
+        elif trigger in BOUNDED_EVENT_KINDS:
+            if review_paused(self, trigger):
+                record_learning_event(self, trigger, "skipped", "paused_after_empty_reviews")
+                return False
+            if review_memory and not memory_has_room(getattr(self, "_memory_store", None)):
+                review_memory = False
+                if not review_skills:
+                    record_learning_event(self, trigger, "skipped", "memory_full")
+                    return False
+                record_learning_event(self, trigger, "memory_full", "memory part dropped")
         from agent.background_review import (
             finish_background_review_run,
             prepare_background_review_run,
@@ -1978,6 +2006,7 @@ class AIAgent:
                 task_cfg=task_cfg,
                 review_run=review_run,
                 attended=manual,
+                trigger=trigger,
             )
             # Carry the active profile into the review thread so MEMORY.md /
             # skill review writes land in the right profile (#54937).
