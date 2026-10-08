@@ -4,7 +4,13 @@ import { useAgentVoice } from "@/hooks/useAgentVoice";
 import type { AgentVoiceSettings } from "@/lib/agent-voice";
 import { useChatAttachmentDraft, restoreChatAttachmentDraft } from "@/hooks/useChatAttachmentDraft";
 import { useSessionRun } from "@/hooks/useSessionRun";
-import { chatViewKey, readChatView, writeChatView } from "@/lib/chat-view-state";
+import {
+  appendRecoveredChatDraft,
+  CHAT_DRAFT_UPDATE_EVENT,
+  chatViewKey,
+  readChatDraft,
+  writeChatDraft,
+} from "@/lib/chat-view-state";
 /**
  * BubbleChatPage — bubble-style chat UI (Phase 2.2 live SSE streaming).
  *
@@ -773,8 +779,17 @@ export function BubbleChatComposer({
   allowAttachments = true,
   draftKey,
 }: BubbleChatComposerProps) {
-  const [value, setValue] = useState(() => draftKey ? readChatView(draftKey) : "");
-  useEffect(() => { if (draftKey) writeChatView(draftKey, value); }, [draftKey, value]);
+  const [value, setValue] = useState(() => draftKey ? readChatDraft(draftKey) : "");
+  useEffect(() => { if (draftKey) writeChatDraft(draftKey, value); }, [draftKey, value]);
+  useEffect(() => {
+    if (!draftKey) return;
+    const syncRecovered = (event: Event) => {
+      const detail = (event as CustomEvent<{ key?: string }>).detail;
+      if (detail?.key === draftKey) setValue(readChatDraft(draftKey));
+    };
+    window.addEventListener(CHAT_DRAFT_UPDATE_EVENT, syncRecovered);
+    return () => window.removeEventListener(CHAT_DRAFT_UPDATE_EVENT, syncRecovered);
+  }, [draftKey]);
   const [attachments, setAttachments] = useChatAttachmentDraft(draftKey);
   const [dragging, setDragging] = useState(false);
   // Одна строка отказа на весь композер: вложения и диктовка спорить за неё
@@ -932,6 +947,7 @@ export function BubbleChatComposer({
     onText: appendDictated,
     onError: setComposerError,
     onEmpty: reportSilence,
+    onDetachedText: draftKey ? (text) => appendRecoveredChatDraft(draftKey, text) : undefined,
   });
 
   // Запись не бросаем ни на фоновом обновлении переписки, ни на ответе
@@ -1531,7 +1547,7 @@ export default function BubbleChatPage({
       setRecoveryNotice("В поле уже много вложений. Уберите лишние файлы и верните сообщение ещё раз — сохранённая копия пока на месте.");
       return;
     }
-    const draft = readChatView(key);
+    const draft = readChatDraft(key);
     setPrefill(draft && draft !== pending.text ? `${draft}\n\n${pending.text}` : pending.text);
     discardPending(target);
     setRecoveryNotice("Текст и вложения возвращены в поле. Ничего не отправлено. Если агент успел выполнить часть задачи, учтите это перед новой отправкой.");

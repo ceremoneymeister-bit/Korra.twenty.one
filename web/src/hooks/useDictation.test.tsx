@@ -471,6 +471,97 @@ describe("useDictation", () => {
     });
   });
 
+  it("поздний успешный текст сохраняется в точном черновике и убирает аудио", async () => {
+    let resolve!: (value: ReturnType<typeof heard>) => void;
+    apiMocks.transcribeRecording.mockReturnValue(new Promise((done) => { resolve = done; }));
+    const onDetachedText = vi.fn(() => true);
+    await mount({ keepKey: "chat-late", onDetachedText });
+    await press();
+    await press();
+    expect(current.state).toBe("transcribing");
+
+    await unmount();
+    await act(async () => { resolve(heard("сохранённое поручение", 1)); });
+    expect(onDetachedText).toHaveBeenCalledWith("сохранённое поручение");
+
+    await mount({ keepKey: "chat-late" });
+    expect(current.kept).toBeNull();
+  });
+
+  it("при отказе постоянного черновика поздний текст не уничтожает аудио", async () => {
+    let resolve!: (value: ReturnType<typeof heard>) => void;
+    apiMocks.transcribeRecording.mockReturnValue(new Promise((done) => { resolve = done; }));
+    await mount({ keepKey: "chat-storage-failed", onDetachedText: () => false });
+    await press();
+    await press();
+    await unmount();
+    await act(async () => { resolve(heard("не сохранено", 1)); });
+
+    await mount({ keepKey: "chat-storage-failed" });
+    expect(current.kept?.kind).toBe("failed");
+    await act(async () => { current.discard(); });
+  });
+
+  it("явно отменённое распознавание не возвращается поздним текстом", async () => {
+    let resolve!: (value: ReturnType<typeof heard>) => void;
+    apiMocks.transcribeRecording.mockReturnValue(new Promise((done) => { resolve = done; }));
+    const onDetachedText = vi.fn(() => true);
+    await mount({ keepKey: "chat-cancelled", onDetachedText });
+    await press();
+    await press();
+
+    await act(async () => { current.cancel(); });
+    await act(async () => { resolve(heard("отменённый текст", 1)); });
+    expect(onDetachedText).not.toHaveBeenCalled();
+    expect(current.kept).toBeNull();
+  });
+
+  it("поздний неполный ответ оставляет текст в черновике и запись с предупреждением", async () => {
+    vi.useFakeTimers();
+    let resolve!: (value: ReturnType<typeof heard>) => void;
+    apiMocks.transcribeRecording.mockReturnValue(new Promise((done) => { resolve = done; }));
+    const onDetachedText = vi.fn(() => true);
+    try {
+      await mount({ keepKey: "chat-late-partial", onDetachedText });
+      await press();
+      await act(async () => { vi.advanceTimersByTime(312_000); });
+      await press();
+      await unmount();
+      await act(async () => { resolve(heard("только начало", 31)); });
+      expect(onDetachedText).toHaveBeenCalledWith("только начало");
+
+      await mount({ keepKey: "chat-late-partial" });
+      expect(current.kept).toMatchObject({ kind: "partial", audioSeconds: 31 });
+      await act(async () => { current.discard(); });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("поле того же чата открыли заново до позднего текста — устаревшая карточка уходит", async () => {
+    const revokeObjectURL = vi.fn();
+    const original = { create: URL.createObjectURL, revoke: URL.revokeObjectURL };
+    URL.createObjectURL = vi.fn(() => "blob:late");
+    URL.revokeObjectURL = revokeObjectURL;
+    let resolve!: (value: ReturnType<typeof heard>) => void;
+    apiMocks.transcribeRecording.mockReturnValue(new Promise((done) => { resolve = done; }));
+    try {
+      await mount({ keepKey: "chat-reopened", onDetachedText: () => true });
+      await press();
+      await press();
+      await unmount();
+      await mount({ keepKey: "chat-reopened", onDetachedText: () => true });
+      expect(current.kept?.kind).toBe("failed");
+
+      await act(async () => { resolve(heard("поручение", 1)); });
+      expect(revokeObjectURL).toHaveBeenCalledWith("blob:late");
+      expect(current.kept).toBeNull();
+    } finally {
+      URL.createObjectURL = original.create;
+      URL.revokeObjectURL = original.revoke;
+    }
+  });
+
   it("без ключа черновика закрытое поле ничего за собой не оставляет", async () => {
     await mount();
     await press();

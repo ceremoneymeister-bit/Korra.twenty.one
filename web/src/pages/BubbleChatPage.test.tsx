@@ -140,6 +140,8 @@ async function enterText(textarea: HTMLTextAreaElement, value: string) {
 }
 
 beforeEach(() => {
+  sessionStorage.clear();
+  localStorage.clear();
   let id = 0;
   vi.stubGlobal("crypto", {
     randomUUID: () => `attachment-${++id}`,
@@ -569,6 +571,101 @@ describe("BubbleChatComposer · диктовка", () => {
     expect(microphoneButton().dataset.state).toBe("idle");
     expect(textarea.value).toBe("Начало сделай смету");
     expect(sendButton().disabled).toBe(false);
+  });
+
+  it("возвращает поздний результат распознавания в черновик исходного чата", async () => {
+    enableMicrophone();
+    let finish: (value: { text: string; audioSeconds: number | null }) => void = () => {};
+    apiMocks.transcribeRecording.mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const onSend = vi.fn();
+    await render(
+      <BubbleChatComposer key="chat-a" draftKey="draft-a" onSend={onSend} />,
+    );
+    await enterText(container.querySelector("textarea")!, "Начало");
+    await pressMicrophone();
+    await pressMicrophone();
+
+    await act(async () => root.render(
+      <MemoryRouter>
+        <BubbleChatComposer key="chat-b" draftKey="draft-b" onSend={onSend} />
+      </MemoryRouter>,
+    ));
+    await act(async () => finish(heard("сохранённое поручение", 1)));
+
+    await act(async () => root.render(
+      <MemoryRouter>
+        <BubbleChatComposer key="chat-a" draftKey="draft-a" onSend={onSend} />
+      </MemoryRouter>,
+    ));
+    expect(container.querySelector<HTMLTextAreaElement>("textarea")!.value).toBe(
+      "Начало сохранённое поручение",
+    );
+    expect(keptCard()).toBeNull();
+  });
+
+  it("в чат вернулись раньше позднего текста — текст в поле один раз, карточки нет", async () => {
+    enableMicrophone();
+    let finish: (value: { text: string; audioSeconds: number | null }) => void = () => {};
+    apiMocks.transcribeRecording.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const onSend = vi.fn();
+    const show = (key: string, draftKey: string) => act(async () => root.render(
+      <MemoryRouter>
+        <BubbleChatComposer key={key} draftKey={draftKey} onSend={onSend} />
+      </MemoryRouter>,
+    ));
+    await render(<BubbleChatComposer key="chat-a" draftKey="draft-a" onSend={onSend} />);
+    await enterText(container.querySelector("textarea")!, "Начало");
+    await pressMicrophone();
+    await pressMicrophone();
+    await show("chat-b", "draft-b");
+    await show("chat-a", "draft-a");
+    expect(keptCard()?.textContent).toContain("Распознавание прервалось");
+
+    await act(async () => finish(heard("поручение", 1)));
+    expect(container.querySelector<HTMLTextAreaElement>("textarea")!.value).toBe(
+      "Начало поручение",
+    );
+    // Повторять нечего: иначе тот же текст встал бы в поле второй раз.
+    expect(keptCard()).toBeNull();
+  });
+
+  it("восстановленный поздний текст открывается в новой вкладке и уходит после отправки", async () => {
+    enableMicrophone();
+    let finish: (value: { text: string; audioSeconds: number | null }) => void = () => {};
+    apiMocks.transcribeRecording.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const onSend = vi.fn(() => true);
+    const show = (key: string, draftKey: string) => act(async () => root.render(
+      <MemoryRouter>
+        <BubbleChatComposer key={key} draftKey={draftKey} onSend={onSend} />
+      </MemoryRouter>,
+    ));
+    await render(<BubbleChatComposer key="chat-a" draftKey="draft-a" onSend={onSend} />);
+    await pressMicrophone();
+    await pressMicrophone();
+    await show("chat-b", "draft-b");
+    await act(async () => finish(heard("поручение", 1)));
+
+    sessionStorage.clear(); // новая вкладка того же браузера
+    await show("chat-a-tab-2", "draft-a");
+    expect(container.querySelector<HTMLTextAreaElement>("textarea")!.value).toBe("поручение");
+    await act(async () => sendButton().click());
+    expect(onSend).toHaveBeenCalledWith("поручение", []);
+
+    sessionStorage.clear();
+    await show("chat-a-tab-3", "draft-a");
+    expect(container.querySelector<HTMLTextAreaElement>("textarea")!.value).toBe("");
   });
 
   it("фоновое обновление переписки не обрывает запись", async () => {
