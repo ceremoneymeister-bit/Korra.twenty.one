@@ -2014,6 +2014,11 @@ def init_agent(
     except Exception:
         pass
 
+    # Learning review starts on events (remember / correction), not counters,
+    # unless the owner set an interval explicitly (K21-230).
+    from agent.learning_trigger import apply_event_trigger_mode
+    apply_event_trigger_mode(agent)
+
     # Tool-use enforcement config: "auto" (default — matches hardcoded
     # model list), true (always), false (never), or list of substrings.
     _agent_section = _agent_cfg.get("agent", {})

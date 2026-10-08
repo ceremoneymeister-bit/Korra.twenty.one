@@ -234,6 +234,18 @@ VALID_HOOKS: Set[str] = {
     #   {"action": "allow"}  /  None             -> normal dispatch
     # Kwargs: event: MessageEvent, gateway: GatewayRunner, session_store.
     "pre_gateway_dispatch",
+    # Learning-review gate. Fired in the background-review thread BEFORE an
+    # event-triggered review (the user asked to remember something, or
+    # corrected the agent) makes its model call, so a cheap classifier plugin
+    # can drop false alarms. Kwargs: event_kind: "remember" | "correction",
+    # excerpt: str (the bounded text the review would read, not the whole
+    # conversation), profile: str, session_id: str.
+    # Return None to continue, or {"skip": True, "reason": "..."} to skip the
+    # review (no model call; the reason is logged and kept in the agent's
+    # learning-event tail). First skip wins. Fail-open: a plugin error,
+    # timeout or any other return value never blocks learning. Not fired for
+    # /refine or for owners who set an explicit nudge interval.
+    "pre_background_review",
     # Approval lifecycle hooks. Fired by tools/approval.py when a dangerous
     # command needs an approval decision -- fires for CLI-interactive prompts,
     # gateway/ACP approvals, and smart-mode auxiliary-LLM decisions.
@@ -435,6 +447,7 @@ _HOOK_TIMEOUT_BOUNDED_HOOKS: Set[str] = {
     "post_api_request",
     "api_request_error",
     "pre_verify",
+    "pre_background_review",
     "on_session_start",
     "on_session_end",
 }

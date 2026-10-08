@@ -936,6 +936,15 @@ def run_codex_app_server_turn(
     # Background review fork — same cadence + signature as the default
     # path (line ~15449). Only fires when a trigger actually tripped AND
     # we have a real final response.
+    from agent.learning_trigger import fold_learning_signal
+
+    review_trigger = None
+    if turn.final_text and not turn.interrupted and turn.error is None:
+        should_review_memory, should_review_skills, review_trigger = fold_learning_signal(
+            agent, messages, should_review_memory, should_review_skills
+        )
+    else:
+        agent._learning_signal = None
     if (
         turn.final_text
         and not turn.interrupted
@@ -948,6 +957,7 @@ def run_codex_app_server_turn(
                 messages_snapshot=list(messages),
                 review_memory=should_review_memory,
                 review_skills=should_review_skills,
+                trigger=review_trigger,
             )
         except Exception:
             logger.debug("background review spawn raised", exc_info=True)

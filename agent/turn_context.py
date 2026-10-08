@@ -841,6 +841,16 @@ def build_turn_context(
             should_review_memory = True
             agent._turns_since_memory = 0
 
+    # Event trigger for the background learning review: remember request or a
+    # direct correction in this user message (deterministic, no model call).
+    from agent.learning_trigger import note_user_turn
+    note_user_turn(
+        agent,
+        messages,
+        original_user_message,
+        synthetic=bool(persist_user_display_kind),
+    )
+
     # Cosmetic side-signal: detect an affection "reaction" (ily / <3 / good bot)
     # and notify the host so it can play hearts. Token-free, never touches the
     # conversation, and never fatal — a purely optional UI beat.

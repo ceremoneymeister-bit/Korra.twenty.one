@@ -803,6 +803,17 @@ def finalize_turn(
     # Suppressed when skip_background_review=True (e.g. cron) — review forks
     # spawn another AIAgent (~30K tokens / event) and cron sessions have no
     # human-in-the-loop benefit from the review.
+    from agent.learning_trigger import fold_learning_signal
+
+    _review_trigger = None
+    if final_response and not interrupted and not failed:
+        # Event signal from this turn's user message (K21-230); the counters
+        # above only fire for owners who set an interval explicitly.
+        _should_review_memory, _should_review_skills, _review_trigger = fold_learning_signal(
+            agent, messages, _should_review_memory, _should_review_skills
+        )
+    else:
+        agent._learning_signal = None
     if (
         final_response
         and not interrupted
@@ -815,6 +826,7 @@ def finalize_turn(
                 messages_snapshot=list(messages),
                 review_memory=_should_review_memory,
                 review_skills=_should_review_skills,
+                trigger=_review_trigger,
             )
         except Exception:
             pass  # Background review is best-effort
