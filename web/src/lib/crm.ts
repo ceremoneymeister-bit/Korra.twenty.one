@@ -217,6 +217,18 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   }
 }
 
+/** Ошибка, которую сформировал сам браузер: до панели не дошли, о ключе ничего не известно. */
+export function isPanelUnreachable(error: CrmErrorInfo): boolean {
+  return error === NETWORK_FAILURE.error;
+}
+
+/** Сбои, после которых ключ сохраняют и проверяют позже: сервер принимает те же четыре кода. */
+const DEFERRABLE_CODES = ["network", "rate_limited", "budget", "limit"];
+
+export function canSaveForLater(error: CrmErrorInfo): boolean {
+  return DEFERRABLE_CODES.includes(error.code) && !isPanelUnreachable(error);
+}
+
 function isFailure(value: unknown): value is CrmFailure {
   return Boolean(value && (value as { ok?: unknown }).ok === false);
 }

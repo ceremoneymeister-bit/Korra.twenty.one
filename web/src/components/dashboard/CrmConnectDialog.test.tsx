@@ -239,6 +239,73 @@ describe("окно подключения CRM", () => {
     expect(dialog()?.querySelector("[role=alert]")?.textContent).toContain("Не удалось связаться с панелью");
   });
 
+  const FAILS = (code: string, retry: boolean) => ({
+    status: 200,
+    body: { ok: false, error: { code, title: "Битрикс24 не отвечает", message: "Попробуйте через минуту.", retry } },
+  });
+
+  async function failFirstCheck(code: string, retry: boolean) {
+    reply["POST /check"] = FAILS(code, retry);
+    await mount();
+    await click(button("Дальше"));
+    await type(dialog()!.querySelector("input")!, SECRET);
+    await click(button("Проверить"));
+  }
+
+  it.each(["network", "rate_limited", "budget", "limit"])(
+    "F11: временный сбой первой проверки (%s) даёт «Сохранить и проверить позже»",
+    async (code) => {
+      reply["PUT /"] = {
+        status: 200,
+        body: {
+          ok: true,
+          connection: crmConnectionFixture(),
+          warning: { code, title: "Ключ сохранён", message: "Данные подтянутся, когда CRM ответит.", retry: true },
+        },
+      };
+      await failFirstCheck(code, true);
+      expect(calls.some((call) => call.method === "PUT")).toBe(false);
+      await click(button("Сохранить и проверить позже"));
+      const save = calls.find((call) => call.method === "PUT")!;
+      expect(save.body).toEqual({
+        type: "bitrix24",
+        webhook_url: SECRET,
+        settings: { pipeline_id: "", stuck_days: 7, agents_access: true },
+      });
+      expect(dialog()?.textContent).toContain("Ключ сохранён");
+      expect(dialog()?.textContent).toContain("Данные подтянутся, когда CRM ответит.");
+      expect(dialog()?.textContent).not.toContain("SECRETSECRET");
+      await click(button("Понятно"));
+      expect(dialog()).toBeNull();
+    },
+  );
+
+  it.each(["bad_key", "bad_url", "self_hosted", "plan_closed", "forbidden"])(
+    "F11: неверный ключ или адрес (%s) не сохраняется и кнопки «позже» нет",
+    async (code) => {
+      await failFirstCheck(code, false);
+      expect(button("Сохранить и проверить позже")).toBeUndefined();
+      expect(calls.some((call) => call.method === "PUT")).toBe(false);
+    },
+  );
+
+  it("F11: недоступная панель — не повод сохранять ключ «позже»", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("offline"))));
+    await mount();
+    await click(button("Дальше"));
+    await type(dialog()!.querySelector("input")!, SECRET);
+    await click(button("Проверить"));
+    expect(button("Сохранить и проверить позже")).toBeUndefined();
+  });
+
+  it("F11: сервер отказал при сохранении «позже» — ошибка показана, окно не закрыто", async () => {
+    reply["PUT /"] = FAILS("bad_key", false);
+    await failFirstCheck("network", true);
+    await click(button("Сохранить и проверить позже"));
+    expect(dialog()?.querySelector("[role=alert]")?.textContent).toContain("Битрикс24 не отвечает");
+    expect(button("Сохранить и проверить позже")).toBeUndefined();
+  });
+
   it("без прав на задачи предупреждает, что просрочки считаться не будут", async () => {
     reply["POST /check"] = { status: 200, body: { ok: true, found: { ...FOUND, tasks: false } } };
     await mount();

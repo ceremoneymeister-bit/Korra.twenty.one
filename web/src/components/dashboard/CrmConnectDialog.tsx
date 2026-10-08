@@ -6,6 +6,7 @@ import { AlertTriangle, Check, Info, X } from "lucide-react";
 import { ProductButton } from "@/components/ProductButton";
 import {
   $crmDialog,
+  canSaveForLater,
   closeCrmDialog,
   crmApi,
   isCrmFailure,
@@ -248,6 +249,25 @@ function DialogBody({ connection, mode }: { connection: CrmConnection | null; mo
       setStep("found");
     });
 
+  const store = async () => {
+    const result = await crmApi.save(input(), settings);
+    if (isCrmFailure(result)) {
+      setError(result.error);
+      setStep("failed");
+      return;
+    }
+    setWebhook("");
+    setToken("");
+    if (result.warning) {
+      setError(result.warning);
+      setStep("kept");
+      return;
+    }
+    closeCrmDialog();
+  };
+
+  const saveLater = () => run(store);
+
   const finish = () =>
     run(async () => {
       if (mode === "settings") {
@@ -260,20 +280,7 @@ function DialogBody({ connection, mode }: { connection: CrmConnection | null; mo
         closeCrmDialog();
         return;
       }
-      const result = await crmApi.save(input(), settings);
-      if (isCrmFailure(result)) {
-        setError(result.error);
-        setStep("failed");
-        return;
-      }
-      setWebhook("");
-      setToken("");
-      if (result.warning) {
-        setError(result.warning);
-        setStep("kept");
-        return;
-      }
-      closeCrmDialog();
+      await store();
     });
 
   const title =
@@ -477,6 +484,11 @@ function DialogBody({ connection, mode }: { connection: CrmConnection | null; mo
                   <ProductButton outlined onClick={() => setStep("key")} disabled={busy}>
                     Изменить адрес
                   </ProductButton>
+                  {canSaveForLater(error) ? (
+                    <ProductButton outlined onClick={() => void saveLater()} disabled={!ready || busy}>
+                      {busy ? "Сохраняем…" : "Сохранить и проверить позже"}
+                    </ProductButton>
+                  ) : null}
                   <ProductButton data-autofocus onClick={() => void check()} disabled={!ready || busy}>
                     {busy ? "Проверяем…" : "Проверить ещё раз"}
                   </ProductButton>
