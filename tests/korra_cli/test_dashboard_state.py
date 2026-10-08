@@ -1469,6 +1469,28 @@ def test_cached_quota_is_dropped_after_a_reset(tmp_path, owner, wham, monkeypatc
     assert cache_key not in ds._cache
 
 
+def test_attention_early_warning_names_the_dangerous_window_not_the_headline(tmp_path, owner, monkeypatch):
+    monkeypatch.setattr(ds, "_update_items", lambda now: [])
+    _two_windows(tmp_path, five_used=10, week_used=60, five_resets_in=4 * 3600, reached=False, applicable=0)
+    quota = ds.quota_section([owner], now=NOW, root=tmp_path)
+    five, week = quota["windows"]
+    assert not five["forecast"]["exhausts_before_reset"] and week["forecast"]["exhausts_before_reset"]
+    rows = [i for i in ds.attention_section([owner], now=NOW, tz=MSK, quota=quota)["items"] if i["source"] == "quota"]
+    assert len(rows) == 1 and rows[0]["title"] == "Лимит Codex кончится раньше сброса"
+    assert "Осталось 40 %" in rows[0]["detail"] and "неделя" in rows[0]["detail"]
+
+
+def test_attention_early_warning_takes_the_closest_running_out(tmp_path, owner):
+    def window(label, used, soon):
+        return {"label": label, "used_percent": used, "resets_at": NOW + 3 * 86400,
+                "forecast": {"exhausts_before_reset": True, "exhausts_at": NOW + soon}}
+
+    quota = {"status": "ok", "level": "warn", "captured_at": NOW,
+             "windows": [window("неделя", 60, 2 * 86400), window("5 часов", 80, 3600)]}
+    row = ds._quota_attention(quota, now=NOW, tz=MSK)
+    assert "5 часов" in row["detail"] and "Осталось 20 %" in row["detail"]
+
+
 def test_attention_early_warning_replaces_the_critical_row(tmp_path, owner, monkeypatch):
     monkeypatch.setattr(ds, "_update_items", lambda now: [])
     quota = _forecast(tmp_path, owner, 58, 3.0)

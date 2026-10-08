@@ -1796,13 +1796,21 @@ def _quota_attention(quota: dict[str, Any], *, now: float, tz: Optional[tzinfo])
             "title": "Лимит Codex исчерпан" if exhausted else f"Лимит Codex почти исчерпан: осталось {left} %",
             "detail": (reset_text + " Агенты могут перестать отвечать до сброса.").strip(),
         }
-    forecast = quota.get("forecast")
-    if forecast and forecast["exhausts_before_reset"] and forecast["used_percent"] >= 50:
-        left = round(100 - forecast["used_percent"])
+    # Any window may be the dangerous one: the closest running-out among those
+    # that are half used, not the headline window or the soonest of all.
+    risky = [
+        window for window in quota.get("windows") or []
+        if window.get("forecast") and window["forecast"]["exhausts_before_reset"] and window["used_percent"] >= 50
+    ]
+    if risky:
+        window = min(risky, key=lambda item: item["forecast"]["exhausts_at"])
+        forecast = window["forecast"]
+        left = round(100 - window["used_percent"])
         detail = (
-            f"Осталось {left} %. При таком темпе лимит кончится {_human_moment(forecast['exhausts_at'], now, tz)}"
-            f", за {_days_ahead(forecast['resets_at'] - forecast['exhausts_at'])} до сброса"
-            f" ({_human_moment(forecast['resets_at'], now, tz)})."
+            f"Осталось {left} % — окно «{window['label']}». "
+            f"При таком темпе лимит кончится {_human_moment(forecast['exhausts_at'], now, tz)}"
+            f", за {_days_ahead(window['resets_at'] - forecast['exhausts_at'])} до сброса"
+            f" ({_human_moment(window['resets_at'], now, tz)})."
         )
         return {
             **row,
