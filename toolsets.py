@@ -80,6 +80,9 @@ _HERMES_CORE_TOOLS = [
     # re-checks the principal and resolves the profile's effective grant.
     "google_calendar",
     "icloud_calendar",
+    # The owner's sales in Битрикс24 / amoCRM (read-only); owner turns only and
+    # only while the owner has opened the connection to agents.
+    "crm_sales",
     # Kanban multi-agent coordination — only in schema when the agent is
     # spawned as a kanban worker (HERMES_KANBAN_TASK env set) or the current
     # profile explicitly enables the kanban toolset. Gated via check_fn in
@@ -177,6 +180,12 @@ TOOLSETS = {
     "icloud_calendar": {
         "description": "Read events in the owner's connected iCloud Calendar",
         "tools": ["icloud_calendar"],
+        "includes": [],
+    },
+
+    "crm_sales": {
+        "description": "Read sales (won, new leads, stuck deals, managers) from the owner's connected Битрикс24 or amoCRM",
+        "tools": ["crm_sales"],
         "includes": [],
     },
 
@@ -482,6 +491,7 @@ TOOLSETS = {
             # The owner's Google Calendar (gated on the installation OAuth app)
             "google_calendar",
             "icloud_calendar",
+            "crm_sales",
             # The owner's Kanban board (K21-142). The cabinet chat reaches the
             # main agent through this server, so without these the main agent
             # cannot plan in the owner's main chat. Who sees them is decided

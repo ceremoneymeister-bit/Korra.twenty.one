@@ -8,6 +8,11 @@ from typing import Optional
 from korra_constants import korra_env
 
 
+# Installation-wide CRM connection (Bitrix24 webhook / amoCRM token), see
+# korra_cli/crm_connection.py. Same credential class as auth.json.
+CRM_CONNECTION_DIR = "crm-connection"
+
+
 def _hermes_home_path() -> Path:
     """Resolve the active HERMES_HOME (profile-aware) without circular imports."""
     try:
@@ -150,6 +155,7 @@ def _classify_write_denial(path: str) -> Optional[str]:
             return "credential"
 
     mcp_tokens_dir_name = "mcp-tokens"
+    crm_dir_name = CRM_CONNECTION_DIR
 
     hermes_dirs = []
     for base in (_hermes_home_path(), _hermes_root_path()):
@@ -175,6 +181,12 @@ def _classify_write_denial(path: str) -> Optional[str]:
         try:
             mcp_real = os.path.realpath(os.path.join(base_real, mcp_tokens_dir_name))
             if resolved == mcp_real or resolved.startswith(mcp_real + os.sep):
+                return "credential"
+        except Exception:
+            pass
+        try:
+            crm_real = os.path.realpath(os.path.join(base_real, crm_dir_name))
+            if resolved == crm_real or resolved.startswith(crm_real + os.sep):
                 return "credential"
         except Exception:
             pass
@@ -256,7 +268,7 @@ def get_read_block_error(path: str) -> Optional[str]:
       * Credential / secret stores under HERMES_HOME and the global Hermes
         root: ``auth.json``, ``auth.lock``, ``.anthropic_oauth.json``,
         ``.env``, ``webhook_subscriptions.json``, ``auth/google_oauth.json``,
-        and anything under ``mcp-tokens/``. These hold plaintext provider keys,
+        and anything under ``mcp-tokens/`` or ``crm-connection/``. These hold plaintext provider keys,
         OAuth tokens, and HMAC secrets that the agent never needs to read
         directly — provider tools / gateway adapters consume them through
         internal channels.
@@ -374,6 +386,20 @@ def get_read_block_error(path: str) -> Optional[str]:
             "and cannot be read directly. (Defense-in-depth — not a "
             "security boundary; the terminal tool can still bypass.)"
         )
+
+    # crm-connection/: installation CRM key (Bitrix24 webhook / amoCRM token).
+    for hd in hermes_dirs:
+        try:
+            crm_dir = (hd / CRM_CONNECTION_DIR).resolve()
+        except Exception:
+            continue
+        if resolved == crm_dir or crm_dir in resolved.parents:
+            return (
+                f"Access denied: {path} is the Korra CRM connection store "
+                "(CRM access key) and cannot be read directly. The CRM is "
+                "available through the crm_sales tool. (Defense-in-depth — "
+                "not a security boundary; the terminal tool can still bypass.)"
+            )
 
     # browser-profile/: real-profile browsing snapshot (browser.use_real_profile).
     # A copy of the user's Cookies / Login Data / Web Data lives here — the same

@@ -346,3 +346,12 @@ def test_a_new_board_never_evicts_somebody_elses():
 
 def test_dashboard_layout_is_not_a_public_endpoint():
     assert "/api/dashboard/layout" not in PUBLIC_API_PATHS
+
+
+def test_sales_card_joins_an_existing_board_last():
+    from korra_cli.dashboard_layout import preference
+
+    assert WIDGET_IDS[-1] == "sales" and "sales" in TILE_WIDGET_IDS
+    old = [w for w in WIDGET_IDS if w != "sales"]
+    config = {"dashboard": {"layout": {"users": {LOCAL_USER_KEY: {"revision": 3, "order": old}}}}}
+    assert preference(config, LOCAL_USER_KEY)["order"][-1] == "sales"

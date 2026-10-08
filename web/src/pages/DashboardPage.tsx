@@ -25,6 +25,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useStore } from "@nanostores/react";
+import { useSearchParams } from "react-router";
 import {
   Check,
   ChevronLeft,
@@ -36,6 +37,7 @@ import {
   Sun,
 } from "lucide-react";
 import { Card } from "@nous-research/ui/ui/components/card";
+import { CrmConnectDialog } from "@/components/dashboard/CrmConnectDialog";
 import { DashboardWidgetCard } from "@/components/dashboard/DashboardWidgetCard";
 import { DashboardWidgetBoundary } from "@/components/dashboard/DashboardWidgetBoundary";
 import { WidgetSizePicker } from "@/components/dashboard/WidgetSizePicker";
@@ -61,6 +63,7 @@ import {
   type DashboardLayout,
   type WidgetSize,
 } from "@/lib/dashboard-layout";
+import { openCrmDialog } from "@/lib/crm";
 import { $dashboardState } from "@/lib/dashboard-state";
 import { cn } from "@/lib/utils";
 
@@ -123,6 +126,15 @@ export default function DashboardPage() {
   // помнит и остальные, поэтому любое изменение возвращает их на места.
   const layout = useMemo(() => withoutWidgets(stored, unavailable), [stored, unavailable]);
   const [setupOpen, setSetupOpen] = useState(false);
+  // Ссылка из чата агента: «подключить CRM» открывает окно и не остаётся в адресе.
+  const [query, setQuery] = useSearchParams();
+  useEffect(() => {
+    if (query.get("crm") !== "connect") return;
+    openCrmDialog("connect");
+    const next = new URLSearchParams(query);
+    next.delete("crm");
+    setQuery(next, { replace: true });
+  }, [query, setQuery]);
   // Состав меняется без перезагрузки экрана, поэтому о результате действия
   // сообщаем голосом: иначе пользователь скринридера видит только то, что
   // фокус остался на кнопке.
@@ -174,6 +186,7 @@ export default function DashboardPage() {
 
   return (
     <div className="korra-dashboard mx-auto flex w-full max-w-6xl flex-col gap-6 pt-2">
+      <CrmConnectDialog />
       <header className="flex flex-row items-start justify-between gap-4">
         <div className="min-w-0">
           <p className="flex items-center gap-2 text-sm text-[var(--neo-text-secondary)]">

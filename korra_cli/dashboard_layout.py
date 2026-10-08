@@ -42,6 +42,9 @@ WIDGET_IDS: tuple[str, ...] = (
     # Shown only where a Codex subscription is connected (0.21.13).
     "codex-quota",
     "icloud-calendar",
+    # Продажи из Битрикс24 или amoCRM (0.21.17); как и остальные новые карточки,
+    # встаёт последней у тех, кто уже настраивал доску.
+    "sales",
 )
 
 #: Cards that live outside the tile grid: no size, no reordering.
