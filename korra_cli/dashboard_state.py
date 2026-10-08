@@ -1338,7 +1338,11 @@ def _reset_codex_limit(redeem_codex_reset_credit, get_default_hermes_root, now, 
     before = quota_section(roster, now=current, root=root)
     try:
         result = redeem_codex_reset_credit(
-            api_key=token, base_url=base_url, account_id=account_id, force=bool(before.get("can_reset"))
+            api_key=token,
+            base_url=base_url,
+            account_id=account_id,
+            force=bool(before.get("can_reset")),
+            require_offer=True,
         )
     except Exception:
         logger.exception("dashboard: Codex reset failed")

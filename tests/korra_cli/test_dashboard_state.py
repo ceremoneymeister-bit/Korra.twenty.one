@@ -21,6 +21,9 @@ import pytest
 
 from korra_cli import dashboard_state as ds
 
+# Nothing here may reach chatgpt.com: a socket to a foreign host fails the test.
+pytestmark = pytest.mark.usefixtures("no_real_network")
+
 MSK = ZoneInfo("Europe/Moscow")
 # Wednesday 23.09.2026 13:00 in Moscow.
 NOW = datetime(2026, 9, 23, 13, 0, tzinfo=MSK).timestamp()
@@ -1219,6 +1222,81 @@ def test_reset_route(tmp_path, owner, wham, monkeypatch):
     assert body["ok"] is True and body["quota"]["windows"][0]["remaining_percent"] == 100
     assert "сброс" in body["message"]
     assert TestClient(web_server.app).post("/api/dashboard/codex-limit/reset").status_code == 401
+
+
+# Запасной сброс на уровне сети: настоящий redeem_codex_reset_credit, подменён только транспорт httpx.
+
+
+@pytest.fixture
+def backend(monkeypatch):
+    """The Codex backend behind ``httpx.MockTransport``; every request is recorded."""
+    import agent.account_usage as account_usage
+
+    box = types.SimpleNamespace(requests=[], usage=_usage(), usage_errors=[])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        box.requests.append((request.method, request.url.host, request.url.path))
+        if request.method == "GET" and request.url.path.endswith("/wham/usage"):
+            if box.usage_errors:
+                return httpx.Response(box.usage_errors.pop(0))
+            return httpx.Response(200, json=box.usage)
+        if request.method == "POST" and request.url.path.endswith("/rate-limit-reset-credits/consume"):
+            box.usage = _usage(0, resets_at=NOW + WEEK, credits=1)
+            return httpx.Response(200, json={"code": "reset", "windows_reset": 1})
+        return httpx.Response(404)
+
+    real_client = httpx.Client
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr(account_usage.httpx, "Client", lambda **kwargs: real_client(transport=transport, **kwargs))
+    box.consumes = lambda: [r for r in box.requests if r[0] == "POST"]
+    return box
+
+
+def test_a_stray_reset_post_spends_nothing_when_the_limit_is_not_exhausted(tmp_path, owner, backend):
+    backend.usage = _usage(36, applicable=0, credits=2)
+    result = ds.reset_codex_limit(now=NOW, agents=[owner], root=tmp_path)
+    assert backend.consumes() == []
+    assert result["ok"] is False and result["status"] == "not_exhausted"
+    assert "запасной сброс сохранён" in result["message"]
+    assert result["quota"]["reset_credits"]["available"] == 2
+    # The requests really went to the Codex host, through the real code path.
+    assert {host for _, host, _ in backend.requests} == {"chatgpt.com"}
+
+
+def test_a_reset_post_for_an_exhausted_limit_spends_exactly_one(tmp_path, owner, backend):
+    backend.usage = _usage(100, applicable=1, credits=2, reached=True)
+    result = ds.reset_codex_limit(now=NOW, agents=[owner], root=tmp_path)
+    assert len(backend.consumes()) == 1
+    assert backend.consumes()[0][2].endswith("/rate-limit-reset-credits/consume")
+    assert result["ok"] is True and result["status"] == "reset"
+    assert result["quota"]["windows"][0]["remaining_percent"] == 100
+
+
+def test_an_old_exhausted_file_does_not_unlock_a_reset_the_backend_would_not_offer(tmp_path, owner, backend):
+    from agent.rate_limit_tracker import CodexQuotaSnapshot, CodexQuotaWindow, record_codex_quota
+
+    # The file says "exhausted" ...
+    record_codex_quota(
+        CodexQuotaSnapshot(
+            primary=CodexQuotaWindow(used_percent=100.0, window_minutes=10080, resets_at=NOW + 86400),
+            plan_type="pro", captured_at=NOW - 3600, source="usage", limit_reached=True,
+            reset_credits={"available": 2, "applicable": 1},
+        ),
+        root=tmp_path, force=True,
+    )
+    # ... the panel cannot re-read it just now, and the fresh answer says the limit is fine.
+    backend.usage_errors = [500]
+    backend.usage = _usage(36, applicable=0, credits=2)
+    result = ds.reset_codex_limit(now=NOW, agents=[owner], root=tmp_path)
+    assert backend.consumes() == []
+    assert result["status"] == "not_exhausted" and "запасной сброс сохранён" in result["message"]
+
+
+def test_the_guard_refuses_a_real_host(no_real_network):
+    with pytest.raises(Exception):
+        httpx.get("https://chatgpt.com/backend-api/wham/usage")
+    assert any("chatgpt.com" in host for host in no_real_network)
+    no_real_network.clear()
 
 
 def test_cached_quota_is_dropped_after_a_reset(tmp_path, owner, wham, monkeypatch):

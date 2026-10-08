@@ -18,6 +18,9 @@ from agent import rate_limit_tracker as rlt
 
 RESETS_AT = 1790412544
 
+# Nothing here may reach chatgpt.com: a socket to a foreign host fails the test.
+pytestmark = pytest.mark.usefixtures("no_real_network")
+
 
 @pytest.fixture(autouse=True)
 def _fresh_memo():

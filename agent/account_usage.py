@@ -666,6 +666,7 @@ def redeem_codex_reset_credit(
     api_key: Optional[str] = None,
     force: bool = False,
     account_id: Optional[str] = None,
+    require_offer: bool = False,
 ) -> CodexResetRedeemResult:
     """Redeem one banked Codex rate-limit reset credit (`/usage reset`).
 
@@ -682,6 +683,11 @@ def redeem_codex_reset_credit(
        idempotency key (``redeem_request_id``). No ``credit_id`` — the
        backend picks the next available credit, exactly like the CLI's
        default "Full reset" option.
+
+    ``require_offer`` narrows ``force`` for callers that act on a stored value
+    (the dashboard button): a reset below 100 % is spent only when this very
+    answer of the backend offers one (``applicable_available_count`` > 0 or
+    ``limit_reached``), never on the caller's older reading.
 
     Never raises: every failure mode returns a ``CodexResetRedeemResult``
     with a user-renderable message.
@@ -727,6 +733,12 @@ def redeem_codex_reset_credit(
                 if isinstance(used, (int, float)):
                     worst_used = max(worst_used or 0.0, float(used))
             exhausted = worst_used is not None and worst_used >= _CODEX_WINDOW_EXHAUSTED_PERCENT
+            if force and require_offer and not exhausted:
+                applicable = reset_credits.get("applicable_available_count")
+                offered = (isinstance(applicable, (int, float)) and applicable > 0) or rate_limit.get(
+                    "limit_reached"
+                ) is True
+                force = bool(offered)
             if not exhausted and not force:
                 usage_note = (
                     f"your busiest window is only {worst_used:.0f}% used"
