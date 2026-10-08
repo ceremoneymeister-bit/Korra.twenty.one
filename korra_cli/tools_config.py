@@ -117,6 +117,8 @@ CONFIGURABLE_TOOLSETS = [
      "Встречи владельца из подключённого Google-календаря; только в разговоре владельца"),
     ("icloud_calendar", "📅 iCloud Календарь",
      "Чтение встреч и добавление событий в подключённый iCloud-календарь по просьбе владельца"),
+    ("crm_sales", "📈 Продажи из CRM",
+     "Продажи из подключённого Битрикс24 или amoCRM по просьбе владельца; только чтение"),
     ("tts", "🔊 Синтез речи", "Преобразование текста в речь"),
     ("stt", "🎙️ Распознавание речи", "Расшифровка голосовых сообщений и голосовой режим"),
     ("skills", "📚 Навыки", "Просмотр и управление навыками"),
@@ -2464,7 +2466,7 @@ def _exempt_explicit_platform_native(
 #: an explicit list, uses it at the owner's request. Who may use it is checked
 #: per call (gateway.principal); a profile that must never have it declines
 #: it in its tool list or via ``agent.disabled_toolsets``. Empty this in 0.21.14.
-_RECENTLY_SHIPPED_TOOLSETS: frozenset = frozenset({"google_calendar", "icloud_calendar"})
+_RECENTLY_SHIPPED_TOOLSETS: frozenset = frozenset({"google_calendar", "icloud_calendar", "crm_sales"})
 
 
 def _enable_recently_shipped_toolsets(
