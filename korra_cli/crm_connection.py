@@ -168,7 +168,7 @@ def failure(err: CrmError, conn_type: str, host: str = "", *, saved: bool = Fals
 # ------------------------------------------------------------------ probe
 
 
-def _bitrix_pipelines(reader: cr.Bitrix24Reader) -> list[dict]:
+def bitrix_pipelines(reader: cr.Bitrix24Reader) -> list[dict]:
     try:
         result = reader.call("crm.category.list", {"entityTypeId": 2}).get("result")
         rows = result.get("categories") if isinstance(result, dict) else result
@@ -190,7 +190,7 @@ def _probe_bitrix(reader: cr.Bitrix24Reader) -> dict:
     profile = profile if isinstance(profile, dict) else {}
     user = " ".join(str(profile.get(k) or "") for k in ("NAME", "LAST_NAME")).strip()
     deals = reader.call("crm.deal.list", {"filter": {"STAGE_SEMANTIC_ID": "P"}, "select": ["ID"]})
-    pipelines = _bitrix_pipelines(reader)
+    pipelines = bitrix_pipelines(reader)
     try:
         managers: Optional[int] = int(reader.call("user.get", {"filter": {"ACTIVE": "true"}}).get("total"))
     except (CrmError, TypeError, ValueError) as exc:
