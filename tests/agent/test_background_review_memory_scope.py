@@ -85,6 +85,8 @@ class TestSpawnForwardsScope:
             review_run=None,
             review_memory=False,
             attended=False,
+            trigger=None,
+            excerpt=None,
         ):
             captured.append(review_memory)
 
