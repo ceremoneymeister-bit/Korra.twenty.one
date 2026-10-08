@@ -468,7 +468,9 @@ class MemoryStore:
             self._set_entries(target, entries)
             self.save_to_disk(target)
 
-        return self._success_response(target, "Entry added.")
+        return self._success_response(
+            target, "Entry added.", changes={"added": [content], "removed": []}
+        )
 
     @staticmethod
     def _match_indices(entries: List[str], old_text: str, *, exact: bool = False) -> List[int]:
@@ -556,10 +558,14 @@ class MemoryStore:
             self._set_entries(target, entries)
             self.save_to_disk(target)
 
+        added: List[str] = []
+        removed: List[str] = []
+        self._note_change(added, removed, gone=replaced_entry, new=new_content)
         return self._success_response(
             target,
             "Entry replaced: the whole entry was overwritten with the new content.",
             replaced_entry=replaced_entry,
+            changes={"added": added, "removed": removed},
         )
 
     def remove(self, target: str, old_text: str, *, exact: bool = False) -> Dict[str, Any]:
@@ -598,11 +604,13 @@ class MemoryStore:
                 # All identical -- safe to remove just the first
 
             idx = matches[0][0]
-            entries.pop(idx)
+            removed_entry = entries.pop(idx)
             self._set_entries(target, entries)
             self.save_to_disk(target)
 
-        return self._success_response(target, "Entry removed.")
+        return self._success_response(
+            target, "Entry removed.", changes={"added": [], "removed": [removed_entry]}
+        )
 
     def apply_batch(self, target: str, operations: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Apply a sequence of add/replace/remove ops to one target atomically.
@@ -641,6 +649,8 @@ class MemoryStore:
             working: List[str] = list(self._entries_for(target))
             limit = self._char_limit(target)
             replaced_entries: Dict[int, str] = {}
+            net_added: List[str] = []
+            net_removed: List[str] = []
 
             for i, op in enumerate(operations):
                 op = op or {}
@@ -655,6 +665,7 @@ class MemoryStore:
                     if content in working:
                         continue  # idempotent -- skip duplicate, don't fail the batch
                     working.append(content)
+                    self._note_change(net_added, net_removed, new=content)
 
                 elif act == "replace":
                     if not old_text:
@@ -673,6 +684,9 @@ class MemoryStore:
                             f"{pos}: '{old_text}' matched multiple distinct entries -- be more specific.",
                         )
                     replaced_entries[i] = working[matches[0]]
+                    self._note_change(
+                        net_added, net_removed, gone=working[matches[0]], new=content
+                    )
                     working[matches[0]] = content
 
                 elif act == "remove":
@@ -686,7 +700,7 @@ class MemoryStore:
                             target,
                             f"{pos}: '{old_text}' matched multiple distinct entries -- be more specific.",
                         )
-                    working.pop(matches[0])
+                    self._note_change(net_added, net_removed, gone=working.pop(matches[0]))
 
                 else:
                     return self._batch_error(
@@ -713,7 +727,9 @@ class MemoryStore:
             self._set_entries(target, working)
             self.save_to_disk(target)
 
-        extra = {"replaced_entries": replaced_entries} if replaced_entries else {}
+        extra: Dict[str, Any] = {"changes": {"added": net_added, "removed": net_removed}}
+        if replaced_entries:
+            extra["replaced_entries"] = replaced_entries
         return self._success_response(
             target, f"Applied {len(operations)} operation(s).", **extra
         )
@@ -743,6 +759,22 @@ class MemoryStore:
         return block if block else None
 
     # -- Internal helpers --
+
+    @staticmethod
+    def _note_change(
+        added: List[str], removed: List[str], *, gone: Optional[str] = None, new: Optional[str] = None
+    ) -> None:
+        """Учесть в ``added``/``removed`` исчезнувшую и появившуюся записи с взаимным сокращением."""
+        if gone is not None:
+            if gone in added:
+                added.remove(gone)
+            else:
+                removed.append(gone)
+        if new is not None:
+            if new in removed:
+                removed.remove(new)
+            else:
+                added.append(new)
 
     @staticmethod
     def _previews(entries: List[str], width: int = 80) -> List[str]:
