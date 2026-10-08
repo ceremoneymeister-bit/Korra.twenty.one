@@ -1477,6 +1477,22 @@ it("служебная сводка сжатия не становится ре�
   expect(current.messages.map(m => m.content)).toEqual(["REAL ASK", "ответ"]);
 });
 
+it("«Учёл…» от фонового разбора после F5 — отдельная реплика с возможностью отмены", async () => {
+  const { getChatRuns } = await import("@/lib/chat-runs");
+  vi.mocked(getChatRuns).mockResolvedValue([]);
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ approvals: [] }))));
+  vi.spyOn(api, "getSessionMessages").mockResolvedValue({ session_id: "learned", messages: [
+    { id: 1, role: "user", content: "поправка" },
+    { id: 2, role: "assistant", content: "принято" },
+    { id: 3, role: "assistant", content: "✅ Учёл: навык «отчёт» создан.", display_kind: "learning",
+      display_metadata: { learning_receipt: { undone: false } } },
+  ] as SessionMessage[], pagination: { order: "latest", returned: 3, before_id: 1, has_more: false } });
+  await act(async () => { await current.loadSession("learned"); });
+  expect(current.messages.map(m => m.content)).toEqual(["поправка", "принято", "✅ Учёл: навык «отчёт» создан."]);
+  expect(current.messages[2]?.learning).toEqual({ undone: false });
+  expect(current.messages[2]?.historyId).toBe(3);
+});
+
 describe("зависшее восстановление ответа (чистое ревью Astra, P1-4)", () => {
   it("готовый ответ из истории показывается и при первом открытии, без переигрывания", async () => {
     const { getChatRuns } = await import("@/lib/chat-runs");

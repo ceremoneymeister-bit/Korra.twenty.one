@@ -820,6 +820,22 @@ function sessionMessagesToChat(
 
     if (message.role !== "assistant") return;
 
+    // «Учёл…» от фонового разбора — отдельная реплика, не часть хода агента.
+    if (message.display_kind === "learning") {
+      closeTurn();
+      const receipt = message.display_metadata?.learning_receipt as { undone?: boolean } | undefined;
+      result.push({
+        id,
+        role: "assistant",
+        content,
+        timestamp,
+        turnComplete: true,
+        ...(message.id !== undefined ? { historyId: message.id } : {}),
+        ...(receipt ? { learning: { undone: Boolean(receipt.undone) } } : {}),
+      });
+      return;
+    }
+
     if (!turn) {
       turn = {
         id,

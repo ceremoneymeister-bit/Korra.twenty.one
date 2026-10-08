@@ -793,6 +793,19 @@ export const api = {
       ),
       signal ? { signal } : undefined,
     ),
+  /** «Отменить» под сообщением «Учёл…»: откат изменения, о котором оно сообщило. */
+  undoLearningNotice: (
+    sessionId: string,
+    messageId: number,
+    profile = getManagementProfile(),
+  ) =>
+    fetchJSON<{ ok: boolean; status: "undone" | "already_undone" | "conflict"; message: string }>(
+      appendProfileParam(
+        `/api/sessions/${encodeURIComponent(sessionId)}/messages/${messageId}/learning-undo`,
+        profile,
+      ),
+      { method: "POST" },
+    ),
   getSessionDetail: (id: string, profile = getManagementProfile()) =>
     fetchJSON<SessionInfo>(
       appendProfileParam(`/api/sessions/${encodeURIComponent(id)}`, profile),
