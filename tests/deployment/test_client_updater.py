@@ -22,6 +22,20 @@ OLD = "sha256:" + "1" * 64
 NEW = "sha256:" + "2" * 64
 
 
+def run_packages_code(root, pinned_json):
+    """USER_PACKAGES_CODE в этом процессе (другие тесты подменяют subprocess.Popen)."""
+    import contextlib
+    out = io.StringIO()
+    argv = sys.argv
+    sys.argv = ["-c", str(root), pinned_json]
+    try:
+        with contextlib.redirect_stdout(out):
+            exec(compile(u.USER_PACKAGES_CODE, "USER_PACKAGES_CODE", "exec"), {"__name__": "__main__"})
+    finally:
+        sys.argv = argv
+    return out.getvalue().strip()
+
+
 class FakeDockerUpdater(u.Updater):
     def __init__(self, home):
         super().__init__(home)
@@ -93,6 +107,14 @@ class FakeDockerUpdater(u.Updater):
             return "ok"
         if args[0] == "pull":
             return "ok"
+        if args[0] == "exec" and u.MIGRATE_PACKAGES_CODE in args:
+            return json.dumps({"migrated": json.loads(args[args.index(u.MIGRATE_PACKAGES_CODE) + 1]), "files": 1, "outside": []})
+        if args[0] == "run" and u.USER_PACKAGES_CODE in args:
+            # Проверка пакетов выполняется настоящим кодом образа; «поставкой»
+            # служит окружение тестов, DATA — смонтированный каталог.
+            index = args.index(u.USER_PACKAGES_CODE)
+            root = next(a for a in args if a.endswith(":/opt/data:ro"))[:-len(":/opt/data:ro")]
+            return run_packages_code(root, args[index + 2])
         if args[0] == "run":
             # Судья SQLite: одноразовый контейнер старого образа поверх снимка,
             # тем же приёмом, что и schema_rehearsal. Отсутствующий образ docker
@@ -1536,7 +1558,7 @@ def test_index_only_the_host_rejects_no_longer_fails_the_backup_gate(updater):
 def test_snapshot_sqlite_is_judged_by_the_image_that_wrote_it(updater):
     updater.update("registry.example/korra:latest")
 
-    judged = [call for call in updater.calls if call[0] == "run"]
+    judged = [call for call in updater.calls if call[0] == "run" and u.USER_PACKAGES_CODE not in call]
     assert judged, "гейт SQLite судит хостовым sqlite3: docker run старого образа не вызывался"
     call = judged[0]
     assert call[call.index("--network") + 1] == "none"
@@ -3154,3 +3176,233 @@ def test_operator_override_is_the_expected_limit_for_update_only(updater, monkey
 def test_effective_resources_follow_docker_semantics(argv, expected):
     got = u.resources_from_launch_argv(["docker", "run", "-d", *argv, "image"])
     assert (got["nano_cpus"], got["memory_bytes"], got["memory_swap_bytes"]) == expected
+
+
+# ---- K21-296: пакеты пользователя в DATA/lazy-packages ----------------------
+
+ABI = "%d.%d:%s" % (sys.version_info[0], sys.version_info[1], __import__("sysconfig").get_config_var("EXT_SUFFIX") or "")
+
+
+def make_user_package(root, name="korra_demo_pkg", version="1.0", *, cli="korra-demo", requires=(), modules=None, abi=ABI):
+    """Пакет так, как его кладёт `pip install --target` в lazy-packages."""
+    store = root / "lazy-packages"
+    info = store / f"{name}-{version}.dist-info"
+    info.mkdir(parents=True)
+    (store / ".python-abi").write_text(abi)
+    record = []
+    for module in modules or [name]:
+        (store / module).mkdir(exist_ok=True)
+        (store / module / "__init__.py").write_text(f"VERSION = {version!r}\n")
+        record.append(f"{module}/__init__.py,,")
+    lines = ["Metadata-Version: 2.1", f"Name: {name}", f"Version: {version}", *[f"Requires-Dist: {r}" for r in requires]]
+    (info / "METADATA").write_text("\n".join(lines) + "\n")
+    if cli:
+        (info / "entry_points.txt").write_text(f"[console_scripts]\n{cli} = {name}:main\n")
+        (store / "bin").mkdir(exist_ok=True)
+        script = store / "bin" / cli
+        script.write_text("#!/bin/sh\necho user-cli-ok\n")
+        script.chmod(0o755)
+        record.append(f"../../bin/{cli},,")
+    (info / "RECORD").write_text("\n".join(record + [f"{info.name}/METADATA,,", f"{info.name}/RECORD,,"]) + "\n")
+    return store
+
+
+def check_packages(root, pinned=None):
+    return json.loads(run_packages_code(root, json.dumps(pinned or {})).splitlines()[-1])
+
+
+def tree(root):
+    return u.tree_manifest(root)
+
+
+def test_package_check_accepts_a_complete_store_and_ignores_an_empty_one(tmp_path):
+    assert check_packages(tmp_path) == {"packages": [], "conflicts": []}
+    make_user_package(tmp_path)
+    result = check_packages(tmp_path)
+    assert result["conflicts"] == []
+    assert result["packages"] == [{"name": "korra-demo-pkg", "version": "1.0", "cli": ["korra-demo"]}]
+
+
+@pytest.mark.parametrize("kind,build,pinned", [
+    ("version", lambda root: make_user_package(root, "pytest", "0.0.1", cli=None), None),
+    ("pinned", lambda root: make_user_package(root, "korra_demo_pkg", "1.0", cli=None), {"korra-demo-pkg": "2.0"}),
+    ("module", lambda root: make_user_package(root, "shadow_json", cli=None, modules=["json"]), None),
+    ("requires", lambda root: make_user_package(root, requires=["pytest>=999"], cli=None), None),
+    ("requires", lambda root: make_user_package(root, requires=["no_such_distribution_xyz"], cli=None), None),
+    ("cli", lambda root: make_user_package(root, cli="python"), None),
+    ("abi", lambda root: make_user_package(root, cli=None, abi="2.7:.cpython-27"), None),
+])
+def test_package_check_reports_conflicts_with_the_shipped_environment(tmp_path, kind, build, pinned):
+    build(tmp_path)
+    kinds = {item["kind"] for item in check_packages(tmp_path, pinned)["conflicts"]}
+    assert kind in kinds
+
+
+def test_package_check_reports_an_incomplete_package_and_a_missing_cli(tmp_path):
+    store = make_user_package(tmp_path)
+    (store / "korra_demo_pkg/__init__.py").unlink()
+    (store / "bin/korra-demo").unlink()
+    kinds = {item["kind"] for item in check_packages(tmp_path)["conflicts"]}
+    assert {"incomplete", "cli"} <= kinds
+
+
+def test_package_check_abi_token_matches_the_engine():
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from tools.lazy_deps import _python_abi_tag
+    assert _python_abi_tag() == ABI
+
+
+def test_user_package_survives_update_rollback_update(updater, tmp_path):
+    store = make_user_package(updater.data)
+    before = tree(store)
+    updater.update("registry.example/korra:latest")
+    assert updater.receipt["status"] == "succeeded"
+    assert updater.receipt["user_packages"]["conflicts"] == []
+    updater.rollback()
+    assert updater.receipt["status"] == "rolled_back"
+    assert tree(updater.data / "lazy-packages") == before
+    updater.tags.clear()
+    updater.receipt = {}
+    updater.initialize("second-job", "registry.example/korra:latest")
+    (updater.home / "IMAGE").write_text(OLD)
+    updater.image = OLD
+    updater.update("registry.example/korra:latest")
+    assert updater.receipt["status"] == "succeeded"
+    assert tree(updater.data / "lazy-packages") == before
+    # Тем, что видит образ (`.pth` из Dockerfile и PATH), пакет импортируется и запускается.
+    env = {**os.environ, "PYTHONPATH": str(updater.data / "lazy-packages"),
+           "PATH": str(updater.data / "lazy-packages/bin") + os.pathsep + os.environ["PATH"]}
+    assert subprocess.run([sys.executable, "-c", "import korra_demo_pkg; print(korra_demo_pkg.VERSION)"],
+                          env=env, capture_output=True, text=True, check=True).stdout.strip() == "1.0"
+    assert subprocess.run(["korra-demo"], env=env, capture_output=True, text=True, check=True).stdout.strip() == "user-cli-ok"
+
+
+def test_package_conflict_stops_update_before_drain_and_keeps_data(updater):
+    store = make_user_package(updater.data, "pytest", "0.0.1", cli=None)
+    before = tree(updater.data)
+    with pytest.raises(u.UpdateError, match="Пакеты пользователя"):
+        updater.update("registry.example/korra:latest")
+    assert updater.receipt["error_code"] == "user_packages_conflict"
+    assert not any(call[0] in {"stop", "start_image"} or call == ("native", "drain") for call in updater.calls)
+    assert updater.image == OLD and updater.running
+    assert tree(updater.data) == before and store.is_dir()
+
+
+def test_package_conflict_found_after_migration_restarts_old_container_without_backup(updater, monkeypatch):
+    updater.diff_output = "A /opt/hermes/.venv/lib/python3.13/site-packages/pytest-0.0.1.dist-info"
+    real = updater.migrate_writable_packages
+
+    def migrate():
+        real()
+        make_user_package(updater.data, "pytest", "0.0.1", cli=None)
+
+    monkeypatch.setattr(updater, "migrate_writable_packages", migrate)
+    with pytest.raises(u.UpdateError, match="несовместимы"):
+        updater.update("registry.example/korra:latest")
+    calls = [call[0] for call in updater.calls]
+    assert calls.index("stop") < len(calls) - 1 and "start" in calls[calls.index("stop"):]
+    assert not any(call[0] == "start_image" for call in updater.calls)
+    assert not updater.receipt.get("backup_path") and not (updater.job / "before").exists()
+    assert updater.image == OLD and updater.running
+    assert (updater.data / "lazy-packages/pytest-0.0.1.dist-info").is_dir()
+    assert updater.receipt["status"] == "failed"
+
+
+def test_packages_are_checked_before_the_old_container_is_stopped(updater):
+    make_user_package(updater.data)
+    updater.update("registry.example/korra:latest")
+    order = [("check" if call[0] == "run" and u.USER_PACKAGES_CODE in call else call[0]) for call in updater.calls]
+    assert order.index("check") < order.index("stop")
+    assert [i for i, name in enumerate(order) if name == "check"][-1] > order.index("stop")
+    assert [i for i, name in enumerate(order) if name == "check"][-1] < order.index("start_image")
+
+
+def test_rollback_refuses_before_stopping_when_the_old_image_conflicts(updater, monkeypatch):
+    make_user_package(updater.data)
+    updater.update("registry.example/korra:latest")
+    monkeypatch.setattr(updater, "pinned_dependencies", lambda: {"korra-demo-pkg": "9.9"})
+    mark = len(updater.calls)
+    with pytest.raises(u.UpdateError, match="Пакеты пользователя"):
+        updater.rollback()
+    assert not any(call[0] in {"stop", "start_image"} for call in updater.calls[mark:])
+    assert updater.image == NEW and updater.running
+
+
+def test_automatic_rollback_records_the_conflict_but_still_restores(updater, monkeypatch):
+    make_user_package(updater.data)
+    answers = iter([{}, {}])
+    monkeypatch.setattr(updater, "pinned_dependencies", lambda: next(answers, {"korra-demo-pkg": "9.9"}))
+    updater.fail_smoke = True
+    with pytest.raises(u.UpdateError, match="Injected model"):
+        updater.update("registry.example/korra:latest")
+    assert updater.receipt["status"] == "rolled_back"
+    assert updater.image == OLD and updater.running
+    assert updater.receipt["user_packages"]["conflicts"][0]["kind"] == "pinned"
+
+
+def test_migration_reads_only_added_distributions_from_the_writable_layer(updater):
+    updater.diff_output = "\n".join([
+        "C /opt/hermes/.venv/lib/python3.13/site-packages",
+        "A /opt/hermes/.venv/lib/python3.13/site-packages/toolkit_a-2.1.dist-info",
+        "A /opt/hermes/.venv/lib/python3.13/site-packages/toolkit_a-2.1.dist-info/RECORD",
+        "A /opt/hermes/.venv/lib/python3.13/site-packages/requests-2.40.0.dist-info",
+        "D /opt/hermes/.venv/lib/python3.13/site-packages/requests-2.32.0.dist-info",
+        "C /opt/hermes/agent/runner.py",
+    ])
+    updater.migrate_writable_packages()
+    assert updater.receipt["writable_packages"]["migrated"] == ["toolkit_a-2.1"]
+    assert updater.receipt["writable_packages"]["replaced_distribution"] == ["requests"]
+    executed = [call for call in updater.calls if call[0] == "exec"]
+    assert json.loads(executed[0][executed[0].index(u.MIGRATE_PACKAGES_CODE) + 1]) == ["toolkit_a-2.1"]
+
+
+def fake_writable_venv(tmp_path):
+    import venv
+    root = tmp_path / "venv"
+    venv.EnvBuilder(with_pip=False).create(root)
+    python = root / "bin/python"
+    purelib = subprocess.run([python, "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"],
+                             capture_output=True, text=True, check=True).stdout.strip()
+    site = Path(purelib)
+    (site / "toolkit_a").mkdir()
+    (site / "toolkit_a/__init__.py").write_text("VERSION = '2.1'\n")
+    (site / "toolkit_a/__pycache__").mkdir()
+    (site / "toolkit_a/__pycache__/__init__.cpython-313.pyc").write_bytes(b"x")
+    info = site / "toolkit_a-2.1.dist-info"
+    info.mkdir()
+    (info / "METADATA").write_text("Metadata-Version: 2.1\nName: toolkit_a\nVersion: 2.1\n")
+    (root / "bin/toolkit").write_text("#!/bin/sh\necho toolkit\n")
+    (root / "bin/toolkit").chmod(0o755)
+    (info / "RECORD").write_text("toolkit_a/__init__.py,,\ntoolkit_a/__pycache__/__init__.cpython-313.pyc,,\n"
+                                 "../../../bin/toolkit,,\ntoolkit_a-2.1.dist-info/METADATA,,\ntoolkit_a-2.1.dist-info/RECORD,,\n")
+    return python, site, info
+
+
+def run_migration(python, stems, store):
+    return subprocess.run([python, "-c", u.MIGRATE_PACKAGES_CODE, json.dumps(stems), str(store)], capture_output=True, text=True)
+
+
+def test_migration_copies_package_files_and_cli_once_and_never_overwrites(tmp_path):
+    python, site, _info = fake_writable_venv(tmp_path)
+    store = tmp_path / "lazy-packages"
+    store.mkdir()
+    result = run_migration(python, ["toolkit_a-2.1"], store)
+    assert result.returncode == 0, result.stderr
+    assert (store / "toolkit_a/__init__.py").read_text() == "VERSION = '2.1'\n"
+    assert os.access(store / "bin/toolkit", os.X_OK) and (store / "toolkit_a-2.1.dist-info/RECORD").is_file()
+    assert not (store / "toolkit_a/__pycache__").exists()
+    assert (store / ".python-abi").read_text() != ""
+    (store / "toolkit_a/__init__.py").write_text("USER EDIT\n")
+    again = run_migration(python, ["toolkit_a-2.1"], store)
+    assert json.loads(again.stdout)["files"] == 0
+    assert (store / "toolkit_a/__init__.py").read_text() == "USER EDIT\n"
+    assert check_packages(tmp_path)["conflicts"] == []
+
+
+def test_failed_migration_removes_what_it_created(tmp_path):
+    python, site, info = fake_writable_venv(tmp_path)
+    (info / "RECORD").write_text((info / "RECORD").read_text() + "toolkit_a/gone.py,,\n")
+    store = tmp_path / "lazy-packages"
+    store.mkdir()
+    assert run_migration(python, ["toolkit_a-2.1"], store).returncode != 0
+    assert [p for p in store.rglob("*") if p.is_file()] == []
