@@ -148,6 +148,7 @@ EXPOSED_TOOLS: tuple[str, ...] = (
     # runtime that need to dispatch new tasks.
     "kanban_create",
     "kanban_unblock",
+    "kanban_edit",
     "kanban_link",
 )
 

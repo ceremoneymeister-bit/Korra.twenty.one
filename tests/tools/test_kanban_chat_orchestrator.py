@@ -176,3 +176,52 @@ def test_block_from_chat_stops_the_running_executor(chat_env, monkeypatch):
         task = kb.get_task(conn, tid)
         assert (task.status, task.block_kind) == ("blocked", kb.OWNER_PAUSE_KIND)
         assert "worker_stopped" in [e.kind for e in kb.list_events(conn, tid)]
+
+
+def test_owner_edit_from_chat_changes_what_the_judge_checks(chat_env, monkeypatch):
+    """K21-298: the owner changes the criteria in the main chat; the judge
+    accepts the handoff against the current description, not the old one."""
+    from tools import kanban_tools as kt
+    from korra_cli import kanban_db as kb
+
+    seen = []
+
+    def judge(goal, last_response, **_):
+        seen.append(goal)
+        ok = "без интеграции" in goal
+        return ("done" if ok else "continue"), "нужна интеграция", False, None, False
+
+    monkeypatch.setattr(kt, "judge_goal", judge)
+    monkeypatch.setattr(kt, "_goal_judge_available", lambda: True)
+    with kb.connect_closing() as conn:
+        tid = kb.create_task(conn, title="CRM", assignee="pm", goal_mode=True,
+                             body="Подключить CRM и проверить интеграцию.")
+        kb.claim_task(conn, tid, claimer="w")
+
+    out = json.loads(kt._handle_edit({"task_id": tid, "body": "Достаточно выгрузки, без интеграции."}))
+    assert out["ok"] is True
+    monkeypatch.setenv("HERMES_KANBAN_TASK", tid)
+    monkeypatch.setenv("KORRA_KANBAN_TASK", tid)
+    done = json.loads(kt._handle_complete({"summary": "Выгрузка готова"}))
+    assert done.get("ok") is True, done
+    assert "без интеграции" in seen[-1] and "Подключить CRM" not in seen[-1]
+    with kb.connect_closing() as conn:
+        assert kb.get_task(conn, tid).status == "done"
+        edited = [e for e in kb.list_events(conn, tid) if e.kind == "edited"]
+        assert edited and edited[-1].payload["previous_body"] == "Подключить CRM и проверить интеграцию."
+
+
+def test_edit_from_chat_refuses_finished_and_worker_calls(chat_env, monkeypatch):
+    from tools import kanban_tools as kt
+    from korra_cli import kanban_db as kb
+    with kb.connect_closing() as conn:
+        tid = kb.create_task(conn, title="CRM", assignee="pm", body="старое")
+        kb.claim_task(conn, tid, claimer="w")
+        kb.complete_task(conn, tid, result="готово")
+    out = json.loads(kt._handle_edit({"task_id": tid, "body": "новое"}))
+    assert "error" in out
+    with kb.connect_closing() as conn:
+        assert kb.get_task(conn, tid).body == "старое"
+    monkeypatch.setenv("HERMES_KANBAN_TASK", tid)
+    monkeypatch.setenv("KORRA_KANBAN_TASK", tid)
+    assert "error" in json.loads(kt._handle_edit({"task_id": tid, "body": "новое"}))

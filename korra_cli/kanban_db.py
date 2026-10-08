@@ -6463,10 +6463,10 @@ def _owner_data_since_block(conn: sqlite3.Connection, task_id: str) -> bool:
     ).fetchone()["id"] or 0
     for row in conn.execute(
         "SELECT kind, payload FROM task_events WHERE task_id = ? AND id > ? "
-        "AND kind IN ('owner_responded', 'task_edited')",
+        "AND kind IN ('owner_responded', 'edited')",
         (task_id, anchor),
     ):
-        if row["kind"] == "task_edited":
+        if row["kind"] == "edited":
             return True
         try:
             payload = json.loads(row["payload"] or "{}")
@@ -7571,6 +7571,49 @@ def return_for_rework(
             "author": author,
         })
     return {"ok": True, "duplicate": False, "reason": None, "status": landing}
+
+
+def edit_task(
+    conn: sqlite3.Connection, task_id: str, *, body: Optional[str] = None,
+    title: Optional[str] = None, board: Optional[str] = None,
+) -> bool:
+    """Owner's edit of an unfinished card's title/description (criteria).
+
+    Same ``edited`` event the dashboard writes, plus the previous text so the
+    history keeps what the executor was first asked. Workers and the goal
+    judge read the row fresh, so the new text applies from the next read.
+    """
+    if title is not None and not title.strip():
+        raise ValueError("title cannot be blank")
+    if title is None and body is None:
+        return False
+    with write_txn(conn):
+        row = conn.execute(
+            "SELECT title, body FROM tasks WHERE id = ? "
+            "AND status NOT IN ('done', 'archived')", (task_id,),
+        ).fetchone()
+        if row is None:
+            return False
+        sets, vals, fields = [], [], []
+        payload: dict[str, Any] = {}
+        if title is not None and title.strip() != (row["title"] or ""):
+            sets.append("title = ?")
+            vals.append(title.strip())
+            fields.append("title")
+            payload["previous_title"] = row["title"]
+        if body is not None and body != (row["body"] or ""):
+            sets.append("body = ?")
+            vals.append(body)
+            fields.append("body")
+            payload["previous_body"] = row["body"]
+        if not fields:
+            return True
+        vals.append(task_id)
+        conn.execute(f"UPDATE tasks SET {', '.join(sets)} WHERE id = ?", vals)
+        payload["fields"] = fields
+        _append_event(conn, task_id, "edited", payload)
+    notify_task_updated(conn, task_id, fields, board=board)
+    return True
 
 
 def pause_task(

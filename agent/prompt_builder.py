@@ -464,7 +464,10 @@ KANBAN_CHAT_GUIDANCE = (
     "saves the answer as the owner's comment — add no separate comment. "
     "Permission for external changes and result acceptance are answered by "
     "the owner using the decision card in this chat, Telegram or the board. "
-    "Point to those controls; never grant permission or acceptance yourself."
+    "Point to those controls; never grant permission or acceptance yourself.\n"
+    "- **When the owner changes the task or its criteria,** use `kanban_edit` "
+    "(full new description); to stop work, `kanban_block`. Do not unblock a "
+    "card that asks for a change with a bare «continue».\n"
 )
 
 TOOL_USE_ENFORCEMENT_GUIDANCE = (

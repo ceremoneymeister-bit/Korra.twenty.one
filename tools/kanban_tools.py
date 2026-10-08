@@ -1835,6 +1835,35 @@ def _handle_unblock(args: dict, **kw) -> str:
         return tool_error(f"kanban_unblock: {e}")
 
 
+def _handle_edit(args: dict, **kw) -> str:
+    """Change an unfinished card's description/criteria on the owner's word."""
+    delegated_err = _reject_delegated_child_mutation("kanban_edit")
+    if delegated_err:
+        return delegated_err
+    guard = _require_orchestrator_tool("kanban_edit")
+    if guard:
+        return guard
+    tid = args.get("task_id")
+    if not tid:
+        return tool_error("task_id is required")
+    body = args.get("body")
+    title = args.get("title")
+    if body is None and title is None:
+        return tool_error("pass body and/or title")
+    try:
+        kb, conn = _connect(board=args.get("board"))
+        try:
+            if not kb.edit_task(conn, str(tid), body=body, title=title,
+                                board=args.get("board")):
+                return tool_error(f"could not edit {tid} (unknown, finished or cancelled)")
+            return _ok(task_id=str(tid), edited=[k for k, v in (("title", title), ("body", body)) if v is not None])
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.exception("kanban_edit failed")
+        return tool_error(f"kanban_edit: {e}")
+
+
 def _handle_link(args: dict, **kw) -> str:
     """Add a parent→child dependency edge after the fact."""
     delegated_err = _reject_delegated_child_mutation("kanban_link")
@@ -2585,6 +2614,29 @@ KANBAN_UNBLOCK_SCHEMA = {
     },
 }
 
+KANBAN_EDIT_SCHEMA = {
+    "name": "kanban_edit",
+    "description": (
+        "Change the description (criteria) and/or title of an unfinished "
+        "Kanban task when the owner asks for it in chat. The executor and "
+        "the completion judge use the new text from their next read; the "
+        "previous text stays in the card history. Orchestrator-only."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "task_id": {"type": "string", "description": "Task to change."},
+            "body": {
+                "type": "string",
+                "description": "The full new description with the criteria (replaces the old one).",
+            },
+            "title": {"type": "string", "description": "New title (optional)."},
+            "board": _board_schema_prop(),
+        },
+        "required": ["task_id"],
+    },
+}
+
 KANBAN_LINK_SCHEMA = {
     "name": "kanban_link",
     "description": (
@@ -2620,6 +2672,7 @@ for _handler_name in (
     "_handle_attachments",
     "_handle_create",
     "_handle_unblock",
+    "_handle_edit",
     "_handle_link",
 ):
     globals()[_handler_name] = _principal_guard(globals()[_handler_name])
@@ -2745,6 +2798,15 @@ registry.register(
     handler=_handle_unblock,
     check_fn=_check_kanban_orchestrator_mode,
     emoji="▶",
+)
+
+registry.register(
+    name="kanban_edit",
+    toolset="kanban",
+    schema=KANBAN_EDIT_SCHEMA,
+    handler=_handle_edit,
+    check_fn=_check_kanban_orchestrator_mode,
+    emoji="✏",
 )
 
 registry.register(

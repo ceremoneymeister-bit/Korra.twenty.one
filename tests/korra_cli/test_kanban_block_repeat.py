@@ -97,3 +97,18 @@ def test_capability_asked_differently_without_news_is_parked(home):
         assert kb.get_task(conn, tid).status == "triage"
         assert [k for k in _kinds(conn, tid) if k in NOTIFYING] == ["blocked"]
         assert decisions.project_task(conn, kb.get_task(conn, tid), "default")["choices"] == []
+
+
+def test_edit_of_the_description_is_news_for_a_repeated_block(home):
+    with kb.connect_closing() as conn:
+        tid = kb.create_task(conn, title="Telegram", assignee="w", body="Прочитать группу")
+        kb.claim_task(conn, tid, claimer="w")
+        kb.block_task(conn, tid, kind="capability", reason="Нет доступа к личному Telegram")
+        assert kb.edit_task(conn, tid, body="Прочитать только публичный канал")
+        with kb.write_txn(conn):
+            conn.execute("UPDATE tasks SET status='ready' WHERE id=?", (tid,))
+        kb.claim_task(conn, tid, claimer="w")
+        kb.block_task(conn, tid, kind="capability", reason="Публичный канал закрыт для бота")
+        task = kb.get_task(conn, tid)
+        assert task.status == "blocked"
+        assert "block_repeated" not in _kinds(conn, tid)

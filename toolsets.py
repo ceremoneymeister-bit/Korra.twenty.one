@@ -90,6 +90,7 @@ _HERMES_CORE_TOOLS = [
     "kanban_heartbeat",
     "kanban_comment", "kanban_create", "kanban_link",
     "kanban_unblock",
+    "kanban_edit",
     "kanban_attach", "kanban_attach_url", "kanban_attachments",
     # The main agent improves the installation's agents for the owner. Only in
     # schema for profile ``default`` in an owner-live turn (check_fn in
@@ -339,6 +340,7 @@ TOOLSETS = {
             "kanban_heartbeat", "kanban_comment",
             "kanban_create", "kanban_link",
             "kanban_unblock",
+            "kanban_edit",
             "kanban_attach", "kanban_attach_url", "kanban_attachments",
         ],
         "includes": [],
@@ -491,6 +493,7 @@ TOOLSETS = {
             "kanban_heartbeat",
             "kanban_comment", "kanban_create", "kanban_link",
             "kanban_unblock",
+            "kanban_edit",
             "kanban_attach", "kanban_attach_url", "kanban_attachments",
             # The owner improves agents by asking the main agent in the
             # cabinet chat (tools/manage_agents_tool.py decides per call).
