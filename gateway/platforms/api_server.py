@@ -190,9 +190,9 @@ def _chat_approval_event(
     event.update({
         "event": "approval.request",
         "session_id": session_id,
-        "choices": (event.get("choices") if event.get("decision_kind") in {
+        "choices": event.get("choices") if event.get("decision_kind") in {
             "kanban_question", "kanban_approval", "kanban_accept",
-        } else None) or _approval_event_choices(
+        } and event.get("choices") is not None else _approval_event_choices(
             smart_denied=bool(event.get("smart_denied")),
             allow_session=event.get("allow_session") is not False,
             allow_permanent=allow_permanent,
@@ -1841,6 +1841,43 @@ class _ProviderAuthResolutionError(RuntimeError):
     closed OpenAI client"), which a bare `except RuntimeError` there would
     otherwise mislabel as an auth failure.
     """
+
+
+def _stamp_after_pause(user_message: str, history: List[Dict[str, Any]]):
+    """Date stamps for the web chat, same policy as the messaging gateway.
+
+    Returns ``(message, history, now)``: user rows (and this message) that
+    follow a long pause get the one-line date prefix in the model's context;
+    stored text stays clean and the stamp is rebuilt from the stored time, so
+    the replayed prefix is byte-identical on the next request.
+    """
+    try:
+        from korra_cli.config import load_config
+        from korra_time import get_timezone
+        from gateway.message_timestamps import (
+            last_message_timestamp, render_user_content_with_timestamp,
+            should_stamp, timestamp_policy,
+        )
+        policy = timestamp_policy(load_config())
+        tz = get_timezone()
+        now = time.time()
+        stamped = []
+        prev = None
+        for msg in history or []:
+            ts = msg.get("timestamp")
+            if (msg.get("role") == "user" and isinstance(msg.get("content"), str)
+                    and should_stamp(policy, ts, prev, tz=tz)):
+                msg = {**msg, "content": render_user_content_with_timestamp(msg["content"], ts, tz=tz)}
+            if ts is not None:
+                prev = ts
+            stamped.append(msg)
+        text = user_message
+        if should_stamp(policy, now, last_message_timestamp(history, tz=tz), tz=tz):
+            text = render_user_content_with_timestamp(user_message, now, tz=tz)
+        return text, stamped, now
+    except Exception:
+        logger.debug("Message timestamp stamping failed (non-fatal)", exc_info=True)
+        return user_message, history, None
 
 
 class APIServerAdapter(BasePlatformAdapter):
@@ -5096,7 +5133,8 @@ class APIServerAdapter(BasePlatformAdapter):
                 return web.json_response(_openai_error("Некорректный ответ"), status=400)
             try:
                 outcome = await asyncio.to_thread(resolve, request_id, choice,
-                                                  source_session_id=session_id, answer=answer)
+                                                  source_session_id=session_id, answer=answer,
+                                                  source={"platform": "api_server", "session_id": session_id})
             except KanbanDecisionConflict as exc:
                 return web.json_response(_openai_error(str(exc), code="kanban_decision_conflict"), status=409)
             return web.json_response({"resolved": 1, **outcome})
@@ -8192,6 +8230,7 @@ class APIServerAdapter(BasePlatformAdapter):
             from gateway.session_context import clear_session_vars
 
             run_user_message = user_message
+            run_history = conversation_history
             persist_message_kwargs: Dict[str, Any] = {}
             if learning_slash and learning_slash[0] == "learn":
                 from agent.learn_prompt import build_learn_prompt
@@ -8200,6 +8239,15 @@ class APIServerAdapter(BasePlatformAdapter):
                 persist_message_kwargs["persist_user_message"] = user_message
 
             with self._profile_scope(request_profile):
+                if not learning_slash and isinstance(user_message, str):
+                    stamped_message, stamped_history, stamped_at = _stamp_after_pause(
+                        user_message, conversation_history)
+                    if stamped_at is not None:
+                        run_history = stamped_history
+                    if stamped_message != user_message:
+                        run_user_message = stamped_message
+                        persist_message_kwargs["persist_user_message"] = user_message
+                        persist_message_kwargs["persist_user_timestamp"] = stamped_at
                 tokens = self._bind_api_server_session(
                     chat_id=session_id or "",
                     session_key=gateway_session_key or session_id or "",
@@ -8266,7 +8314,7 @@ class APIServerAdapter(BasePlatformAdapter):
                     else:
                         result = agent.run_conversation(
                             user_message=run_user_message,
-                            conversation_history=conversation_history,
+                            conversation_history=run_history,
                             task_id=effective_task_id,
                             **persist_message_kwargs,
                             **({"persist_user_display_metadata": persist_user_display_metadata}

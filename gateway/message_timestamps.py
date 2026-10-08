@@ -73,6 +73,47 @@ def coerce_message_timestamp(ts_value: Any, tz=None) -> Optional[float]:
     return None
 
 
+DEFAULT_AFTER_PAUSE_HOURS = 6.0
+
+
+def timestamp_policy(user_config: Any) -> Tuple[bool, float]:
+    """``(always, pause_seconds)`` from ``gateway.message_timestamps``.
+
+    ``enabled: true`` stamps every user message. Otherwise a message is
+    stamped only when it follows a pause of ``after_pause_hours`` (default 6,
+    ``0`` turns the labels off), so the model learns the real date after a
+    long silence without a prefix on every message.
+    """
+    gw = user_config.get("gateway") if isinstance(user_config, dict) else None
+    mt = gw.get("message_timestamps") if isinstance(gw, dict) else None
+    if mt is None or isinstance(mt, dict):
+        mt = mt or {}
+        try:
+            hours = float(mt.get("after_pause_hours", DEFAULT_AFTER_PAUSE_HOURS))
+        except (TypeError, ValueError):
+            hours = DEFAULT_AFTER_PAUSE_HOURS
+        return bool(mt.get("enabled", False)), max(hours, 0.0) * 3600
+    return bool(mt), 0.0
+
+
+def last_message_timestamp(history: Any, tz=None) -> Optional[float]:
+    """Time of the latest stored message that carries one."""
+    for msg in reversed(history or []):
+        epoch = coerce_message_timestamp(msg.get("timestamp"), tz=tz) if isinstance(msg, dict) else None
+        if epoch is not None:
+            return epoch
+    return None
+
+
+def should_stamp(policy: Tuple[bool, float], ts_value: Any, prev_value: Any, tz=None) -> bool:
+    always, pause_seconds = policy
+    if always:
+        return True
+    ts = coerce_message_timestamp(ts_value, tz=tz)
+    prev = coerce_message_timestamp(prev_value, tz=tz)
+    return bool(pause_seconds and ts is not None and prev is not None and ts - prev >= pause_seconds)
+
+
 def format_message_timestamp(ts_value: Any, tz=None) -> str:
     """Format a timestamp value as ``[Tue 2026-04-28 13:40:53 CEST]``."""
     epoch = coerce_message_timestamp(ts_value, tz=tz)

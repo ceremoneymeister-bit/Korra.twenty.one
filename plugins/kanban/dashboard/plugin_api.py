@@ -191,16 +191,17 @@ def _block_revisions(conn: sqlite3.Connection, task_ids: list[str]) -> dict[str,
         return {}
     marks = ",".join("?" for _ in task_ids)
     latest = conn.execute(
-        f"SELECT e.task_id, e.id, e.kind FROM task_events e "
+        f"SELECT e.task_id, e.id, e.kind, e.payload FROM task_events e "
         f"JOIN (SELECT task_id, MAX(id) AS mid FROM task_events "
-        f"      WHERE kind IN ('blocked', 'block_loop_detected', 'unblocked', 'gave_up') "
+        f"      WHERE kind IN ('blocked', 'block_loop_detected', 'block_repeated', "
+        f"                     'unblocked', 'gave_up') "
         f"        AND task_id IN ({marks}) GROUP BY task_id) m "
         f"  ON m.mid = e.id",
         task_ids,
     ).fetchall()
     return {
-        r["task_id"]: int(r["id"]) for r in latest
-        if r["kind"] in ("blocked", "block_loop_detected")
+        r["task_id"]: kanban_db._question_revision(r) for r in latest
+        if r["kind"] in ("blocked", "block_loop_detected", "block_repeated")
     }
 
 
@@ -1455,6 +1456,7 @@ _RESPOND_REJECTIONS = {
     "not_blocked": (409, "not_waiting"),
     "stale": (409, "question_changed"),
     "decision_required": (409, "decision_required"),
+    "answer_required": (409, "answer_required"),
 }
 
 

@@ -1803,11 +1803,17 @@ def _message_timestamps_enabled(user_config: Optional[dict]) -> bool:
     return bool(mt)
 
 
+def _timestamp_policy(user_config: Optional[dict]) -> tuple:
+    from gateway.message_timestamps import timestamp_policy
+    return timestamp_policy(user_config)
+
+
 def _build_gateway_agent_history(
     history: List[Dict[str, Any]],
     *,
     channel_prompt: Optional[str] = None,
     inject_timestamps: bool = False,
+    timestamp_pause_seconds: float = 0.0,
 ) -> tuple[List[Dict[str, Any]], Optional[str]]:
     """Convert stored gateway transcript rows into agent replay messages.
 
@@ -1819,15 +1825,19 @@ def _build_gateway_agent_history(
 
     When ``inject_timestamps`` is True (gateway.message_timestamps.enabled),
     each replayed user message is rendered with a single human-readable
-    timestamp prefix from its stored metadata.
+    timestamp prefix from its stored metadata. With ``timestamp_pause_seconds``
+    only a message that follows a pause that long is rendered that way.
     """
 
     from korra_time import get_timezone as _get_msg_tz
     from gateway.message_timestamps import (
         render_user_content_with_timestamp as _render_msg_ts,
+        should_stamp as _should_stamp,
     )
 
     _msg_tz = _get_msg_tz()
+    _stamp_policy = (bool(inject_timestamps), float(timestamp_pause_seconds or 0.0))
+    _prev_msg_ts = None
     agent_history: List[Dict[str, Any]] = []
     observed_group_context: List[str] = []
     separate_observed_context = _uses_telegram_observed_group_context(channel_prompt)
@@ -1847,8 +1857,13 @@ def _build_gateway_agent_history(
             continue
 
         content = msg.get("content")
-        if inject_timestamps and role == "user" and isinstance(content, str):
+        if (
+            role == "user" and isinstance(content, str)
+            and _should_stamp(_stamp_policy, msg.get("timestamp"), _prev_msg_ts, tz=_msg_tz)
+        ):
             content = _render_msg_ts(content, msg.get("timestamp"), tz=_msg_tz)
+        if msg.get("timestamp") is not None:
+            _prev_msg_ts = msg.get("timestamp")
         if separate_observed_context and msg.get("observed") and role == "user" and content:
             observed_group_context.append(str(content).strip())
             continue
@@ -6582,6 +6597,7 @@ class TurnRunner:
             ctx.history,
             channel_prompt=ctx.channel_prompt,
             inject_timestamps=_message_timestamps_enabled(ctx.user_config),
+            timestamp_pause_seconds=_timestamp_policy(ctx.user_config)[1],
         )
 
         # FTS write-corruption guard (#50502): when message persistence
@@ -22093,7 +22109,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             from korra_time import get_timezone as _get_evt_tz
             from gateway.message_timestamps import (
                 coerce_message_timestamp as _coerce_msg_ts,
+                last_message_timestamp as _last_msg_ts,
                 render_user_content_with_timestamp as _render_msg_ts,
+                should_stamp as _should_stamp_msg,
                 strip_leading_message_timestamps as _strip_msg_ts,
             )
             _evt_tz = _get_evt_tz()
@@ -22106,7 +22124,12 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 persist_user_timestamp = (
                     _event_epoch if _event_epoch is not None else _embedded_ts
                 )
-                if _message_timestamps_enabled(_load_gateway_config()):
+                if _should_stamp_msg(
+                    _timestamp_policy(_load_gateway_config()),
+                    persist_user_timestamp,
+                    _last_msg_ts(history, tz=_evt_tz),
+                    tz=_evt_tz,
+                ):
                     message_text = _render_msg_ts(
                         _clean_message_text,
                         persist_user_timestamp,

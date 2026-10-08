@@ -153,3 +153,166 @@ def test_chat_comment_is_signed_by_the_chat_not_worker(chat_env, monkeypatch):
     finally:
         conn.close()
     assert "add no separate comment" in KANBAN_CHAT_GUIDANCE
+
+
+def test_block_from_chat_stops_the_running_executor(chat_env, monkeypatch):
+    """The owner's word to stop is a pause: the executor's process ends too."""
+    from tools import kanban_tools as kt
+    from korra_cli import kanban_db as kb
+    stopped = []
+    monkeypatch.setattr(
+        kb, "_terminate_reclaimed_worker",
+        lambda pid, claim_lock, **_: stopped.append(pid) or {"terminated": True},
+    )
+    with kb.connect_closing() as conn:
+        tid = kb.create_task(conn, title="CRM", assignee="pm")
+        kb.claim_task(conn, tid, claimer="w")
+        with kb.write_txn(conn):
+            conn.execute("UPDATE tasks SET worker_pid = 4242 WHERE id = ?", (tid,))
+    out = json.loads(kt._handle_block({"task_id": tid, "reason": "Владелец просил остановить"}))
+    assert out["ok"] is True and out["block_kind"] == kb.OWNER_PAUSE_KIND
+    assert stopped == [4242]
+    with kb.connect_closing() as conn:
+        task = kb.get_task(conn, tid)
+        assert (task.status, task.block_kind) == ("blocked", kb.OWNER_PAUSE_KIND)
+        assert "worker_stopped" in [e.kind for e in kb.list_events(conn, tid)]
+
+
+def test_owner_edit_from_chat_changes_what_the_judge_checks(chat_env, monkeypatch):
+    """K21-298: the owner changes the criteria in the main chat; the judge
+    accepts the handoff against the current description, not the old one."""
+    from tools import kanban_tools as kt
+    from korra_cli import kanban_db as kb
+
+    seen = []
+
+    def judge(goal, last_response, **_):
+        seen.append(goal)
+        ok = "без интеграции" in goal
+        return ("done" if ok else "continue"), "нужна интеграция", False, None, False
+
+    monkeypatch.setattr(kt, "judge_goal", judge)
+    monkeypatch.setattr(kt, "_goal_judge_available", lambda: True)
+    with kb.connect_closing() as conn:
+        tid = kb.create_task(conn, title="CRM", assignee="pm", goal_mode=True,
+                             body="Подключить CRM и проверить интеграцию.")
+        kb.claim_task(conn, tid, claimer="w")
+
+    out = json.loads(kt._handle_edit({"task_id": tid, "body": "Достаточно выгрузки, без интеграции."}))
+    assert out.get("ok") is True, out
+    monkeypatch.setenv("HERMES_KANBAN_TASK", tid)
+    monkeypatch.setenv("KORRA_KANBAN_TASK", tid)
+    done = json.loads(kt._handle_complete({"summary": "Выгрузка готова"}))
+    assert done.get("ok") is True, done
+    assert "без интеграции" in seen[-1] and "Подключить CRM" not in seen[-1]
+    with kb.connect_closing() as conn:
+        assert kb.get_task(conn, tid).status == "done"
+        edited = [e for e in kb.list_events(conn, tid) if e.kind == "edited"]
+        assert edited and edited[-1].payload["previous_body"] == "Подключить CRM и проверить интеграцию."
+
+
+def test_edit_from_chat_refuses_finished_and_worker_calls(chat_env, monkeypatch):
+    from tools import kanban_tools as kt
+    from korra_cli import kanban_db as kb
+    with kb.connect_closing() as conn:
+        tid = kb.create_task(conn, title="CRM", assignee="pm", body="старое")
+        kb.claim_task(conn, tid, claimer="w")
+        kb.complete_task(conn, tid, result="готово")
+    out = json.loads(kt._handle_edit({"task_id": tid, "body": "новое"}))
+    assert "error" in out
+    with kb.connect_closing() as conn:
+        assert kb.get_task(conn, tid).body == "старое"
+    monkeypatch.setenv("HERMES_KANBAN_TASK", tid)
+    monkeypatch.setenv("KORRA_KANBAN_TASK", tid)
+    assert "error" in json.loads(kt._handle_edit({"task_id": tid, "body": "новое"}))
+
+
+def _owner_answer_in(session_id, platform, monkeypatch, tmp_path):
+    """A card waits for the owner; the owner answers it from another chat."""
+    from tools import kanban_tools as kt
+    from korra_cli import kanban_db as kb
+    import contextvars
+    from gateway.session_context import set_session_vars, clear_session_vars
+    monkeypatch.setenv("KORRA_TIMEZONE", "UTC")
+    import korra_time
+    korra_time.reset_cache()
+    with kb.connect_closing() as conn:
+        tid = kb.create_task(conn, title="Скидка", assignee="pm", session_id="web-origin")
+        kb.claim_task(conn, tid, claimer="w")
+        kb.block_task(conn, tid, kind="needs_input", reason="Какая скидка?")
+        revision = kb.block_revision(conn, tid)
+    def answer():
+        tokens = set_session_vars(platform=platform, session_id=session_id, message_id="777",
+                                  user_name="Дмитрий", profile="default", chat_id="42",
+                                  owner_principal="live")
+        try:
+            return json.loads(kt._handle_unblock({"task_id": tid, "answer": "Скидка 15%", "revision": revision}))
+        finally:
+            clear_session_vars(tokens)
+
+    # set_session_vars() engages the session context process-wide and
+    # clear_session_vars() pins "" — undo both so later tests see os.environ
+    import gateway.session_context as sc
+    monkeypatch.setattr(sc, "_session_context_engaged", sc._session_context_engaged)
+    try:
+        out = contextvars.copy_context().run(answer)
+    finally:
+        sc._session_context_engaged = False
+    assert out.get("ok") is True, out
+    return tid
+
+
+def test_owner_decision_from_telegram_keeps_its_source(chat_env, monkeypatch, tmp_path):
+    """K21-300: the card and kanban_show name who decided, where and when."""
+    from tools import kanban_tools as kt
+    from korra_cli import kanban_db as kb
+    tid = _owner_answer_in("tg-session-1", "telegram", monkeypatch, tmp_path)
+    with kb.connect_closing() as conn:
+        comment = kb.list_comments(conn, tid)[-1]
+    assert comment.body == "Скидка 15%"
+    shown = json.loads(kt._handle_show({"task_id": tid}))
+    from datetime import datetime, timezone
+    stamp = datetime.fromtimestamp(shown["comments"][-1]["source"]["at"], timezone.utc).strftime("%d.%m %H:%M")
+    assert comment.author == f"Дмитрий · Telegram · {stamp}"
+    last = shown["comments"][-1]
+    assert last["author"] == comment.author
+    assert last["source"]["platform"] == "telegram"
+    assert last["source"]["session_id"] == "tg-session-1"
+    assert last["source"]["message_id"] == "777"
+    assert last["source"]["link"] == "@session:default/tg-session-1"
+
+
+def test_web_agent_finds_the_telegram_decision_and_does_not_block(chat_env, monkeypatch, tmp_path):
+    """The web chat sees the link, reads the source with session_search and
+    treats the card as the owner's decision instead of blocking it again."""
+    from tools import kanban_tools as kt
+    from tools.session_search_tool import session_search
+    from korra_cli import kanban_db as kb
+    from korra_state import SessionDB
+    db = SessionDB(chat_env / "state.db")
+    db.create_session("tg-session-1", source="telegram")
+    db.append_message("tg-session-1", "user", "Скидка 15%, решаю я")
+    tid = _owner_answer_in("tg-session-1", "telegram", monkeypatch, tmp_path)
+    link = json.loads(kt._handle_show({"task_id": tid}))["comments"][-1]["source"]["link"]
+    profile, session_id = link.removeprefix("@session:").split("/", 1)
+    found = session_search(session_id=session_id, db=db)
+    db.close()
+    assert "Скидка 15%, решаю я" in found
+    with kb.connect_closing() as conn:
+        assert kb.get_task(conn, tid).status == "ready"
+
+
+def test_comment_without_source_is_shown_as_before(chat_env):
+    from tools import kanban_tools as kt
+    from korra_cli import kanban_db as kb
+    with kb.connect_closing() as conn:
+        tid = kb.create_task(conn, title="Старая", assignee="pm")
+        kb.add_comment(conn, tid, "Владелец", "ответ без источника")
+    last = json.loads(kt._handle_show({"task_id": tid}))["comments"][-1]
+    assert last == {"author": "Владелец", "body": "ответ без источника", "created_at": last["created_at"]}
+
+
+def test_chat_guidance_asks_to_check_the_source_before_disputing(chat_env):
+    from agent.prompt_builder import KANBAN_CHAT_GUIDANCE
+    assert "session_search" in KANBAN_CHAT_GUIDANCE and "dispute" in KANBAN_CHAT_GUIDANCE
+    assert len(KANBAN_CHAT_GUIDANCE) < 3500

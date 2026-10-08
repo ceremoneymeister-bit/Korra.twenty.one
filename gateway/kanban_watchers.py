@@ -817,7 +817,11 @@ class GatewayKanbanWatchersMixin:
                                 _send_res = await adapter.send_exec_approval(
                                     chat_id=sub["chat_id"], command=board_decision["command"],
                                     session_key=board_decision["source_session_id"],
-                                    description="Ждёт вас. Ответьте на это сообщение или используйте кнопки.",
+                                    description=(
+                                        "Ждёт вас. Ответьте на это сообщение или используйте кнопки."
+                                        if board_decision["choices"] else
+                                        "Ждёт вас. Ответьте на это сообщение: напишите, что изменить или добавить."
+                                    ),
                                     metadata={**metadata, **board_decision, "owner_id": sub.get("user_id") or sub["chat_id"]},
                                     allow_session=False, allow_permanent=False,
                                 )

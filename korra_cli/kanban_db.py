@@ -6428,11 +6428,64 @@ def edit_completed_task_result(
     return True
 
 
+CONTINUE_AS_PROPOSED = "Продолжайте, как вы предложили."
+
+
 def _same_block_text(previous: Optional[str], current: Optional[str]) -> bool:
-    """Whether two block texts name the same cause (case/space-insensitive)."""
+    """Whether two block texts name the same cause.
+
+    Equal ignoring case/spacing, or a rewording: most of the word stems
+    (first five letters) coincide. Short texts must match exactly.
+    """
     def norm(value: Optional[str]) -> str:
         return " ".join((value or "").casefold().split())
-    return norm(previous) == norm(current)
+    if norm(previous) == norm(current):
+        return True
+    stems = [
+        {w[:5] for w in re.findall(r"\w+", norm(v)) if len(w) > 2}
+        for v in (previous, current)
+    ]
+    if min(len(stems[0]), len(stems[1])) < 4:
+        return False
+    return len(stems[0] & stems[1]) / len(stems[0] | stems[1]) >= 0.6
+
+
+def _owner_data_since_block(conn: sqlite3.Connection, task_id: str) -> bool:
+    """Whether the owner gave anything new after the question was asked.
+
+    A real answer (not the bare "continue as proposed") or an edit of the
+    task's description counts. Without it a repeated block carries no news.
+    """
+    anchor = conn.execute(
+        "SELECT MAX(id) AS id FROM task_events WHERE task_id = ? "
+        "AND kind IN ('blocked', 'block_loop_detected')",
+        (task_id,),
+    ).fetchone()["id"] or 0
+    for row in conn.execute(
+        "SELECT kind, payload FROM task_events WHERE task_id = ? AND id > ? "
+        "AND kind IN ('owner_responded', 'edited')",
+        (task_id, anchor),
+    ):
+        if row["kind"] == "edited":
+            return True
+        try:
+            payload = json.loads(row["payload"] or "{}")
+        except (TypeError, ValueError):
+            continue
+        if payload.get("answered") and not payload.get("continue_only"):
+            return True
+    return False
+
+
+def _question_revision(row) -> Optional[int]:
+    """Revision a ``blocked``-like event row stands for (see ``block_revision``)."""
+    if row["kind"] != "block_repeated":
+        return int(row["id"])
+    try:
+        revision = json.loads(row["payload"] or "{}").get("revision")
+    except (TypeError, ValueError, AttributeError):
+        revision = None
+    return int(revision) if revision else int(row["id"])
 
 
 def block_task(
@@ -6552,11 +6605,15 @@ def block_task(
         # kind survive untouched, and a task waiting on its parents
         # (``todo``) can be paused too. The ``blocked`` event keeps it sticky.
         if kind == OWNER_PAUSE_KIND:
+            if cur_row["block_kind"] == APPROVAL_BLOCK_KIND and cur_row["status"] in ("blocked", "triage"):
+                # A permission question is closed only by the owner's verdict.
+                return False
             cur = conn.execute(
                 "UPDATE tasks SET status = 'blocked', claim_lock = NULL, "
                 "claim_expires = NULL, worker_pid = NULL, block_kind = ?, "
                 "block_reason = ? WHERE id = ? "
-                "AND status IN ('running', 'ready', 'todo')"
+                "AND (status IN ('running', 'ready', 'todo', 'blocked') "
+                "     OR (status = 'triage' AND block_kind IS NOT NULL))"
                 + ("" if expected_run_id is None else " AND current_run_id = ?"),
                 (kind, reason, task_id) if expected_run_id is None
                 else (kind, reason, task_id, int(expected_run_id)),
@@ -6598,9 +6655,17 @@ def block_task(
         # the same cause. A different question after the owner answered is
         # progress, not a loop. Un-typed/untexted blocks compare as before.
         prev_reason = cur_row["block_reason"] if "block_reason" in cur_row.keys() else None
-        same_cause = prev_kind == kind and _same_block_text(prev_reason, reason)
+        similar = _same_block_text(prev_reason, reason)
+        same_cause = prev_kind == kind and similar
         recurrences = prev_recurrences + 1 if same_cause else 1
-        target = "triage" if recurrences >= BLOCK_RECURRENCE_LIMIT else "blocked"
+        # The same question again with nothing new from the owner (a missing
+        # capability stays missing however it is worded): park it in triage
+        # under the question already asked, without a second ping or wake-up.
+        repeated = (
+            prev_kind == kind and (similar or kind == "capability")
+            and not _owner_data_since_block(conn, task_id)
+        )
+        target = "triage" if repeated or recurrences >= BLOCK_RECURRENCE_LIMIT else "blocked"
 
         cur = conn.execute(
             f"""
@@ -6631,6 +6696,25 @@ def block_task(
             run_id = _synthesize_ended_run(
                 conn, task_id, outcome="blocked", summary=reason,
             )
+        if repeated:
+            question = conn.execute(
+                "SELECT id, kind, payload FROM task_events WHERE task_id = ? "
+                "AND kind IN ('blocked', 'block_loop_detected', 'block_repeated') "
+                "ORDER BY id DESC LIMIT 1",
+                (task_id,),
+            ).fetchone()
+            _append_event(
+                conn, task_id, "block_repeated",
+                {
+                    "reason": reason,
+                    "kind": kind,
+                    "recurrences": recurrences,
+                    "revision": _question_revision(question) if question else None,
+                    "source_status": source_status,
+                },
+                run_id=run_id,
+            )
+            return True
         if target == "triage":
             # Loop detected — stop letting the unblocker spin this task and
             # route it to triage for a human-in-the-loop decision.
@@ -7181,14 +7265,31 @@ def block_revision(conn: sqlite3.Connection, task_id: str) -> Optional[int]:
     rejected instead of resuming work on the wrong premise.
     """
     row = conn.execute(
-        "SELECT id, kind FROM task_events WHERE task_id = ? "
-        "AND kind IN ('blocked', 'block_loop_detected', 'unblocked', 'gave_up') "
-        "ORDER BY id DESC LIMIT 1",
+        "SELECT id, kind, payload FROM task_events WHERE task_id = ? "
+        "AND kind IN ('blocked', 'block_loop_detected', 'block_repeated', "
+        "'unblocked', 'gave_up') ORDER BY id DESC LIMIT 1",
         (task_id,),
     ).fetchone()
-    return (
-        int(row["id"]) if row and row["kind"] in ("blocked", "block_loop_detected") else None
-    )
+    if row and row["kind"] in ("blocked", "block_loop_detected", "block_repeated"):
+        return _question_revision(row)
+    return None
+
+
+_SOURCE_PLATFORMS = {"telegram": "Telegram", "api_server": "Веб-чат", "tui": "Терминал"}
+
+
+def owner_source_label(source: dict[str, Any], fallback: str = "Владелец") -> str:
+    """«Имя · Telegram · 08.10 14:32»: who answered, where and when."""
+    import korra_time
+    from datetime import datetime
+    platform = str(source.get("platform") or "")
+    parts = [str(source.get("user_name") or "").strip() or fallback,
+             _SOURCE_PLATFORMS.get(platform, platform)]
+    try:
+        parts.append(datetime.fromtimestamp(int(source["at"]), korra_time.get_timezone()).strftime("%d.%m %H:%M"))
+    except (KeyError, TypeError, ValueError, OverflowError, OSError):
+        pass
+    return " · ".join(p for p in parts if p)
 
 
 def respond_to_block(
@@ -7200,8 +7301,12 @@ def respond_to_block(
     request_id: str,
     revision: Optional[int] = None,
     decision: Optional[str] = None,
+    source: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """Answer a blocked task and resume it in one transaction.
+
+    ``source`` says where the owner answered (platform, session, message,
+    name); it signs the comment and rides in the ``owner_responded`` event.
 
     ``revision`` is required whenever the task waits on a question: an
     answer written for an earlier screen must not resume work on a question
@@ -7221,11 +7326,20 @@ def respond_to_block(
     if not request_id:
         raise ValueError("request_id is required")
     text = (answer or "").strip()
+    if source:
+        source = {**source, "at": int(time.time())}
     with write_txn(conn):
+        # An answer given before the question was repeated is history, not a
+        # retry: the repeated question may be answered again with new data.
+        repeated_at = conn.execute(
+            "SELECT MAX(id) AS id FROM task_events WHERE task_id = ? "
+            "AND kind = 'block_repeated'",
+            (task_id,),
+        ).fetchone()["id"] or 0
         for row in conn.execute(
             "SELECT payload FROM task_events WHERE task_id = ? "
-            "AND kind = 'owner_responded' ORDER BY id DESC",
-            (task_id,),
+            "AND kind = 'owner_responded' AND id > ? ORDER BY id DESC",
+            (task_id, repeated_at),
         ):
             try:
                 payload = json.loads(row["payload"] or "{}")
@@ -7258,6 +7372,15 @@ def respond_to_block(
                 "duplicate": False, "reason": "stale",
             }
         approval = current["block_kind"] == APPROVAL_BLOCK_KIND
+        if (
+            not approval and text in ("", CONTINUE_AS_PROPOSED)
+            and (repeated_question or current["block_kind"] == "capability")
+        ):
+            # Nothing was changed, so resuming would only repeat the block.
+            return {
+                "ok": False, "status": current["status"],
+                "duplicate": False, "reason": "answer_required",
+            }
         if approval and decision not in ("grant", "deny"):
             return {
                 "ok": False, "status": current["status"],
@@ -7278,8 +7401,11 @@ def respond_to_block(
                 "revision": current_revision,
                 "request_id": request_id,
             })
+        comment_id = None
         if text:
-            add_comment(conn, task_id, author, text)
+            comment_id = add_comment(
+                conn, task_id, owner_source_label(source, author) if source else author, text,
+            )
         if repeated_question:
             # The owner broke the loop by answering: resume with a fresh
             # counter so a genuinely new question is not treated as a loop.
@@ -7306,8 +7432,10 @@ def respond_to_block(
                 "request_id": request_id,
                 "revision": current_revision,
                 "answered": bool(text),
+                "continue_only": text == CONTINUE_AS_PROPOSED,
                 "decision": decision,
                 "status": new_status,
+                **({"source": source, "comment_id": comment_id} if source else {}),
             },
         )
     return {"ok": True, "status": new_status, "duplicate": False, "reason": None}
@@ -7470,6 +7598,49 @@ def return_for_rework(
             "author": author,
         })
     return {"ok": True, "duplicate": False, "reason": None, "status": landing}
+
+
+def edit_task(
+    conn: sqlite3.Connection, task_id: str, *, body: Optional[str] = None,
+    title: Optional[str] = None, board: Optional[str] = None,
+) -> bool:
+    """Owner's edit of an unfinished card's title/description (criteria).
+
+    Same ``edited`` event the dashboard writes, plus the previous text so the
+    history keeps what the executor was first asked. Workers and the goal
+    judge read the row fresh, so the new text applies from the next read.
+    """
+    if title is not None and not title.strip():
+        raise ValueError("title cannot be blank")
+    if title is None and body is None:
+        return False
+    with write_txn(conn):
+        row = conn.execute(
+            "SELECT title, body FROM tasks WHERE id = ? "
+            "AND status NOT IN ('done', 'archived')", (task_id,),
+        ).fetchone()
+        if row is None:
+            return False
+        sets, vals, fields = [], [], []
+        payload: dict[str, Any] = {}
+        if title is not None and title.strip() != (row["title"] or ""):
+            sets.append("title = ?")
+            vals.append(title.strip())
+            fields.append("title")
+            payload["previous_title"] = row["title"]
+        if body is not None and body != (row["body"] or ""):
+            sets.append("body = ?")
+            vals.append(body)
+            fields.append("body")
+            payload["previous_body"] = row["body"]
+        if not fields:
+            return True
+        vals.append(task_id)
+        conn.execute(f"UPDATE tasks SET {', '.join(sets)} WHERE id = ?", vals)
+        payload["fields"] = fields
+        _append_event(conn, task_id, "edited", payload)
+    notify_task_updated(conn, task_id, fields, board=board)
+    return True
 
 
 def pause_task(
@@ -8118,6 +8289,10 @@ def archive_task(
             summary="task archived with run still active",
         )
         _append_event(conn, task_id, "archived", None, run_id=run_id)
+        if prev is not None and prev["status"] != "done":
+            # Cancelled before it finished: nobody is waiting for news of it.
+            # A done card keeps its subscriptions so its result still arrives.
+            conn.execute("DELETE FROM kanban_notify_subs WHERE task_id = ?", (task_id,))
     if stop_worker and prev is not None and prev["status"] == "running" and prev["worker_pid"]:
         info = _terminate_reclaimed_worker(prev["worker_pid"], prev["claim_lock"])
         with write_txn(conn):

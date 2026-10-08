@@ -3361,8 +3361,12 @@ DEFAULT_CONFIG = {
         # Persisted transcripts always stay clean (the timestamp is stored as
         # message metadata regardless of this toggle), so turning it on later
         # surfaces send-times for past messages too.
+        # With ``enabled`` off, the first message after a pause of
+        # ``after_pause_hours`` (default 6; 0 = never) still carries it, so
+        # the model knows the real date after a long silence.
         "message_timestamps": {
             "enabled": False,
+            "after_pause_hours": 6,
         },
 
         # Maximum bytes for an inbound image / audio / video payload the

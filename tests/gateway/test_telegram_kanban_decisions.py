@@ -131,3 +131,16 @@ async def test_existing_effect_buttons_resolve_exact_request(setup, monkeypatch)
     update, _ = callback(approval_id)
     await setup._handle_callback_query(update, None)
     resolver.assert_called_once_with("origin", "once", request_id="effect_exact")
+
+
+@pytest.mark.asyncio
+async def test_capability_question_has_no_continue_as_proposed_button(setup, monkeypatch):
+    import plugins.platforms.telegram.adapter as telegram
+    monkeypatch.setattr(telegram, "InlineKeyboardButton", lambda text, **kw: text)
+    monkeypatch.setattr(telegram, "InlineKeyboardMarkup", lambda rows: rows)
+    adapter = setup
+    await send_question(adapter, kind="capability")
+    assert adapter._bot.send_message.call_args.kwargs["reply_markup"] is None
+    adapter._bot.send_message.reset_mock()
+    await send_question(adapter, kind="needs_input")
+    assert adapter._bot.send_message.call_args.kwargs["reply_markup"] == [["Продолжить как предложено"]]

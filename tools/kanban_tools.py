@@ -614,6 +614,13 @@ def _handle_show(args: dict, **kw) -> str:
                 return tool_error(f"task {tid} not found")
             comments = kb.list_comments(conn, tid)
             events = kb.list_events(conn, tid)
+            # Where the owner's answers came from (comment id -> source).
+            sources = {
+                e.payload["comment_id"]: e.payload["source"]
+                for e in events
+                if e.kind == "owner_responded" and isinstance(e.payload, dict)
+                and e.payload.get("source") and e.payload.get("comment_id")
+            }
             runs = kb.list_runs(conn, tid)
             parents = kb.parent_ids(conn, tid)
             children = kb.child_ids(conn, tid)
@@ -663,7 +670,8 @@ def _handle_show(args: dict, **kw) -> str:
                 "children": children,
                 "comments": [
                     {"author": c.author, "body": c.body,
-                     "created_at": c.created_at}
+                     "created_at": c.created_at,
+                     **({"source": sources[c.id]} if c.id in sources else {})}
                     for c in comments
                 ],
                 "events": [
@@ -941,6 +949,17 @@ def _handle_block(args: dict, **kw) -> str:
     board = args.get("board")
     try:
         kb, conn = _connect(board=board)
+        if not korra_env("KORRA_KANBAN_TASK"):
+            # Not the task's own worker (the main chat acting on the owner's
+            # word): stop the executor like an owner pause, not just flip a flag.
+            try:
+                paused = kb.pause_task(conn, tid, reason=reason)
+                if not paused["ok"]:
+                    return tool_error(f"could not pause {tid} (unknown id, finished or waiting for permission)")
+                return _ok(task_id=tid, status="blocked", block_kind=kb.OWNER_PAUSE_KIND,
+                           worker_stopped=paused["stopped"])
+            finally:
+                conn.close()
         if kind is not None and kind not in kb.VALID_BLOCK_KINDS:
             conn.close()
             return tool_error(
@@ -1757,6 +1776,27 @@ def _maybe_auto_subscribe(conn: Any, task_id: str) -> bool:
         return False
 
 
+def _chat_source() -> Optional[dict[str, Any]]:
+    """Where the owner is talking to this agent: platform, session, message."""
+    try:
+        from gateway.session_context import get_session_env
+        platform = get_session_env("KORRA_SESSION_PLATFORM", "")
+        session_id = get_session_env("KORRA_SESSION_ID", "")
+        if not platform:
+            return None
+        profile = get_session_env("KORRA_SESSION_PROFILE", "") or korra_env("KORRA_PROFILE") or ""
+        source = {
+            "platform": platform,
+            "session_id": session_id or None,
+            "message_id": get_session_env("KORRA_SESSION_MESSAGE_ID", "") or None,
+            "user_name": get_session_env("KORRA_SESSION_USER_NAME", "") or None,
+            "link": (f"@session:{profile}/{session_id}" if profile else f"@session:{session_id}") if session_id else None,
+        }
+        return {k: v for k, v in source.items() if v}
+    except Exception:
+        return None
+
+
 def _handle_unblock(args: dict, **kw) -> str:
     """Transition a blocked task to ready, or todo while parents remain open."""
     delegated_err = _reject_delegated_child_mutation("kanban_unblock")
@@ -1801,6 +1841,7 @@ def _handle_unblock(args: dict, **kw) -> str:
                 outcome = kb.respond_to_block(
                     conn, str(tid), answer=answer, author="Владелец (через чат)",
                     request_id=f"chat-{tid}-{int(revision)}", revision=int(revision),
+                    source=_chat_source(),
                 )
                 if not outcome["ok"]:
                     if outcome["reason"] == "stale":
@@ -1822,6 +1863,35 @@ def _handle_unblock(args: dict, **kw) -> str:
     except Exception as e:
         logger.exception("kanban_unblock failed")
         return tool_error(f"kanban_unblock: {e}")
+
+
+def _handle_edit(args: dict, **kw) -> str:
+    """Change an unfinished card's description/criteria on the owner's word."""
+    delegated_err = _reject_delegated_child_mutation("kanban_edit")
+    if delegated_err:
+        return delegated_err
+    guard = _require_orchestrator_tool("kanban_edit")
+    if guard:
+        return guard
+    tid = args.get("task_id")
+    if not tid:
+        return tool_error("task_id is required")
+    body = args.get("body")
+    title = args.get("title")
+    if body is None and title is None:
+        return tool_error("pass body and/or title")
+    try:
+        kb, conn = _connect(board=args.get("board"))
+        try:
+            if not kb.edit_task(conn, str(tid), body=body, title=title,
+                                board=args.get("board")):
+                return tool_error(f"could not edit {tid} (unknown, finished or cancelled)")
+            return _ok(task_id=str(tid), edited=[k for k, v in (("title", title), ("body", body)) if v is not None])
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.exception("kanban_edit failed")
+        return tool_error(f"kanban_edit: {e}")
 
 
 def _handle_link(args: dict, **kw) -> str:
@@ -2574,6 +2644,29 @@ KANBAN_UNBLOCK_SCHEMA = {
     },
 }
 
+KANBAN_EDIT_SCHEMA = {
+    "name": "kanban_edit",
+    "description": (
+        "Change the description (criteria) and/or title of an unfinished "
+        "Kanban task when the owner asks for it in chat. The executor and "
+        "the completion judge use the new text from their next read; the "
+        "previous text stays in the card history. Orchestrator-only."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "task_id": {"type": "string", "description": "Task to change."},
+            "body": {
+                "type": "string",
+                "description": "The full new description with the criteria (replaces the old one).",
+            },
+            "title": {"type": "string", "description": "New title (optional)."},
+            "board": _board_schema_prop(),
+        },
+        "required": ["task_id"],
+    },
+}
+
 KANBAN_LINK_SCHEMA = {
     "name": "kanban_link",
     "description": (
@@ -2609,6 +2702,7 @@ for _handler_name in (
     "_handle_attachments",
     "_handle_create",
     "_handle_unblock",
+    "_handle_edit",
     "_handle_link",
 ):
     globals()[_handler_name] = _principal_guard(globals()[_handler_name])
@@ -2734,6 +2828,15 @@ registry.register(
     handler=_handle_unblock,
     check_fn=_check_kanban_orchestrator_mode,
     emoji="▶",
+)
+
+registry.register(
+    name="kanban_edit",
+    toolset="kanban",
+    schema=KANBAN_EDIT_SCHEMA,
+    handler=_handle_edit,
+    check_fn=_check_kanban_orchestrator_mode,
+    emoji="✏",
 )
 
 registry.register(
