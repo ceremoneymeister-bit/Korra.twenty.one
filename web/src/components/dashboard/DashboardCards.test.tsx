@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router";
@@ -22,7 +23,8 @@ import {
   type DashboardState,
   type QuotaWindow,
 } from "@/lib/dashboard-state";
-import widgetStyles from "./dashboard-widgets.css?raw";
+
+const widgetStyles = readFileSync(`${process.cwd()}/src/components/dashboard/dashboard-widgets.css`, "utf8");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -759,9 +761,9 @@ describe("«Лимит Codex»", () => {
     expect(container.querySelector(".kdw-quota-updated--stale")).not.toBeNull();
     // Подпись не прячется ни на одном размере полотна, ни в контейнерном запросе.
     const hidden = /display:\s*none/;
-    for (const block of widgetStyles.split("}")) {
-      if (block.includes("kdw-quota-updated")) expect(block).not.toMatch(hidden);
-    }
+    const blocks = widgetStyles.split("}").filter((block) => block.includes("kdw-quota-updated"));
+    expect(blocks.length).toBeGreaterThan(0);
+    for (const block of blocks) expect(block).not.toMatch(hidden);
   });
 
   it("шапка: на 30-й минуте данные ещё свежие, на 31-й уже нет", async () => {
