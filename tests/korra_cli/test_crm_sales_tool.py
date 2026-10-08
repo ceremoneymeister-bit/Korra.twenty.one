@@ -199,3 +199,16 @@ def test_cut_figures_are_named_lower_bounds_in_every_summary_action(desk, action
 def test_complete_figures_carry_no_limits(desk, action):
     connect(desk)
     assert run(action=action)["limits"] == []
+
+
+def test_amo_stuck_lower_bounds_reach_the_agent(desk):
+    desk.amo.handlers = amo_probe_handlers()
+    cc.save({"type": "amocrm", "domain": "acme.amocrm.ru", "token": AMO_TOKEN}, root=desk.root)
+    desk.amo.handlers = amo_handlers()
+    base = desk.amo.handlers["events"]
+    desk.amo.handlers["events"] = lambda q: (
+        {"_embedded": {"events": [{"entity_id": 999, "created_at": 1}] * 100}} if "filter[entity_id][]" in q else base(q)
+    )
+    answer = run(action="stuck")
+    assert any("не менее" in line for line in answer["limits"])
+    assert all(deal["days_min"] is True for deal in answer["deals"])

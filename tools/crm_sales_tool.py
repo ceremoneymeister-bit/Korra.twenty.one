@@ -78,6 +78,14 @@ def _limits(section: dict) -> list[str]:
             f"Открытых сделок {atleast}{total}; прочитаны первые {river.get('deals_loaded')}. "
             "Застрявшие сделки, суммы по этапам и по менеджерам посчитаны по этой выборке — это «не менее»."
         )
+    stuck = section.get("stuck") or {}
+    if stuck.get("approx"):
+        out.append("Журнал событий amoCRM прочитан не весь: застрявших сделок — «не менее».")
+    if stuck.get("top_exact") is False:
+        out.append(
+            "Дни без движения у части сделок — «не менее»: самые давние в списке могут оказаться "
+            "не самыми давними в воронке."
+        )
     if (section.get("won") or {}).get("limited"):
         out.append(
             "Выигранные сделки прочитаны не полностью: количество и суммы — «не менее»; "
@@ -113,8 +121,6 @@ def _stuck(section: dict, limit: int) -> dict:
     rows.sort(key=lambda d: -(d.get("days") or 0))
     out = {"stuck_days": section.get("stuck_days"), "count": (section.get("stuck") or {}).get("count"),
            "deals": rows[:limit], **_freshness(section), "limits": _limits(section)}
-    if (section.get("stuck") or {}).get("approx"):
-        out["note"] = "Журнал событий amoCRM обрезан: список может быть неполным."
     return out
 
 

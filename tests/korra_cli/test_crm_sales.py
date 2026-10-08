@@ -662,3 +662,55 @@ def test_cut_won_list_gives_lower_bounds_and_no_exact_percentage(portal):
 def test_complete_won_list_keeps_the_percentage(portal):
     won = cs.gather(BITRIX_CONN, now=NOW, tz=TZ)["won"]
     assert won["limited"] is False and won["change_pct"] == 75
+
+
+# ---------------------------------------------------------------- amoCRM: «не менее N дней» and the three longest (F7)
+
+
+def _history_page_of_others(portal):
+    def events(q):
+        if "filter[entity_id][]" in q:
+            return {"_embedded": {"events": [{"entity_id": 999, "created_at": ts("2026-10-07T10:00:00")}] * 100}}
+        return {"_embedded": {"events": [{"entity_id": 101, "created_at": ts("2026-10-07T10:00:00")}]}}
+
+    portal.amo.handlers["events"] = events
+
+
+def test_amo_days_are_a_lower_bound_when_the_history_page_is_full(portal):
+    _history_page_of_others(portal)
+    stuck = cs.gather(AMO_CONN, now=NOW, tz=TZ)["stuck"]
+    top = {d["id"]: d for d in stuck["top"]}
+    # 102 was last edited Sep 15 (23 days); the full page says nothing about it, so no leap back to its creation
+    assert top["102"]["days"] == 23 and top["102"]["days_min"] is True
+    assert top["103"]["days"] == 7 and top["103"]["days_min"] is True
+    assert stuck["top_exact"] is False
+
+
+def test_amo_days_are_exact_when_the_history_is_complete(portal):
+    stuck = cs.gather(AMO_CONN, now=NOW, tz=TZ)["stuck"]
+    assert all(d["days_min"] is False for d in stuck["top"]) and stuck["top_exact"] is True
+
+
+def test_amo_three_longest_are_not_promised_among_more_than_the_checked_deals(portal):
+    leads = [
+        {"id": 200 + i, "name": f"d{i}", "price": 1, "status_id": 11, "responsible_user_id": 7,
+         "created_at": ts("2026-08-01T10:00:00"), "updated_at": ts("2026-09-01T10:00:00")}
+        for i in range(8)
+    ]
+    base = portal.amo.handlers["leads"]
+    portal.amo.handlers["leads"] = lambda q: (
+        {"_embedded": {"leads": leads}} if "order[updated_at]" in q else base(q)
+    )
+    portal.amo.handlers["events"] = lambda q: {"_embedded": {"events": []}}
+    stuck = cs.gather(AMO_CONN, now=NOW, tz=TZ)["stuck"]
+    assert stuck["count"] == 8 and stuck["top_exact"] is False and len(stuck["top"]) == 3
+
+
+def test_bitrix_days_are_always_exact(portal):
+    stuck = cs.gather(BITRIX_CONN, now=NOW, tz=TZ)["stuck"]
+    assert stuck["top_exact"] is True and all(d["days_min"] is False for d in stuck["top"])
+
+
+def test_amo_unix_timestamps_work_when_no_zone_is_configured(portal):
+    snap = cs.gather(AMO_CONN, now=NOW, tz=None)
+    assert snap["stuck"]["count"] == 2

@@ -60,6 +60,7 @@ class Deal:
     created: datetime
     idle_days: int
     stuck: bool
+    exact: bool = True
 
 
 @dataclass
@@ -117,7 +118,8 @@ def won_window_start(now: datetime) -> datetime:
 
 def _parse_dt(value: Any, tz: Optional[tzinfo]) -> Optional[datetime]:
     if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return datetime.fromtimestamp(float(value), tz)
+        moment = datetime.fromtimestamp(float(value), tz)
+        return moment if moment.tzinfo else moment.astimezone()
     if not isinstance(value, str) or not value:
         return None
     try:
@@ -356,6 +358,7 @@ def collect_amo(reader: cr.AmoReader, settings: dict, now: datetime, tz: Optiona
                 created=created,
                 idle_days=max(stuck_days, _days(now - updated)) if stuck else _days(now - updated),
                 stuck=stuck,
+                exact=not stuck,
             )
         )
     _amo_exact_idle(reader, deals, tz, now)
@@ -458,22 +461,31 @@ def _amo_changed_since(reader: cr.AmoReader, window: datetime, tz) -> tuple[set,
 
 
 def _amo_exact_idle(reader: cr.AmoReader, deals: list[Deal], tz, now: datetime) -> None:
-    """Exact days at the stage for the few longest-standing deals shown on the card."""
+    """Exact days at the stage for the few longest-standing deals shown on the card.
+
+    Only when the history page is not full: then it holds every stage change of
+    these deals. A full page may hide older (or newer) ones, so the days stay a
+    lower bound taken from the last edit.
+    """
     top = sorted((d for d in deals if d.stuck), key=lambda d: -d.idle_days)[:5]
     if not top:
         return
+    page_size = 100
     query = [("filter[type][]", "lead_status_changed"), ("filter[entity][]", "lead")]
     query += [("filter[entity_id][]", d.id) for d in top]
-    data = reader.get("events", query + [("limit", 100)])
+    data = reader.get("events", query + [("limit", page_size)])
+    events = ((data or {}).get("_embedded") or {}).get("events") or []
+    if len(events) >= page_size:
+        return
     latest: dict[str, datetime] = {}
-    for event in ((data or {}).get("_embedded") or {}).get("events") or []:
+    for event in events:
         moment = _parse_dt(event.get("created_at"), tz)
         key = str(event.get("entity_id"))
         if moment is not None and (key not in latest or moment > latest[key]):
             latest[key] = moment
     for deal in top:
-        since = latest.get(deal.id, deal.created)
-        deal.idle_days = max(deal.idle_days if deal.id not in latest else 0, _days(now - since))
+        deal.idle_days = _days(now - latest.get(deal.id, deal.created))
+        deal.exact = True
 
 
 def _amo_overdue(reader: cr.AmoReader, deal_ids: set[str], now: datetime) -> tuple[bool, list[dict], bool]:
@@ -556,6 +568,7 @@ def build_snapshot(
             "amount": _number(d.amount),
             "days": d.idle_days,
             "stuck": d.stuck,
+            "days_min": not d.exact,
             "late": d.id in late_by_deal,
             "new": _midnight(d.created) == today,
             "url": deal_url(d.id),
@@ -641,6 +654,7 @@ def build_snapshot(
             "days": stuck_days,
             "approx": raw.stuck_approx,
             "limited": raw.deals_truncated,
+            "top_exact": all(d.exact for d in stuck_deals),
             "top": [view(d) for d in top],
         },
         "overdue": {
