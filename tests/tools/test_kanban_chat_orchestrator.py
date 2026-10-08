@@ -231,6 +231,7 @@ def _owner_answer_in(session_id, platform, monkeypatch, tmp_path):
     """A card waits for the owner; the owner answers it from another chat."""
     from tools import kanban_tools as kt
     from korra_cli import kanban_db as kb
+    import contextvars
     from gateway.session_context import set_session_vars, clear_session_vars
     monkeypatch.setenv("KORRA_TIMEZONE", "UTC")
     import korra_time
@@ -240,13 +241,23 @@ def _owner_answer_in(session_id, platform, monkeypatch, tmp_path):
         kb.claim_task(conn, tid, claimer="w")
         kb.block_task(conn, tid, kind="needs_input", reason="Какая скидка?")
         revision = kb.block_revision(conn, tid)
-    tokens = set_session_vars(platform=platform, session_id=session_id, message_id="777",
-                              user_name="Дмитрий", profile="default", chat_id="42",
-                              owner_principal="live")
+    def answer():
+        tokens = set_session_vars(platform=platform, session_id=session_id, message_id="777",
+                                  user_name="Дмитрий", profile="default", chat_id="42",
+                                  owner_principal="live")
+        try:
+            return json.loads(kt._handle_unblock({"task_id": tid, "answer": "Скидка 15%", "revision": revision}))
+        finally:
+            clear_session_vars(tokens)
+
+    # set_session_vars() engages the session context process-wide and
+    # clear_session_vars() pins "" — undo both so later tests see os.environ
+    import gateway.session_context as sc
+    monkeypatch.setattr(sc, "_session_context_engaged", sc._session_context_engaged)
     try:
-        out = json.loads(kt._handle_unblock({"task_id": tid, "answer": "Скидка 15%", "revision": revision}))
+        out = contextvars.copy_context().run(answer)
     finally:
-        clear_session_vars(tokens)
+        sc._session_context_engaged = False
     assert out.get("ok") is True, out
     return tid
 
