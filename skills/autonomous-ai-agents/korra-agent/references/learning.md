@@ -21,13 +21,25 @@ appending. A skill description says **when to use it** in one short sentence
 `korra memory reset` clears MEMORY.md and USER.md.
 
 ### What learns on its own (background review)
-A copy of the agent reviews the conversation in the background after the answer:
-- **Memory:** every `memory.nudge_interval` user turns (10).
-- **Skills:** after `skills.creation_nudge_interval` tool iterations (10) with
-  no `skill_manage` call in between.
+A copy of the agent reviews a short excerpt of the chat in the background
+after the answer, only on an explicit signal (no counters by default):
+- **"Remember" / rule for the future** ("запомни", "всегда", "впредь",
+  "в следующий раз", "больше не…", "remember", "from now on") — one review.
+- **Direct correction** of the agent's result ("не так", "неправильно",
+  "надо было…", "that's not right") — one review.
+- Long tool work alone is not a signal. One review is one short call over
+  the excerpt around the event (about 6 iterations), never the whole chat.
+  After two empty corrections in a row, corrections pause until a "remember"
+  request or `/refine`. Full memory (no room for an entry) never calls the model.
+- If the owner set `memory.nudge_interval` or `skills.creation_nudge_interval`
+  explicitly, that part keeps the old counter: every `memory.nudge_interval`
+  user turns (10 by default) / after `skills.creation_nudge_interval` tool
+  iterations (10 by default) without a `skill_manage` call.
 - `auxiliary.background_review.enabled` (default true) turns off only the
   automatic start. Cron jobs never start it. Chat notices:
   `display.memory_notifications` ("on").
+- Plugins may veto an event review with the `pre_background_review` hook
+  (`{"skip": true, "reason": "..."}`); a failing plugin never blocks learning.
 
 ### On request
 - `/learn <folder | URL | notes>` — build a skill from materials or from this chat.
@@ -52,4 +64,4 @@ CLI: `korra curator status|usage|run|pause|resume|pin|unpin|adopt|restore|list-a
 
 ### When something is not learned
 `korra curator status`, `korra journey list`, `/memory pending`, `korra logs`
-(background review logs `result=memory|skill`), `korra skills list`.
+(background review logs `trigger=… result=none|memory|skill cost_status=…`, and `skipped … reason=memory_full|paused_after_empty_reviews|plugin: …`), `korra skills list`.

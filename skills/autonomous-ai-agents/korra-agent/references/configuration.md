@@ -16,8 +16,8 @@ installed build.
 | `approvals` | `mode` (smart/manual/off), `timeout`, `cron_mode` |
 | `stt` | `enabled`, `provider` (local/groq/openai/mistral/elevenlabs/deepinfra) |
 | `tts` | `provider` (edge/elevenlabs/openai/minimax/mistral/neutts/gemini/piper/kittentts/deepinfra/xai) |
-| `memory` | `memory_enabled`, `user_profile_enabled`, `memory_char_limit` (2200), `user_char_limit` (1375), `nudge_interval` (10), `write_approval` (false), `provider` |
-| `skills` | `creation_nudge_interval` (10) |
+| `memory` | `memory_enabled`, `user_profile_enabled`, `memory_char_limit` (2200), `user_char_limit` (1375), `nudge_interval` (unset = review on explicit "remember"/correction events; a value makes it a counter), `write_approval` (false), `provider` |
+| `skills` | `creation_nudge_interval` (unset = event-driven; a value makes it a counter) |
 | `auxiliary.background_review` | `enabled` (true), `model`, `max_input_tokens` |
 | `security` | `redact_secrets`, `tirith_enabled`, `website_blocklist` |
 | `delegation` | `model`, `provider`, `max_concurrent_children` (10), `max_iterations` (250), `max_spawn_depth` (1) |

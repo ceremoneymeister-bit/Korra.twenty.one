@@ -134,9 +134,9 @@ def test_documented_limits_match_the_defaults_in_code():
         assert str(number) in skill and str(number) in learning
     assert f"≤{SKILL_PROMPT_DESC_LIMIT} символов" in skill
     assert f"≤ {SKILL_PROMPT_DESC_LIMIT} chars" in learning
-    assert f"`memory.nudge_interval` user turns ({memory['nudge_interval']})" in learning
+    assert f"`memory.nudge_interval`\n  user turns ({memory['nudge_interval']} by default)" in learning
     assert 'skills_config.get("creation_nudge_interval", 10)' in (REPO / "agent" / "agent_init.py").read_text(encoding="utf-8")
-    assert "`skills.creation_nudge_interval` tool iterations (10)" in learning
+    assert "`skills.creation_nudge_interval` tool\n  iterations (10 by default)" in learning
     assert f"{curator['stale_after_days']} days" in learning
     assert str(curator["archive_after_days"]) in learning
     assert curator["prune_builtins"] is False and "`prune_builtins: false`" in learning
