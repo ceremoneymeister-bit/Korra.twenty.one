@@ -687,6 +687,7 @@ _LEARNING_SLASH_RE = re.compile(r"^/([A-Za-z][A-Za-z0-9_-]*)(?=\s|$)\s*(.*)$", r
 _LEARNING_SLASH_COMMANDS = frozenset(
     {"learn", "refine", "memory", "skills", "curator", "context"}
 )
+_LEARNING_SLASH_NO_MODEL = frozenset({"memory", "skills", "curator", "context"})
 
 
 def _parse_learning_slash(user_message: Any) -> Optional[tuple]:
@@ -8239,6 +8240,22 @@ class APIServerAdapter(BasePlatformAdapter):
                 persist_message_kwargs["persist_user_message"] = user_message
 
             with self._profile_scope(request_profile):
+                if learning_slash and learning_slash[0] in _LEARNING_SLASH_NO_MODEL:
+                    # Не требуют ни модели, ни входа в подписку: выполняются до
+                    # разрешения провайдера и создания агента.
+                    result = {
+                        "final_response": _run_web_learning_command(*learning_slash),
+                        "messages": list(conversation_history or []),
+                        "api_calls": 0,
+                        "completed": True,
+                    }
+                    if isinstance(session_id, str) and session_id:
+                        result["session_id"] = session_id
+                    return result, {
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                        "total_tokens": 0,
+                    }
                 if not learning_slash and isinstance(user_message, str):
                     stamped_message, stamped_history, stamped_at = _stamp_after_pause(
                         user_message, conversation_history)
@@ -8293,16 +8310,7 @@ class APIServerAdapter(BasePlatformAdapter):
                     # ``agent_ref``, and only /v1/runs has a run_id, so neither
                     # is a usable hook for the rest.
                     self._shutdown_interruptible_agents[id(agent)] = agent
-                    if learning_slash and learning_slash[0] in {
-                        "memory", "skills", "curator", "context",
-                    }:
-                        result = {
-                            "final_response": _run_web_learning_command(*learning_slash),
-                            "messages": list(conversation_history or []),
-                            "api_calls": 0,
-                            "completed": True,
-                        }
-                    elif learning_slash and learning_slash[0] == "refine":
+                    if learning_slash and learning_slash[0] == "refine":
                         result = {
                             "final_response": _start_manual_refine(
                                 agent, conversation_history, learning_slash[1]
