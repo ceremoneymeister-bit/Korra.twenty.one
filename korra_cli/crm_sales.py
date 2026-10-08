@@ -655,6 +655,20 @@ def build_snapshot(
 # ------------------------------------------------------------------ gathering
 
 
+def installation_tz() -> Optional[tzinfo]:
+    """The installation's configured zone; ``None`` falls back to the process zone."""
+    try:
+        from korra_time import get_timezone
+
+        return get_timezone()
+    except Exception:
+        return None
+
+
+def _zone_key(tz: Optional[tzinfo]) -> str:
+    return str(getattr(tz, "key", None) or tz or "")
+
+
 def _now(tz: Optional[tzinfo]) -> datetime:
     return datetime.now(tz) if tz else datetime.now().astimezone()
 
@@ -753,7 +767,11 @@ def _render(conn: dict, entry: _Entry) -> dict:
 
 
 def sales_section(*, root: Optional[Path] = None, tz: Optional[tzinfo] = None, wait: float = FIRST_WAIT_SECONDS) -> dict:
-    """What ``/api/dashboard/state`` shows in ``sales``. Never raises for CRM trouble."""
+    """What ``/api/dashboard/state`` and the agent tool show. Never raises for CRM trouble.
+
+    The installation's zone is applied here, so every caller gets the same «сегодня»
+    and month boundary; ``tz`` only overrides it.
+    """
     try:
         conn = cc.load(root)
     except cc.CrmConnectionError:
@@ -767,7 +785,8 @@ def sales_section(*, root: Optional[Path] = None, tz: Optional[tzinfo] = None, w
             candidates = list(_candidates_cache["value"])
         return {"status": "not_connected", "candidates": candidates}
 
-    key = (str(root or ""), cc.stamp(root))
+    tz = tz or installation_tz()
+    key = (str(root or ""), cc.stamp(root), _zone_key(tz))
     check = cc.public(conn)["last_check"]
     now = _clock()
     with _state_lock:

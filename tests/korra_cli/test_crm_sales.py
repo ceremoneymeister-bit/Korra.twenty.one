@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
@@ -464,3 +464,43 @@ def test_slow_first_read_reports_loading(portal, stored, monkeypatch):
 def test_section_never_contains_the_secret(portal, stored):
     text = json.dumps(cs.sales_section(root=stored, tz=TZ), ensure_ascii=False)
     assert "abcdef1234567890" not in text and "/rest/17/" not in text
+
+
+# ---------------------------------------------------------------- one builder, one time zone (F8)
+
+
+PLUS7 = timezone(timedelta(hours=7))
+
+
+def _spy_gather(monkeypatch):
+    seen = []
+    real = cs.gather
+
+    def spy(conn, *, now=None, tz=None):
+        seen.append(tz)
+        return real(conn, now=now, tz=tz)
+
+    monkeypatch.setattr(cs, "gather", spy)
+    return seen
+
+
+def test_caller_without_a_zone_gets_the_installation_zone(portal, stored, monkeypatch):
+    monkeypatch.setattr(cs, "installation_tz", lambda: PLUS7)
+    seen = _spy_gather(monkeypatch)
+    assert cs.sales_section(root=stored)["status"] == "ok"
+    assert seen == [PLUS7]
+
+
+def test_agent_and_dashboard_share_one_zone_and_one_cache(portal, stored, monkeypatch):
+    monkeypatch.setattr(cs, "installation_tz", lambda: PLUS7)
+    seen = _spy_gather(monkeypatch)
+    cs.sales_section(root=stored)  # the agent tool: no zone of its own
+    cs.sales_section(root=stored, tz=PLUS7)  # the dashboard
+    assert seen == [PLUS7]
+
+
+def test_changed_zone_is_not_served_from_the_old_cache(portal, stored, monkeypatch):
+    seen = _spy_gather(monkeypatch)
+    cs.sales_section(root=stored, tz=TZ)
+    cs.sales_section(root=stored, tz=PLUS7)
+    assert seen == [TZ, PLUS7]
