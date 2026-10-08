@@ -85,7 +85,8 @@ async def test_db_is_closed_even_when_corruption_raises(malformed_db):
 async def test_messages_endpoint_reports_corruption(malformed_db):
     with pytest.raises(HTTPException) as excinfo:
         await sessions_router.get_session_messages(
-            "20260830_180820_744f05", None, None, 0, None, False
+            "20260830_180820_744f05", None, None, 0, None, False,
+            display_limit=None, before_id=None, archive=False,
         )
     assert excinfo.value.status_code == 503
 
