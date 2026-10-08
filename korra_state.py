@@ -12612,41 +12612,7 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                     [session_id],
                 )
                 all_rows = cursor.fetchall()
-            seen: dict = {}
-            for row in all_rows:
-                dedupe_content = row["content"]
-                if row["role"] == "user":
-                    from agent.context_compressor import split_user_originated_turn
-
-                    candidate = {
-                        "role": "user",
-                        "content": self._decode_content(row["content"]),
-                        "display_kind": row["display_kind"],
-                        "display_metadata": self._decode_display_metadata(
-                            row["display_metadata"]
-                        ),
-                    }
-                    handoff, live_view = split_user_originated_turn(candidate)
-                    if handoff is not None and live_view is not None:
-                        dedupe_content = self._encode_content(
-                            live_view.get("content")
-                        )
-                # Tool fields participate in the dedupe key: compaction copies
-                # them verbatim, so identical tool messages across generations
-                # still collapse, while distinct tool calls that happen to
-                # share role/content/timestamp are never merged.
-                key = (
-                    row["role"],
-                    dedupe_content,
-                    row["timestamp"],
-                    row["tool_call_id"],
-                    row["tool_calls"],
-                    row["tool_name"],
-                )
-                cur = seen.get(key)
-                if cur is None or (row["active"], row["id"]) > (cur["active"], cur["id"]):
-                    seen[key] = row
-            rows = sorted(seen.values(), key=lambda r: r["id"])
+            rows = self._dedupe_display_rows(all_rows)
             if latest:
                 rows = rows[::-1]
             rows = rows[offset:]
@@ -12665,6 +12631,80 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
             if latest:
                 rows.reverse()
         return self._decode_message_rows(rows)
+
+    def _dedupe_display_rows(self, all_rows) -> list:
+        """Каждое сообщение один раз: живая строка, затем новейшее поколение."""
+        seen: dict = {}
+        for row in all_rows:
+            dedupe_content = row["content"]
+            if row["role"] == "user":
+                from agent.context_compressor import split_user_originated_turn
+
+                candidate = {
+                    "role": "user",
+                    "content": self._decode_content(row["content"]),
+                    "display_kind": row["display_kind"],
+                    "display_metadata": self._decode_display_metadata(
+                        row["display_metadata"]
+                    ),
+                }
+                handoff, live_view = split_user_originated_turn(candidate)
+                if handoff is not None and live_view is not None:
+                    dedupe_content = self._encode_content(
+                        live_view.get("content")
+                    )
+            # Tool fields participate in the dedupe key: compaction copies
+            # them verbatim, so identical tool messages across generations
+            # still collapse, while distinct tool calls that happen to
+            # share role/content/timestamp are never merged.
+            key = (
+                row["role"],
+                dedupe_content,
+                row["timestamp"],
+                row["tool_call_id"],
+                row["tool_calls"],
+                row["tool_name"],
+            )
+            cur = seen.get(key)
+            if cur is None or (row["active"], row["id"]) > (cur["active"], cur["id"]):
+                seen[key] = row
+        return sorted(seen.values(), key=lambda r: r["id"])
+
+    def get_archive_messages(
+        self, session_id: str, *, limit: int, offset: int = 0
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """Часть разговора до живой ленты — для режима «только чтение».
+
+        Сжатие на месте оставляет ранние реплики в той же сессии
+        (``active=0, compacted=1``), сжатие с ротацией — в предках по цепочке
+        сжатия (``get_compression_lineage``, без явных веток). Предков
+        обходит только этот метод: лента ``get_display_page`` их не склеивает.
+        Сообщение, чья победившая строка — активная строка самой сессии, уже
+        в живой ленте и в архив не входит, поэтому повторов нет.
+
+        Читатель идёт от новых к старым: ``offset`` отмеряется от конца
+        архива, страница возвращается по возрастанию id. Вторым значением —
+        сколько всего сообщений в архиве.
+        """
+        try:
+            lineage = self.get_compression_lineage(session_id)
+        except Exception:
+            lineage = []
+        ids = lineage[: lineage.index(session_id) + 1] if session_id in lineage else [session_id]
+        placeholders = ",".join("?" for _ in ids)
+        with self._read_ctx() as conn:
+            all_rows = conn.execute(
+                f"SELECT * FROM messages WHERE session_id IN ({placeholders}) "
+                "AND (active = 1 OR compacted = 1) ORDER BY id ASC",
+                ids,
+            ).fetchall()
+        archived = [
+            row for row in self._dedupe_display_rows(all_rows)
+            if not (row["active"] == 1 and row["session_id"] == session_id)
+        ]
+        total = len(archived)
+        end = max(total - offset, 0)
+        return self._decode_message_rows(archived[max(end - limit, 0):end]), total
 
     def _decode_message_rows(self, rows) -> List[Dict[str, Any]]:
         result = []

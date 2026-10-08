@@ -726,6 +726,7 @@ async def get_session_messages(
     include_compacted: bool = Query(False),
     display_limit: Optional[int] = Query(None, ge=1, le=100),
     before_id: Optional[int] = Query(None, ge=1),
+    archive: bool = Query(False),
 ):
     if order not in (None, "oldest", "latest"):
         raise HTTPException(
@@ -740,6 +741,10 @@ async def get_session_messages(
         raise HTTPException(
             status_code=400, detail="display_limit is incompatible with include_compacted"
         )
+    if archive and (display_limit is not None or include_compacted):
+        raise HTTPException(
+            status_code=400, detail="archive is incompatible with display_limit and include_compacted"
+        )
 
     def _read():
         db = _open_session_db_for_profile(profile, read_only=True)
@@ -748,6 +753,14 @@ async def get_session_messages(
             if not sid:
                 return None
             sid = db.resolve_resume_session_id(sid)
+            if archive:
+                # «Показать раннюю часть»: только чтение, от новых к старым.
+                page_limit = min(limit or 30, 100)
+                rows, total = db.get_archive_messages(sid, limit=page_limit, offset=offset)
+                return sid, page_limit, _light_tool_results(rows), {
+                    "archive": True, "total": total,
+                    "has_more": offset + len(rows) < total,
+                }
             if display_limit is not None:
                 # Лента чата: последние N сообщений (реплика или целый ход
                 # агента), более ранние — следующей страницей до before_id.
@@ -800,6 +813,13 @@ async def get_session_messages(
             projected["display_content"] = display_view.get("content")
             projected.pop("display_kind", None)
         projected_messages.append(projected)
+    if display_page is not None and display_page.get("archive"):
+        return {
+            "session_id": sid,
+            "messages": projected_messages,
+            "pagination": {"limit": _limit, "offset": offset, "order": "latest",
+                           "returned": len(projected_messages), **display_page},
+        }
     if display_page is not None:
         return {
             "session_id": sid,
