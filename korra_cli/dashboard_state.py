@@ -1059,6 +1059,8 @@ _codex_reset_lock = threading.Lock()
 
 QUOTA_CRITICAL_LEFT_PERCENT = 5.0
 QUOTA_WARN_LEFT_PERCENT = 20.0
+#: A banked reset is not worth spending when the limit comes back by itself sooner than this.
+QUOTA_RESET_SOON_SECONDS = 12 * 3600
 _FORECAST_MIN_ELAPSED = 0.10
 _FORECAST_MIN_USED = 5.0
 
@@ -1254,6 +1256,7 @@ def quota_section(
         and (reset_credits["applicable"] > 0 or (limit_reached and not all(w["renewed"] for w in windows)) or exhausted)
     )
     headline = min(windows, key=lambda window: window["remaining_percent"])
+    natural_reset_at = _natural_reset_at(windows, limit_reached, now) if can_reset else None
     forecasts = [window for window in windows if window["forecast"]]
     soonest = min(forecasts, key=lambda window: window["forecast"]["exhausts_at"], default=None)
     return {
@@ -1267,6 +1270,7 @@ def quota_section(
         "limit_reached": limit_reached,
         "reset_credits": reset_credits,
         "can_reset": can_reset,
+        "natural_reset_at": natural_reset_at,
         "used_percent": headline["used_percent"],
         "window_minutes": headline["window_minutes"],
         "window_label": headline["label"],
@@ -1277,6 +1281,23 @@ def quota_section(
             if soonest else None
         ),
     }
+
+
+def _natural_reset_at(windows: list[dict[str, Any]], limit_reached: bool, now: float) -> Optional[float]:
+    """When the exhausted limit returns by itself, if that is sooner than ``QUOTA_RESET_SOON_SECONDS``.
+
+    The limit is back when the *last* exhausted window resets. Several empty
+    windows: the latest of their resets. A reached limit with no empty window:
+    the most used live one. Nothing exhausted or no reset time: ``None``.
+    """
+    blocking = [window for window in windows if window["remaining_percent"] <= 0 and not window["renewed"]]
+    if not blocking and limit_reached:
+        live = [window for window in windows if not window["renewed"]]
+        blocking = live and [min(live, key=lambda window: window["remaining_percent"])] or []
+    if not blocking or any(window["resets_at"] is None for window in blocking):
+        return None
+    back = max(window["resets_at"] for window in blocking)
+    return back if 0 < back - now < QUOTA_RESET_SOON_SECONDS else None
 
 
 _RESET_MESSAGES = {

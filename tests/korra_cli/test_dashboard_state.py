@@ -1100,6 +1100,52 @@ def test_no_button_without_banked_resets(tmp_path, owner, wham):
     assert ds.quota_section([owner], now=NOW, root=tmp_path)["can_reset"] is False
 
 
+HOUR = 3600
+
+
+def test_a_limit_that_returns_soon_is_marked_for_the_card(tmp_path, owner, wham):
+    wham["answer"] = _usage(100, resets_at=NOW + 11 * HOUR, reached=True)
+    value = ds.quota_section([owner], now=NOW, root=tmp_path)
+    assert value["can_reset"] is True and value["natural_reset_at"] == NOW + 11 * HOUR
+
+
+@pytest.mark.parametrize("hours", [12, 13, 72])
+def test_a_limit_that_returns_in_twelve_hours_or_more_is_not(tmp_path, owner, wham, hours):
+    wham["answer"] = _usage(100, resets_at=NOW + hours * HOUR, reached=True)
+    value = ds.quota_section([owner], now=NOW, root=tmp_path)
+    assert value["can_reset"] is True and value["natural_reset_at"] is None
+
+
+def test_several_empty_windows_return_with_the_latest_reset(tmp_path, owner, wham):
+    answer = _usage(100, resets_at=NOW + 2 * HOUR, window=18000, reached=True)
+    answer["rate_limit"]["secondary_window"] = {
+        "used_percent": 100, "limit_window_seconds": WEEK, "reset_at": NOW + 30 * HOUR}
+    wham["answer"] = answer
+    assert ds.quota_section([owner], now=NOW, root=tmp_path)["natural_reset_at"] is None
+    ds.reset_cache()
+    answer["rate_limit"]["secondary_window"]["reset_at"] = NOW + 5 * HOUR
+    value = ds.quota_section([owner], now=NOW + 200, root=tmp_path)
+    assert value["natural_reset_at"] == NOW + 5 * HOUR
+
+
+def test_only_the_empty_window_counts_not_a_full_one(tmp_path, owner, wham):
+    answer = _usage(100, resets_at=NOW + 3 * HOUR, window=18000, reached=True)
+    answer["rate_limit"]["secondary_window"] = {
+        "used_percent": 20, "limit_window_seconds": WEEK, "reset_at": NOW + 5 * 86400}
+    wham["answer"] = answer
+    assert ds.quota_section([owner], now=NOW, root=tmp_path)["natural_reset_at"] == NOW + 3 * HOUR
+
+
+def test_nothing_to_wait_for_when_the_reset_is_not_on_offer_or_nothing_is_exhausted(tmp_path, owner, wham):
+    wham["answer"] = _usage(36, applicable=1, resets_at=NOW + 2 * HOUR)
+    value = ds.quota_section([owner], now=NOW, root=tmp_path)
+    assert value["can_reset"] is True and value["natural_reset_at"] is None
+    ds.reset_cache()
+    wham["answer"] = _usage(100, credits=0, resets_at=NOW + 2 * HOUR, reached=True)
+    value = ds.quota_section([owner], now=NOW + 200, root=tmp_path)
+    assert value["can_reset"] is False and value["natural_reset_at"] is None
+
+
 def _redeem(monkeypatch, wham, result):
     import agent.account_usage as account_usage
 
