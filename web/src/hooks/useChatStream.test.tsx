@@ -1654,3 +1654,53 @@ it("a hidden chat tab does not poll approvals (0.21.16 review R3)", async () => 
     vi.unstubAllGlobals();
   }
 });
+
+describe("итог фонового разбора после хода (K21-294)", () => {
+  it("«Учёл» появляется в открытом чате без возврата на вкладку и без F5", async () => {
+    vi.useFakeTimers();
+    try {
+      const learned = { id: 3, role: "assistant", content: "✅ Учёл: навык «отчёт» создан.", display_kind: "learning",
+        display_metadata: { learning_receipt: { undone: false } } };
+      const history = [{ id: 1, role: "user", content: "поправка" }, { id: 2, role: "assistant", content: "принято" }];
+      let stored: unknown[] = history;
+      const reads = vi.spyOn(api, "getSessionMessages").mockImplementation(async () => (
+        { session_id: "learn-live", messages: stored as SessionMessage[], pagination: { order: "latest", returned: stored.length, before_id: 1, has_more: false } }));
+      vi.stubGlobal("fetch", vi.fn(async (url: string) => String(url).includes("/stream") || String(url).includes("chat/completions")
+        ? sseResponse('data: {"choices":[{"delta":{"content":"принято"}}]}\n\n', "data: [DONE]\n\n")
+        : new Response(JSON.stringify({ approvals: [], data: [] }), { headers: { "content-type": "application/json" } })));
+      await act(async () => { await current.loadSession("learn-live"); });
+      await act(async () => { await current.send("поправка"); });
+      expect(current.isStreaming).toBe(false);
+      expect(current.messages.some(m => m.learning)).toBe(false);
+
+      stored = [...history, learned];
+      const before = reads.mock.calls.length;
+      await act(async () => { await vi.advanceTimersByTimeAsync(4_100); });
+      expect(reads.mock.calls.length).toBeGreaterThan(before);
+      expect(current.messages.at(-1)?.content).toBe("✅ Учёл: навык «отчёт» создан.");
+      expect(current.messages.at(-1)?.learning).toEqual({ undone: false });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("перечитывание истории после хода ограничено по времени", async () => {
+    vi.useFakeTimers();
+    try {
+      const reads = vi.spyOn(api, "getSessionMessages").mockResolvedValue({ session_id: "learn-quiet", messages: [
+        { id: 1, role: "user", content: "вопрос" }, { id: 2, role: "assistant", content: "ответ" },
+      ] as SessionMessage[], pagination: { order: "latest", returned: 2, before_id: 1, has_more: false } });
+      vi.stubGlobal("fetch", vi.fn(async (url: string) => String(url).includes("/stream") || String(url).includes("chat/completions")
+        ? sseResponse('data: {"choices":[{"delta":{"content":"ответ"}}]}\n\n', "data: [DONE]\n\n")
+        : new Response(JSON.stringify({ approvals: [], data: [] }), { headers: { "content-type": "application/json" } })));
+      await act(async () => { await current.loadSession("learn-quiet"); });
+      await act(async () => { await current.send("вопрос"); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(200_000); });
+      const settled = reads.mock.calls.length;
+      await act(async () => { await vi.advanceTimersByTimeAsync(200_000); });
+      expect(reads.mock.calls.length).toBe(settled);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

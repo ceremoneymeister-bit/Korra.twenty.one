@@ -55,6 +55,10 @@ export interface ChatApprovalEntry {
 
 /** Как часто перепроверять нерешённые вопросы, когда живого потока нет. */
 const APPROVAL_POLL_MS = 5000;
+// Фоновый разбор после хода идёт без привязки к запросу, поэтому его итог
+// («Учёл…») появляется в истории позже ответа. Несколько дешёвых фоновых
+// перечиток истории после хода — и итог виден без возврата на вкладку.
+const LEARNING_FOLLOW_UP_MS = [4000, 6000, 10000, 15000, 20000, 30000, 45000];
 
 /** Сколько сообщений ленты открывается сразу и догружается за раз при
  *  прокрутке к началу. 500 строк за раз на телефоне весили до 1,3 МБ и
@@ -942,6 +946,7 @@ export function useChatStream(
   // APPEND_DELTA into the wrong (newly-created) assistant message.
   // Codex stop-gate review #7 caught this.
   const streamingRef = useRef(false);
+  const [turnsDelivered, setTurnsDelivered] = useState(0);
   // Identifier of the stream currently allowed to mutate state. send()
   // sets this to the session UUID it created/uses, and the read loop
   // checks it before every dispatch. If loadSession()/reset() flips it
@@ -1690,6 +1695,7 @@ export function useChatStream(
         }
       } finally {
         void refreshChatRuns();
+        if (delivered && mountedRef.current) setTurnsDelivered((n) => n + 1);
         // Defensive cleanup — only unlock if this stream is still the
         // active one. If invalidated, the new stream owns the lock and
         // we must not touch it. (Codex review #11.)
@@ -1948,6 +1954,25 @@ export function useChatStream(
   // вопросы команд во время живого хода остаются под управлением SSE.
   // Только видимая вкладка: скрытые чаты не опрашивают сервер (ревью 0.21.16, R3).
   const { sessionId: currentSessionId, isStreaming } = state;
+  const loadSessionRef = useRef(loadSession);
+  useEffect(() => { loadSessionRef.current = loadSession; }, [loadSession]);
+  useEffect(() => {
+    if (!active || !currentSessionId || turnsDelivered === 0) return;
+    let cancelled = false;
+    let timer: number | undefined;
+    const schedule = (step: number) => {
+      if (step >= LEARNING_FOLLOW_UP_MS.length) return;
+      timer = window.setTimeout(async () => {
+        if (cancelled) return;
+        if (!document.hidden && !streamingRef.current) {
+          try { await loadSessionRef.current(currentSessionId, { background: true }); } catch { /* следующая проверка */ }
+        }
+        if (!cancelled) schedule(step + 1);
+      }, LEARNING_FOLLOW_UP_MS[step]);
+    };
+    schedule(0);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [active, currentSessionId, turnsDelivered]);
   useEffect(() => {
     if (!active || !currentSessionId) return;
     let cancelled = false;
