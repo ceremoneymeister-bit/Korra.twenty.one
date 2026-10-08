@@ -7,7 +7,14 @@ from unittest.mock import patch
 
 import pytest
 
-from agent.learning_receipt import DISPLAY_KIND, RECEIPT_KEY, undo_receipt
+from agent.learning_receipt import (
+    DISPLAY_KIND,
+    RECEIPT_KEY,
+    build_review_receipt,
+    build_turn_receipt,
+    snapshot_memory,
+    undo_receipt,
+)
 from gateway.config import PlatformConfig
 from gateway.platforms.api_server import APIServerAdapter
 from korra_state import SessionDB
@@ -210,3 +217,37 @@ async def test_background_review_alone_still_adds_its_own_single_message(env):
 
     await _turn(env, lambda: [], after_turn=review_later)
     assert len(_notices(env["db"])) == 1
+
+
+def test_late_background_notice_must_not_reintroduce_cancelled_receipt(env):
+    from tools.memory_tool import load_on_disk_store
+
+    db = env["db"]
+    adapter = APIServerAdapter(PlatformConfig(enabled=True, extra={"key": "k" * 32}))
+    agent = types.SimpleNamespace(session_id="web-1", _session_db=db)
+    adapter._wire_learning_notice(agent, {})
+    first = build_turn_receipt([{"role": "user", "content": "Не так"}] + _memory_add())
+    agent._post_turn_learning_receipt(first)
+    row = _notices(db)[0]
+    assert undo_receipt(first)["status"] == "undone"
+    db.merge_message_display_metadata(row["id"], {RECEIPT_KEY: {**first, "undone": True}})
+
+    before_review = snapshot_memory()
+    assert load_on_disk_store().add("memory", "Отчёты по пятницам")["success"]
+    agent.background_review_receipt = build_review_receipt([], [], before_review)
+    agent.background_review_callback("review finished")
+
+    notices = _notices(db)
+    assert len(notices) == 2
+    assert notices[0]["display_metadata"][RECEIPT_KEY]["undone"] is True
+    live = [
+        m["display_metadata"][RECEIPT_KEY]
+        for m in notices
+        if not m["display_metadata"][RECEIPT_KEY].get("undone")
+    ]
+    assert live
+    assert "Планы встреч" not in notices[1]["content"]
+    assert "Отчёты по пятницам" in notices[1]["content"]
+    outcome = undo_receipt(live[-1])
+    assert outcome["status"] == "undone"
+    assert snapshot_memory()["memory"] == []
