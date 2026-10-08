@@ -18,7 +18,6 @@ RECEIPT_KEY = "learning_receipt"
 DISPLAY_KIND = "learning"
 
 _MEMORY_FILES = {"memory": "MEMORY.md", "user": "USER.md"}
-_MEMORY_LABELS = {"memory": "память агента", "user": "заметки о вас"}
 _MEMORY_WRITE_ACTIONS = frozenset({"add", "replace", "remove"})
 _ACTION_LABELS = {"create": "создан", "delete": "удалён"}
 
@@ -218,32 +217,102 @@ def _assemble(
     return {"version": 1, "id": uuid.uuid4().hex[:12], "skills": skills, "memory": memory}
 
 
-def _preview(text: str, width: int = 100) -> str:
+_NOTICE_LIMIT = 200
+_NOTICE_LIMIT_VERBOSE = 600
+_NOTICE_MAX_ENTRIES = 3
+
+# Предложный («в …») и родительный («из …») падеж мест хранения.
+_PLACE_IN = {"user": "в заметках о вас", "memory": "в памяти агента"}
+_PLACE_FROM = {"user": "из заметок о вас", "memory": "из памяти агента"}
+_SKILL_VERBS = {"create": "создан", "delete": "удалён"}
+
+
+def _clip(text: Any, limit: int) -> str:
+    """Одна строка, обрезанная по слову до ``limit`` знаков."""
     one_line = " ".join(str(text).split())
-    return one_line if len(one_line) <= width else one_line[: width - 1] + "…"
+    if len(one_line) <= limit:
+        return one_line
+    cut = one_line[:limit]
+    space = cut.rfind(" ")
+    if space >= limit // 2:
+        cut = cut[:space]
+    return cut.rstrip(" ,;:.-—–") + "…"
+
+
+def _quoted(entries: List[str], limit: int) -> str:
+    shown = [f"«{_clip(e, limit)}»" for e in entries[:_NOTICE_MAX_ENTRIES]]
+    text = "; ".join(shown)
+    rest = len(entries) - _NOTICE_MAX_ENTRIES
+    if rest > 0:
+        text += f" и ещё {rest}"
+    return text
+
+
+def _memory_sentence(item: Dict[str, Any], limit: int) -> str:
+    target = item.get("target")
+    place_in = _PLACE_IN.get(target, "в памяти")
+    place_from = _PLACE_FROM.get(target, "из памяти")
+    added = [e for e in item.get("added") or [] if str(e).strip()]
+    removed = [e for e in item.get("removed") or [] if str(e).strip()]
+    if added and removed:
+        return f"{_quoted(added, limit)} (вместо {_quoted(removed, limit)}). Обновлено {place_in}."
+    if added:
+        return f"{_quoted(added, limit)}. Сохранено {place_in}."
+    if removed:
+        return f"{_quoted(removed, limit)}. Удалено {place_from}."
+    return f"Обновлено {place_in}."
 
 
 def format_notice(receipt: Dict[str, Any], mode: str = "on") -> str:
-    """Короткое сообщение для чата: что учтено и где."""
-    parts: List[str] = []
+    """Короткое сообщение для чата: что именно усвоено и где."""
+    limit = _NOTICE_LIMIT_VERBOSE if str(mode or "on").lower() == "verbose" else _NOTICE_LIMIT
+    sentences: List[str] = []
     for item in receipt.get("skills") or []:
-        label = _ACTION_LABELS.get(item.get("action"), "обновлён")
-        parts.append(f"навык «{item['name']}» {label}")
-    verbose = str(mode or "on").lower() == "verbose"
+        verb = _SKILL_VERBS.get(item.get("action"), "обновлён")
+        sentences.append(f"навык «{item['name']}» {verb}.")
     for item in receipt.get("memory") or []:
-        label = _MEMORY_LABELS.get(item.get("target"), "память")
-        if verbose and item.get("added"):
-            previews = "; ".join(_preview(e) for e in item["added"][:3])
-            parts.append(f"{label}: {previews}")
-        else:
-            parts.append(f"{label} обновлена")
-    return "✅ Учёл из нашего разговора: " + ", ".join(parts) + "."
+        sentences.append(_memory_sentence(item, limit))
+    if not sentences:
+        return "✅ Учёл."
+    text = " ".join(
+        sentence if index == 0 else sentence[0].upper() + sentence[1:]
+        for index, sentence in enumerate(sentences)
+    )
+    return f"✅ Учёл: {text}"
 
 
 def receipt_has_undo(receipt: Dict[str, Any]) -> bool:
     return bool(receipt.get("memory")) or any(
         s.get("entry_ids") for s in receipt.get("skills") or []
     )
+
+
+def _undo_message(skills: List[Dict[str, Any]], memory: List[Dict[str, Any]]) -> str:
+    """Один ясный итог отмены: что именно удалено и что возвращено."""
+    parts: List[str] = []
+    for item in skills:
+        name = item.get("name")
+        if item.get("action") == "create":
+            parts.append(f"навык «{name}» удалён")
+        else:
+            parts.append(f"навык «{name}» возвращён к прежней версии")
+    for item in memory:
+        user = item.get("target") == "user"
+        noun_one, noun_many = ("заметка", "заметки") if user else ("запись памяти", "записи памяти")
+        added = len(item.get("added") or [])
+        removed = len(item.get("removed") or [])
+        count = max(added, removed)
+        many = count > 1
+        noun = noun_many if many else noun_one
+        suffix = f" ({count})" if many else ""
+        if added and removed:
+            verb = "возвращены" if many else "возвращена"
+            parts.append(f"{noun} {verb} к прежней версии{suffix}")
+        elif added:
+            parts.append(f"{noun} {'удалены' if many else 'удалена'}{suffix}")
+        elif removed:
+            parts.append(f"{noun} {'возвращены' if many else 'возвращена'}{suffix}")
+    return "Отменено: " + "; ".join(parts) if parts else "Отменено."
 
 
 def _conflict(message: str) -> Dict[str, Any]:
@@ -349,4 +418,4 @@ def undo_receipt(receipt: Dict[str, Any]) -> Dict[str, Any]:
                     final.append(entry)
             MemoryStore._write_file(path, final)
 
-    return {"ok": True, "status": "undone", "message": "Готово, изменение отменено."}
+    return {"ok": True, "status": "undone", "message": _undo_message(skills, memory)}

@@ -24,13 +24,13 @@ const button = () => host.querySelector<HTMLButtonElement>("button");
 
 it("отменяет изменение именно этого сообщения и показывает «Отменено»", async () => {
   const undo = vi.spyOn(api, "undoLearningNotice").mockResolvedValue({
-    ok: true, status: "undone", message: "Готово, изменение отменено.",
+    ok: true, status: "undone", message: "Отменено: заметка удалена",
   });
   await act(async () => root.render(<LearningUndo sessionId="s1" messageId={7} profile="work" undone={false} />));
   expect(button()?.textContent).toBe("Отменить");
   await act(async () => button()?.click());
   expect(undo).toHaveBeenCalledWith("s1", 7, "work");
-  expect(host.textContent).toContain("Отменено");
+  expect(host.textContent).toBe("Отменено: заметка удалена");
   expect(button()).toBeNull();
 });
 

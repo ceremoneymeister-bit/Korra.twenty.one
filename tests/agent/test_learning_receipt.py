@@ -161,7 +161,7 @@ def test_memory_add_is_reported_and_undone(env):
     assert receipt["memory"] == [
         {"target": "memory", "added": ["Отчёты сдаём по пятницам"], "removed": []}
     ]
-    assert "память агента обновлена" in format_notice(receipt)
+    assert "«Отчёты сдаём по пятницам». Сохранено в памяти агента." in format_notice(receipt)
     assert "Отчёты сдаём по пятницам" in format_notice(receipt, "verbose")
 
     assert undo_receipt(receipt)["status"] == "undone"
