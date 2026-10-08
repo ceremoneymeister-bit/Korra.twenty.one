@@ -15,6 +15,7 @@
 import { atom, onMount } from "nanostores";
 
 import { fetchJSON } from "@/lib/api";
+import type { DashboardSales } from "@/lib/crm";
 import type { ChatRun } from "@/lib/chat-runs";
 import { getOwnerTimeZone } from "@/lib/dashboard-flags";
 
@@ -213,6 +214,8 @@ export interface DashboardState {
   upcoming: DashboardUpcoming | { status: "error" };
   artifacts: DashboardArtifacts | { status: "error" };
   quota: DashboardQuota;
+  /** Нет у сервера старше 0.21.17: карточка «Продажи» тогда считается недоступной. */
+  sales?: DashboardSales;
 }
 
 export type LoadStatus = "idle" | "loading" | "ready" | "error";

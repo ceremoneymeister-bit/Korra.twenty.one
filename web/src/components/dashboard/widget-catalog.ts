@@ -7,6 +7,7 @@ import { CALENDAR_WIDGET } from "./widgets/CalendarWidget";
 import { ICLOUD_CALENDAR_WIDGET } from "./widgets/ICloudCalendarWidget";
 import { CODEX_QUOTA_WIDGET } from "./widgets/CodexQuotaWidget";
 import { METRICS_WIDGET } from "./widgets/MetricsWidget";
+import { SALES_WIDGET } from "./widgets/SalesWidget";
 import { RECENT_RESULTS_WIDGET } from "./widgets/RecentResultsWidget";
 import { UPCOMING_TASKS_WIDGET } from "./widgets/UpcomingTasksWidget";
 
@@ -32,6 +33,8 @@ export const DASHBOARD_WIDGETS: readonly DashboardWidget[] = [
   CALENDAR_WIDGET,
   CODEX_QUOTA_WIDGET,
   ICLOUD_CALENDAR_WIDGET,
+  // 0.21.17: продажи из Битрикс24 / amoCRM — последним, как на сервере.
+  SALES_WIDGET,
 ];
 
 /** Порядок каталога в том виде, в каком его читают функции состава. */

@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { dashboardStateFixture } from "@/components/dashboard/dashboard-state.fixture";
+import { $crmDialog, closeCrmDialog } from "@/lib/crm";
 import { ApiError, type DashboardLayoutPreference } from "@/lib/api";
 import {
   $dashboardState,
@@ -310,8 +311,8 @@ describe("Раскладка дашборда хранится на сервер
     await click(button("Настроить"));
     await click(byLabel("Переместить карточку «Агенты» правее"));
 
-    // Лимит Codex на этой установке недоступна: на доске её нет, но
-    // сохранённая раскладка её помнит и не теряет место.
+    // Лимита Codex и продаж на этой установке нет: на доске их нет, но
+    // сохранённая раскладка их помнит и не теряет место.
     expect(api.setDashboardLayout.mock.calls[0][0].order).toEqual([
       "attention",
       "metrics",
@@ -321,6 +322,7 @@ describe("Раскладка дашборда хранится на сервер
       "calendar",
       "codex-quota",
       "icloud-calendar",
+      "sales",
     ]);
     expect(tiles().map((tile) => tile.id)).toEqual([
       "metrics",
@@ -432,3 +434,47 @@ describe("Карточки на живой сводке", () => {
     expect(container.textContent).not.toContain("Сводка недоступна");
   });
 });
+
+describe("Карточка «Продажи» на доске", () => {
+  it("встаёт в конец доски, когда сводка принесла раздел продаж", async () => {
+    $dashboardState.set(null);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify(dashboardStateFixture({ sales: { status: "not_connected", candidates: [] } })), {
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    await act(async () => {
+      await refreshDashboardState();
+    });
+    expect(tiles().map((tile) => tile.id)).toContain("sales");
+    expect(tiles().at(-1)?.id).toBe("sales");
+  });
+
+  it("ссылка агента /dashboard?crm=connect открывает окно подключения и убирает параметр", async () => {
+    await act(async () => root.unmount());
+    container.remove();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    closeCrmDialog();
+    await act(async () =>
+      root.render(
+        <MemoryRouter initialEntries={["/dashboard?crm=connect"]}>
+          <DashboardPage />
+          <Where />
+        </MemoryRouter>,
+      ),
+    );
+    expect($crmDialog.get()).toBe("connect");
+    expect(container.querySelector("[data-testid=where]")?.textContent).toBe("/dashboard");
+    closeCrmDialog();
+  });
+});
+
+function Where() {
+  const location = useLocation();
+  return <output data-testid="where">{location.pathname + location.search}</output>;
+}

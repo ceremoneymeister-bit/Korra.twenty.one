@@ -6,6 +6,7 @@
  * явно, чтобы строки «сегодня в 18:00» не зависели от машины, где идёт тест.
  */
 
+import type { CrmConnection, CrmType, SalesDeal, SalesReady } from "@/lib/crm";
 import type { DashboardState } from "@/lib/dashboard-state";
 
 export const FIXTURE_NOW = Date.UTC(2026, 8, 23, 10, 0) / 1000;
@@ -207,6 +208,103 @@ export function dashboardStateFixture(overrides: Partial<DashboardState> = {}): 
       can_reset: false,
       forecast: null,
     },
+    ...overrides,
+  };
+}
+
+export function crmConnectionFixture(overrides: Partial<CrmConnection> = {}): CrmConnection {
+  return {
+    type: "bitrix24",
+    source_label: "Битрикс24",
+    portal: "acme.bitrix24.ru",
+    route: "installation",
+    account: {
+      user: "Анна Петрова",
+      deals: 128,
+      deals_capped: false,
+      managers: 6,
+      tasks: true,
+      pipelines: [
+        { id: "0", name: "Продажи" },
+        { id: "2", name: "Партнёры" },
+      ],
+    },
+    settings: { pipeline_id: "0", stuck_days: 7, agents_access: true },
+    last_check: { ok: true, at: "2026-09-23T09:55:00+00:00", code: null },
+    saved_at: "2026-09-20T08:00:00+00:00",
+    ...overrides,
+  };
+}
+
+const deal = (id: string, title: string, amount: number, days: number, extra: Partial<SalesDeal> = {}): SalesDeal => ({
+  id,
+  title,
+  amount,
+  days,
+  stuck: days >= 7,
+  late: false,
+  new: false,
+  url: `https://acme.bitrix24.ru/crm/deal/details/${id}/`,
+  manager: "Иван Орлов",
+  stage: "Переговоры",
+  ...extra,
+});
+
+/** Карточка «Продажи» с данными Битрикс24: сентябрь, 7 застрявших сделок. */
+export function salesFixture(overrides: Partial<SalesReady> = {}, type: CrmType = "bitrix24"): SalesReady {
+  const connection = crmConnectionFixture(
+    type === "amocrm" ? { type, source_label: "amoCRM", portal: "acme.amocrm.ru" } : {},
+  );
+  const stuckTop = [
+    deal("812", "Поставка для «Север»", 840_000, 21),
+    deal("790", "Ремонт склада", 420_000, 15),
+    deal("655", "Договор с «Дельта»", 300_000, 11),
+  ];
+  return {
+    status: "ok",
+    connection,
+    source: type,
+    source_label: connection.source_label,
+    portal: connection.portal,
+    pipeline: { id: "0", name: "Продажи" },
+    stuck_days: 7,
+    won: {
+      amount: 2_840_000,
+      count: 14,
+      prev_amount: 2_400_000,
+      prev_count: 11,
+      change_pct: 18,
+      weeks: [
+        { start: "2026-09-01", amount: 600_000, count: 3 },
+        { start: "2026-09-08", amount: 900_000, count: 4 },
+        { start: "2026-09-15", amount: 700_000, count: 3 },
+        { start: "2026-09-22", amount: 640_000, count: 4 },
+      ],
+      limited: false,
+    },
+    new_leads: { today: 6, series: [2, 4, 3, 5, 1, 0, 6], unsorted: 2 },
+    stuck: { count: 7, amount: 1_260_000, days: 7, approx: false, top: stuckTop },
+    overdue: { available: true, tasks: 4, managers: 2, limited: false },
+    river: {
+      deals_total: 31,
+      deals_loaded: 31,
+      amount_total: 6_100_000,
+      truncated: false,
+      limit: 300,
+      busiest_stage: "Переговоры",
+      stages: [
+        { id: "NEW", name: "Новые", count: 2, amount: 300_000, stuck: 0, deals: [deal("1", "Заявка с сайта", 100_000, 0, { new: true, stage: "Новые" }), deal("2", "Звонок", 200_000, 1, { stage: "Новые" })] },
+        { id: "TALK", name: "Переговоры", count: 3, amount: 1_560_000, stuck: 2, deals: [...stuckTop.slice(0, 2).map((d) => ({ ...d })), deal("3", "Тендер", 300_000, 3)] },
+        { id: "OFFER", name: "Предложение", count: 1, amount: 300_000, stuck: 1, deals: [{ ...stuckTop[2], stage: "Предложение", late: true }] },
+      ],
+    },
+    managers: [
+      { id: "7", name: "Иван Орлов", initials: "ИО", overdue: 3, stuck: 4, won_amount: 1_400_000, won_count: 6, leader: true },
+      { id: "8", name: "Мария Дым", initials: "МД", overdue: 1, stuck: 3, won_amount: 900_000, won_count: 5, leader: false },
+    ],
+    links: { portal: "https://acme.bitrix24.ru/crm/deal/kanban/" },
+    as_of: "2026-09-23T09:57:00+00:00",
+    stale: false,
     ...overrides,
   };
 }

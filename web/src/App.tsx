@@ -183,7 +183,9 @@ function StaleBuildNotice({ build }: { build?: string | null }) {
 }
 
 function RootRedirect() {
-  return <Navigate to={productHomePath(productUiMode())} replace />;
+  // Ссылка агента «подключить CRM» (`/?crm=connect`) ведёт на дашборд, где окно.
+  const connectCrm = new URLSearchParams(useLocation().search).get("crm") === "connect";
+  return <Navigate to={connectCrm ? "/dashboard?crm=connect" : productHomePath(productUiMode())} replace />;
 }
 
 function UnknownRouteFallback({ pluginsLoading }: { pluginsLoading: boolean }) {

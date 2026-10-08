@@ -1769,3 +1769,1217 @@
 .kdw-quota--with-usage .kdw-limit-pct small {
   font-size: 11px;
 }
+
+/* ── Продажи (K21-322) ────────────────────────────────────────────────── */
+
+.korra-dashboard {
+  --kdw-stuck: #e0a100;
+  --kdw-late: #d6452d;
+  --kdw-dark: #222;
+}
+
+.kdw-sales-header {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.kdw-sales-src {
+  flex: none;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--kdw-muted);
+}
+
+.kdw-sales-fresh {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--kdw-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kdw-sales-fresh i {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--kdw-accent);
+  vertical-align: 1px;
+}
+
+.kdw-sales-fresh--stale {
+  font-weight: 600;
+  color: var(--kdw-warn);
+}
+
+@container korra-dashboard (max-width: 440px) {
+  .kdw-sales-fresh:not(.kdw-sales-fresh--stale) {
+    display: none;
+  }
+}
+
+.kdw-sales-more {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin: -8px -10px -8px 0;
+  border: 0;
+  border-radius: var(--neo-radius-control);
+  background: none;
+  color: var(--kdw-muted);
+  cursor: pointer;
+}
+
+.kdw-sales-more:hover,
+.kdw-sales-more[aria-expanded="true"] {
+  color: var(--kdw-ink);
+  box-shadow: var(--neo-inset-compact);
+}
+
+/* Меню живёт в body: переменных дашборда там нет, берём токены темы. */
+.kdw-sales-menu {
+  position: fixed;
+  z-index: 150;
+  display: flex;
+  flex-direction: column;
+  min-width: 248px;
+  max-width: calc(100vw - 16px);
+  padding: 6px;
+  border-radius: 14px;
+  background: var(--neo-surface);
+  box-shadow: var(--neo-depth-3);
+  color: var(--neo-text-primary);
+}
+
+.kdw-sales-menu button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.kdw-sales-menu button:hover:not(:disabled),
+.kdw-sales-menu button:focus-visible {
+  box-shadow: var(--neo-inset-compact);
+  outline: none;
+}
+
+.kdw-sales-menu button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.kdw-sales-menu small {
+  font-size: 12px;
+  color: var(--neo-text-secondary);
+}
+
+.kdw-sales-menu .kdw-sales-menu-danger {
+  color: #c2410c;
+}
+
+.kdw-sales-menu-note {
+  margin: 4px 12px 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--neo-text-secondary);
+}
+
+/* ── Тело карточки ────────────────────────────────────────────────────── */
+
+.kdw-sales {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow: hidden;
+  container-type: size;
+  container-name: kdw-sales;
+  color: var(--kdw-ink);
+}
+
+.kdw-sales-hero {
+  display: flex;
+  flex: none;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.kdw-sales-money {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.kdw-sales-k {
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--kdw-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kdw-sales-v {
+  font-size: 40px;
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+
+.kdw-sales-v small {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--kdw-muted);
+}
+
+.kdw-sales-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  font-size: 12px;
+  color: var(--kdw-muted);
+}
+
+.kdw-sales-chip {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--kdw-accent) 30%, transparent);
+  font-weight: 700;
+  color: var(--kdw-ink);
+}
+
+.kdw-sales-chip--down {
+  background: color-mix(in srgb, var(--kdw-late) 18%, transparent);
+}
+
+.kdw-sales-limited {
+  color: var(--kdw-warn);
+}
+
+.kdw-sales-bars,
+.kdw-sales-spark {
+  display: flex;
+  flex: none;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.kdw-sales-bars {
+  width: 88px;
+  height: 52px;
+}
+
+.kdw-sales-bars i,
+.kdw-sales-spark i {
+  flex: 1;
+  min-height: 3px;
+  border-radius: 3px;
+  background: var(--kdw-hairline);
+}
+
+.kdw-sales-bars .kdw-sales-bar--now,
+.kdw-sales-spark .kdw-sales-bar--now {
+  background: var(--kdw-accent);
+}
+
+.kdw-sales-signals {
+  display: grid;
+  flex: none;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.kdw-sales-sig {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 6px 8px;
+  border-radius: 12px;
+  color: inherit;
+  text-decoration: none;
+  box-shadow: var(--neo-inset-compact);
+}
+
+.kdw-sales-sig:focus-visible {
+  outline: 2px solid var(--neo-accent-line, var(--kdw-accent));
+  outline-offset: 2px;
+}
+
+.kdw-sales-ico {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.kdw-sales-ico--dark {
+  background: var(--kdw-dark);
+  color: var(--kdw-accent);
+}
+
+.kdw-sales-ico--amber {
+  background: var(--kdw-stuck);
+  color: #222;
+}
+
+.kdw-sales-ico--red {
+  background: var(--kdw-late);
+  color: #fff;
+}
+
+.kdw-sales-sigt {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--kdw-muted);
+}
+
+.kdw-sales-sigt b {
+  font-size: 18px;
+  color: var(--kdw-ink);
+}
+
+.kdw-sales-sigt span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kdw-sales-spark {
+  width: 28px;
+  height: 22px;
+  margin-left: auto;
+}
+
+/* M на невысокой плитке (телефон: ≈170 px): остаются деньги месяца и сигналы в одну строку. */
+@container kdw-sales (max-height: 118px) {
+  .kdw-sales-v {
+    font-size: 30px;
+  }
+
+  .kdw-sales-bars {
+    height: 38px;
+  }
+
+  .kdw-sales-chips,
+  .kdw-sales-signals .kdw-sales-ico {
+    display: none;
+  }
+
+  .kdw-sales-sig {
+    min-height: 40px;
+    padding: 4px 8px;
+  }
+}
+
+@container kdw-sales (max-height: 84px) {
+  .kdw-sales-signals {
+    display: none;
+  }
+}
+
+/* ── Река сделок ──────────────────────────────────────────────────────── */
+
+.kdw-sales-river-wrap {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 72px;
+}
+
+.kdw-sales-river-h {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 2px 12px;
+  font-size: 12px;
+  color: var(--kdw-muted);
+}
+
+.kdw-sales-river-h b {
+  color: var(--kdw-ink);
+}
+
+.kdw-sales-river-hot {
+  color: var(--kdw-warn);
+}
+
+.kdw-sales-river {
+  display: flex;
+  flex: 1 1 0;
+  gap: 2px;
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.kdw-sales-col {
+  display: flex;
+  flex: 1 0 64px;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 6px;
+  border-radius: 10px;
+}
+
+.kdw-sales-col--hot {
+  background: color-mix(in srgb, var(--kdw-stuck) 12%, transparent);
+}
+
+.kdw-sales-col-h {
+  flex: none;
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kdw-sales-dots {
+  display: flex;
+  flex: 1 1 0;
+  flex-wrap: wrap;
+  align-content: flex-end;
+  align-items: flex-end;
+  gap: 3px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.kdw-sales-dot {
+  flex: none;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--kdw-ink) 38%, transparent);
+}
+
+.kdw-sales-dot:hover,
+.kdw-sales-dot:focus-visible {
+  outline: 2px solid var(--kdw-ink);
+  outline-offset: 1px;
+}
+
+.kdw-sales-dot--stuck {
+  background: var(--kdw-stuck);
+}
+
+.kdw-sales-dot--late {
+  box-shadow: 0 0 0 2px var(--kdw-late);
+}
+
+.kdw-sales-dot--new {
+  background: var(--kdw-accent);
+}
+
+.kdw-sales-more-dots {
+  font-size: 11px;
+  color: var(--kdw-muted);
+}
+
+.kdw-sales-col-f {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  font-size: 11px;
+  color: var(--kdw-muted);
+  white-space: nowrap;
+}
+
+.kdw-sales-col-f em {
+  font-style: normal;
+  color: var(--kdw-warn);
+}
+
+.kdw-sales-legend {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 11px;
+  color: var(--kdw-muted);
+}
+
+.kdw-sales-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.kdw-sales-legend i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--kdw-ink) 38%, transparent);
+}
+
+.kdw-sales-legend i.kdw-sales-dot--stuck {
+  background: var(--kdw-stuck);
+}
+
+.kdw-sales-legend i.kdw-sales-dot--late {
+  box-shadow: 0 0 0 2px var(--kdw-late);
+}
+
+.kdw-sales-legend i.kdw-sales-dot--new {
+  background: var(--kdw-accent);
+}
+
+@container kdw-sales (max-height: 380px) {
+  .kdw-sales-legend {
+    display: none;
+  }
+}
+
+/* Карточки застрявших и команда — только когда высоты правда хватает. */
+.kdw-sales-extras {
+  display: none;
+  flex: none;
+  gap: 10px;
+}
+
+@container kdw-sales (min-height: 540px) {
+  .kdw-sales-extras {
+    display: flex;
+    flex-direction: column;
+  }
+}
+
+.kdw-sales-stuck {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.kdw-sales-deal {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px;
+  border-radius: 12px;
+  color: inherit;
+  text-decoration: none;
+  box-shadow: var(--neo-inset-compact);
+}
+
+.kdw-sales-ring {
+  --p: 50;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: conic-gradient(var(--kdw-stuck) calc(var(--p) * 1%), var(--kdw-hairline) 0);
+}
+
+.kdw-sales-ring > span {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--neo-surface);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.kdw-sales-ring small {
+  font-size: 8px;
+  font-weight: 500;
+  color: var(--kdw-muted);
+}
+
+.kdw-sales-deal-top {
+  display: flex;
+}
+
+.kdw-sales-sum {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.kdw-sales-nm,
+.kdw-sales-st {
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kdw-sales-st {
+  color: var(--kdw-muted);
+}
+
+.kdw-sales-team {
+  display: flex;
+  gap: 12px;
+  overflow: hidden;
+}
+
+.kdw-sales-mate {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.kdw-sales-ava {
+  position: relative;
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--kdw-hairline);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.kdw-sales-ava--lime {
+  background: var(--kdw-accent);
+  color: #222;
+}
+
+.kdw-sales-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--kdw-late);
+  font-size: 10px;
+  font-style: normal;
+  line-height: 16px;
+  text-align: center;
+  color: #fff;
+}
+
+.kdw-sales-who {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--kdw-muted);
+}
+
+.kdw-sales-who b {
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--kdw-ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kdw-sales-foot {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+
+.kdw-sales-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 12px;
+  background: var(--kdw-dark);
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  text-decoration: none;
+}
+
+.kdw-sales-btn svg {
+  color: var(--kdw-accent);
+}
+
+.kdw-sales-btn:focus-visible,
+.kdw-sales-link:focus-visible {
+  outline: 2px solid var(--neo-accent-line, var(--kdw-accent));
+  outline-offset: 2px;
+}
+
+.kdw-sales-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--kdw-ink);
+  text-decoration: none;
+}
+
+.kdw-sales-calm {
+  font-size: 13px;
+  color: var(--kdw-muted);
+}
+
+/* ── Плитка S ─────────────────────────────────────────────────────────── */
+
+.kdw-sales--tile {
+  position: relative;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--kdw-dark);
+  color: #fff;
+}
+
+.kdw-sales-big {
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.kdw-sales-cap {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1.3;
+  color: rgb(255 255 255 / 0.7);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+
+.kdw-sales-arc {
+  --p: 0;
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: conic-gradient(var(--kdw-stuck) calc(var(--p) * 1%), rgb(255 255 255 / 0.16) 0);
+  mask: radial-gradient(circle, transparent 12px, #000 13px);
+}
+
+.kdw-sales-pct {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--kdw-stuck);
+}
+
+@container kdw-sales (max-height: 100px) {
+  .kdw-sales-big {
+    font-size: 26px;
+  }
+
+  .kdw-sales-cap {
+    -webkit-line-clamp: 3;
+  }
+}
+
+/* ── Пустое состояние и ошибки ────────────────────────────────────────── */
+
+.kdw-sales-empty {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 16px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.kdw-sales-ghost {
+  display: flex;
+  flex: none;
+  align-items: flex-end;
+  gap: 5px;
+  height: 56px;
+  opacity: 0.5;
+}
+
+.kdw-sales-ghost i {
+  width: 14px;
+  border-radius: 50%;
+  background: var(--kdw-hairline);
+  aspect-ratio: 1;
+}
+
+.kdw-sales-ghost i:nth-child(2) {
+  width: 22px;
+}
+
+.kdw-sales-ghost i:nth-child(3) {
+  width: 10px;
+}
+
+.kdw-sales-empty-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--kdw-muted);
+}
+
+.kdw-sales-empty-text b {
+  font-size: 15px;
+  color: var(--kdw-ink);
+}
+
+.kdw-sales-empty-text p {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+@container korra-dashboard (max-width: 440px) {
+  .kdw-sales-ghost {
+    display: none;
+  }
+
+  .kdw-sales-empty-text p {
+    display: none;
+  }
+}
+
+.kdw-sales-offer {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--kdw-muted);
+}
+
+.kdw-sales-offer b {
+  font-size: 14px;
+  color: var(--kdw-ink);
+}
+
+.kdw-sales-offer-error {
+  color: var(--kdw-danger);
+}
+
+.kdw-sales-offer-acts,
+.kdw-sales-error-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.kdw-sales-error-text {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  font-size: 13px;
+  color: var(--kdw-muted);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+/* ── Телефон: река листается вбок ─────────────────────────────────────── */
+
+@media (max-width: 680px) {
+  .kdw-sales-river {
+    display: flex;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .kdw-sales-col {
+    flex: 0 0 132px;
+    scroll-snap-align: start;
+  }
+}
+
+/* ── Окно подключения CRM ─────────────────────────────────────────────── */
+
+.kdw-crm-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: calc(100dvh - 32px);
+  padding: 22px;
+  overflow-y: auto;
+  color: var(--neo-text-primary);
+}
+
+.kdw-crm-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.kdw-crm-head h2 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 700;
+}
+
+.kdw-crm-x {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin: -8px -8px -8px 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--neo-text-secondary);
+  cursor: pointer;
+}
+
+.kdw-crm-x:hover {
+  box-shadow: var(--neo-inset-compact);
+}
+
+.kdw-crm-stepper {
+  display: flex;
+  gap: 6px;
+}
+
+.kdw-crm-stepper i {
+  flex: 1;
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--neo-text-secondary) 22%, transparent);
+}
+
+.kdw-crm-stepper i.kdw-crm-stepper--on {
+  background: var(--neo-accent, #9ede01);
+}
+
+.kdw-crm-choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+@media (max-width: 480px) {
+  .kdw-crm-choices {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.kdw-crm-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 14px;
+  border: 2px solid transparent;
+  border-radius: 14px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: var(--neo-inset-compact);
+}
+
+.kdw-crm-choice--on {
+  border-color: var(--neo-accent, #9ede01);
+}
+
+.kdw-crm-choice > span:last-child {
+  font-size: 12px;
+  color: var(--neo-text-secondary);
+}
+
+.kdw-crm-logo {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #fff;
+}
+
+.kdw-crm-logo--b24 {
+  background: #2fc6f6;
+}
+
+.kdw-crm-logo--amo {
+  background: #1d6df0;
+}
+
+.kdw-crm-ro {
+  margin: 0;
+  font-size: 13px;
+  color: var(--neo-text-secondary);
+}
+
+.kdw-crm-how {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-size: 13px;
+  box-shadow: var(--neo-inset-compact);
+}
+
+.kdw-crm-how ol {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--neo-text-secondary);
+}
+
+.kdw-crm-path {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.kdw-crm-path em {
+  margin-right: 6px;
+  font-style: normal;
+  color: var(--neo-text-secondary);
+}
+
+.kdw-crm-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.kdw-crm-field input {
+  min-height: 44px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--neo-surface);
+  box-shadow: var(--neo-inset-compact);
+  color: var(--neo-text-primary);
+  /* 16 px — иначе iOS приближает страницу при фокусе. */
+  font: inherit;
+  font-size: 16px;
+  font-weight: 400;
+}
+
+.kdw-crm-honest {
+  display: flex;
+  gap: 8px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--neo-text-secondary);
+}
+
+.kdw-crm-honest svg {
+  margin-top: 1px;
+}
+
+.kdw-crm-acts {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.kdw-crm-wide {
+  flex: 1;
+}
+
+.kdw-crm-ok {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.kdw-crm-ok > i {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--neo-accent, #9ede01);
+  color: #222;
+}
+
+.kdw-crm-ok > span {
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  color: var(--neo-text-secondary);
+}
+
+.kdw-crm-ok b {
+  font-size: 15px;
+  color: var(--neo-text-primary);
+}
+
+.kdw-crm-found {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.kdw-crm-found > div {
+  display: flex;
+  flex-direction: column;
+  padding: 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  color: var(--neo-text-secondary);
+  box-shadow: var(--neo-inset-compact);
+}
+
+.kdw-crm-found b {
+  font-size: 22px;
+  color: var(--neo-text-primary);
+}
+
+.kdw-crm-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.kdw-crm-opt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 52px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.kdw-crm-opt > span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.kdw-crm-opt small {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--neo-text-secondary);
+}
+
+.kdw-crm-opt select {
+  min-height: 44px;
+  max-width: 50%;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--neo-surface);
+  box-shadow: var(--neo-inset-compact);
+  color: var(--neo-text-primary);
+  font: inherit;
+  font-size: 14px;
+}
+
+.kdw-crm-switch {
+  position: relative;
+  flex: none;
+  width: 48px;
+  height: 28px;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--neo-text-secondary) 30%, transparent);
+  cursor: pointer;
+}
+
+.kdw-crm-switch::after {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #fff;
+  content: "";
+  transition: transform 0.15s ease;
+}
+
+.kdw-crm-switch[aria-checked="true"] {
+  background: var(--neo-accent, #9ede01);
+}
+
+.kdw-crm-switch[aria-checked="true"]::after {
+  transform: translateX(20px);
+}
+
+.kdw-crm-err {
+  display: flex;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: color-mix(in srgb, #d6452d 10%, transparent);
+  font-size: 13px;
+}
+
+.kdw-crm-err > i {
+  flex: none;
+  color: #c2410c;
+}
+
+.kdw-crm-err > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--neo-text-secondary);
+}
+
+.kdw-crm-err b {
+  color: var(--neo-text-primary);
+}
