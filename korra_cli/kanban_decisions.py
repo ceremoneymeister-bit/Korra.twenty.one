@@ -157,6 +157,8 @@ def resolve(request_id: str, choice: str, *, source_session_id: str, answer: str
                 decision=("grant" if choice == "once" else "deny") if kind == "approval" else None,
             )
         if not outcome["ok"]:
+            if outcome.get("status") == "archived":
+                raise KanbanDecisionConflict("Поручение отменено, его нельзя возобновить этим ответом.")
             if outcome.get("reason") == "answer_required":
                 raise KanbanDecisionConflict("Напишите, что изменить или добавить: без этого поручение снова остановится.")
             if outcome.get("reason") == "assignee_required":

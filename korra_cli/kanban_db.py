@@ -6605,11 +6605,15 @@ def block_task(
         # kind survive untouched, and a task waiting on its parents
         # (``todo``) can be paused too. The ``blocked`` event keeps it sticky.
         if kind == OWNER_PAUSE_KIND:
+            if cur_row["block_kind"] == APPROVAL_BLOCK_KIND and cur_row["status"] in ("blocked", "triage"):
+                # A permission question is closed only by the owner's verdict.
+                return False
             cur = conn.execute(
                 "UPDATE tasks SET status = 'blocked', claim_lock = NULL, "
                 "claim_expires = NULL, worker_pid = NULL, block_kind = ?, "
                 "block_reason = ? WHERE id = ? "
-                "AND status IN ('running', 'ready', 'todo')"
+                "AND (status IN ('running', 'ready', 'todo', 'blocked') "
+                "     OR (status = 'triage' AND block_kind IS NOT NULL))"
                 + ("" if expected_run_id is None else " AND current_run_id = ?"),
                 (kind, reason, task_id) if expected_run_id is None
                 else (kind, reason, task_id, int(expected_run_id)),
@@ -8215,6 +8219,10 @@ def archive_task(
             summary="task archived with run still active",
         )
         _append_event(conn, task_id, "archived", None, run_id=run_id)
+        if prev is not None and prev["status"] != "done":
+            # Cancelled before it finished: nobody is waiting for news of it.
+            # A done card keeps its subscriptions so its result still arrives.
+            conn.execute("DELETE FROM kanban_notify_subs WHERE task_id = ?", (task_id,))
     if stop_worker and prev is not None and prev["status"] == "running" and prev["worker_pid"]:
         info = _terminate_reclaimed_worker(prev["worker_pid"], prev["claim_lock"])
         with write_txn(conn):

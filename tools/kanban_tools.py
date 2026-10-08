@@ -941,6 +941,17 @@ def _handle_block(args: dict, **kw) -> str:
     board = args.get("board")
     try:
         kb, conn = _connect(board=board)
+        if not korra_env("KORRA_KANBAN_TASK"):
+            # Not the task's own worker (the main chat acting on the owner's
+            # word): stop the executor like an owner pause, not just flip a flag.
+            try:
+                paused = kb.pause_task(conn, tid, reason=reason)
+                if not paused["ok"]:
+                    return tool_error(f"could not pause {tid} (unknown id, finished or waiting for permission)")
+                return _ok(task_id=tid, status="blocked", block_kind=kb.OWNER_PAUSE_KIND,
+                           worker_stopped=paused["stopped"])
+            finally:
+                conn.close()
         if kind is not None and kind not in kb.VALID_BLOCK_KINDS:
             conn.close()
             return tool_error(

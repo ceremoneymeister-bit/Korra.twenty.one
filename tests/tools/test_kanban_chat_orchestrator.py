@@ -153,3 +153,26 @@ def test_chat_comment_is_signed_by_the_chat_not_worker(chat_env, monkeypatch):
     finally:
         conn.close()
     assert "add no separate comment" in KANBAN_CHAT_GUIDANCE
+
+
+def test_block_from_chat_stops_the_running_executor(chat_env, monkeypatch):
+    """The owner's word to stop is a pause: the executor's process ends too."""
+    from tools import kanban_tools as kt
+    from korra_cli import kanban_db as kb
+    stopped = []
+    monkeypatch.setattr(
+        kb, "_terminate_reclaimed_worker",
+        lambda pid, claim_lock, **_: stopped.append(pid) or {"terminated": True},
+    )
+    with kb.connect_closing() as conn:
+        tid = kb.create_task(conn, title="CRM", assignee="pm")
+        kb.claim_task(conn, tid, claimer="w")
+        with kb.write_txn(conn):
+            conn.execute("UPDATE tasks SET worker_pid = 4242 WHERE id = ?", (tid,))
+    out = json.loads(kt._handle_block({"task_id": tid, "reason": "Владелец просил остановить"}))
+    assert out["ok"] is True and out["block_kind"] == kb.OWNER_PAUSE_KIND
+    assert stopped == [4242]
+    with kb.connect_closing() as conn:
+        task = kb.get_task(conn, tid)
+        assert (task.status, task.block_kind) == ("blocked", kb.OWNER_PAUSE_KIND)
+        assert "worker_stopped" in [e.kind for e in kb.list_events(conn, tid)]
