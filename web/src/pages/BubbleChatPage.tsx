@@ -95,6 +95,7 @@ import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
 import { useI18n } from "@/i18n";
 import { Button } from "@nous-research/ui/ui/components/button";
 import { CopyTextButton } from "@/components/chat/CopyTextButton";
+import { LearningUndo } from "@/components/chat/LearningUndo";
 import "@/components/chat/chat-answer.css";
 import { ownerFacingError } from "@/lib/owner-facing-error";
 import { cn } from "@/lib/utils";
@@ -272,6 +273,7 @@ function UserBubble({
 function AssistantBubble({
   voiceSettings, profile = "default", active = true,
   message,
+  sessionId,
   streaming,
   busyState,
   onDecision,
@@ -285,6 +287,7 @@ function AssistantBubble({
   /** Ключ хода, общий у живого пузыря и того же хода из истории. */
   chatKey?: string;
   message: ChatMessage;
+  sessionId?: string | null;
   streaming?: boolean;
   /** Что агент делает прямо сейчас — ровно настолько, насколько мы это знаем. */
   busyState?: BusyKind;
@@ -349,6 +352,14 @@ function AssistantBubble({
                 <div className="korra-chat-answer__footer">
                   <CopyTextButton text={message.content} label="Скопировать ответ" />
                 </div>
+                {message.learning && sessionId && message.historyId !== undefined && (
+                  <LearningUndo
+                    sessionId={sessionId}
+                    messageId={message.historyId}
+                    profile={profile}
+                    undone={message.learning.undone}
+                  />
+                )}
               </>
             )}
           </article>
@@ -673,6 +684,7 @@ export function BubbleChatTranscript({
                   // (третье и четвёртое чистое ревью Astra, P2-1).
                   chatKey={messages[i - 1]?.role === "user" && messages[i - 1]?.clientMessageId ? `assistant:${messages[i - 1]?.clientMessageId}` : undefined}
                   message={m}
+                  sessionId={sessionId}
                   streaming={
                     streaming === true && lastIsAssistant && i === lastIdx
                   }

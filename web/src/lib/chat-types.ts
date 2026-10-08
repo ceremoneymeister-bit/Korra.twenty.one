@@ -37,6 +37,8 @@ export interface ChatMessage {
   /** Ход агента из истории закончен ответом без вызовов. false — в истории
    *  только его промежуточный снимок. У живых сообщений поля нет. */
   turnComplete?: boolean;
+  /** Сообщение «Учёл…» от фонового разбора: можно ли его отменить и отменено ли. */
+  learning?: { undone: boolean };
 }
 
 export interface ChatSession {

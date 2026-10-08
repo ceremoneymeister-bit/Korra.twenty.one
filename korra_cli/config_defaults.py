@@ -2351,6 +2351,10 @@ DEFAULT_CONFIG = {
         # Absolute paths of project roots whose repo-local skills may load.
         # Managed by ``hermes skills trust`` / ``hermes skills untrust``.
         "trusted_project_dirs": [],
+        # Skill names pinned as fully loaded into every new session's system
+        # prompt (CLI, gateway, cron, API) of this profile. Missing/disabled
+        # names are skipped with a warning; the total size is capped.
+        "auto_load": [],
         # Substitute ${HERMES_SKILL_DIR} and ${HERMES_SESSION_ID} in SKILL.md
         # content with the absolute skill directory and the active session id
         # before the agent sees it.  Lets skill authors reference bundled

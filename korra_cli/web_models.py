@@ -774,6 +774,12 @@ class SkillToggle(BaseModel):
     profile: Optional[str] = None
 
 
+class SkillAutoLoad(BaseModel):
+    name: str
+    enabled: bool
+    profile: Optional[str] = None
+
+
 # --- from web_server.py (originally lines 15883-15893) ---
 
 class SkillCreate(BaseModel):

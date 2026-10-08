@@ -143,3 +143,7 @@ def test_documented_limits_match_the_defaults_in_code():
     assert f"default **{delegation['max_concurrent_children']}**" in background
     assert f"`max_iterations` {delegation['max_iterations']}" in background
     assert f"{delegation['max_concurrent_children']} параллельных" in skill
+
+
+def test_skill_tells_how_to_pin_a_skill_into_every_chat(skill_text: str) -> None:
+    assert "skills.auto_load" in skill_text

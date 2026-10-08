@@ -11906,6 +11906,41 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
 
         return self._execute_write(_do)
 
+    def get_message_display_metadata(self, message_row_id: int) -> Optional[Dict[str, Any]]:
+        """Decoded ``display_metadata`` of one message row (``None`` — no such row)."""
+        if message_row_id is None:
+            return None
+        with self._read_ctx() as conn:
+            row = conn.execute(
+                "SELECT display_metadata FROM messages WHERE id = ?", (message_row_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        return self._decode_display_metadata(row[0]) or {}
+
+    def merge_message_display_metadata(
+        self, message_row_id: int, updates: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Overlay *updates* on one row's ``display_metadata``; returns the result."""
+        if message_row_id is None or not updates:
+            return None
+
+        def _do(conn):
+            row = conn.execute(
+                "SELECT display_metadata FROM messages WHERE id = ?", (message_row_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            meta = self._decode_display_metadata(row[0]) or {}
+            meta.update(updates)
+            conn.execute(
+                "UPDATE messages SET display_metadata = ? WHERE id = ?",
+                (self._encode_display_metadata(meta), message_row_id),
+            )
+            return meta
+
+        return self._execute_write(_do)
+
     def get_message_reactions(
         self, session_id: str, message_row_id: int
     ) -> List[Dict[str, Any]]:

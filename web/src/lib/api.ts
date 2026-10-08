@@ -808,6 +808,19 @@ export const api = {
       ),
       signal ? { signal } : undefined,
     ),
+  /** «Отменить» под сообщением «Учёл…»: откат изменения, о котором оно сообщило. */
+  undoLearningNotice: (
+    sessionId: string,
+    messageId: number,
+    profile = getManagementProfile(),
+  ) =>
+    fetchJSON<{ ok: boolean; status: "undone" | "already_undone" | "conflict"; message: string }>(
+      appendProfileParam(
+        `/api/sessions/${encodeURIComponent(sessionId)}/messages/${messageId}/learning-undo`,
+        profile,
+      ),
+      { method: "POST" },
+    ),
   getSessionDetail: (id: string, profile = getManagementProfile()) =>
     fetchJSON<SessionInfo>(
       appendProfileParam(`/api/sessions/${encodeURIComponent(id)}`, profile),
@@ -1394,6 +1407,12 @@ export const api = {
   ),
   toggleSkill: (name: string, enabled: boolean, profile?: string) =>
     fetchJSON<{ ok: boolean }>("/api/skills/toggle", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, enabled, profile: profile || undefined }),
+    }),
+  setSkillAutoLoad: (name: string, enabled: boolean, profile?: string) =>
+    fetchJSON<{ ok: boolean; name: string; auto_load: boolean }>("/api/skills/auto-load", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, enabled, profile: profile || undefined }),
@@ -3430,6 +3449,7 @@ export interface SkillInfo {
   description: string;
   category: string;
   enabled: boolean;
+  auto_load?: boolean;
 }
 
 export interface SkillContent {

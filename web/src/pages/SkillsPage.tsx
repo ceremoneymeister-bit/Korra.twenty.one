@@ -175,6 +175,34 @@ export default function SkillsPage() {
     };
   }, [selectedProfile]);
 
+  /* ---- «В каждом чате»: skills.auto_load профиля ---- */
+  const handleToggleAutoLoad = async (skill: SkillInfo) => {
+    if (!canManageSkills) return;
+    const next = !skill.auto_load;
+    setTogglingSkills((prev) => new Set(prev).add(skill.name));
+    try {
+      await api.setSkillAutoLoad(skill.name, next, selectedProfile || undefined);
+      setSkills((prev) =>
+        prev.map((s) => (s.name === skill.name ? { ...s, auto_load: next } : s)),
+      );
+      showToast(
+        next
+          ? `${skill.name}: теперь в каждом чате`
+          : `${skill.name}: больше не закреплён в чатах`,
+        "success",
+      );
+    } catch (e) {
+      const detail = e instanceof Error ? e.message.replace(/^\d+:\s*/, "") : "";
+      showToast(detail || `${t.common.failedToToggle} ${skill.name}`, "error");
+    } finally {
+      setTogglingSkills((prev) => {
+        const next2 = new Set(prev);
+        next2.delete(skill.name);
+        return next2;
+      });
+    }
+  };
+
   /* ---- Toggle skill ---- */
   const handleToggleSkill = async (skill: SkillInfo) => {
     if (!canManageSkills) return;
@@ -499,6 +527,7 @@ export default function SkillsPage() {
                         readOnly={!canManageSkills}
                         toggling={togglingSkills.has(skill.name)}
                         onToggle={() => handleToggleSkill(skill)}
+                        onToggleAutoLoad={() => handleToggleAutoLoad(skill)}
                         onEdit={() => openEditEditor(skill.name)}
                         noDescriptionLabel={t.skills.noDescription}
                       />
@@ -561,6 +590,7 @@ export default function SkillsPage() {
                         readOnly={!canManageSkills}
                         toggling={togglingSkills.has(skill.name)}
                         onToggle={() => handleToggleSkill(skill)}
+                        onToggleAutoLoad={() => handleToggleAutoLoad(skill)}
                         onEdit={() => openEditEditor(skill.name)}
                         noDescriptionLabel={t.skills.noDescription}
                       />
@@ -741,6 +771,7 @@ function SkillRow({
   readOnly,
   toggling,
   onToggle,
+  onToggleAutoLoad,
   onEdit,
   noDescriptionLabel,
 }: SkillRowProps) {
@@ -773,6 +804,20 @@ function SkillRow({
           {skill.description?.trim() || noDescriptionLabel}
         </p>
       </div>
+      {skill.enabled && (!readOnly || skill.auto_load) && (
+        <label
+          className="flex shrink-0 items-center gap-1.5 pt-0.5 text-xs text-muted-foreground"
+          title="Навык целиком попадает в системную инструкцию каждого нового чата этого профиля"
+        >
+          <Switch
+            checked={!!skill.auto_load}
+            onCheckedChange={onToggleAutoLoad}
+            disabled={toggling || readOnly}
+            aria-label={`${skill.name}: в каждом чате`}
+          />
+          В каждом чате
+        </label>
+      )}
       {!readOnly && <Button
         ghost
         size="icon"
@@ -815,6 +860,7 @@ interface SkillRowProps {
   readOnly: boolean;
   noDescriptionLabel: string;
   onToggle: () => void;
+  onToggleAutoLoad: () => void;
   onEdit: () => void;
   skill: SkillInfo;
   toggling: boolean;
