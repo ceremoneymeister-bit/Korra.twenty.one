@@ -683,17 +683,124 @@ def _auto_truncate_response_history(
     return [conversation_history[index] for index in sorted(kept_indices)]
 
 
-_LEARNING_SLASH_RE = re.compile(r"^/(learn|refine)(?=\s|$)\s*(.*)$", re.DOTALL)
+_LEARNING_SLASH_RE = re.compile(r"^/([A-Za-z][A-Za-z0-9_-]*)(?=\s|$)\s*(.*)$", re.DOTALL)
+_LEARNING_SLASH_COMMANDS = frozenset(
+    {"learn", "refine", "memory", "skills", "curator", "context"}
+)
 
 
 def _parse_learning_slash(user_message: Any) -> Optional[tuple]:
-    """``("learn" | "refine", args)`` for a plain-text ``/learn`` or ``/refine`` turn."""
+    """``(command, args)`` for a plain-text learning command turn.
+
+    The command is the canonical registry name (``/ctx`` -> ``context``); only
+    ``learn``, ``refine``, ``memory``, ``skills``, ``curator`` and ``context``
+    are recognised, everything else stays an ordinary message.
+    """
     if not isinstance(user_message, str):
         return None
     match = _LEARNING_SLASH_RE.match(user_message.strip())
     if not match:
         return None
-    return match.group(1), match.group(2).strip()
+    from korra_cli.commands import resolve_command
+
+    command = resolve_command(match.group(1))
+    if command is None or command.name not in _LEARNING_SLASH_COMMANDS:
+        return None
+    return command.name, match.group(2).strip()
+
+
+_CURATOR_WEB_SUBCOMMANDS = frozenset(
+    {"status", "pause", "resume", "pin", "unpin", "restore", "list-archived"}
+)
+
+
+def _run_web_learning_command(command: str, args: str) -> str:
+    """Answer ``/memory``, ``/skills``, ``/curator`` or ``/context`` in the web chat.
+
+    Runs the same handlers as the messengers and the terminal (write-approval
+    review, ``korra_cli.curator``) once, without a model turn; what a plain
+    chat cannot do is answered with where the command is available.
+    """
+    import contextlib
+    import io
+    import shlex
+
+    tokens = args.split()
+    if command == "context":
+        return (
+            "Подробный отчёт /context пока доступен в мессенджерах и в терминале Korra. "
+            "В веб-чате его нет."
+        )
+    if command == "curator":
+        try:
+            tokens = shlex.split(args)
+        except ValueError:
+            return "Не удалось разобрать команду /curator: проверьте кавычки."
+        sub = tokens[0].lower() if tokens else "status"
+        if sub not in _CURATOR_WEB_SUBCOMMANDS:
+            return (
+                "В веб-чате доступны подкоманды /curator: "
+                + ", ".join(sorted(_CURATOR_WEB_SUBCOMMANDS))
+                + ". Запуск обслуживания (run) использует модель, поэтому его "
+                "выполняйте в терминале Korra командой «korra curator run»."
+            )
+        from korra_cli.curator import cli_main
+
+        buffer = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buffer):
+                cli_main(tokens or ["status"])
+        except SystemExit:
+            pass
+        except Exception as exc:
+            return f"Не удалось выполнить /curator: {exc}"
+        return buffer.getvalue().strip() or "Готово."
+
+    from korra_cli.config import atomic_config_write, read_user_config_raw
+    from korra_cli.write_approval_commands import handle_pending_subcommand
+    from korra_constants import get_hermes_home
+    from tools import write_approval as wa
+
+    subsystem = wa.MEMORY if command == "memory" else wa.SKILLS
+    if command == "skills":
+        wants_toggle = bool(tokens) and tokens[0].lower() in {"approval", "mode"}
+        if (
+            not wa.write_approval_enabled(wa.SKILLS)
+            and not wants_toggle
+            and wa.pending_count(wa.SKILLS) == 0
+        ):
+            return (
+                "Подтверждение записи навыков отключено (skills.write_approval). "
+                "Включите его командой /skills approval on. Поиск и установка "
+                "навыков — на странице «Навыки»."
+            )
+
+    def _set_approval(enabled: bool) -> None:
+        config_path = get_hermes_home() / "config.yaml"
+        user_config = read_user_config_raw(config_path)
+        user_config.setdefault(subsystem, {})["write_approval"] = bool(enabled)
+        atomic_config_write(config_path, user_config)
+
+    memory_store = None
+    if command == "memory":
+        from tools.memory_tool import load_on_disk_store
+
+        memory_store = load_on_disk_store()
+    out = handle_pending_subcommand(
+        subsystem, tokens, memory_store=memory_store, set_mode_fn=_set_approval
+    )
+    if out is None:
+        if command == "memory":
+            return (
+                "Неизвестная подкоманда /memory. Доступны: pending, approve <id>, "
+                "reject <id>, approval <on|off>."
+            )
+        return (
+            "Эта подкоманда /skills недоступна в веб-чате. Доступны: pending, "
+            "approve <id>, reject <id>, diff <id>, approval <on|off>. Поиск и "
+            "установка навыков — на странице «Навыки»."
+        )
+    return out
 
 
 def _start_manual_refine(agent: Any, history: Any, focus: str) -> str:
@@ -8116,7 +8223,16 @@ class APIServerAdapter(BasePlatformAdapter):
                     # ``agent_ref``, and only /v1/runs has a run_id, so neither
                     # is a usable hook for the rest.
                     self._shutdown_interruptible_agents[id(agent)] = agent
-                    if learning_slash and learning_slash[0] == "refine":
+                    if learning_slash and learning_slash[0] in {
+                        "memory", "skills", "curator", "context",
+                    }:
+                        result = {
+                            "final_response": _run_web_learning_command(*learning_slash),
+                            "messages": list(conversation_history or []),
+                            "api_calls": 0,
+                            "completed": True,
+                        }
+                    elif learning_slash and learning_slash[0] == "refine":
                         result = {
                             "final_response": _start_manual_refine(
                                 agent, conversation_history, learning_slash[1]

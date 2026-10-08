@@ -218,3 +218,95 @@ async def test_refine_through_chat_completions_reaches_the_browser(stream):
     agent._spawn_background_review.assert_called_once()
     snapshot = agent._spawn_background_review.call_args.kwargs["messages_snapshot"]
     assert [m["content"] for m in snapshot] == ["привет", "здравствуйте"]
+
+
+async def _send(text, agent=None, history=None):
+    adapter = _adapter()
+    agent = agent or _agent()
+    with patch.object(adapter, "_create_agent", return_value=agent):
+        result, _ = await adapter._run_agent(
+            user_message=text,
+            conversation_history=history or [{"role": "user", "content": "x"}],
+            session_id="s1",
+        )
+    return agent, result
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("/memory", ("memory", "")),
+        ("/memory approve a1", ("memory", "approve a1")),
+        ("/skills pending", ("skills", "pending")),
+        ("/curator status", ("curator", "status")),
+        ("/context all", ("context", "all")),
+        ("/ctx", ("context", "")),
+    ],
+)
+def test_parse_recognises_registry_learning_commands(text, expected):
+    assert _parse_learning_slash(text) == expected
+
+
+@pytest.mark.parametrize("text", ["/memoryx", "/model", "/status", "/skillset"])
+def test_parse_leaves_other_slash_commands_alone(text):
+    assert _parse_learning_slash(text) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("command", ["memory", "skills"])
+async def test_memory_and_skills_run_the_shared_handler_once(command):
+    with patch(
+        "korra_cli.write_approval_commands.handle_pending_subcommand",
+        return_value="итог обработчика",
+    ) as handler, patch("tools.write_approval.write_approval_enabled", return_value=True):
+        agent, result = await _send(f"/{command} pending")
+    handler.assert_called_once()
+    assert handler.call_args.args[1] == ["pending"]
+    assert result["final_response"] == "итог обработчика"
+    agent.run_conversation.assert_not_called()
+    agent._spawn_background_review.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_memory_without_arguments_lists_pending_writes():
+    agent, result = await _send("/memory")
+    assert result["final_response"].strip()
+    assert "Неизвестная подкоманда" not in result["final_response"]
+    agent.run_conversation.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_skills_search_is_explained_not_sent_to_the_model():
+    with patch("tools.write_approval.write_approval_enabled", return_value=True):
+        agent, result = await _send("/skills search pdf")
+    assert "странице «Навыки»" in result["final_response"]
+    agent.run_conversation.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_curator_runs_the_shared_cli_once_and_returns_its_output():
+    def fake_cli(tokens):
+        print("curator: всё спокойно")
+        return 0
+
+    with patch("korra_cli.curator.cli_main", side_effect=fake_cli) as cli:
+        agent, result = await _send("/curator status")
+    cli.assert_called_once_with(["status"])
+    assert "всё спокойно" in result["final_response"]
+    agent.run_conversation.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_curator_run_is_explained_because_it_needs_a_model():
+    with patch("korra_cli.curator.cli_main") as cli:
+        agent, result = await _send("/curator run")
+    cli.assert_not_called()
+    assert "korra curator run" in result["final_response"]
+    agent.run_conversation.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_context_is_explained_in_the_web_chat():
+    agent, result = await _send("/context")
+    assert "мессенджерах" in result["final_response"]
+    agent.run_conversation.assert_not_called()

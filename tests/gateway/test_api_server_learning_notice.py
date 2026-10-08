@@ -186,3 +186,20 @@ def test_callback_is_not_set_without_a_session_db():
     adapter = APIServerAdapter(PlatformConfig(enabled=True, extra={"key": "k" * 32}))
     adapter._wire_learning_notice(agent, {})
     assert agent.memory_notifications == "on"
+
+
+def test_refine_without_topic_works_with_automatic_review_switched_off(env, monkeypatch):
+    from gateway.platforms.api_server import _start_manual_refine
+
+    (env["home"] / "config.yaml").write_text(
+        "auxiliary:\n  background_review:\n    enabled: false\n"
+    )
+    _fake_review(monkeypatch, _skill_write)
+    agent = _agent(env["db"])
+    agent.valid_tool_names = {"skill_manage", "memory"}
+
+    reply = _start_manual_refine(agent, [{"role": "user", "content": "поправка"}], "")
+
+    assert "Изучаю диалог" in reply
+    rows = _rows(env["db"])
+    assert len(rows) == 1 and "«weekly-report»" in rows[0]["content"]
