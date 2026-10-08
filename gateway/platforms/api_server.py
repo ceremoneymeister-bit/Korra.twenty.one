@@ -687,7 +687,6 @@ _LEARNING_SLASH_RE = re.compile(r"^/([A-Za-z][A-Za-z0-9_-]*)(?=\s|$)\s*(.*)$", r
 _LEARNING_SLASH_COMMANDS = frozenset(
     {"learn", "refine", "memory", "skills", "curator", "context"}
 )
-_NO_MODEL_TURN = object()
 _LEARNING_SLASH_NO_MODEL = frozenset({"memory", "skills", "curator", "context"})
 
 
@@ -718,20 +717,7 @@ _CURATOR_WEB_SUBCOMMANDS = frozenset(
 
 _CURATOR_WEB_TIMEOUT_SECONDS = 30
 
-def _snapshot_memory_for_turn_notice(agent: Any) -> Optional[Dict[str, Any]]:
-    """Снимок памяти до хода (нужен для «Учёл»); при выключенных уведомлениях не берётся."""
-    if getattr(agent, "memory_notifications", "on") == "off":
-        return None
-    try:
-        from agent.learning_receipt import snapshot_memory
-
-        return snapshot_memory()
-    except Exception:
-        logger.debug("memory snapshot for the turn notice failed", exc_info=True)
-        return None
-
-
-def _post_turn_learning_notice(agent: Any, result: Any, memory_before: Optional[Dict[str, Any]]) -> None:
+def _post_turn_learning_notice(agent: Any, result: Any) -> None:
     """Если агент сам записал память или навык в этом ходе — одно сообщение «Учёл»."""
     post = getattr(agent, "_post_turn_learning_receipt", None)
     if post is None or not isinstance(result, dict):
@@ -739,7 +725,7 @@ def _post_turn_learning_notice(agent: Any, result: Any, memory_before: Optional[
     try:
         from agent.learning_receipt import build_turn_receipt
 
-        post(build_turn_receipt(result.get("messages") or [], memory_before))
+        post(build_turn_receipt(result.get("messages") or []))
     except Exception:
         logger.debug("turn learning notice failed", exc_info=True)
 
@@ -3640,6 +3626,10 @@ class APIServerAdapter(BasePlatformAdapter):
                 return
             try:
                 with lock:
+                    if posted:
+                        stored = db.get_message_display_metadata(posted["row_id"]) or {}
+                        if (stored.get(RECEIPT_KEY) or {}).get("undone"):
+                            posted.clear()
                     if posted:
                         receipt = merge_receipts(posted["receipt"], receipt)
                     text = format_notice(receipt, mode)
@@ -8359,7 +8349,7 @@ class APIServerAdapter(BasePlatformAdapter):
                     # ``agent_ref``, and only /v1/runs has a run_id, so neither
                     # is a usable hook for the rest.
                     self._shutdown_interruptible_agents[id(agent)] = agent
-                    memory_before: Any = _NO_MODEL_TURN
+                    model_turn = False
                     if learning_slash and learning_slash[0] == "refine":
                         result = {
                             "final_response": _start_manual_refine(
@@ -8370,7 +8360,7 @@ class APIServerAdapter(BasePlatformAdapter):
                             "completed": True,
                         }
                     else:
-                        memory_before = _snapshot_memory_for_turn_notice(agent)
+                        model_turn = True
                         result = agent.run_conversation(
                             user_message=run_user_message,
                             conversation_history=run_history,
@@ -8379,8 +8369,8 @@ class APIServerAdapter(BasePlatformAdapter):
                             **({"persist_user_display_metadata": persist_user_display_metadata}
                                if persist_user_display_metadata else {}),
                         )
-                    if memory_before is not _NO_MODEL_TURN:
-                        _post_turn_learning_notice(agent, result, memory_before)
+                    if model_turn:
+                        _post_turn_learning_notice(agent, result)
                     usage = {
                         "input_tokens": getattr(agent, "session_prompt_tokens", 0) or 0,
                         "output_tokens": getattr(agent, "session_completion_tokens", 0) or 0,

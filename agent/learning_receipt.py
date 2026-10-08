@@ -18,7 +18,6 @@ RECEIPT_KEY = "learning_receipt"
 DISPLAY_KIND = "learning"
 
 _MEMORY_FILES = {"memory": "MEMORY.md", "user": "USER.md"}
-_MEMORY_WRITE_ACTIONS = frozenset({"add", "replace", "remove"})
 _ACTION_LABELS = {"create": "создан", "delete": "удалён"}
 
 
@@ -113,7 +112,9 @@ def build_review_receipt(
     memory_before: Optional[Dict[str, Optional[List[str]]]],
 ) -> Optional[Dict[str, Any]]:
     """Квитанция разбора или ``None``, если ничего не сохранено."""
-    return _assemble(_skill_changes(review_messages, prior_snapshot), memory_before)
+    return _assemble(
+        _skill_changes(review_messages, prior_snapshot), _memory_diff(memory_before)
+    )
 
 
 def current_turn_messages(messages: List[Dict]) -> List[Dict]:
@@ -125,50 +126,59 @@ def current_turn_messages(messages: List[Dict]) -> List[Dict]:
     return []
 
 
-def _memory_write_succeeded(turn_messages: List[Dict]) -> bool:
-    call_ids = set()
+def _cancel(added: List[str], removed: List[str]) -> None:
+    """Запись, добавленная и убранная в одной цепочке изменений, из обоих списков уходит."""
+    for entry in list(removed):
+        if entry in added:
+            added.remove(entry)
+            removed.remove(entry)
+
+
+def _memory_changes(turn_messages: List[Dict]) -> List[Dict[str, Any]]:
+    """Изменения памяти, которые вернули успешные вызовы ``memory`` этого хода.
+
+    Инструмент в ответе перечисляет, какие записи он добавил и убрал
+    (``changes``), поэтому чужие записи других чатов в квитанцию не попадают.
+    """
+    memory_calls = set()
     for msg in turn_messages:
         if isinstance(msg, dict) and msg.get("role") == "assistant":
             for tc in msg.get("tool_calls", []) or []:
                 fn = (tc.get("function") or {}) if isinstance(tc, dict) else {}
-                if fn.get("name") != "memory":
-                    continue
-                try:
-                    args = json.loads(fn.get("arguments", "{}"))
-                except (json.JSONDecodeError, TypeError):
-                    args = {}
-                if isinstance(args, dict) and (
-                    args.get("action") in _MEMORY_WRITE_ACTIONS or args.get("operations")
-                ):
-                    call_ids.add(tc.get("id"))
+                if fn.get("name") == "memory":
+                    memory_calls.add(tc.get("id"))
+    by_target: Dict[str, Dict[str, Any]] = {}
     for msg in turn_messages:
         if not isinstance(msg, dict) or msg.get("role") != "tool":
             continue
-        if msg.get("tool_call_id") not in call_ids:
+        if msg.get("tool_call_id") not in memory_calls:
             continue
         try:
             data = json.loads(msg.get("content", "{}"))
         except (json.JSONDecodeError, TypeError):
             continue
-        if isinstance(data, dict) and data.get("success") and not data.get("staged"):
-            return True
-    return False
+        if not isinstance(data, dict) or not data.get("success") or data.get("staged"):
+            continue
+        changes = data.get("changes")
+        target = data.get("target")
+        if target not in _MEMORY_FILES or not isinstance(changes, dict):
+            continue
+        item = by_target.setdefault(target, {"target": target, "added": [], "removed": []})
+        item["added"].extend(str(e) for e in changes.get("added") or [])
+        item["removed"].extend(str(e) for e in changes.get("removed") or [])
+        _cancel(item["added"], item["removed"])
+    return [item for item in by_target.values() if item["added"] or item["removed"]]
 
 
-def build_turn_receipt(
-    messages: List[Dict],
-    memory_before: Optional[Dict[str, Optional[List[str]]]],
-) -> Optional[Dict[str, Any]]:
+def build_turn_receipt(messages: List[Dict]) -> Optional[Dict[str, Any]]:
     """Квитанция хода, в котором агент сам записал память или навык.
 
-    Берутся только вызовы текущего хода. Разница файлов памяти учитывается лишь
-    при успешном вызове ``memory`` в этом ходе, чтобы чужая запись (например,
-    фонового разбора прошлого хода) не приписывалась этому ходу.
+    Берутся только вызовы текущего хода и только то, что они сами изменили, а не
+    разница файлов за время хода: параллельные записи других чатов и фонового
+    разбора этому ходу не приписываются.
     """
     turn = current_turn_messages(messages)
-    skills = _skill_changes(turn, [])
-    before = memory_before if _memory_write_succeeded(turn) else None
-    return _assemble(skills, before)
+    return _assemble(_skill_changes(turn, []), _memory_changes(turn))
 
 
 def merge_receipts(base: Dict[str, Any], extra: Dict[str, Any]) -> Dict[str, Any]:
@@ -189,18 +199,19 @@ def merge_receipts(base: Dict[str, Any], extra: Dict[str, Any]) -> Dict[str, Any
         )
         known["added"].extend(item.get("added") or [])
         known["removed"].extend(item.get("removed") or [])
+        _cancel(known["added"], known["removed"])
     return {
         "version": 1,
         "id": base.get("id") or extra.get("id"),
         "skills": list(skills.values()),
-        "memory": list(memory.values()),
+        "memory": [m for m in memory.values() if m["added"] or m["removed"]],
     }
 
 
-def _assemble(
-    skills: List[Dict[str, Any]],
+def _memory_diff(
     memory_before: Optional[Dict[str, Optional[List[str]]]],
-) -> Optional[Dict[str, Any]]:
+) -> List[Dict[str, Any]]:
+    """Изменения памяти фонового разбора: разница снимка до и файлов после."""
     memory: List[Dict[str, Any]] = []
     if memory_before:
         after_snap = snapshot_memory()
@@ -212,6 +223,12 @@ def _assemble(
             removed = _multiset_diff(after, before)
             if added or removed:
                 memory.append({"target": target, "added": added, "removed": removed})
+    return memory
+
+
+def _assemble(
+    skills: List[Dict[str, Any]], memory: List[Dict[str, Any]]
+) -> Optional[Dict[str, Any]]:
     if not skills and not memory:
         return None
     return {"version": 1, "id": uuid.uuid4().hex[:12], "skills": skills, "memory": memory}
