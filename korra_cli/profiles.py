@@ -147,6 +147,12 @@ _CLONE_ALL_HISTORY_EXCLUDE_ROOT: frozenset[str] = frozenset({
     "checkpoints",
 })
 
+# Installation-wide stores that belong to the install, not to a profile: the CRM
+# connection holds the installation's CRM key.  Never cloned into a profile and
+# never exported with one, whatever the source (including old clones that
+# already contain a copy).
+_INSTALL_WIDE_STORE_ROOT: frozenset[str] = frozenset({"crm-connection"})
+
 # Marker file written by `hermes profile create --no-skills`.  When present in
 # a profile's root, callers of seed_profile_skills() (fresh-create, `hermes
 # update`'s all-profile sync, the web dashboard) skip bundled-skill seeding
@@ -207,7 +213,10 @@ def _clone_all_copytree_ignore(source_dir: Path):
                 at_root = False
             if at_root:
                 # History artifacts: excluded for ANY source profile.
-                if entry in _CLONE_ALL_HISTORY_EXCLUDE_ROOT:
+                if (
+                    entry in _CLONE_ALL_HISTORY_EXCLUDE_ROOT
+                    or entry in _INSTALL_WIDE_STORE_ROOT
+                ):
                     ignored.append(entry)
                     continue
                 # Infrastructure: only the default profile contains these.
@@ -2778,11 +2787,18 @@ def export_profile(name: str, output_path: str, extra_files: Optional[Dict[str, 
     with tempfile.TemporaryDirectory() as tmpdir:
         staged = Path(tmpdir) / canon
         _CREDENTIAL_FILES = {"auth.json", ".env"}
+
+        def _named_export_ignore(directory: str, contents: list) -> set:
+            ignored = _CREDENTIAL_FILES & set(contents)
+            if Path(directory) == profile_dir:
+                ignored |= _INSTALL_WIDE_STORE_ROOT & set(contents)
+            return ignored
+
         shutil.copytree(
             profile_dir,
             staged,
             symlinks=True,
-            ignore=lambda d, contents: _CREDENTIAL_FILES & set(contents),
+            ignore=_named_export_ignore,
         )
         _stage_extras(staged)
         _scrub_export_secrets(staged)
