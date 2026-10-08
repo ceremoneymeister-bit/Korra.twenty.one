@@ -55,4 +55,9 @@ export interface DashboardWidget {
   isAvailable?: (state: DashboardState | null) => boolean;
   /** Содержимое карточки: у каждого виджета своё и живёт в его файле. */
   Body: ComponentType<DashboardWidgetBodyProps>;
+  /**
+   * Короткая пометка справа от заголовка («обновлено 3 мин назад»). Живёт в
+   * шапке, чтобы быть на виду и на тесной плитке, и на телефоне.
+   */
+  HeaderNote?: ComponentType<DashboardWidgetBodyProps>;
 }
