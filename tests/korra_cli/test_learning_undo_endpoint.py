@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from agent.learning_receipt import DISPLAY_KIND, RECEIPT_KEY, build_review_receipt, snapshot_memory
+from agent.learning_receipt import DISPLAY_KIND, RECEIPT_KEY, build_review_receipt
 
 SKILL_V1 = "---\nname: weekly-report\ndescription: weekly report\n---\n\n# Report\n\nVersion one.\n"
 SKILL_V2 = SKILL_V1.replace("Version one.", "Version two.")
@@ -48,7 +48,7 @@ def _skill_notice(action, content):
         }}]},
         {"role": "tool", "tool_call_id": "c", "content": raw},
     ]
-    return build_review_receipt(messages, [], snapshot_memory())
+    return build_review_receipt(messages, [])
 
 
 def _post_notice(receipt):

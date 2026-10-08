@@ -74,7 +74,7 @@ def _skill_md(env):
 def test_receipt_names_the_created_skill_and_undo_removes_it(env):
     result, raw = _skill("create", SKILL_V1)
     assert result["success"]
-    receipt = build_review_receipt(_review_messages("create", raw), [], snapshot_memory())
+    receipt = build_review_receipt(_review_messages("create", raw), [])
 
     assert [s["name"] for s in receipt["skills"]] == ["weekly-report"]
     assert "«weekly-report»" in format_notice(receipt)
@@ -88,7 +88,7 @@ def test_receipt_names_the_created_skill_and_undo_removes_it(env):
 def test_undo_restores_previous_skill_content(env):
     _skill("create", SKILL_V1)
     result, raw = _skill("edit", SKILL_V2)
-    receipt = build_review_receipt(_review_messages("edit", raw), [], snapshot_memory())
+    receipt = build_review_receipt(_review_messages("edit", raw), [])
     assert "Version two." in _skill_md(env).read_text()
 
     assert undo_receipt(receipt)["status"] == "undone"
@@ -98,7 +98,7 @@ def test_undo_restores_previous_skill_content(env):
 def test_undo_of_overwritten_change_explains_and_changes_nothing(env):
     _skill("create", SKILL_V1)
     _, raw = _skill("edit", SKILL_V2)
-    receipt = build_review_receipt(_review_messages("edit", raw), [], snapshot_memory())
+    receipt = build_review_receipt(_review_messages("edit", raw), [])
     newer = SKILL_V2.replace("Version two.", "Version three, written later.")
     _skill("edit", newer)
 
@@ -111,7 +111,7 @@ def test_undo_of_overwritten_change_explains_and_changes_nothing(env):
 def test_second_undo_is_refused_cleanly(env):
     _skill("create", SKILL_V1)
     _, raw = _skill("edit", SKILL_V2)
-    receipt = build_review_receipt(_review_messages("edit", raw), [], snapshot_memory())
+    receipt = build_review_receipt(_review_messages("edit", raw), [])
     assert undo_receipt(receipt)["status"] == "undone"
 
     again = undo_receipt(receipt)
@@ -127,7 +127,7 @@ def test_skill_without_ledger_entry_is_not_silently_rolled_back(env):
     payload = json.loads(raw)
     payload.pop("ledger", None)
     receipt = build_review_receipt(
-        _review_messages("create", json.dumps(payload)), [], snapshot_memory()
+        _review_messages("create", json.dumps(payload)), []
     )
     out = undo_receipt(receipt)
     assert out["status"] == "conflict"
@@ -137,14 +137,14 @@ def test_skill_without_ledger_entry_is_not_silently_rolled_back(env):
 def test_staged_or_failed_skill_writes_make_no_receipt(env):
     staged = json.dumps({"success": True, "staged": True, "pending_id": "p1"})
     failed = json.dumps({"success": False, "error": "x"})
-    assert build_review_receipt(_review_messages("create", staged), [], snapshot_memory()) is None
-    assert build_review_receipt(_review_messages("create", failed), [], snapshot_memory()) is None
+    assert build_review_receipt(_review_messages("create", staged), []) is None
+    assert build_review_receipt(_review_messages("create", failed), []) is None
 
 
 def test_prior_snapshot_tool_results_are_not_reported(env):
     _, raw = _skill("create", SKILL_V1)
     messages = _review_messages("create", raw, call_id="old")
-    assert build_review_receipt(messages, [messages[1]], snapshot_memory()) is None
+    assert build_review_receipt(messages, [messages[1]]) is None
 
 
 def _store():
@@ -153,12 +153,29 @@ def _store():
     return load_on_disk_store()
 
 
+def _memory_call(call_id="r1", **args):
+    """Вызов инструмента ``memory`` и его настоящий ответ — как в сообщениях форка."""
+    from tools.memory_tool import memory_tool
+
+    raw = memory_tool(store=_store(), **args)
+    assert json.loads(raw)["success"]
+    return [
+        {
+            "role": "assistant",
+            "tool_calls": [
+                {"id": call_id, "function": {"name": "memory", "arguments": json.dumps(args)}}
+            ],
+        },
+        {"role": "tool", "tool_call_id": call_id, "content": raw},
+    ]
+
+
 def test_memory_add_is_reported_and_undone(env):
     store = _store()
     store.add("memory", "Клиент любит короткие отчёты")
-    before = snapshot_memory()
-    store.add("memory", "Отчёты сдаём по пятницам")
-    receipt = build_review_receipt([], [], before)
+    receipt = build_review_receipt(
+        _memory_call(action="add", target="memory", content="Отчёты сдаём по пятницам"), []
+    )
 
     assert receipt["memory"] == [
         {"target": "memory", "added": ["Отчёты сдаём по пятницам"], "removed": []}
@@ -173,9 +190,15 @@ def test_memory_add_is_reported_and_undone(env):
 def test_memory_replace_is_undone_to_the_old_entry(env):
     store = _store()
     store.add("user", "Пишет по-русски")
-    before = snapshot_memory()
-    store.replace("user", "Пишет по-русски", "Пишет по-русски, без эмодзи")
-    receipt = build_review_receipt([], [], before)
+    receipt = build_review_receipt(
+        _memory_call(
+            action="replace",
+            target="user",
+            old_text="Пишет по-русски",
+            content="Пишет по-русски, без эмодзи",
+        ),
+        [],
+    )
 
     assert undo_receipt(receipt)["status"] == "undone"
     assert snapshot_memory()["user"] == ["Пишет по-русски"]
@@ -183,9 +206,9 @@ def test_memory_replace_is_undone_to_the_old_entry(env):
 
 def test_memory_undo_refuses_when_entry_was_edited_since(env):
     store = _store()
-    before = snapshot_memory()
-    store.add("memory", "Первая версия правила")
-    receipt = build_review_receipt([], [], before)
+    receipt = build_review_receipt(
+        _memory_call(action="add", target="memory", content="Первая версия правила"), []
+    )
     store.replace("memory", "Первая версия правила", "Вторая версия правила")
 
     out = undo_receipt(receipt)
@@ -195,32 +218,13 @@ def test_memory_undo_refuses_when_entry_was_edited_since(env):
 
 def test_no_changes_no_receipt(env):
     _store().add("memory", "Что-то давно известное")
-    assert build_review_receipt([], [], snapshot_memory()) is None
+    assert build_review_receipt([], []) is None
 
 
 def _memory_add_messages(text, call_id="m1"):
-    from tools.memory_tool import load_on_disk_store
-
-    result = load_on_disk_store().add("user", text)
-    assert result["success"]
-    return [
-        {"role": "user", "content": "Сохрани моё правило"},
-        {
-            "role": "assistant",
-            "tool_calls": [
-                {
-                    "id": call_id,
-                    "function": {
-                        "name": "memory",
-                        "arguments": json.dumps(
-                            {"action": "add", "target": "user", "content": text}
-                        ),
-                    },
-                }
-            ],
-        },
-        {"role": "tool", "tool_call_id": call_id, "content": json.dumps(result)},
-    ]
+    return [{"role": "user", "content": "Сохрани моё правило"}] + _memory_call(
+        call_id, action="add", target="user", content=text
+    )
 
 
 def test_undo_must_preserve_another_chat_write_during_the_turn(env):
@@ -233,15 +237,16 @@ def test_undo_must_preserve_another_chat_write_during_the_turn(env):
 
 
 def test_merged_add_then_refinement_must_undo_to_original_memory(env):
-    from tools.memory_tool import load_on_disk_store
-
     first = build_turn_receipt(_memory_add_messages("Планы начинаем с цели"))
-    before_review = snapshot_memory()
-    result = load_on_disk_store().replace(
-        "user", "Планы начинаем с цели", "Планы встреч начинаем с цели и указываем минуты"
+    second = build_review_receipt(
+        _memory_call(
+            action="replace",
+            target="user",
+            old_text="Планы начинаем с цели",
+            content="Планы встреч начинаем с цели и указываем минуты",
+        ),
+        [],
     )
-    assert result["success"]
-    second = build_review_receipt([], [], before_review)
     merged = merge_receipts(first, second)
     outcome = undo_receipt(merged)
     assert outcome["status"] == "undone"
@@ -256,9 +261,16 @@ def test_merged_refinement_restores_content_that_was_there_before_both_writes(en
     first = build_turn_receipt(
         _memory_add_messages("Планы начинаем с цели")
     )
-    before_review = snapshot_memory()
-    assert store.replace("user", "Планы начинаем с цели", "Планы встреч с минутами")["success"]
-    merged = merge_receipts(first, build_review_receipt([], [], before_review))
+    second = build_review_receipt(
+        _memory_call(
+            action="replace",
+            target="user",
+            old_text="Планы начинаем с цели",
+            content="Планы встреч с минутами",
+        ),
+        [],
+    )
+    merged = merge_receipts(first, second)
     assert merged["memory"] == [
         {"target": "user", "added": ["Планы встреч с минутами"], "removed": []}
     ]
@@ -318,3 +330,25 @@ def test_duplicate_add_changes_nothing_and_gives_no_receipt(env):
 
     assert load_on_disk_store().add("user", "Планы начинаем с цели")["success"]
     assert build_turn_receipt(_memory_add_messages("Планы начинаем с цели")) is None
+
+
+def test_background_undo_preserves_another_chat_write(env):
+    own_rule = "Планы встреч начинаем с цели"
+    other_rule = "Письма подписываем именем"
+    own_messages = _memory_call("review-m1", action="add", target="user", content=own_rule)
+    assert _store().add("user", other_rule)["success"]
+    receipt = build_review_receipt(own_messages, [])
+    assert receipt["memory"] == [{"target": "user", "added": [own_rule], "removed": []}]
+    outcome = undo_receipt(receipt)
+    assert outcome["status"] == "undone"
+    assert snapshot_memory()["user"] == [other_rule]
+
+
+def test_review_without_fork_messages_gives_no_memory_receipt(env):
+    assert _store().add("user", "Запись без сообщений форка")["success"]
+    assert build_review_receipt([], []) is None
+
+
+def test_review_receipt_ignores_memory_calls_from_the_parent_history(env):
+    messages = _memory_call("old", action="add", target="user", content="Старое правило")
+    assert build_review_receipt(messages, [messages[1]]) is None
