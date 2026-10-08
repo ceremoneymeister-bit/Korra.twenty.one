@@ -285,7 +285,7 @@ export function salesFixture(overrides: Partial<SalesReady> = {}, type: CrmType 
       ],
       limited: false,
     },
-    new_leads: { today: 6, series: [2, 4, 3, 5, 1, 0, 6], unsorted: 2, limited: false },
+    new_leads: { today: 6, series: [2, 4, 3, 5, 1, 0, 6], unsorted: type === "amocrm" ? 2 : null, limited: false },
     stuck: { count: 7, amount: 1_260_000, days: 7, approx: false, limited: false, top_exact: true, top: stuckTop },
     overdue: { available: true, tasks: 4, managers: 2, limited: false },
     river: {

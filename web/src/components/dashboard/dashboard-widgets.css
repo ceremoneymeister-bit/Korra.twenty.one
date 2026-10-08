@@ -2135,20 +2135,26 @@
 
 .kdw-sales-river-wrap {
   display: flex;
-  flex: 1 1 0;
+  flex: 0 1 auto;
   flex-direction: column;
   gap: 6px;
-  min-height: 72px;
+  min-height: 0;
 }
 
 .kdw-sales-river-h {
   display: flex;
   flex: none;
-  flex-wrap: wrap;
   justify-content: space-between;
   gap: 2px 12px;
+  min-width: 0;
   font-size: 12px;
   color: var(--kdw-muted);
+}
+
+.kdw-sales-river-h > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .kdw-sales-river-h b {
@@ -2161,7 +2167,7 @@
 
 .kdw-sales-river {
   display: flex;
-  flex: 1 1 0;
+  flex: 0 1 auto;
   gap: 2px;
   min-height: 0;
   overflow-x: auto;
@@ -2174,6 +2180,7 @@
   flex-direction: column;
   gap: 4px;
   min-width: 0;
+  min-height: 0;
   padding: 6px;
   border-radius: 10px;
 }
@@ -2192,12 +2199,12 @@
 
 .kdw-sales-dots {
   display: flex;
-  flex: 1 1 0;
+  flex: 0 1 auto;
   flex-wrap: wrap;
-  align-content: flex-end;
-  align-items: flex-end;
+  align-content: flex-start;
+  align-items: center;
   gap: 3px;
-  min-height: 0;
+  min-height: 18px;
   overflow: hidden;
 }
 
@@ -2283,8 +2290,15 @@
   background: var(--kdw-accent);
 }
 
-@container kdw-sales (max-height: 380px) {
+/* Штатная плитка L (≈500 px): легенда и «больше всего стоит» уступают место тройке застрявших. */
+@container kdw-sales (max-height: 540px) {
   .kdw-sales-legend,
+  .kdw-sales-river-hot {
+    display: none;
+  }
+}
+
+@container kdw-sales (max-height: 380px) {
   .kdw-sales-river-h {
     display: none;
   }
@@ -2299,17 +2313,27 @@
   }
 }
 
-/* Карточки застрявших и команда — только когда высоты правда хватает. */
+/* Тройка застрявших видна уже в штатной L; команда — только когда высоты правда хватает. */
 .kdw-sales-extras {
   display: none;
   flex: none;
+  flex-direction: column;
   gap: 10px;
 }
 
-@container kdw-sales (min-height: 540px) {
+.kdw-sales-team {
+  display: none;
+}
+
+@container kdw-sales (min-height: 400px) {
   .kdw-sales-extras {
     display: flex;
-    flex-direction: column;
+  }
+}
+
+@container kdw-sales (min-height: 540px) {
+  .kdw-sales-team {
+    display: flex;
   }
 }
 
@@ -2320,11 +2344,12 @@
 }
 
 .kdw-sales-deal {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  column-gap: 8px;
+  align-items: center;
   min-width: 0;
-  padding: 8px;
+  padding: 6px 8px;
   border-radius: 12px;
   color: inherit;
   text-decoration: none;
@@ -2335,8 +2360,8 @@
   --p: 50;
   display: grid;
   place-items: center;
-  width: 44px;
-  height: 44px;
+  width: 38px;
+  height: 38px;
   border-radius: 50%;
   background: conic-gradient(var(--kdw-stuck) calc(var(--p) * 1%), var(--kdw-hairline) 0);
 }
@@ -2344,27 +2369,29 @@
 .kdw-sales-ring > span {
   display: grid;
   place-items: center;
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
   background: var(--neo-surface);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   line-height: 1;
 }
 
 .kdw-sales-ring small {
-  font-size: 8px;
+  font-size: 7px;
   font-weight: 500;
   color: var(--kdw-muted);
 }
 
 .kdw-sales-deal-top {
   display: flex;
+  grid-row: 1 / span 3;
 }
 
 .kdw-sales-sum {
-  font-size: 14px;
+  grid-column: 2;
+  font-size: 13px;
   font-weight: 700;
 }
 
@@ -2381,7 +2408,6 @@
 }
 
 .kdw-sales-team {
-  display: flex;
   gap: 12px;
   overflow: hidden;
 }

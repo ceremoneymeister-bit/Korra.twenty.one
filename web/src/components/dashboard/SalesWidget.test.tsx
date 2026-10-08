@@ -335,6 +335,36 @@ describe("карточка «Продажи»: валюта и полнота (K
   });
 });
 
+describe("карточка «Продажи»: плитка L и «Неразобранное» (K21-322 F12)", () => {
+  it.each(["m", "l"] as const)("%s, amoCRM: в сигнале заявок — «неразобр.»", async (size) => {
+    sales = salesFixture({ new_leads: { today: 14, series: [1, 2, 3, 4, 5, 6, 14], unsorted: 4 } }, "amocrm");
+    await mount(size);
+    const first = container.querySelector(".kdw-sales-signals .kdw-sales-sig")!.textContent!;
+    expect(first).toContain("14");
+    expect(first).toContain("4 неразобр.");
+  });
+
+  it("Битрикс24 без «Неразобранного» не получает пустой подписи", async () => {
+    sales = salesFixture({ new_leads: { today: 6, series: [0, 0, 0, 0, 0, 0, 6], unsorted: null } });
+    await mount("l");
+    expect(container.querySelector(".kdw-sales-signals")!.textContent).not.toContain("неразобр");
+  });
+
+  it("L: три застрявшие сделки видны в штатной плитке ≈500 px, команда прячется только на тесной", () => {
+    expect(widgetStyles).toMatch(/\.kdw-sales-extras \{[^}]*display: none/);
+    expect(widgetStyles).toMatch(/@container kdw-sales \(min-height: 400px\) \{\s*\.kdw-sales-extras \{\s*display: flex/);
+    expect(widgetStyles).toMatch(/\.kdw-sales-team \{[^}]*display: none/);
+    expect(widgetStyles).toMatch(/@container kdw-sales \(min-height: 540px\) \{\s*\.kdw-sales-team \{\s*display: flex/);
+    expect(widgetStyles).not.toMatch(/@container kdw-sales \(min-height: 540px\) \{\s*\.kdw-sales-extras/);
+  });
+
+  it("L: река занимает по содержимому — точки сверху, колонки не растягиваются пустотой", () => {
+    expect(widgetStyles).toMatch(/\.kdw-sales-river-wrap \{[^}]*flex: 0 1 auto/);
+    expect(widgetStyles).toMatch(/\.kdw-sales-river \{[^}]*flex: 0 1 auto/);
+    expect(widgetStyles).toMatch(/\.kdw-sales-dots \{[^}]*align-content: flex-start/);
+  });
+});
+
 describe("карточка «Продажи»: наличие на доске", () => {
   it("есть только там, где сводка принесла раздел продаж", () => {
     expect(SALES_WIDGET.isAvailable?.(null)).toBe(false);

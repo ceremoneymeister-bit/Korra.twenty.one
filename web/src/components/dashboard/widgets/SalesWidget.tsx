@@ -370,9 +370,13 @@ function Signals({ sales, size }: { sales: SalesReady; size: "m" | "l" }) {
             <AtLeast on={leads.limited} />
             {leads.today}
           </b>
-          <span>{size === "l" ? "новых заявок сегодня" : "заявок сегодня"}</span>
+          {leads.unsorted !== null ? (
+            <span title="Заявок сегодня; неразобранных — в разделе «Неразобранное»">заявок · {leads.unsorted} неразобр.</span>
+          ) : (
+            <span>{size === "l" ? "новых заявок сегодня" : "заявок сегодня"}</span>
+          )}
         </span>
-        {size === "l" ? (
+        {size === "l" && leads.unsorted === null ? (
           <span className="kdw-sales-spark" aria-hidden>
             {leads.series.map((value, index) => (
               <i
@@ -529,11 +533,15 @@ function StuckCards({ sales }: { sales: SalesReady }) {
       {top.map((deal) => (
         <a key={deal.id} className="kdw-sales-deal" href={deal.url} target="_blank" rel="noopener noreferrer">
           <span className="kdw-sales-deal-top">
-            <span className="kdw-sales-ring" style={{ "--p": Math.round((deal.days / longest) * 100) } as CSSProperties}>
+            <span
+              className="kdw-sales-ring"
+              title={deal.days_min ? `не менее ${deal.days} дн. без движения` : `${deal.days} дн. без движения`}
+              style={{ "--p": Math.round((deal.days / longest) * 100) } as CSSProperties}
+            >
               <span>
-                {deal.days_min ? <small>не менее</small> : null}
+                {deal.days_min ? "≥" : ""}
                 {deal.days}
-                <small>{plural(deal.days, ["день", "дня", "дней"])}</small>
+                <small>дн.</small>
               </span>
             </span>
           </span>
