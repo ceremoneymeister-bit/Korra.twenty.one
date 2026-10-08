@@ -351,6 +351,20 @@ def build(payload: Any, *, socket_path: str = "") -> dict:
     raise CrmConnectionError("invalid_request", "Выберите Битрикс24 или amoCRM.")
 
 
+def _saved_route(payload: Any, root: Optional[Path], explicit: str = "") -> str:
+    """The socket route to use: an explicit trusted one, else the one saved for this same amoCRM account."""
+    if explicit or not isinstance(payload, dict) or payload.get("type") != AMOCRM:
+        return explicit
+    previous = load(root)
+    if previous is None or previous["type"] != AMOCRM or not previous.get("unix_socket"):
+        return ""
+    try:
+        same = portal_of(previous) == cr.parse_amo_domain(_text(payload.get("domain"), 200))
+    except CrmError:
+        return ""
+    return previous["unix_socket"] if same else ""
+
+
 def _host_hint(payload: Any) -> str:
     try:
         return portal_of(build(payload))
@@ -364,7 +378,7 @@ def check(payload: Any, *, root: Optional[Path] = None) -> dict:
     try:
         if not payload or not kind:
             return recheck(root=root)
-        conn = build(payload)
+        conn = build(payload, socket_path=_saved_route(payload, root))
         found = probe(conn)
     except CrmError as exc:
         return failure(exc, kind if kind in (BITRIX, AMOCRM) else BITRIX, _host_hint(payload))
@@ -401,7 +415,7 @@ def save(payload: Any, *, root: Optional[Path] = None, socket_path: str = "") ->
     is not the key's fault, so the connection is saved and checked again later.
     """
     try:
-        conn = build(payload, socket_path=socket_path)
+        conn = build(payload, socket_path=_saved_route(payload, root, socket_path))
     except CrmError as exc:
         kind = payload.get("type") if isinstance(payload, dict) else None
         return failure(exc, kind if kind in (BITRIX, AMOCRM) else BITRIX, _host_hint(payload))

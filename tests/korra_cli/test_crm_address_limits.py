@@ -143,3 +143,49 @@ def test_save_via_api_drops_socket_but_adopt_keeps_agent_route(tmp_path, monkeyp
     cc.adopt("sales", "amocrm", root=tmp_path)
     assert probed[-1] == "/run/amo/amo.sock"
     assert cc.load(tmp_path)["unix_socket"] == "/run/amo/amo.sock"
+
+
+# --- F10: replacing the token of the same account keeps the adopted route ---
+
+SOCKET = "/run/amo/amo.sock"
+
+
+def _stored_amo(tmp_path, socket_path=SOCKET):
+    record = {"type": "amocrm", "domain": "synthetic.amocrm.ru", "token": "old-token", "settings": {"agents_access": True}}
+    if socket_path:
+        record["unix_socket"] = socket_path
+    cc._write(record, tmp_path)
+
+
+def test_replacing_token_keeps_route_on_check_and_save(tmp_path, monkeypatch):
+    _stored_amo(tmp_path)
+    seen = []
+    monkeypatch.setattr(cc, "probe", lambda conn: seen.append(conn.get("unix_socket")) or {"pipelines": []})
+    payload = {"type": "amocrm", "domain": "synthetic.amocrm.ru", "token": "new-token"}
+    assert cc.check(payload, root=tmp_path)["ok"]
+    assert seen == [SOCKET]
+    out = cc.save(payload, root=tmp_path)
+    assert out["ok"] and seen == [SOCKET, SOCKET]
+    stored = cc.load(tmp_path)
+    assert stored["token"] == "new-token" and stored["unix_socket"] == SOCKET
+
+
+def test_route_survives_a_network_failure_on_replacement(tmp_path, monkeypatch):
+    _stored_amo(tmp_path)
+
+    def down(conn):
+        assert conn.get("unix_socket") == SOCKET
+        raise cr.CrmError("network")
+
+    monkeypatch.setattr(cc, "probe", down)
+    out = cc.save({"type": "amocrm", "domain": "synthetic.amocrm.ru", "token": "new-token"}, root=tmp_path)
+    assert out["ok"] and out["warning"]["code"] == "network"
+    assert cc.load(tmp_path)["unix_socket"] == SOCKET
+
+
+def test_route_is_not_carried_to_another_account(tmp_path, monkeypatch):
+    _stored_amo(tmp_path)
+    seen = []
+    monkeypatch.setattr(cc, "probe", lambda conn: seen.append(conn.get("unix_socket")) or {"pipelines": []})
+    cc.save({"type": "amocrm", "domain": "other.amocrm.ru", "token": "tok"}, root=tmp_path)
+    assert seen == [None] and "unix_socket" not in cc.load(tmp_path)
