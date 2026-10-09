@@ -1232,27 +1232,51 @@ def _record_review_usage_to_parent(
         )
 
 
-def _classify_review_result(actions: List[str]) -> str:
-    """Map a review action summary to ``none`` / ``skill`` / ``memory`` / both.
+def _classify_review_result(
+    review_messages: List[Dict],
+    prior_snapshot: Optional[List[Dict]] = None,
+) -> str:
+    """Map the fork's real writes to ``none`` / ``skill`` / ``memory`` / both.
 
-    Matching is prefix-based on the formats
-    :func:`summarize_background_review_actions` emits
-    (``Skill …``, ``📝 Skill …``, ``Memory …``, ``User profile …``), not
-    free-text substring search — so a line like
-    ``Skipped: no skill worth saving`` stays ``none``.
+    Judged by the tool results themselves — a ``memory`` / ``skill_manage``
+    call answered with ``success: true`` (the same source as
+    ``_review_write_landed`` and the learning receipt) — not by the wording
+    of the human-facing summary. Results already present in ``prior_snapshot``
+    are inherited history and do not count.
     """
-    if not actions:
-        return "none"
+    inherited = {
+        m.get("tool_call_id")
+        for m in prior_snapshot or []
+        if isinstance(m, dict) and m.get("role") == "tool" and m.get("tool_call_id")
+    }
+    tool_names: Dict[Any, str] = {}
+    for msg in review_messages or []:
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            continue
+        for tc in msg.get("tool_calls") or []:
+            if isinstance(tc, dict) and tc.get("id"):
+                fn = tc.get("function")
+                tool_names[tc["id"]] = fn.get("name", "") if isinstance(fn, dict) else ""
     has_skill = False
     has_memory = False
-    for action in actions:
-        text = str(action).lstrip()
-        if text.startswith("📝"):
-            text = text[1:].lstrip()
-        lower = text.lower()
-        if lower.startswith("skill"):
+    for msg in review_messages or []:
+        if not isinstance(msg, dict) or msg.get("role") != "tool":
+            continue
+        tcid = msg.get("tool_call_id")
+        if not tcid or tcid in inherited:
+            continue
+        name = tool_names.get(tcid)
+        if name not in ("memory", "skill_manage"):
+            continue
+        try:
+            data = json.loads(msg.get("content") or "")
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(data, dict) or data.get("success") is not True:
+            continue
+        if name == "skill_manage":
             has_skill = True
-        elif lower.startswith("memory") or lower.startswith("user profile"):
+        else:
             has_memory = True
     if has_skill and has_memory:
         return "skill+memory"
@@ -1953,7 +1977,7 @@ def _run_review_in_thread(
             )
             actions = []
 
-        _result = _classify_review_result(actions)
+        _result = _classify_review_result(review_messages, messages_snapshot)
         _log_review_completion(review_usage, _result, trigger)
         note_review_result(agent, trigger, _result)
 
