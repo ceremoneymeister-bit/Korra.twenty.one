@@ -160,6 +160,8 @@ def finalize_turn(
         and not interrupted
         and not failed
         and str(_turn_exit_reason) in {"unknown", "budget_exhausted"}
+        # The event-triggered learning review never reads a closing summary.
+        and not getattr(agent, "_review_stop_after_write", False)
     )
     continuation_budget_exhausted = (
         final_response is None
@@ -508,7 +510,7 @@ def finalize_turn(
         agent.session_id or "none",
     )
 
-    if _last_msg_role == "tool" and not interrupted:
+    if _last_msg_role == "tool" and not interrupted and str(_turn_exit_reason) != "review_write_done":
         # Agent was mid-work — this is the "just stops" case.
         logger.warning(
             "Turn ended with pending tool result (agent may appear stuck). "

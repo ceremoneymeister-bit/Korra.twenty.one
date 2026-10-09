@@ -201,6 +201,26 @@ def _review_input_budget_exhausted(agent: Any) -> bool:
     return used >= budget
 
 
+def _review_write_landed(assistant_message: Any, messages: List[Dict[str, Any]]) -> bool:
+    """True when this tool round made a successful ``memory``/``skill_manage`` write."""
+    names = {
+        getattr(tc, "id", None): getattr(getattr(tc, "function", None), "name", None)
+        for tc in (getattr(assistant_message, "tool_calls", None) or [])
+    }
+    for message in reversed(messages):
+        if not isinstance(message, dict) or message.get("role") != "tool":
+            break
+        if names.get(message.get("tool_call_id")) not in ("memory", "skill_manage"):
+            continue
+        try:
+            result = json.loads(message.get("content") or "")
+        except (TypeError, ValueError):
+            continue
+        if isinstance(result, dict) and result.get("success") is True:
+            return True
+    return False
+
+
 def _maybe_inject_run_budget_wrapup(agent: Any, messages: List[Dict[str, Any]]) -> bool:
     """Inject the one-time wall-clock wrap-up notice when past 80% of budget.
 
@@ -7780,6 +7800,15 @@ def run_conversation(
                                 agent.stream_delta_callback(None)
                             except Exception:
                                 pass
+                    break
+
+                # Event-triggered learning review (K21-230): the saved write is
+                # the result and nobody reads the closing text, so the fork
+                # stops here instead of paying for one more provider request.
+                if getattr(agent, "_review_stop_after_write", False) and _review_write_landed(
+                    assistant_message, messages
+                ):
+                    _turn_exit_reason = "review_write_done"
                     break
 
                 # Reset per-turn retry counters after successful tool

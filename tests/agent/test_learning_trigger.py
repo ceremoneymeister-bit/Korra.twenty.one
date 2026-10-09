@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 from types import SimpleNamespace
@@ -55,7 +56,7 @@ def _tool_call(call_id):
 def _make_agent(skip_memory=True):
     with (
         patch("run_agent.get_tool_definitions",
-              return_value=_tool_defs("web_search", "memory", "skill_manage")),
+              return_value=_tool_defs("web_search", "memory", "skill_manage", "skill_view")),
         patch("run_agent.check_toolset_requirements", return_value={}),
         patch("run_agent.OpenAI"),
     ):
@@ -322,6 +323,7 @@ def test_event_review_gets_a_bounded_excerpt_and_a_small_iteration_cap():
     assert started is True
     assert build.call_count == 1 and len(fork.calls) == 1
     assert build.call_args.kwargs["max_iterations"] == lt.EVENT_MAX_ITERATIONS < 16
+    assert fork._review_stop_after_write is True
     call = fork.calls[0]
     assert call["conversation_history"] == []
     prompt = call["user_message"]
@@ -342,6 +344,7 @@ def test_manual_refine_keeps_full_history_and_full_iteration_cap():
         assert agent._spawn_background_review(history, True, True, manual=True) is True
     assert build.call_args.kwargs["max_iterations"] == br._REVIEW_MAX_ITERATIONS
     assert len(fork.calls[0]["conversation_history"]) == len(history)
+    assert not getattr(fork, "_review_stop_after_write", False)
 
 
 def test_two_empty_reviews_pause_corrections_until_an_explicit_signal(caplog):
@@ -532,3 +535,119 @@ def test_every_review_prompt_carries_the_basis_quality_rules():
         assert "Quality of the basis" in prompt
         assert "is NOT a basis" in prompt
         assert "one-off exception" in prompt
+
+
+# ---- K21-230 review: provider requests of one automatic correction -----------
+
+def _tc(call_id, tool, **arguments):
+    return SimpleNamespace(
+        id=call_id, type="function",
+        function=SimpleNamespace(name=tool, arguments=json.dumps(arguments)),
+    )
+
+
+_MEMORY_OK = json.dumps({"success": True, "target": "memory",
+                         "changes": {"added": ["Суммы показывать в рублях."], "removed": []}})
+_SKILL_OK = json.dumps({"success": True, "message": "Skill 'price-list' patched."})
+_SKILL_READ = json.dumps({"success": True, "name": "price-list", "content": "..."})
+
+
+def _run_event_review(script, tool_results, *, review_skills=False):
+    """Run the real event fork loop; return (provider requests, executed tools, notices)."""
+    with patch("agent.model_metadata.fetch_model_metadata", return_value={}):
+        parent = _make_agent()
+        fork = _make_agent()
+    fork.skip_background_review = True
+    provider = fork.client.chat.completions.create
+    provider.side_effect = list(script)
+    notices = []
+    parent.background_review_callback = notices.append
+
+    def construct(*args, **kwargs):
+        fork.max_iterations = kwargs["max_iterations"]
+        return fork, {}, False
+
+    def run_tool(name, *args, **kwargs):
+        result = tool_results[name]
+        return result.pop(0) if isinstance(result, list) else result
+
+    target, _prompt = br.spawn_background_review_thread(
+        parent, _long_history(), review_memory=not review_skills,
+        review_skills=review_skills, trigger=lt.SIGNAL_CORRECTION, task_cfg={},
+    )
+    with patch.object(br, "build_cache_parity_fork", side_effect=construct), \
+         patch("run_agent.handle_function_call", side_effect=run_tool), \
+         patch.object(fork, "_persist_session"), patch.object(fork, "_save_trajectory"), \
+         patch.object(fork, "_cleanup_task_resources"):
+        target()
+        executed = [m["name"] for m in fork._session_messages if m.get("role") == "tool"]
+    return provider.call_count, executed, notices
+
+
+def test_correction_saved_to_memory_costs_exactly_one_provider_request():
+    save = _tc("save", "memory", action="add", target="memory",
+               content="Суммы показывать в рублях.")
+    requests, executed, notices = _run_event_review(
+        [_response(tool_calls=[save], finish_reason="tool_calls"),
+         _response(content="Правило сохранено.")],
+        {"memory": _MEMORY_OK},
+    )
+    assert requests == 1
+    assert executed == ["memory"]
+    assert notices and "Self-improvement review" in notices[0]
+
+
+def test_nothing_to_save_costs_one_provider_request():
+    requests, executed, notices = _run_event_review(
+        [_response(content="Нечего сохранять.")], {},
+    )
+    assert requests == 1 and executed == [] and notices == []
+
+
+def test_creating_a_skill_costs_one_provider_request():
+    create = _tc("new", "skill_manage", action="create", name="price-list", content="---")
+    requests, executed, _notices = _run_event_review(
+        [_response(tool_calls=[create], finish_reason="tool_calls"),
+         _response(content="Навык создан.")],
+        {"skill_manage": _SKILL_OK}, review_skills=True,
+    )
+    assert requests == 1 and executed == ["skill_manage"]
+
+
+def test_fixing_an_existing_skill_costs_at_most_two_provider_requests():
+    read = _tc("read", "skill_view", name="price-list")
+    patch_call = _tc("fix", "skill_manage", action="patch", name="price-list",
+                     old_string="доллары", new_string="рубли")
+    requests, executed, _notices = _run_event_review(
+        [_response(tool_calls=[read], finish_reason="tool_calls"),
+         _response(tool_calls=[patch_call], finish_reason="tool_calls"),
+         _response(content="Поправила навык.")],
+        {"skill_view": _SKILL_READ, "skill_manage": _SKILL_OK}, review_skills=True,
+    )
+    assert requests == 2 and executed == ["skill_view", "skill_manage"]
+
+
+def test_exhausted_limit_in_an_event_review_makes_no_summary_request():
+    read = lambda i: _response(tool_calls=[_tc(f"r{i}", "skill_view", name="price-list")],
+                               finish_reason="tool_calls")
+    requests, executed, _notices = _run_event_review(
+        [read(1), read(2), _response(content="Сводка")],
+        {"skill_view": _SKILL_READ}, review_skills=True,
+    )
+    assert requests == lt.EVENT_MAX_ITERATIONS == 2
+    assert executed == ["skill_view", "skill_view"]
+
+
+def test_failed_write_does_not_stop_the_event_review_early():
+    bad = _tc("bad", "skill_manage", action="patch", name="price-list",
+              old_string="x", new_string="y")
+    good = _tc("good", "skill_manage", action="patch", name="price-list",
+               old_string="доллары", new_string="рубли")
+    requests, executed, _notices = _run_event_review(
+        [_response(tool_calls=[bad], finish_reason="tool_calls"),
+         _response(tool_calls=[good], finish_reason="tool_calls"),
+         _response(content="Готово.")],
+        {"skill_manage": [json.dumps({"success": False, "error": "no match"}), _SKILL_OK]},
+        review_skills=True,
+    )
+    assert requests == 2 and executed == ["skill_manage", "skill_manage"]

@@ -27,8 +27,9 @@ SIGNAL_COUNTER = "counter"
 # Event kinds that run the short bounded review (excerpt, few iterations).
 BOUNDED_EVENT_KINDS = frozenset({SIGNAL_REMEMBER, SIGNAL_CORRECTION})
 
-# Iteration cap of an event review fork; the legacy fork keeps 16.
-EVENT_MAX_ITERATIONS = 6
+# Iteration cap of an event review fork; the legacy fork keeps 16. Two requests:
+# read an existing skill, then write; a memory write or a new skill takes one.
+EVENT_MAX_ITERATIONS = 2
 
 # Two empty reviews in a row pause correction-triggered reviews in a session
 # until an explicit remember request or /refine.
