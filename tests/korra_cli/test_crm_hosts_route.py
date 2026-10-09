@@ -32,8 +32,21 @@ def closed_network(monkeypatch):
 
 
 @pytest.fixture
-def admin_file(monkeypatch):
-    """The process is not root and cannot write to the file, as the engine in a container."""
+def root_owned(monkeypatch):
+    """The file belongs to root whoever runs the tests; mode and the other fields stay real."""
+    real = cr._stat_file
+
+    def stat_as_root(path, *args, **kwargs):
+        fields = list(real(path, *args, **kwargs))
+        fields[stat.ST_UID] = 0
+        return os.stat_result(fields)
+
+    monkeypatch.setattr(cr, "_stat_file", stat_as_root)
+
+
+@pytest.fixture
+def admin_file(monkeypatch, root_owned):
+    """The administrator's file: owned by root, and the process cannot write to it, as the engine in a container."""
     monkeypatch.setattr(cr, "_can_write", lambda path, mode: False)
 
 
@@ -174,7 +187,7 @@ def test_a_pin_for_another_name_or_a_superset_or_suffix_allows_nothing(tmp_path,
 # ---- the file must be the administrator's
 
 
-def test_a_file_the_process_can_write_is_not_trusted(tmp_path, monkeypatch):
+def test_a_file_the_process_can_write_is_not_trusted(tmp_path, monkeypatch, root_owned):
     path = hosts(tmp_path, f"127.0.0.2 {AMO}\n")
     monkeypatch.setattr(cr, "_can_write", lambda p, mode: True)
     resolves_to(monkeypatch, "127.0.0.2")
@@ -209,8 +222,6 @@ def test_a_file_not_owned_by_root_is_not_trusted(tmp_path, monkeypatch, admin_fi
 
 def test_a_root_owned_file_of_the_administrator_is_trusted(tmp_path, monkeypatch, admin_file):
     path = hosts(tmp_path, f"127.0.0.2 {AMO}\n")
-    real = os.stat(path)
-    monkeypatch.setattr(cr, "_stat_file", lambda p: SimpleNamespace(st_mode=real.st_mode, st_uid=0, st_gid=0))
     assert cr.is_allowed_address(AMO, "127.0.0.2", path)
 
 
