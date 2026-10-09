@@ -1735,12 +1735,15 @@ class Updater:
             return {}
 
     def user_packages_probe(self, image, root, migrated):
-        output = self.docker(
-            "run", "--rm", "--network", "none", "--cpus", "1", "--memory", "768m",
-            "--user", self.runtime_user(), "--entrypoint", PYTHON,
-            "-v", str(root or self.data) + ":/opt/data:ro", image,
-            "-c", USER_PACKAGES_CODE, "/opt/data", json.dumps(self.pinned_dependencies()),
-            json.dumps(migrated), timeout=180)
+        try:
+            output = self.docker(
+                "run", "--rm", "--network", "none", "--cpus", "1", "--memory", "768m",
+                "--user", self.runtime_user(), "--entrypoint", PYTHON,
+                "-v", str(root or self.data) + ":/opt/data:ro", image,
+                "-c", USER_PACKAGES_CODE, "/opt/data", json.dumps(self.pinned_dependencies()),
+                json.dumps(migrated), timeout=180)
+        except subprocess.TimeoutExpired:
+            raise UpdateError("Проверка пакетов пользователя не завершилась за 180 с") from None
         try:
             result = json.loads(output.splitlines()[-1])
             list(result["conflicts"])
@@ -1763,11 +1766,21 @@ class Updater:
         теми же данными). Модуль, который там грузился из хранилища, а в
         целевом образе перекрыт, ломал бы импорт и остаётся конфликтом, как и
         дубль пакета, перенесённого из writable слоя. Без базового прогона
-        (образа нет, ответ некорректный) любое перекрытие считается конфликтом.
+        (образа нет, таймаут, ответ некорректный) любое перекрытие считается
+        конфликтом. Сбой основного прогона при обычной операции — отказ до
+        drain, при автоматическом откате — запись и продолжение.
         """
         migrated = sorted({re.sub(r"[-_.]+", "-", stem.rpartition("-")[0]).lower()
                            for stem in (self.receipt.get("writable_packages") or {}).get("migrated", [])})
-        result = self.user_packages_probe(image, root, migrated)
+        try:
+            result = self.user_packages_probe(image, root, migrated)
+        except UpdateError as exc:
+            if strict:
+                self.receipt["error_code"] = "user_packages_check_failed"
+                raise UpdateError(f"Не удалось проверить пакеты пользователя ({exc}). Данные не изменены") from None
+            self.receipt["user_packages"] = {"conflicts": [], "error": str(exc)}
+            self.log(f"user packages check failed (rollback continues): {exc}")
+            return self.receipt["user_packages"]
         conflicts, modules = list(result["conflicts"]), set(result["shadowed_modules"])
         if modules:
             try:

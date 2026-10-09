@@ -3446,6 +3446,73 @@ def test_user_package_check_fails_closed_when_the_current_image_cannot_be_probed
     assert tree(updater.data) == before and store.is_dir()
 
 
+def fail_package_probe(updater, monkeypatch, image, fault, *, phase=None):
+    """Сбой Docker-границы только у проверки пакетов указанным образом (и в указанной фазе)."""
+    real = updater.docker
+
+    def docker(*args, **kwargs):
+        if (u.USER_PACKAGES_CODE in args and args[args.index(u.USER_PACKAGES_CODE) - 2] == image
+                and (phase is None or updater.receipt.get("phase") == phase)):
+            if fault == "timeout":
+                raise subprocess.TimeoutExpired(["docker", "run", image], timeout=180)
+            raise u.UpdateError("docker run failed (exit 125)")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(updater, "docker", docker)
+
+
+@pytest.mark.parametrize("fault", ["command_error", "timeout"])
+def test_failed_baseline_probe_does_not_stop_the_automatic_restore(updater, tmp_path, monkeypatch, fault):
+    versioned_images(updater, tmp_path, old_version="1.5")
+    updater.fail_smoke = True
+    fail_package_probe(updater, monkeypatch, NEW, fault, phase="smoke")
+    with pytest.raises(u.UpdateError, match="Injected model smoke failure"):
+        updater.update("registry.example/korra:latest")
+    assert updater.receipt["status"] == "rolled_back"
+    assert updater.image == OLD and updater.running
+    assert updater.receipt["user_packages"]["baseline"]["image"] == NEW
+    assert updater.receipt["user_packages"]["baseline"]["error"]
+
+
+@pytest.mark.parametrize("fault", ["command_error", "timeout"])
+def test_failed_main_probe_does_not_stop_the_automatic_restore(updater, tmp_path, monkeypatch, fault):
+    versioned_images(updater, tmp_path, old_version="1.5")
+    updater.fail_smoke = True
+    fail_package_probe(updater, monkeypatch, OLD, fault, phase="smoke")
+    with pytest.raises(u.UpdateError, match="Injected model smoke failure"):
+        updater.update("registry.example/korra:latest")
+    assert updater.receipt["status"] == "rolled_back"
+    assert updater.image == OLD and updater.running
+    assert updater.receipt["user_packages"]["error"]
+
+
+def test_baseline_timeout_stops_the_update_before_drain_and_keeps_data(updater, tmp_path, monkeypatch):
+    store = overlap_images(updater, tmp_path, True, old_ships=True)
+    fail_package_probe(updater, monkeypatch, OLD, "timeout")
+    before = tree(updater.data)
+    with pytest.raises(u.UpdateError, match="не удалось проверить текущую среду"):
+        updater.update("registry.example/korra:latest")
+    packages = updater.receipt["user_packages"]
+    assert updater.receipt["error_code"] == "user_packages_conflict"
+    assert packages["baseline"]["image"] == OLD and "180" in packages["baseline"]["error"]
+    assert not any(call[0] in {"stop", "start_image"} or call == ("native", "drain") for call in updater.calls)
+    assert updater.image == OLD and updater.running
+    assert tree(updater.data) == before and store.is_dir()
+
+
+def test_main_probe_timeout_stops_the_update_before_drain_with_a_clear_error(updater, tmp_path, monkeypatch):
+    store = overlap_images(updater, tmp_path, True, old_ships=True)
+    fail_package_probe(updater, monkeypatch, NEW, "timeout")
+    before = tree(updater.data)
+    with pytest.raises(u.UpdateError, match="Не удалось проверить пакеты пользователя") as caught:
+        updater.update("registry.example/korra:latest")
+    assert not isinstance(caught.value, subprocess.TimeoutExpired)
+    assert updater.receipt["error_code"] == "user_packages_check_failed"
+    assert not any(call[0] in {"stop", "start_image"} or call == ("native", "drain") for call in updater.calls)
+    assert updater.image == OLD and updater.running
+    assert tree(updater.data) == before and store.is_dir()
+
+
 def test_rollback_refuses_a_shadow_the_image_it_leaves_did_not_have(updater, tmp_path):
     overlap_images(updater, tmp_path, True, old_ships=False, new_ships=False)
     updater.update("registry.example/korra:latest")
