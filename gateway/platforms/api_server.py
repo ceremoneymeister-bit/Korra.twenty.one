@@ -760,12 +760,12 @@ def _run_web_learning_command(command: str, args: str) -> str:
             )
         import subprocess
 
-        from korra_constants import get_hermes_home
+        from korra_constants import get_hermes_home, korra_env_expand
 
         source_root = str(Path(__file__).resolve().parents[2])
         env = dict(
             os.environ,
-            HERMES_HOME=str(get_hermes_home()),
+            **korra_env_expand({"HERMES_HOME": str(get_hermes_home())}),
             PYTHONIOENCODING="utf-8",
             PYTHONPATH=os.pathsep.join(
                 p for p in (source_root, os.environ.get("PYTHONPATH", "")) if p
