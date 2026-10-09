@@ -126,35 +126,6 @@ def test_survives_accounting_failure():
     background_review._record_review_usage_to_parent(_FakeParent(_BoomDB()), _usage())
 
 
-def test_classify_review_result():
-    assert background_review._classify_review_result([]) == "none"
-    assert background_review._classify_review_result(["Memory updated"]) == "memory"
-    assert background_review._classify_review_result(["Skill 'x' patched"]) == "skill"
-    assert (
-        background_review._classify_review_result(
-            ["Memory updated", "Skill 'x' created"]
-        )
-        == "skill+memory"
-    )
-    # Prefix-based — free-text "skill"/"memory" elsewhere must not misclassify.
-    assert (
-        background_review._classify_review_result(
-            ["Skipped: no skill worth saving"]
-        )
-        == "none"
-    )
-    assert (
-        background_review._classify_review_result(
-            ["📝 Skill 'deploy' patched: \"a\" → \"b\""]
-        )
-        == "skill"
-    )
-    assert (
-        background_review._classify_review_result(["User profile ➕ prefers terse"])
-        == "memory"
-    )
-
-
 def test_enabled_config_failure_logs_warning(caplog):
     with patch(
         "korra_cli.config.load_config_readonly",

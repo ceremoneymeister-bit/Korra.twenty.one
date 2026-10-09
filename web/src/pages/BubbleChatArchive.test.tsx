@@ -53,6 +53,8 @@ const ARCHIVE = Array.from({ length: 70 }, (_, index) => ({
   role: index % 2 === 0 ? "user" : "assistant",
   content: `архив ${index + 1}`,
   timestamp: index + 1,
+  // Последняя реплика архива — «Учёл…» с чеком отмены (K21-324).
+  ...(index === 69 ? { display_kind: "learning", display_metadata: { learning_receipt: { undone: false } } } : {}),
 }));
 
 let container: HTMLDivElement;
@@ -184,5 +186,39 @@ describe("ранняя часть разговора после сжатия", (
     expect(bubbleTexts()).toContain("архив 70");
     await press("Вернуться к чату");
     expect(bubbleTexts()).toContain("Живой вопрос");
+  });
+});
+
+describe("«Учёл» и «Отменить» (K21-324)", () => {
+  const liveLearning = {
+    id: "session-a-h203", role: "assistant", content: "Учёл: считать в рублях",
+    timestamp: 3, turnComplete: true, historyId: 203, learning: { undone: false },
+  };
+  const undoRequests = () => requests.filter(request => request.url.includes("learning-undo"));
+
+  it("в архиве «Учёл» остаётся текстом, кнопки «Отменить» нет и запрос не уходит", async () => {
+    live.messages.push(liveLearning as never);
+    try {
+      await render(<BubbleChatPage agentProfile="lawyer" />);
+      await press("Показать раннюю часть");
+      expect(bubbleTexts()).toContain("архив 70");
+      expect(button("Отменить")).toBeUndefined();
+      expect(undoRequests()).toHaveLength(0);
+    } finally {
+      live.messages.pop();
+    }
+  });
+
+  it("в обычном чате «Отменить» отправляет отмену как прежде", async () => {
+    live.messages.push(liveLearning as never);
+    try {
+      await render(<BubbleChatPage agentProfile="lawyer" />);
+      await press("Отменить");
+      expect(undoRequests()).toEqual([
+        expect.objectContaining({ method: "POST", url: expect.stringContaining("/session-a/messages/203/learning-undo") }),
+      ]);
+    } finally {
+      live.messages.pop();
+    }
   });
 });

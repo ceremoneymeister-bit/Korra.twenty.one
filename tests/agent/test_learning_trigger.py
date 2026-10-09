@@ -287,10 +287,15 @@ class _FakeFork:
     def run_conversation(self, **kwargs):
         self.calls.append(kwargs)
         if self.writes:
-            self._session_messages = [{
-                "role": "tool", "tool_call_id": "n",
-                "content": '{"success": true, "message": "Entry added", "target": "memory"}',
-            }]
+            self._session_messages = [
+                {"role": "assistant", "tool_calls": [{
+                    "id": "n", "function": {"name": "memory", "arguments": "{}"},
+                }]},
+                {
+                    "role": "tool", "tool_call_id": "n",
+                    "content": '{"success": true, "message": "Entry added", "target": "memory"}',
+                },
+            ]
 
 
 def _long_history():

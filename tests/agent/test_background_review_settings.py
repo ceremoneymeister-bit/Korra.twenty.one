@@ -116,8 +116,11 @@ def test_notification_off_does_not_hide_review_result(monkeypatch, caplog):
         _user_profile_enabled=False, close=lambda: None,
         shutdown_memory_provider=lambda: None)
     def run(**kwargs):
-        fork._session_messages = [{'role': 'tool', 'tool_call_id': 'new',
-            'content': json.dumps({'success': True, 'message': 'Entry added', 'target': 'memory'})}]
+        fork._session_messages = [
+            {'role': 'assistant', 'tool_calls': [{'id': 'new', 'function': {'name': 'memory', 'arguments': '{}'}}]},
+            {'role': 'tool', 'tool_call_id': 'new',
+             'content': json.dumps({'success': True, 'message': 'Entry added', 'target': 'memory'})},
+        ]
     fork.run_conversation = run
     with patch('agent.background_review.build_cache_parity_fork', return_value=(fork, {}, False)), \
          caplog.at_level('INFO', logger='agent.background_review'):
