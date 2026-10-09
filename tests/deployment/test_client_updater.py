@@ -1,4 +1,5 @@
 """Updater transactions on real filesystem/SQLite with fake Docker boundaries."""
+import importlib.metadata
 import importlib.util
 import hashlib
 import io
@@ -22,12 +23,12 @@ OLD = "sha256:" + "1" * 64
 NEW = "sha256:" + "2" * 64
 
 
-def run_packages_code(root, pinned_json):
+def run_packages_code(root, pinned_json, migrated_json=None):
     """USER_PACKAGES_CODE в этом процессе (другие тесты подменяют subprocess.Popen)."""
     import contextlib
     out = io.StringIO()
     argv = sys.argv
-    sys.argv = ["-c", str(root), pinned_json]
+    sys.argv = ["-c", str(root), pinned_json, *([migrated_json] if migrated_json is not None else [])]
     try:
         with contextlib.redirect_stdout(out):
             exec(compile(u.USER_PACKAGES_CODE, "USER_PACKAGES_CODE", "exec"), {"__name__": "__main__"})
@@ -114,7 +115,7 @@ class FakeDockerUpdater(u.Updater):
             # служит окружение тестов, DATA — смонтированный каталог.
             index = args.index(u.USER_PACKAGES_CODE)
             root = next(a for a in args if a.endswith(":/opt/data:ro"))[:-len(":/opt/data:ro")]
-            return run_packages_code(root, args[index + 2])
+            return run_packages_code(root, *args[index + 2:index + 4])
         if args[0] == "run":
             # Судья SQLite: одноразовый контейнер старого образа поверх снимка,
             # тем же приёмом, что и schema_rehearsal. Отсутствующий образ docker
@@ -3207,8 +3208,8 @@ def make_user_package(root, name="korra_demo_pkg", version="1.0", *, cli="korra-
     return store
 
 
-def check_packages(root, pinned=None):
-    return json.loads(run_packages_code(root, json.dumps(pinned or {})).splitlines()[-1])
+def check_packages(root, pinned=None, migrated=None):
+    return json.loads(run_packages_code(root, json.dumps(pinned or {}), json.dumps(migrated or [])).splitlines()[-1])
 
 
 def tree(root):
@@ -3216,26 +3217,42 @@ def tree(root):
 
 
 def test_package_check_accepts_a_complete_store_and_ignores_an_empty_one(tmp_path):
-    assert check_packages(tmp_path) == {"packages": [], "conflicts": []}
+    assert check_packages(tmp_path) == {"packages": [], "conflicts": [], "shadowed": []}
     make_user_package(tmp_path)
     result = check_packages(tmp_path)
     assert result["conflicts"] == []
     assert result["packages"] == [{"name": "korra-demo-pkg", "version": "1.0", "cli": ["korra-demo"]}]
 
 
-@pytest.mark.parametrize("kind,build,pinned", [
-    ("version", lambda root: make_user_package(root, "pytest", "0.0.1", cli=None), None),
-    ("pinned", lambda root: make_user_package(root, "korra_demo_pkg", "1.0", cli=None), {"korra-demo-pkg": "2.0"}),
-    ("module", lambda root: make_user_package(root, "shadow_json", cli=None, modules=["json"]), None),
-    ("requires", lambda root: make_user_package(root, requires=["pytest>=999"], cli=None), None),
-    ("requires", lambda root: make_user_package(root, requires=["no_such_distribution_xyz"], cli=None), None),
-    ("cli", lambda root: make_user_package(root, cli="python"), None),
-    ("abi", lambda root: make_user_package(root, cli=None, abi="2.7:.cpython-27"), None),
+@pytest.mark.parametrize("kind,build,pinned,migrated", [
+    ("pinned", lambda root: make_user_package(root, "korra_demo_pkg", "1.0", cli=None), {"korra-demo-pkg": "2.0"}, None),
+    ("requires", lambda root: make_user_package(root, requires=["pytest>=999"], cli=None), None, None),
+    ("requires", lambda root: make_user_package(root, requires=["no_such_distribution_xyz"], cli=None), None, None),
+    ("cli", lambda root: make_user_package(root, cli="python"), None, None),
+    ("abi", lambda root: make_user_package(root, cli=None, abi="2.7:.cpython-27"), None, None),
+    # Перенесённый из writable слоя пакет с дублем поставки остаётся конфликтом.
+    ("version", lambda root: make_user_package(root, "pytest", "0.0.1", cli=None), None, ["pytest"]),
+    ("module", lambda root: make_user_package(root, "shadow_json", cli=None, modules=["json"]), None, ["shadow-json"]),
 ])
-def test_package_check_reports_conflicts_with_the_shipped_environment(tmp_path, kind, build, pinned):
+def test_package_check_reports_conflicts_with_the_shipped_environment(tmp_path, kind, build, pinned, migrated):
     build(tmp_path)
-    kinds = {item["kind"] for item in check_packages(tmp_path, pinned)["conflicts"]}
-    assert kind in kinds
+    result = check_packages(tmp_path, pinned, migrated)
+    assert kind in {item["kind"] for item in result["conflicts"]}
+    assert result["shadowed"] == []
+
+
+def test_package_check_lists_shipped_duplicates_as_shadowed_without_conflict(tmp_path):
+    make_user_package(tmp_path, "pytest", "0.0.1", cli=None)
+    make_user_package(tmp_path, "shadow_json", cli=None, modules=["json"])
+    result = check_packages(tmp_path)
+    assert result["conflicts"] == []
+    shadowed = {item["package"]: item for item in result["shadowed"]}
+    assert shadowed["pytest"]["kind"] == "version" and shadowed["pytest"]["version"] == "0.0.1"
+    assert shadowed["pytest"]["shipped"] == importlib.metadata.version("pytest")
+    assert shadowed["shadow-json"]["kind"] == "module" and shadowed["shadow-json"]["shipped"] == "json"
+    # Перенос из writable слоя касается только названного пакета.
+    kinds = {(item["package"], item["kind"]) for item in check_packages(tmp_path, migrated=["pytest"])["conflicts"]}
+    assert kinds == {("pytest", "version")}
 
 
 def test_package_check_reports_an_incomplete_package_and_a_missing_cli(tmp_path):
@@ -3277,15 +3294,37 @@ def test_user_package_survives_update_rollback_update(updater, tmp_path):
     assert subprocess.run(["korra-demo"], env=env, capture_output=True, text=True, check=True).stdout.strip() == "user-cli-ok"
 
 
-def test_package_conflict_stops_update_before_drain_and_keeps_data(updater):
-    store = make_user_package(updater.data, "pytest", "0.0.1", cli=None)
+@pytest.mark.parametrize("kind", ["pinned", "requires", "abi"])
+def test_package_conflict_stops_update_before_drain_and_keeps_data(updater, monkeypatch, kind):
+    build = {
+        "pinned": lambda: make_user_package(updater.data, cli=None),
+        "requires": lambda: make_user_package(updater.data, requires=["pytest>=999"], cli=None),
+        "abi": lambda: make_user_package(updater.data, cli=None, abi="2.7:.cpython-27"),
+    }[kind]
+    store = build()
+    if kind == "pinned":
+        monkeypatch.setattr(updater, "pinned_dependencies", lambda: {"korra-demo-pkg": "2.0"})
     before = tree(updater.data)
     with pytest.raises(u.UpdateError, match="Пакеты пользователя"):
         updater.update("registry.example/korra:latest")
     assert updater.receipt["error_code"] == "user_packages_conflict"
+    assert kind in {item["kind"] for item in updater.receipt["user_packages"]["conflicts"]}
     assert not any(call[0] in {"stop", "start_image"} or call == ("native", "drain") for call in updater.calls)
     assert updater.image == OLD and updater.running
     assert tree(updater.data) == before and store.is_dir()
+
+
+def test_shipped_duplicates_in_the_store_do_not_stop_the_update(updater):
+    make_user_package(updater.data, "pytest", "0.0.1", cli=None)
+    store = make_user_package(updater.data, "shadow_json", cli=None, modules=["json"])
+    before = tree(store)
+    updater.update("registry.example/korra:latest")
+    assert updater.receipt["status"] == "succeeded"
+    assert updater.receipt["user_packages"]["conflicts"] == []
+    assert {(item["package"], item["kind"]) for item in updater.receipt["user_packages"]["shadowed"]} == {
+        ("pytest", "version"), ("shadow-json", "module")}
+    assert tree(store) == before
+    assert updater.image == NEW and updater.running
 
 
 def test_package_conflict_found_after_migration_restarts_old_container_without_backup(updater, monkeypatch):

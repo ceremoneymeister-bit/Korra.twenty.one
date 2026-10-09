@@ -121,16 +121,28 @@ print(json.dumps({'skills': skills}))
 # read-only копией DATA и сверяет хранилище с его поставкой: версии
 # дистрибутивов, закреплённый стек из dependencies.lock.json, модули, которые
 # поставка перекрыла бы, зависимости, CLI и ABI интерпретатора. Данные она не
-# меняет. ABI-токен повторяет tools.lazy_deps._python_abi_tag (тест следит).
+# меняет. Дубль пакета или модуля поставки (хранилище в конце sys.path, он не
+# загружается) идёт в `shadowed` и не останавливает; конфликтом он остаётся
+# только у пакета, перенесённого из writable слоя (третий аргумент).
+# ABI-токен повторяет tools.lazy_deps._python_abi_tag (тест следит).
 USER_PACKAGES_CODE = r'''
 import importlib.machinery, importlib.metadata as md, json, os, re, sys, sysconfig
 from pathlib import Path
 root, pinned = Path(sys.argv[1]), json.loads(sys.argv[2])
+migrated = set(json.loads(sys.argv[3])) if len(sys.argv) > 3 else set()
 store = root / 'lazy-packages'
 norm = lambda n: re.sub(r'[-_.]+', '-', n).lower()
-result = {'packages': [], 'conflicts': []}
+result = {'packages': [], 'conflicts': [], 'shadowed': []}
 def conflict(package, kind, detail):
     result['conflicts'].append({'package': package, 'kind': kind, 'detail': detail})
+def shadow(package, kind, detail, version, shipped):
+    # Хранилище в конце sys.path: дубль поставки не загружается и ничего не меняет.
+    # Перенесённый из writable слоя пакет раньше перекрывал поставку, поэтому
+    # его дубль остаётся конфликтом: после переноса версия пользователя не действует.
+    if package in migrated:
+        conflict(package, kind, detail)
+    else:
+        result['shadowed'].append({'package': package, 'kind': kind, 'version': version, 'shipped': shipped, 'detail': detail})
 dists = list(md.distributions(path=[str(store)])) if store.is_dir() else []
 if dists:
     resolved = store.resolve()
@@ -150,7 +162,7 @@ if dists:
         name, version = norm(d.metadata['Name']), d.version
         if name in core:
             if core[name] != version:
-                conflict(name, 'version', 'в хранилище %s, в поставке %s' % (version, core[name]))
+                shadow(name, 'version', 'в хранилище %s, в поставке %s' % (version, core[name]), version, core[name])
             continue
         if name in pinned and pinned[name] != version:
             conflict(name, 'pinned', 'в хранилище %s, закреплено поставкой %s' % (version, pinned[name]))
@@ -168,7 +180,7 @@ if dists:
         for top in sorted(tops):
             spec = importlib.machinery.PathFinder.find_spec(top, core_paths)
             if spec is not None and spec.origin not in (None, 'namespace'):
-                conflict(name, 'module', 'модуль %s перекрыт поставкой' % top)
+                shadow(name, 'module', 'модуль %s перекрыт поставкой' % top, version, top)
         for line in (d.requires or []) if Requirement else []:
             try:
                 req = Requirement(line)
@@ -1718,19 +1730,27 @@ class Updater:
         Образ запускается без сети над read-only копией; конфликт останавливает
         операцию до запуска gateway, данные не меняются. Нестрогий режим (откат
         после неудачного обновления) только записывает конфликты: остановка
-        там оставила бы контур без шлюза.
+        там оставила бы контур без шлюза. Дубли поставки (`shadowed`) только
+        записываются; конфликтом они остаются у перенесённых из writable слоя.
         """
+        migrated = sorted({re.sub(r"[-_.]+", "-", stem.rpartition("-")[0]).lower()
+                           for stem in (self.receipt.get("writable_packages") or {}).get("migrated", [])})
         output = self.docker(
             "run", "--rm", "--network", "none", "--cpus", "1", "--memory", "768m",
             "--user", self.runtime_user(), "--entrypoint", PYTHON,
             "-v", str(root or self.data) + ":/opt/data:ro", image,
-            "-c", USER_PACKAGES_CODE, "/opt/data", json.dumps(self.pinned_dependencies()), timeout=180)
+            "-c", USER_PACKAGES_CODE, "/opt/data", json.dumps(self.pinned_dependencies()),
+            json.dumps(migrated), timeout=180)
         try:
             result = json.loads(output.splitlines()[-1])
             conflicts = list(result["conflicts"])
+            shadowed = list(result.get("shadowed", []))
         except (ValueError, IndexError, KeyError, TypeError):
             raise UpdateError("Проверка пакетов пользователя вернула некорректный ответ") from None
         self.receipt["user_packages"] = result
+        if shadowed:
+            self.log("user packages shadowed by the image (never loaded, not a conflict): "
+                     + ", ".join(sorted({item["package"] for item in shadowed})))
         if conflicts:
             summary = "; ".join("{} ({}): {}".format(c["package"], c["kind"], c["detail"]) for c in conflicts[:5])
             if not strict:
