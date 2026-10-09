@@ -37,6 +37,17 @@ def run_packages_code(root, pinned_json, migrated_json=None):
     return out.getvalue().strip()
 
 
+def run_packages_isolated(core, root, pinned_json, migrated_json):
+    """USER_PACKAGES_CODE настоящим процессом: поставка `core` впереди, хранилище в конце sys.path."""
+    bootstrap = ("import sys\nsys.path.insert(0, sys.argv[1])\nsys.path.append(sys.argv[2] + '/lazy-packages')\n"
+                 "sys.argv = ['probe', sys.argv[2], sys.argv[3], sys.argv[4]]\n")
+    done = subprocess.run([sys.executable, "-I", "-B", "-c", bootstrap + u.USER_PACKAGES_CODE,
+                           str(core), str(root), pinned_json, migrated_json],
+                          capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, done.stderr
+    return done.stdout.strip()
+
+
 class FakeDockerUpdater(u.Updater):
     def __init__(self, home):
         super().__init__(home)
@@ -53,6 +64,10 @@ class FakeDockerUpdater(u.Updater):
         self.tags = {}
         self.judge_verdict = {"bad": []}
         self.judge_image_missing = False
+        # Образ -> каталог его «поставки» для проверки пакетов в отдельном
+        # процессе; образы без записи видят окружение тестов.
+        self.image_cores = {}
+        self.package_probe_fails = set()
         # Мультиплексный контур: профили обслуживает корневой шлюз и он же их
         # перечисляет. Без мультиплекса у каждого профиля свой шлюз и своё home,
         # а лежачий профиль в ответе просто отсутствует.
@@ -115,6 +130,11 @@ class FakeDockerUpdater(u.Updater):
             # служит окружение тестов, DATA — смонтированный каталог.
             index = args.index(u.USER_PACKAGES_CODE)
             root = next(a for a in args if a.endswith(":/opt/data:ro"))[:-len(":/opt/data:ro")]
+            image = args[args.index(u.USER_PACKAGES_CODE) - 2]
+            if image in self.package_probe_fails:
+                raise u.UpdateError("docker run failed (exit 125)")
+            if image in self.image_cores:
+                return run_packages_isolated(self.image_cores[image], root, *args[index + 2:index + 4])
             return run_packages_code(root, *args[index + 2:index + 4])
         if args[0] == "run":
             # Судья SQLite: одноразовый контейнер старого образа поверх снимка,
@@ -3325,6 +3345,80 @@ def test_shipped_duplicates_in_the_store_do_not_stop_the_update(updater):
         ("pytest", "version"), ("shadow-json", "module")}
     assert tree(store) == before
     assert updater.image == NEW and updater.running
+
+
+def overlap_images(updater, tmp_path, same_distribution, *, old_ships, new_ships=True):
+    """Пакет пользователя в DATA и «поставки» образов, перекрывающие его или нет."""
+    store = make_user_package(updater.data, "review_client_dependency", "1.0", cli=None)
+    for image, ships, version in ((OLD, old_ships, "1.5"), (NEW, new_ships, "2.0")):
+        core = tmp_path / ("core-" + image[-1])
+        core.mkdir()
+        if ships:
+            name = "review_client_dependency" if same_distribution else "review_bundled_provider"
+            make_user_package(core, name, version, cli=None, modules=["review_client_dependency"])
+        updater.image_cores[image] = core / "lazy-packages" if ships else core
+    return store
+
+
+@pytest.mark.parametrize("same_distribution", [True, False], ids=["new-distribution", "new-module"])
+def test_new_shadow_of_a_working_user_package_stops_the_update_before_drain(updater, tmp_path, same_distribution):
+    store = overlap_images(updater, tmp_path, same_distribution, old_ships=False)
+    before = tree(updater.data)
+    with pytest.raises(u.UpdateError, match="Пакеты пользователя"):
+        updater.update("registry.example/korra:latest")
+    assert updater.receipt["error_code"] == "user_packages_conflict"
+    conflict, = updater.receipt["user_packages"]["conflicts"]
+    assert conflict["kind"] == ("version" if same_distribution else "module")
+    assert "новое перекрытие" in conflict["detail"]
+    assert updater.receipt["user_packages"]["shadowed"] == []
+    assert not any(call[0] in {"stop", "start_image"} or call == ("native", "drain") for call in updater.calls)
+    assert updater.image == OLD and updater.running
+    assert tree(updater.data) == before and store.is_dir()
+
+
+@pytest.mark.parametrize("same_distribution", [True, False], ids=["old-distribution", "old-module"])
+def test_shadow_that_already_existed_in_the_current_image_is_allowed(updater, tmp_path, same_distribution):
+    store = overlap_images(updater, tmp_path, same_distribution, old_ships=True)
+    before = tree(store)
+    updater.update("registry.example/korra:latest")
+    assert updater.receipt["status"] == "succeeded"
+    packages = updater.receipt["user_packages"]
+    assert packages["conflicts"] == []
+    assert [(item["package"], item["kind"]) for item in packages["shadowed"]] == [
+        ("review-client-dependency", "version" if same_distribution else "module")]
+    assert packages["baseline"]["image"] == OLD and "error" not in packages["baseline"]
+    assert tree(store) == before
+
+
+def test_user_package_check_fails_closed_when_the_current_image_cannot_be_probed(updater, tmp_path):
+    store = overlap_images(updater, tmp_path, True, old_ships=True)
+    updater.package_probe_fails.add(OLD)
+    before = tree(updater.data)
+    with pytest.raises(u.UpdateError, match="не удалось проверить текущую среду"):
+        updater.update("registry.example/korra:latest")
+    packages = updater.receipt["user_packages"]
+    assert updater.receipt["error_code"] == "user_packages_conflict"
+    assert packages["shadowed"] == [] and packages["baseline"]["image"] == OLD and "exit 125" in packages["baseline"]["error"]
+    assert not any(call[0] in {"stop", "start_image"} or call == ("native", "drain") for call in updater.calls)
+    assert tree(updater.data) == before and store.is_dir()
+
+
+def test_rollback_refuses_a_shadow_the_image_it_leaves_did_not_have(updater, tmp_path):
+    overlap_images(updater, tmp_path, True, old_ships=False, new_ships=False)
+    updater.update("registry.example/korra:latest")
+    assert updater.receipt["status"] == "succeeded"
+    core = tmp_path / "core-shadow"
+    make_user_package(core, "review_client_dependency", "1.5", cli=None)
+    updater.image_cores[OLD] = core / "lazy-packages"
+    mark = len(updater.calls)
+    with pytest.raises(u.UpdateError, match="новое перекрытие"):
+        updater.rollback()
+    assert not any(call[0] in {"stop", "start_image"} for call in updater.calls[mark:])
+    assert updater.image == NEW and updater.running
+    updater.image_cores[NEW] = core / "lazy-packages"
+    updater.rollback()
+    assert updater.receipt["status"] == "rolled_back" and updater.image == OLD
+    assert updater.receipt["user_packages"]["baseline"]["image"] == NEW
 
 
 def test_package_conflict_found_after_migration_restarts_old_container_without_backup(updater, monkeypatch):

@@ -122,8 +122,9 @@ print(json.dumps({'skills': skills}))
 # дистрибутивов, закреплённый стек из dependencies.lock.json, модули, которые
 # поставка перекрыла бы, зависимости, CLI и ABI интерпретатора. Данные она не
 # меняет. Дубль пакета или модуля поставки (хранилище в конце sys.path, он не
-# загружается) идёт в `shadowed` и не останавливает; конфликтом он остаётся
-# только у пакета, перенесённого из writable слоя (третий аргумент).
+# загружается) идёт в `shadowed`; конфликтом он остаётся у пакета, перенесённого
+# из writable слоя (третий аргумент). Допустим ли `shadowed`, решает
+# verify_user_packages: тот же код текущим образом, перекрытие должно быть и там.
 # ABI-токен повторяет tools.lazy_deps._python_abi_tag (тест следит).
 USER_PACKAGES_CODE = r'''
 import importlib.machinery, importlib.metadata as md, json, os, re, sys, sysconfig
@@ -1724,17 +1725,7 @@ class Updater:
         except (OSError, ValueError, KeyError, IndexError, TypeError):
             return {}
 
-    def verify_user_packages(self, image, root=None, *, strict=True):
-        """Сверить пакеты пользователя в DATA/lazy-packages с поставкой образа.
-
-        Образ запускается без сети над read-only копией; конфликт останавливает
-        операцию до запуска gateway, данные не меняются. Нестрогий режим (откат
-        после неудачного обновления) только записывает конфликты: остановка
-        там оставила бы контур без шлюза. Дубли поставки (`shadowed`) только
-        записываются; конфликтом они остаются у перенесённых из writable слоя.
-        """
-        migrated = sorted({re.sub(r"[-_.]+", "-", stem.rpartition("-")[0]).lower()
-                           for stem in (self.receipt.get("writable_packages") or {}).get("migrated", [])})
+    def user_packages_probe(self, image, root, migrated):
         output = self.docker(
             "run", "--rm", "--network", "none", "--cpus", "1", "--memory", "768m",
             "--user", self.runtime_user(), "--entrypoint", PYTHON,
@@ -1743,14 +1734,51 @@ class Updater:
             json.dumps(migrated), timeout=180)
         try:
             result = json.loads(output.splitlines()[-1])
-            conflicts = list(result["conflicts"])
-            shadowed = list(result.get("shadowed", []))
-        except (ValueError, IndexError, KeyError, TypeError):
+            list(result["conflicts"])
+            list(result.get("shadowed", []))
+        except (ValueError, IndexError, KeyError, TypeError, AttributeError):
             raise UpdateError("Проверка пакетов пользователя вернула некорректный ответ") from None
-        self.receipt["user_packages"] = result
+        return result
+
+    def verify_user_packages(self, image, root=None, *, strict=True, current=None):
+        """Сверить пакеты пользователя в DATA/lazy-packages с поставкой образа.
+
+        Образ запускается без сети над read-only копией; конфликт останавливает
+        операцию до запуска gateway, данные не меняются. Нестрогий режим (откат
+        после неудачного обновления) только записывает конфликты: остановка
+        там оставила бы контур без шлюза. Дубль поставки (`shadowed`) допустим,
+        только если он перекрыт и в текущей среде `current` (образ, который
+        работает до операции): тот же код над теми же данными. Новое перекрытие
+        ломало бы импорт, который работал, и остаётся конфликтом, как и дубль
+        пакета, перенесённого из writable слоя. Без базового прогона
+        (образа нет, ответ некорректный) перекрытия считаются конфликтом.
+        """
+        migrated = sorted({re.sub(r"[-_.]+", "-", stem.rpartition("-")[0]).lower()
+                           for stem in (self.receipt.get("writable_packages") or {}).get("migrated", [])})
+        result = self.user_packages_probe(image, root, migrated)
+        conflicts, shadowed = list(result["conflicts"]), list(result.get("shadowed", []))
         if shadowed:
-            self.log("user packages shadowed by the image (never loaded, not a conflict): "
-                     + ", ".join(sorted({item["package"] for item in shadowed})))
+            key = lambda item: (item["package"], item["kind"], item["shipped"] if item["kind"] == "module" else None)
+            try:
+                if not current:
+                    raise UpdateError("текущий образ неизвестен")
+                known = {key(item) for item in self.user_packages_probe(current, root, [])["shadowed"]}
+                result["baseline"] = {"image": current, "shadowed": len(known)}
+                reason = "новое перекрытие: в текущей среде пакет брался из хранилища"
+            except (UpdateError, KeyError, TypeError) as exc:
+                known = set()
+                result["baseline"] = {"image": current, "error": str(exc)}
+                reason = f"не удалось проверить текущую среду ({exc}), перекрытие считается конфликтом"
+            result["shadowed"] = [item for item in shadowed if key(item) in known]
+            for item in shadowed:
+                if key(item) not in known:
+                    conflicts.append({"package": item["package"], "kind": item["kind"],
+                                      "detail": f"{item['detail']}; {reason}"})
+            result["conflicts"] = conflicts
+        self.receipt["user_packages"] = result
+        if result.get("shadowed"):
+            self.log("user packages shadowed by the image (never loaded, shadowed before too, not a conflict): "
+                     + ", ".join(sorted({item["package"] for item in result["shadowed"]})))
         if conflicts:
             summary = "; ".join("{} ({}): {}".format(c["package"], c["kind"], c["detail"]) for c in conflicts[:5])
             if not strict:
@@ -2631,7 +2659,7 @@ print(json.dumps(changed))
                 self.phase("already_current", status="succeeded")
                 return
             self.phase("user_packages")
-            self.verify_user_packages(target)
+            self.verify_user_packages(target, current=old)
             self.phase("draining")
             drained = True
             self.drain()
@@ -2641,7 +2669,7 @@ print(json.dumps(changed))
             self.docker("stop", "--time", "60", self.name, timeout=90)
             stopped = True
             self.inspect_target(old, running=False)
-            self.verify_user_packages(target)  # после переноса из writable слоя, до backup и recreate
+            self.verify_user_packages(target, current=old)  # после переноса из writable слоя, до backup и recreate
             # DATA is now quiescent.  Resolve current intent/config here rather
             # than from the earlier gateway cache: profile create/delete and
             # channel toggles immediately before the operation are included.
@@ -2700,7 +2728,8 @@ print(json.dumps(changed))
         # one that silently moved the owner's day is not.
         self.verify_launcher(rollback=True)
         backup, _ = self.verify_backup()  # validate before quiescing a healthy newer gateway
-        self.verify_user_packages(self.receipt["old_image_id"], backup, strict=not automatic)
+        self.verify_user_packages(self.receipt["old_image_id"], backup, strict=not automatic,
+                                  current=self.receipt.get("target_image_id"))
         allowed = {self.receipt.get("old_image_id"), self.receipt.get("target_image_id")}
         try:
             info = self.inspect_target(running=False)
