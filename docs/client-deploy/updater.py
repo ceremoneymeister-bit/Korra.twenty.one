@@ -121,10 +121,13 @@ print(json.dumps({'skills': skills}))
 # read-only копией DATA и сверяет хранилище с его поставкой: версии
 # дистрибутивов, закреплённый стек из dependencies.lock.json, модули, которые
 # поставка перекрыла бы, зависимости, CLI и ABI интерпретатора. Данные она не
-# меняет. Дубль пакета или модуля поставки (хранилище в конце sys.path, он не
-# загружается) идёт в `shadowed`; конфликтом он остаётся у пакета, перенесённого
-# из writable слоя (третий аргумент). Допустим ли `shadowed`, решает
-# verify_user_packages: тот же код текущим образом, перекрытие должно быть и там.
+# меняет. Хранилище стоит в конце sys.path: его модуль, который поставка уже даёт,
+# не загружается. Такие модули (у каждой дистрибуции хранилища, и при совпадении
+# версий) выводятся списком `shadowed_modules` (владелец — `shadowed_by`); по ним
+# verify_user_packages сравнивает целевой образ с текущим: конфликт — модуль,
+# который раньше грузился из хранилища, а теперь перекрыт. `shadowed` (дубль
+# версии или модуля, ярлыки kind) — только диагностика для receipt; конфликтом он
+# остаётся у пакета, перенесённого из writable слоя (третий аргумент).
 # ABI-токен повторяет tools.lazy_deps._python_abi_tag (тест следит).
 USER_PACKAGES_CODE = r'''
 import importlib.machinery, importlib.metadata as md, json, os, re, sys, sysconfig
@@ -133,7 +136,7 @@ root, pinned = Path(sys.argv[1]), json.loads(sys.argv[2])
 migrated = set(json.loads(sys.argv[3])) if len(sys.argv) > 3 else set()
 store = root / 'lazy-packages'
 norm = lambda n: re.sub(r'[-_.]+', '-', n).lower()
-result = {'packages': [], 'conflicts': [], 'shadowed': []}
+result = {'packages': [], 'conflicts': [], 'shadowed': [], 'shadowed_modules': [], 'shadowed_by': {}}
 def conflict(package, kind, detail):
     result['conflicts'].append({'package': package, 'kind': kind, 'detail': detail})
 def shadow(package, kind, detail, version, shipped):
@@ -161,27 +164,32 @@ if dists:
     shadow_dirs = [Path('/opt/hermes/bin'), Path(sys.prefix, 'bin')]
     for d in sorted(dists, key=lambda item: norm(item.metadata['Name'])):
         name, version = norm(d.metadata['Name']), d.version
-        if name in core:
-            if core[name] != version:
-                shadow(name, 'version', 'в хранилище %s, в поставке %s' % (version, core[name]), version, core[name])
-            continue
-        if name in pinned and pinned[name] != version:
-            conflict(name, 'pinned', 'в хранилище %s, закреплено поставкой %s' % (version, pinned[name]))
         files = d.files or []
-        gone = [str(f) for f in files if not str(f).startswith('..') and '__pycache__' not in f.parts
-                and f.suffix != '.pyc' and not d.locate_file(f).exists()]
-        if not files or gone:
-            conflict(name, 'incomplete', ', '.join(gone[:3]) or 'нет RECORD')
         tops = set()
         for f in files:
             top = f.parts[0] if f.parts else ''
             if not top or top in ('..', 'bin', '__pycache__') or top.endswith(('.dist-info', '.data', '.pth')):
                 continue
             tops.add(top.split('.')[0] if len(f.parts) == 1 else top)
+        overlap = []
         for top in sorted(tops):
             spec = importlib.machinery.PathFinder.find_spec(top, core_paths)
             if spec is not None and spec.origin not in (None, 'namespace'):
-                shadow(name, 'module', 'модуль %s перекрыт поставкой' % top, version, top)
+                overlap.append(top)
+                if name not in migrated:
+                    result['shadowed_by'].setdefault(top, name)
+        if name in core:
+            if core[name] != version:
+                shadow(name, 'version', 'в хранилище %s, в поставке %s' % (version, core[name]), version, core[name])
+            continue
+        if name in pinned and pinned[name] != version:
+            conflict(name, 'pinned', 'в хранилище %s, закреплено поставкой %s' % (version, pinned[name]))
+        gone = [str(f) for f in files if not str(f).startswith('..') and '__pycache__' not in f.parts
+                and f.suffix != '.pyc' and not d.locate_file(f).exists()]
+        if not files or gone:
+            conflict(name, 'incomplete', ', '.join(gone[:3]) or 'нет RECORD')
+        for top in overlap:
+            shadow(name, 'module', 'модуль %s перекрыт поставкой' % top, version, top)
         for line in (d.requires or []) if Requirement else []:
             try:
                 req = Requirement(line)
@@ -202,6 +210,7 @@ if dists:
             elif any((directory / script).exists() for directory in shadow_dirs):
                 conflict(name, 'cli', 'команда %s перекрыта поставкой' % script)
         result['packages'].append({'name': name, 'version': version, 'cli': scripts})
+result['shadowed_modules'] = sorted(result['shadowed_by'])
 print(json.dumps(result))
 '''
 
@@ -1736,6 +1745,7 @@ class Updater:
             result = json.loads(output.splitlines()[-1])
             list(result["conflicts"])
             list(result.get("shadowed", []))
+            list(result["shadowed_modules"])
         except (ValueError, IndexError, KeyError, TypeError, AttributeError):
             raise UpdateError("Проверка пакетов пользователя вернула некорректный ответ") from None
         return result
@@ -1746,38 +1756,37 @@ class Updater:
         Образ запускается без сети над read-only копией; конфликт останавливает
         операцию до запуска gateway, данные не меняются. Нестрогий режим (откат
         после неудачного обновления) только записывает конфликты: остановка
-        там оставила бы контур без шлюза. Дубль поставки (`shadowed`) допустим,
-        только если он перекрыт и в текущей среде `current` (образ, который
-        работает до операции): тот же код над теми же данными. Новое перекрытие
-        ломало бы импорт, который работал, и остаётся конфликтом, как и дубль
-        пакета, перенесённого из writable слоя. Без базового прогона
-        (образа нет, ответ некорректный) перекрытия считаются конфликтом.
+        там оставила бы контур без шлюза. Сравниваются не диагностические записи
+        `shadowed`, а фактическое перекрытие: модули хранилища, которые образ
+        даёт сам (`shadowed_modules`). Допустимы те, что перекрыты и в текущей
+        среде `current` (образ, который работает до операции; тот же код над
+        теми же данными). Модуль, который там грузился из хранилища, а в
+        целевом образе перекрыт, ломал бы импорт и остаётся конфликтом, как и
+        дубль пакета, перенесённого из writable слоя. Без базового прогона
+        (образа нет, ответ некорректный) любое перекрытие считается конфликтом.
         """
         migrated = sorted({re.sub(r"[-_.]+", "-", stem.rpartition("-")[0]).lower()
                            for stem in (self.receipt.get("writable_packages") or {}).get("migrated", [])})
         result = self.user_packages_probe(image, root, migrated)
-        conflicts, shadowed = list(result["conflicts"]), list(result.get("shadowed", []))
-        if shadowed:
-            key = lambda item: (item["package"], item["kind"], item["shipped"] if item["kind"] == "module" else None)
+        conflicts, modules = list(result["conflicts"]), set(result["shadowed_modules"])
+        if modules:
             try:
                 if not current:
                     raise UpdateError("текущий образ неизвестен")
-                known = {key(item) for item in self.user_packages_probe(current, root, [])["shadowed"]}
-                result["baseline"] = {"image": current, "shadowed": len(known)}
-                reason = "новое перекрытие: в текущей среде пакет брался из хранилища"
+                known = set(self.user_packages_probe(current, root, [])["shadowed_modules"])
+                result["baseline"] = {"image": current, "shadowed_modules": len(known)}
+                reason = "новый образ его перекрывает"
             except (UpdateError, KeyError, TypeError) as exc:
                 known = set()
                 result["baseline"] = {"image": current, "error": str(exc)}
-                reason = f"не удалось проверить текущую среду ({exc}), перекрытие считается конфликтом"
-            result["shadowed"] = [item for item in shadowed if key(item) in known]
-            for item in shadowed:
-                if key(item) not in known:
-                    conflicts.append({"package": item["package"], "kind": item["kind"],
-                                      "detail": f"{item['detail']}; {reason}"})
+                reason = f"не удалось проверить текущую среду ({exc}), перекрытие считается новым"
+            for module in sorted(modules - known):
+                conflicts.append({"package": result["shadowed_by"].get(module, module), "kind": "module",
+                                  "detail": f"модуль {module} раньше загружался из хранилища, {reason}"})
             result["conflicts"] = conflicts
         self.receipt["user_packages"] = result
         if result.get("shadowed"):
-            self.log("user packages shadowed by the image (never loaded, shadowed before too, not a conflict): "
+            self.log("user packages shadowed by the image (never loaded from the store, not a conflict by itself): "
                      + ", ".join(sorted({item["package"] for item in result["shadowed"]})))
         if conflicts:
             summary = "; ".join("{} ({}): {}".format(c["package"], c["kind"], c["detail"]) for c in conflicts[:5])

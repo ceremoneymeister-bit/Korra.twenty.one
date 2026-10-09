@@ -3237,7 +3237,7 @@ def tree(root):
 
 
 def test_package_check_accepts_a_complete_store_and_ignores_an_empty_one(tmp_path):
-    assert check_packages(tmp_path) == {"packages": [], "conflicts": [], "shadowed": []}
+    assert check_packages(tmp_path) == {"packages": [], "conflicts": [], "shadowed": [], "shadowed_modules": [], "shadowed_by": {}}
     make_user_package(tmp_path)
     result = check_packages(tmp_path)
     assert result["conflicts"] == []
@@ -3270,6 +3270,8 @@ def test_package_check_lists_shipped_duplicates_as_shadowed_without_conflict(tmp
     assert shadowed["pytest"]["kind"] == "version" and shadowed["pytest"]["version"] == "0.0.1"
     assert shadowed["pytest"]["shipped"] == importlib.metadata.version("pytest")
     assert shadowed["shadow-json"]["kind"] == "module" and shadowed["shadow-json"]["shipped"] == "json"
+    assert {"pytest", "json"} <= set(result["shadowed_modules"])
+    assert result["shadowed_by"]["json"] == "shadow-json"
     # Перенос из writable слоя касается только названного пакета.
     kinds = {(item["package"], item["kind"]) for item in check_packages(tmp_path, migrated=["pytest"])["conflicts"]}
     assert kinds == {("pytest", "version")}
@@ -3368,9 +3370,9 @@ def test_new_shadow_of_a_working_user_package_stops_the_update_before_drain(upda
         updater.update("registry.example/korra:latest")
     assert updater.receipt["error_code"] == "user_packages_conflict"
     conflict, = updater.receipt["user_packages"]["conflicts"]
-    assert conflict["kind"] == ("version" if same_distribution else "module")
-    assert "новое перекрытие" in conflict["detail"]
-    assert updater.receipt["user_packages"]["shadowed"] == []
+    assert conflict["kind"] == "module" and conflict["package"] == "review-client-dependency"
+    assert "модуль review_client_dependency раньше загружался из хранилища, новый образ его перекрывает" in conflict["detail"]
+    assert updater.receipt["user_packages"]["baseline"] == {"image": OLD, "shadowed_modules": 0}
     assert not any(call[0] in {"stop", "start_image"} or call == ("native", "drain") for call in updater.calls)
     assert updater.image == OLD and updater.running
     assert tree(updater.data) == before and store.is_dir()
@@ -3386,8 +3388,49 @@ def test_shadow_that_already_existed_in_the_current_image_is_allowed(updater, tm
     assert packages["conflicts"] == []
     assert [(item["package"], item["kind"]) for item in packages["shadowed"]] == [
         ("review-client-dependency", "version" if same_distribution else "module")]
-    assert packages["baseline"]["image"] == OLD and "error" not in packages["baseline"]
+    assert packages["baseline"] == {"image": OLD, "shadowed_modules": 1}
+    assert packages["shadowed_modules"] == ["review_client_dependency"]
     assert tree(store) == before
+
+
+def versioned_images(updater, tmp_path, *, old_version, old_same_distribution=True):
+    """Пакет 1.0 в DATA; старый образ даёт модуль (или нет), новый — 2.0 той же дистрибуции."""
+    store = make_user_package(updater.data, "review_dependency", "1.0", cli=None)
+    for image, version, same in ((OLD, old_version, old_same_distribution), (NEW, "2.0", True)):
+        core = tmp_path / ("core-" + image[-1])
+        core.mkdir()
+        if version is not None:
+            make_user_package(core, "review_dependency" if same else "other_distribution", version,
+                              cli=None, modules=["review_dependency"])
+        updater.image_cores[image] = core / "lazy-packages"
+    return store
+
+
+@pytest.mark.parametrize("old_version,old_same", [("1.0", True), ("1.5", True), ("1.5", False)],
+                         ids=["same-version", "other-version", "label-changes"])
+def test_overlap_that_existed_in_the_current_image_never_blocks_whatever_the_versions_or_labels(
+        updater, tmp_path, old_version, old_same):
+    store = versioned_images(updater, tmp_path, old_version=old_version, old_same_distribution=old_same)
+    before = tree(updater.data)
+    updater.update("registry.example/korra:latest")
+    assert updater.receipt["status"] == "succeeded"
+    packages = updater.receipt["user_packages"]
+    assert packages["conflicts"] == [] and packages["shadowed_modules"] == ["review_dependency"]
+    assert packages["baseline"] == {"image": OLD, "shadowed_modules": 1}
+    assert tree(updater.data) == before and store.is_dir()
+    assert updater.image == NEW and updater.running
+
+
+def test_package_check_lists_overlapped_modules_of_every_distribution_even_with_equal_versions(tmp_path):
+    shipped = tmp_path / "shipped"
+    make_user_package(shipped, "review_dependency", "1.0", cli=None)
+    make_user_package(tmp_path / "data", "review_dependency", "1.0", cli=None)
+    make_user_package(tmp_path / "data", "own_pkg", "1.0", cli=None)
+    result = run_packages_isolated(shipped / "lazy-packages", tmp_path / "data", "{}", "[]")
+    result = json.loads(result.splitlines()[-1])
+    assert result["conflicts"] == [] and result["shadowed"] == []
+    assert result["shadowed_modules"] == ["review_dependency"]
+    assert result["shadowed_by"] == {"review_dependency": "review-dependency"}
 
 
 def test_user_package_check_fails_closed_when_the_current_image_cannot_be_probed(updater, tmp_path):
@@ -3398,7 +3441,7 @@ def test_user_package_check_fails_closed_when_the_current_image_cannot_be_probed
         updater.update("registry.example/korra:latest")
     packages = updater.receipt["user_packages"]
     assert updater.receipt["error_code"] == "user_packages_conflict"
-    assert packages["shadowed"] == [] and packages["baseline"]["image"] == OLD and "exit 125" in packages["baseline"]["error"]
+    assert packages["baseline"]["image"] == OLD and "exit 125" in packages["baseline"]["error"]
     assert not any(call[0] in {"stop", "start_image"} or call == ("native", "drain") for call in updater.calls)
     assert tree(updater.data) == before and store.is_dir()
 
@@ -3411,7 +3454,7 @@ def test_rollback_refuses_a_shadow_the_image_it_leaves_did_not_have(updater, tmp
     make_user_package(core, "review_client_dependency", "1.5", cli=None)
     updater.image_cores[OLD] = core / "lazy-packages"
     mark = len(updater.calls)
-    with pytest.raises(u.UpdateError, match="новое перекрытие"):
+    with pytest.raises(u.UpdateError, match="раньше загружался из хранилища"):
         updater.rollback()
     assert not any(call[0] in {"stop", "start_image"} for call in updater.calls[mark:])
     assert updater.image == NEW and updater.running
