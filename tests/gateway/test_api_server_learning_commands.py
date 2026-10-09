@@ -444,3 +444,55 @@ async def test_memory_in_web_chat_answers_in_russian(tmp_path, monkeypatch):
     assert result["final_response"] == "Подтверждение записей в память включено."
     _agent_obj, result = await _send("/memory pending")
     assert result["final_response"] == "Ожидающих записей в память нет."
+
+
+@pytest.mark.asyncio
+async def test_curator_real_subprocess_changes_only_the_selected_profile(tmp_path, monkeypatch):
+    """K21-230 review: KORRA_HOME имеет приоритет, но выбран профиль веб-чата."""
+    import json as _json
+
+    from korra_constants import reset_hermes_home_override, set_hermes_home_override
+    from gateway.platforms.api_server import _run_web_learning_command
+    from tools import skill_usage
+
+    root = tmp_path / "root"
+    profile = root / "profiles" / "alice"
+    for home in (root, profile):
+        (home / "skills" / "owner-method").mkdir(parents=True)
+        (home / "skills" / "owner-method" / "SKILL.md").write_text(
+            "---\nname: owner-method\ndescription: method\n---\nМетод владельца.\n",
+            encoding="utf-8",
+        )
+        (home / "skills" / ".curator_state").write_text(_json.dumps({"paused": False}))
+    monkeypatch.setenv("KORRA_HOME", str(root))
+    monkeypatch.setenv("HERMES_HOME", str(root))
+
+    def pinned(home):
+        token = set_hermes_home_override(home)
+        try:
+            return skill_usage.get_record("owner-method").get("pinned")
+        finally:
+            reset_hermes_home_override(token)
+
+    for home in (root, profile):
+        token = set_hermes_home_override(home)
+        try:
+            skill_usage.mark_agent_created("owner-method")
+            assert skill_usage.set_pinned("owner-method", True)
+        finally:
+            reset_hermes_home_override(token)
+
+    token = set_hermes_home_override(profile)
+    try:
+        unpin = _run_web_learning_command("curator", "unpin owner-method")
+        pause = _run_web_learning_command("curator", "pause")
+    finally:
+        reset_hermes_home_override(token)
+
+    assert "откреплён" in unpin, unpin
+    assert "приостановлено" in pause, pause
+    assert pinned(profile) is False
+    assert pinned(root) is True
+    paused = lambda home: _json.loads((home / "skills" / ".curator_state").read_text())["paused"]
+    assert paused(profile) is True
+    assert paused(root) is False

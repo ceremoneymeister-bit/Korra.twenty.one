@@ -1793,6 +1793,8 @@ def _run_review_in_thread(
                 ),
                 attended=attended,
             )
+            if excerpt is not None:
+                review_agent._review_stop_after_write = True
 
             # Register this fork on the PARENT's _active_children (the same
             # list interrupt() fans out to for subagent delegation) and
