@@ -280,7 +280,10 @@ function AssistantBubble({
   decisionsBusy,
   decided,
   chatKey,
+  readOnly,
 }: {
+  /** Архив: чтение и копирование без действий записи («Отменить» под «Учёл»). */
+  readOnly?: boolean;
   voiceSettings?: AgentVoiceSettings | null;
   profile?: string;
   active?: boolean;
@@ -352,7 +355,7 @@ function AssistantBubble({
                 <div className="korra-chat-answer__footer">
                   <CopyTextButton text={message.content} label="Скопировать ответ" />
                 </div>
-                {message.learning && sessionId && message.historyId !== undefined && (
+                {!readOnly && message.learning && sessionId && message.historyId !== undefined && (
                   <LearningUndo
                     sessionId={sessionId}
                     messageId={message.historyId}
@@ -596,7 +599,10 @@ export function BubbleChatTranscript({
   older,
   onLoadOlder,
   onShowArchive,
+  readOnly,
 }: {
+  /** Архив только для чтения: без действий записи в ответах агента. */
+  readOnly?: boolean;
   /** Более ранние сообщения этого чата, догружаемые к началу ленты. */
   older?: OlderHistoryState;
   onLoadOlder?: () => void;
@@ -685,6 +691,7 @@ export function BubbleChatTranscript({
                   chatKey={messages[i - 1]?.role === "user" && messages[i - 1]?.clientMessageId ? `assistant:${messages[i - 1]?.clientMessageId}` : undefined}
                   message={m}
                   sessionId={sessionId}
+                  readOnly={readOnly}
                   streaming={
                     streaming === true && lastIsAssistant && i === lastIdx
                   }
@@ -780,6 +787,7 @@ function ChatArchive({
         onLoadOlder={() => void archive.load()}
         sessionId={sessionId}
         agentLabel={agentLabel}
+        readOnly
       />
     </>
   );
