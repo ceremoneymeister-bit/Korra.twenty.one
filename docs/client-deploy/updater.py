@@ -125,7 +125,8 @@ print(json.dumps({'skills': skills}))
 # не загружается. Такие модули (у каждой дистрибуции хранилища, и при совпадении
 # версий) выводятся списком `shadowed_modules` (владелец — `shadowed_by`); по ним
 # verify_user_packages сравнивает целевой образ с текущим: конфликт — модуль,
-# который раньше грузился из хранилища, а теперь перекрыт. `shadowed` (дубль
+# который раньше грузился из хранилища, а теперь перекрыт. Остальные конфликты
+# сравниваются по (пакет, вид, key): уже существующие в текущем образе не новые. `shadowed` (дубль
 # версии или модуля, ярлыки kind) — только диагностика для receipt; конфликтом он
 # остаётся у пакета, перенесённого из writable слоя (третий аргумент).
 # ABI-токен повторяет tools.lazy_deps._python_abi_tag (тест следит).
@@ -137,8 +138,10 @@ migrated = set(json.loads(sys.argv[3])) if len(sys.argv) > 3 else set()
 store = root / 'lazy-packages'
 norm = lambda n: re.sub(r'[-_.]+', '-', n).lower()
 result = {'packages': [], 'conflicts': [], 'shadowed': [], 'shadowed_modules': [], 'shadowed_by': {}}
-def conflict(package, kind, detail):
-    result['conflicts'].append({'package': package, 'kind': kind, 'detail': detail})
+def conflict(package, kind, detail, key=None):
+    # key — то же без версий поставки: verify_user_packages сопоставляет конфликты
+    # текущего и целевого образов, а версия зависимости от образа к образу меняется.
+    result['conflicts'].append({'package': package, 'kind': kind, 'detail': detail, 'key': key or detail})
 def shadow(package, kind, detail, version, shipped):
     # Хранилище в конце sys.path: дубль поставки не загружается и ничего не меняет.
     # Перенесённый из writable слоя пакет раньше перекрывал поставку, поэтому
@@ -156,7 +159,7 @@ if dists:
     stamp = store / '.python-abi'
     want = '%d.%d:%s' % (sys.version_info[0], sys.version_info[1], sysconfig.get_config_var('EXT_SUFFIX') or '')
     if stamp.is_file() and stamp.read_text().strip() != want:
-        conflict('*', 'abi', stamp.read_text().strip() + ' -> ' + want)
+        conflict('*', 'abi', stamp.read_text().strip() + ' -> ' + want, stamp.read_text().strip())
     try:
         from packaging.requirements import Requirement
     except ImportError:
@@ -201,7 +204,8 @@ if dists:
             if have is None:
                 conflict(name, 'requires', 'нет зависимости ' + req.name)
             elif req.specifier and not req.specifier.contains(have, prereleases=True):
-                conflict(name, 'requires', '%s %s не подходит под %s' % (req.name, have, req.specifier))
+                conflict(name, 'requires', '%s %s не подходит под %s' % (req.name, have, req.specifier),
+                         '%s не подходит под %s' % (req.name, req.specifier))
         scripts = sorted(ep.name for ep in d.entry_points if ep.group == 'console_scripts')
         for script in scripts:
             path = store / 'bin' / script
@@ -1765,9 +1769,12 @@ class Updater:
         среде `current` (образ, который работает до операции; тот же код над
         теми же данными). Модуль, который там грузился из хранилища, а в
         целевом образе перекрыт, ломал бы импорт и остаётся конфликтом, как и
-        дубль пакета, перенесённого из writable слоя. Без базового прогона
-        (образа нет, таймаут, ответ некорректный) любое перекрытие считается
-        конфликтом. Сбой основного прогона при обычной операции — отказ до
+        дубль пакета, перенесённого из writable слоя. Остальные конфликты
+        (requires, cli, pinned, abi, incomplete), которые текущий образ над теми
+        же данными даёт тоже (ключ: пакет, вид, `key` без версий поставки),
+        обновление не ухудшает: они пишутся в `preexisting` и не останавливают.
+        Без базового прогона (образа нет, таймаут, ответ некорректный) любое
+        перекрытие и любой конфликт считаются новыми. Сбой основного прогона при обычной операции — отказ до
         drain, при автоматическом откате — запись и продолжение.
         """
         migrated = sorted({re.sub(r"[-_.]+", "-", stem.rpartition("-")[0]).lower()
@@ -1782,17 +1789,22 @@ class Updater:
             self.log(f"user packages check failed (rollback continues): {exc}")
             return self.receipt["user_packages"]
         conflicts, modules = list(result["conflicts"]), set(result["shadowed_modules"])
-        if modules:
+        result["preexisting"] = []
+        if conflicts or modules:
             try:
                 if not current:
                     raise UpdateError("текущий образ неизвестен")
-                known = set(self.user_packages_probe(current, root, [])["shadowed_modules"])
+                base = self.user_packages_probe(current, root, [])
+                known = set(base["shadowed_modules"])
+                seen = {(c["package"], c["kind"], c.get("key", c["detail"])) for c in base["conflicts"]}
                 result["baseline"] = {"image": current, "shadowed_modules": len(known)}
                 reason = "новый образ его перекрывает"
             except (UpdateError, KeyError, TypeError) as exc:
-                known = set()
+                known, seen = set(), set()
                 result["baseline"] = {"image": current, "error": str(exc)}
                 reason = f"не удалось проверить текущую среду ({exc}), перекрытие считается новым"
+            result["preexisting"] = [c for c in conflicts if (c["package"], c["kind"], c.get("key", c["detail"])) in seen]
+            conflicts = [c for c in conflicts if c not in result["preexisting"]]
             for module in sorted(modules - known):
                 conflicts.append({"package": result["shadowed_by"].get(module, module), "kind": "module",
                                   "detail": f"модуль {module} раньше загружался из хранилища, {reason}"})
@@ -1801,6 +1813,9 @@ class Updater:
         if result.get("shadowed"):
             self.log("user packages shadowed by the image (never loaded from the store, not a conflict by itself): "
                      + ", ".join(sorted({item["package"] for item in result["shadowed"]})))
+        if result["preexisting"]:
+            self.log("user packages conflicts already present in the current image (not blocking): "
+                     + "; ".join("{} ({})".format(c["package"], c["kind"]) for c in result["preexisting"][:5]))
         if conflicts:
             summary = "; ".join("{} ({}): {}".format(c["package"], c["kind"], c["detail"]) for c in conflicts[:5])
             if not strict:

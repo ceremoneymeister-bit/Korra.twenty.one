@@ -3316,24 +3316,108 @@ def test_user_package_survives_update_rollback_update(updater, tmp_path):
     assert subprocess.run(["korra-demo"], env=env, capture_output=True, text=True, check=True).stdout.strip() == "user-cli-ok"
 
 
-@pytest.mark.parametrize("kind", ["pinned", "requires", "abi"])
-def test_package_conflict_stops_update_before_drain_and_keeps_data(updater, monkeypatch, kind):
-    build = {
-        "pinned": lambda: make_user_package(updater.data, cli=None),
-        "requires": lambda: make_user_package(updater.data, requires=["pytest>=999"], cli=None),
-        "abi": lambda: make_user_package(updater.data, cli=None, abi="2.7:.cpython-27"),
-    }[kind]
-    store = build()
+def package_conflict_case(updater, monkeypatch, tmp_path, kind):
+    """Хранилище с конфликтом вида `kind` для обоих образов (одно окружение)."""
     if kind == "pinned":
         monkeypatch.setattr(updater, "pinned_dependencies", lambda: {"korra-demo-pkg": "2.0"})
+        return make_user_package(updater.data, cli=None)
+    if kind == "requires":
+        return make_user_package(updater.data, requires=["pytest>=999"], cli=None)
+    if kind == "cli":
+        return make_user_package(updater.data, cli="python")
+    return make_user_package(updater.data, cli=None, abi="2.7:.cpython-27")
+
+
+def old_image_without_conflicts(updater, monkeypatch):
+    """Текущий образ, у которого конфликтов нет (его проверка отвечает чисто)."""
+    real = updater.user_packages_probe
+
+    def probe(image, root, migrated):
+        result = real(image, root, migrated)
+        return {**result, "conflicts": []} if image == OLD else result
+
+    monkeypatch.setattr(updater, "user_packages_probe", probe)
+
+
+@pytest.mark.parametrize("kind", ["pinned", "requires", "cli", "abi"])
+def test_new_package_conflict_stops_update_before_drain_and_keeps_data(updater, monkeypatch, tmp_path, kind):
+    store = package_conflict_case(updater, monkeypatch, tmp_path, kind)
+    old_image_without_conflicts(updater, monkeypatch)
     before = tree(updater.data)
     with pytest.raises(u.UpdateError, match="Пакеты пользователя"):
         updater.update("registry.example/korra:latest")
     assert updater.receipt["error_code"] == "user_packages_conflict"
     assert kind in {item["kind"] for item in updater.receipt["user_packages"]["conflicts"]}
+    assert updater.receipt["user_packages"]["preexisting"] == []
     assert not any(call[0] in {"stop", "start_image"} or call == ("native", "drain") for call in updater.calls)
     assert updater.image == OLD and updater.running
     assert tree(updater.data) == before and store.is_dir()
+
+
+@pytest.mark.parametrize("kind", ["pinned", "requires", "cli", "abi"])
+def test_package_conflict_already_present_in_the_current_image_does_not_stop_the_update(
+        updater, monkeypatch, tmp_path, kind):
+    store = package_conflict_case(updater, monkeypatch, tmp_path, kind)
+    before = tree(store)
+    updater.update("registry.example/korra:latest")
+    assert updater.receipt["status"] == "succeeded" and updater.image == NEW
+    packages = updater.receipt["user_packages"]
+    assert packages["conflicts"] == []
+    assert kind in {item["kind"] for item in packages["preexisting"]}
+    assert tree(store) == before
+    updater.rollback()
+    assert updater.receipt["status"] == "rolled_back" and updater.image == OLD
+
+
+def test_pymupdf_layout_requires_conflict_of_the_current_release_does_not_stop_the_update(updater):
+    # Хранилище Доломановой: PyMuPDF 1.26.4, а надстройки просят 1.28.2.
+    make_user_package(updater.data, "PyMuPDF", "1.26.4", cli=None, modules=["pymupdf"])
+    make_user_package(updater.data, "pymupdf_layout", "1.0", requires=["PyMuPDF==1.28.2"], cli=None)
+    make_user_package(updater.data, "pymupdf4llm", "1.0", requires=["PyMuPDF>=1.28.2", "pymupdf-layout"], cli=None)
+    updater.update("registry.example/korra:latest")
+    assert updater.receipt["status"] == "succeeded" and updater.image == NEW
+    packages = updater.receipt["user_packages"]
+    assert packages["conflicts"] == []
+    assert {(item["package"], item["kind"]) for item in packages["preexisting"]} == {
+        ("pymupdf-layout", "requires"), ("pymupdf4llm", "requires")}
+
+
+def test_new_image_that_changes_a_shipped_dependency_breaks_a_working_package(updater, tmp_path):
+    make_user_package(updater.data, requires=["review_dep>=2"], cli=None)
+    for image, version in ((OLD, "3.0"), (NEW, "1.0")):
+        core = tmp_path / ("core-" + image[-1])
+        make_user_package(core, "review_dep", version, cli=None)
+        updater.image_cores[image] = core / "lazy-packages"
+    with pytest.raises(u.UpdateError, match="Пакеты пользователя"):
+        updater.update("registry.example/korra:latest")
+    conflict, = updater.receipt["user_packages"]["conflicts"]
+    assert (conflict["kind"], conflict["package"]) == ("requires", "korra-demo-pkg")
+    assert not any(call[0] in {"stop", "start_image"} for call in updater.calls)
+
+
+def test_requires_conflict_stays_preexisting_when_only_the_shipped_version_differs(updater, tmp_path):
+    make_user_package(updater.data, requires=["review_dep>=2"], cli=None)
+    for image, version in ((OLD, "1.0"), (NEW, "1.5")):
+        core = tmp_path / ("core-" + image[-1])
+        make_user_package(core, "review_dep", version, cli=None)
+        updater.image_cores[image] = core / "lazy-packages"
+    updater.update("registry.example/korra:latest")
+    assert updater.receipt["status"] == "succeeded"
+    assert updater.receipt["user_packages"]["conflicts"] == []
+    assert "1.5" in updater.receipt["user_packages"]["preexisting"][0]["detail"]
+
+
+@pytest.mark.parametrize("fault", ["command_error", "timeout"])
+def test_package_conflict_without_a_baseline_probe_stops_the_update(updater, monkeypatch, fault):
+    make_user_package(updater.data, requires=["pytest>=999"], cli=None)
+    fail_package_probe(updater, monkeypatch, OLD, fault)
+    with pytest.raises(u.UpdateError, match="Пакеты пользователя"):
+        updater.update("registry.example/korra:latest")
+    packages = updater.receipt["user_packages"]
+    assert updater.receipt["error_code"] == "user_packages_conflict"
+    assert packages["baseline"]["error"] and packages["preexisting"] == []
+    assert [item["kind"] for item in packages["conflicts"]] == ["requires"]
+    assert not any(call[0] in {"stop", "start_image"} for call in updater.calls)
 
 
 def test_shipped_duplicates_in_the_store_do_not_stop_the_update(updater):
