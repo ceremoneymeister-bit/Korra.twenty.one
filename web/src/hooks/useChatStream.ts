@@ -174,6 +174,24 @@ function effectOutcomeNote(request: SSEApprovalRequestData): string | undefined 
   }
 }
 
+/** Явно завершённые durable-решения не возвращаются в чат после F5: их
+ *  история — в центре «Решений». Явный список, а не «всё кроме ждущих»:
+ *  `failed`, `unknown`, `needs_review` и любой будущий статус остаются на виду. */
+const FINISHED_EFFECT_STATUSES: ReadonlySet<string> = new Set([
+  "denied",
+  "succeeded",
+  "expired",
+  "superseded",
+]);
+
+function isFinishedEffectDecision(request: SSEApprovalRequestData): boolean {
+  return Boolean(
+    request.decision_kind &&
+    request.effect_status &&
+    FINISHED_EFFECT_STATUSES.has(request.effect_status),
+  );
+}
+
 function restoredApprovalEntry(request: SSEApprovalRequestData): ChatApprovalEntry {
   if (request.decision_kind && request.effect_status && request.effect_status !== "pending") {
     return {
@@ -608,7 +626,7 @@ function reducer(state: StreamState, action: StreamAction): StreamState {
         return entry;
       });
       const added = action.requests
-        .filter((item) => !known.has(item.request_id))
+        .filter((item) => !known.has(item.request_id) && !isFinishedEffectDecision(item))
         .map((item) => restored.get(item.request_id)!);
       if (added.length === 0 && kept.every((entry, i) => entry === state.approvals[i])) {
         return state;
