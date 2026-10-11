@@ -759,6 +759,7 @@ from cron.jobs import (
     fire_claim_fence,
     clear_run_claim,
     get_due_jobs,
+    fire_fence_in_use,
     heartbeat_fire_claim,
     heartbeat_run_claim,
     mark_job_run,
@@ -7590,14 +7591,22 @@ def _run_with_fire_claim_heartbeat(job: dict, run) -> bool:
         last_confirmed = time.monotonic()
         while not stop.wait(_RUN_CLAIM_HEARTBEAT_SECONDS):
             try:
-                if not heartbeat_fire_claim(job_id, expected_owner=owner):
+                if heartbeat_fire_claim(job_id, expected_owner=owner):
+                    last_confirmed = time.monotonic()
+                    continue
+                if not fire_fence_in_use(job_id):
                     lost_ownership.set()
                     logger.warning(
                         "Job '%s': fire claim ownership lost; interrupting stale run",
                         job_id,
                     )
                     return
-                last_confirmed = time.monotonic()
+                # The run's own delivery holds the fence (a slow send): the
+                # heartbeat could not even look at the claim, which says
+                # nothing about who owns it. A delivered report must not be
+                # recorded as interrupted because of it; only the bounded
+                # grace below ends the wait.
+                raise TimeoutError("fire fence is held by this run's delivery")
             except Exception:
                 logger.debug(
                     "Job '%s': fire_claim heartbeat failed",

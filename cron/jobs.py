@@ -106,6 +106,7 @@ _jobs_file_lock = threading.RLock()
 _jobs_lock_state = threading.local()
 _fire_fence_locks: Dict[str, threading.RLock] = {}
 _fire_fence_locks_guard = threading.Lock()
+_fire_fence_active: Set[str] = set()
 _fire_fence_lock_state = threading.local()
 
 # Upper bound on waiting for the cross-process .jobs.lock flock (#60703).
@@ -450,10 +451,16 @@ def _fire_job_lock(job_id: str):
             logger.error("Cron fire fence unavailable for %s: %s", job_id, exc)
 
         held_locks[lock_key] = acquired
+        if acquired:
+            with _fire_fence_locks_guard:
+                _fire_fence_active.add(lock_key)
         try:
             yield acquired
         finally:
             held_locks.pop(lock_key, None)
+            if acquired:
+                with _fire_fence_locks_guard:
+                    _fire_fence_active.discard(lock_key)
             if lock_fd is not None:
                 try:
                     if acquired and fcntl is not None:
@@ -468,6 +475,17 @@ def _fire_job_lock(job_id: str):
                     lock_fd.close()
     finally:
         local_lock.release()
+
+
+def fire_fence_in_use(job_id: str) -> bool:
+    """True while some thread of this process holds the job's side-effect fence.
+
+    Lets the claim heartbeat tell "the run's own delivery holds the fence" from
+    "someone else owns the claim": the first is not a verdict on ownership.
+    """
+    lock_key = f"{_current_cron_store().cron_dir.resolve()}::{job_id}"
+    with _fire_fence_locks_guard:
+        return lock_key in _fire_fence_active
 
 
 @contextlib.contextmanager
