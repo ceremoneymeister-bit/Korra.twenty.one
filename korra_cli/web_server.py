@@ -3585,6 +3585,67 @@ def _chat_profile_upstream(
     }
 
 
+def _chat_executor_links(session_id: str, profile: Optional[str]) -> list[tuple[str, str]]:
+    """Executor profiles holding cards handed over from this chat.
+
+    Returns ``(executor profile, card origin session)`` pairs. The link is the
+    card itself (origin session + assignee), followed along the chat's own
+    reset/compression chain; no other profile's ledger is scanned. Anything
+    unreadable yields no link: the chat then keeps only its own decisions.
+    """
+    try:
+        from korra_cli import kanban_db as _kb
+        from korra_cli import profiles as profiles_mod
+        from korra_cli.kanban_decisions import session_ids as _chain
+        from korra_constants import get_hermes_home
+
+        origin = (profile or "").strip() or "default"
+        home = (
+            Path(get_hermes_home()) if origin == "default"
+            else Path(profiles_mod.resolve_profile_env(origin))
+        )
+        chain = _chain(session_id, home=home)
+        links: list[tuple[str, str]] = []
+        for executor, sessions in sorted(_kb.executors_for_sessions(chain).items()):
+            if (
+                executor == origin
+                or not _CHAT_PROFILE_RE.fullmatch(executor)
+                or (executor != "default" and not profiles_mod.profile_exists(executor))
+            ):
+                continue
+            links.extend((executor, sid) for sid in sorted(sessions))
+        return links[:16]
+    except Exception as exc:
+        _log.warning("chat executor links unavailable for %s: %s", session_id, exc)
+        return []
+
+
+async def _chat_executor_effects(
+    client: Any, links: list[tuple[str, str]]
+) -> tuple[list[tuple[str, str, dict]], list[str]]:
+    """Durable effects of linked executors for this chat: ``(profile, session, item)``."""
+    found: list[tuple[str, str, dict]] = []
+    unavailable: list[str] = []
+    for executor, sid in links:
+        try:
+            url, headers = _chat_approval_upstream(
+                sid, None if executor == "default" else executor, "/approvals"
+            )
+            response = await client.get(url, headers=headers)
+            data = response.json()["data"] if response.status_code < 400 else None
+            if not isinstance(data, list):
+                raise ValueError(f"status {response.status_code}")
+        except Exception as exc:
+            _log.warning("executor %s decisions unavailable: %s", executor, exc)
+            unavailable.append(executor)
+            continue
+        found.extend(
+            (executor, sid, item) for item in data
+            if isinstance(item, dict) and str(item.get("request_id") or "").startswith("effect_")
+        )
+    return found, unavailable
+
+
 @app.get("/api/chat/decisions")
 async def chat_decisions_proxy(profile: Optional[str] = None) -> Response:
     """Профильный центр долговечных решений по внешним эффектам."""
@@ -3617,9 +3678,20 @@ async def chat_approvals_proxy(
     import httpx as _httpx
 
     url, headers = _chat_approval_upstream(session_id, profile, "/approvals")
+    links = await run_in_threadpool(_chat_executor_links, session_id, profile)
     try:
         async with _httpx.AsyncClient(timeout=_httpx.Timeout(15.0)) as client:
             response = await client.get(url, headers=headers)
+            if links and response.status_code < 400:
+                payload = response.json()
+                data = payload["data"]
+                seen = {str(i.get("request_id") or "") for i in data if isinstance(i, dict)}
+                foreign, _down = await _chat_executor_effects(client, links)
+                for _executor, _sid, item in foreign:
+                    if str(item["request_id"]) not in seen:
+                        data.append(item)
+                        seen.add(str(item["request_id"]))
+                return JSONResponse(content=payload, status_code=response.status_code)
     except Exception as exc:
         _log.error("chat_approvals_proxy upstream error: %s", exc)
         raise HTTPException(status_code=502, detail=f"Upstream error: {exc}")
@@ -3644,7 +3716,28 @@ async def chat_approval_proxy(
     if payload.request_id is not None and (not request_id or len(request_id) > 256):
         raise HTTPException(status_code=400, detail="Некорректный идентификатор запроса")
 
-    url, headers = _chat_approval_upstream(payload.session_id, profile, "/approval")
+    target_profile, target_session = profile, payload.session_id
+    if request_id.startswith("effect_"):
+        links = await run_in_threadpool(_chat_executor_links, payload.session_id, profile)
+        if links:
+            try:
+                async with _httpx.AsyncClient(timeout=_httpx.Timeout(15.0)) as client:
+                    foreign, down = await _chat_executor_effects(client, links)
+            except Exception as exc:
+                _log.error("chat_approval_proxy executor lookup error: %s", exc)
+                raise HTTPException(status_code=502, detail=f"Upstream error: {exc}")
+            owners = {(e, sid) for e, sid, item in foreign if item["request_id"] == request_id}
+            if len(owners) > 1:
+                raise HTTPException(status_code=409, detail="Запрос подтверждения найден у нескольких исполнителей")
+            if owners:
+                executor, target_session = next(iter(owners))
+                target_profile = None if executor == "default" else executor
+            elif down:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Исполнитель сейчас недоступен, повторите решение чуть позже",
+                )
+    url, headers = _chat_approval_upstream(target_session, target_profile, "/approval")
     body: dict[str, Any] = {"choice": choice}
     if payload.answer is not None:
         body["answer"] = payload.answer

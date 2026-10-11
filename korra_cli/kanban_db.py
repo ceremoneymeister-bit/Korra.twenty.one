@@ -5408,6 +5408,43 @@ def _tasks_on_other_boards(
     return found
 
 
+def executors_for_sessions(session_ids: Iterable[str]) -> dict[str, set[str]]:
+    """Profiles that hold cards handed over from these chat sessions.
+
+    ``{assignee: {card origin session, ...}}`` from every board, read-only. This
+    is the proven origin -> executor link: it comes from the card itself, so a
+    decision can be shown and answered in the owner's chat without scanning
+    other profiles' ledgers. An unreadable board contributes nothing.
+    """
+    wanted = list(dict.fromkeys(i for i in session_ids if i))
+    result: dict[str, set[str]] = {}
+    if not wanted:
+        return result
+    try:
+        slugs = [m.get("slug") for m in list_boards(include_archived=True)]
+    except OSError:
+        return result
+    marks = ",".join(["?"] * len(wanted))
+    for slug in slugs:
+        path = _board_file(slug) if slug else None
+        if path is None or not path.is_file():
+            continue
+        try:
+            other = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1)
+            try:
+                for assignee, session_id in other.execute(
+                    "SELECT DISTINCT assignee, session_id FROM tasks "
+                    f"WHERE session_id IN ({marks}) AND assignee IS NOT NULL AND assignee != ''",
+                    tuple(wanted),
+                ):
+                    result.setdefault(assignee, set()).add(session_id)
+            finally:
+                other.close()
+        except sqlite3.Error:
+            continue
+    return result
+
+
 def _verify_created_cards(
     conn: sqlite3.Connection,
     completing_task_id: str,
@@ -12577,6 +12614,23 @@ def remove_notify_sub(
             (task_id, platform, chat_id, thread_id or ""),
         )
     return cur.rowcount > 0
+
+
+def current_task_origin_session() -> str:
+    """Owner chat session of the card this dispatcher worker is executing, or ''."""
+    task_id = korra_env("KORRA_KANBAN_TASK")
+    if not task_id:
+        return ""
+    try:
+        from agent.delegation_context import is_dispatcher_owned_worker_context
+
+        if not is_dispatcher_owned_worker_context():
+            return ""
+        with connect_closing() as conn:
+            task = get_task(conn, task_id)
+        return (task.session_id or "") if task else ""
+    except Exception:
+        return ""
 
 
 def reroute_notify_sub(

@@ -80,3 +80,21 @@ def test_cli_creation_without_chat_is_not_subscribed(kb_home):
     out = json.loads(kt._handle_create({"title": "cron card", "assignee": "default"}))
     assert "task_id" in out, out
     assert out["subscribed"] is False
+
+
+def test_worker_decision_belongs_to_the_chat_that_handed_over_the_card(kb_home, monkeypatch):
+    kb = kb_home
+    creator = _owner_card(kb)
+    monkeypatch.setenv("HERMES_KANBAN_TASK", creator)
+    from tools.send_message_tool import _decision_session_identity
+    session_id, _key, _profile, _owner = _decision_session_identity()
+    assert session_id == "owner-chat"
+    explicit, *_ = _decision_session_identity(source_session_id="cron:job:run")
+    assert explicit == "cron:job:run"
+
+
+def test_outside_a_worker_the_decision_keeps_its_own_session(kb_home, monkeypatch):
+    from tools.send_message_tool import _decision_session_identity
+    monkeypatch.setenv("HERMES_SESSION_ID", "plain-session")
+    session_id, *_ = _decision_session_identity()
+    assert session_id != "owner-chat"
