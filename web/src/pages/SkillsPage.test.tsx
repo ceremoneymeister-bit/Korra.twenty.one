@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, useLocation } from "react-router";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ allowed: false, clientRole: false, pin: false, getSkills: vi.fn(), getToolsets: vi.fn(), toggleSkill: vi.fn(), setSkillAutoLoad: vi.fn(),
   setEnd: vi.fn(), setAfterTitle: vi.fn() }));
@@ -21,13 +21,25 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.allowed = false;
   mocks.clientRole = false;
+  delete (window as { __KORRA_UI_MODE__?: string }).__KORRA_UI_MODE__;
   mocks.pin = false;
   mocks.getSkills.mockResolvedValue([{ name: "visual-design", description: "Визуальный дизайн", enabled: true }]);
   mocks.getToolsets.mockResolvedValue([{ name: "image_gen", label: "Генерация", description: "Изображения", enabled: true, configured: false, tools: ["image_generate"] }]);
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
-async function render() { await act(async () => root.render(<MemoryRouter><SkillsPage /></MemoryRouter>)); }
+function Where() { const l = useLocation(); return <output data-testid="where">{l.pathname}{l.search}</output>; }
+async function render() { await act(async () => root.render(<MemoryRouter initialEntries={["/skills"]}><SkillsPage /><Where /></MemoryRouter>)); }
+const where = () => host.querySelector('[data-testid="where"]')!.textContent!;
+async function learn(text: string) {
+  const open = [...host.querySelectorAll("button")].find((b) => b.textContent?.includes("Создать навык"))!;
+  await act(async () => open.click());
+  const area = document.body.querySelector<HTMLTextAreaElement>("textarea")!;
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+  await act(async () => { setter.call(area, text); area.dispatchEvent(new Event("input", { bubbles: true })); });
+  const go = [...document.body.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Создать навык" && b.closest('[role="dialog"]'))!;
+  await act(async () => go.click());
+}
 it("shows installed skills but does not offer blocked editing or toggles", async () => {
   await render();
   expect(host.textContent).toContain("visual-design");
@@ -84,4 +96,29 @@ it("tells a client who may edit skills that only the image generator is the admi
   await render();
   expect(host.textContent).toContain("Подключение генератора изображений меняет администратор");
   expect(host.textContent).not.toContain("доступны для просмотра");
+});
+it("hands a learn request to the agent workbench in fleet instead of the redirected /chat (K21-310)", async () => {
+  mocks.allowed = true;
+  (window as { __KORRA_UI_MODE__?: string }).__KORRA_UI_MODE__ = "fleet";
+  await render();
+  await learn("как я веду отчёт по расходам");
+  const url = new URL(where(), "http://x");
+  expect(url.pathname).toBe("/agents");
+  expect(url.searchParams.get("agent")).toBe("default");
+  expect(url.searchParams.get("draft")).toContain("как я веду отчёт по расходам");
+  expect(url.searchParams.get("draft")).toContain("skill_manage");
+});
+it("keeps /chat?learn= for the administrator panel", async () => {
+  mocks.allowed = true;
+  await render();
+  await learn("how I file expenses");
+  expect(where()).toBe("/chat?learn=how%20I%20file%20expenses");
+});
+it("does not silently cut a too long learn request in fleet", async () => {
+  mocks.allowed = true;
+  (window as { __KORRA_UI_MODE__?: string }).__KORRA_UI_MODE__ = "fleet";
+  await render();
+  await learn("а".repeat(1600));
+  expect(where()).toBe("/skills");
+  expect(document.body.textContent).toContain("слишком длинный");
 });

@@ -41,6 +41,7 @@ import type {
   SkillHubPreview,
   SkillHubScan,
 } from "@/lib/api";
+import { productUiMode } from "@/lib/dashboard-flags";
 import { useProfileScope } from "@/contexts/useProfileScope";
 import { useCabinetSession } from "@/hooks/useCabinetSession";
 import { ToolsetConfigDrawer } from "@/components/ToolsetConfigDrawer";
@@ -127,6 +128,11 @@ function toolsetIcon(
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
+
+/** Лимит черновика-диплинка `/agents?draft=` (BubbleChatPage режет по нему). */
+const LEARN_DRAFT_LIMIT = 1500;
+const LEARN_DRAFT_PREFIX =
+  "Создай навык по моему запросу и сохрани его через skill_manage. Источники прочитай своими инструментами и учти все пожелания из запроса. Запрос: ";
 
 export default function SkillsPage() {
   const { canManageSkills, canPinSkills, canConfigureToolsets, canBrowseSkillsHub } = useCabinetSession();
@@ -263,19 +269,35 @@ export default function SkillsPage() {
     setLearnOpen(true);
   }, []);
   const submitLearn = useCallback(() => {
+    const fleet = productUiMode() === "fleet";
     const segs: string[] = [];
     const dir = learnDir.trim();
     const url = learnUrl.trim();
     const text = learnText.trim();
-    if (dir) segs.push(`local source: ${dir}`);
-    if (url) segs.push(`URL: ${url}`);
+    if (dir) segs.push(`${fleet ? "источник на диске" : "local source"}: ${dir}`);
+    if (url) segs.push(`${fleet ? "ссылка" : "URL"}: ${url}`);
     if (text) segs.push(text);
     // Flatten to a single line — the chat composer submits on the first Enter.
     const composed = segs.join("; ").replace(/\s*\n\s*/g, " ").trim();
     if (!composed) return;
+    if (fleet) {
+      // /chat в fleet уводит на дашборд и теряет запрос: отдаём его агенту
+      // черновиком в его же чате, человек проверяет текст и отправляет сам.
+      const draft = `${LEARN_DRAFT_PREFIX}${composed}`;
+      if (draft.length > LEARN_DRAFT_LIMIT) {
+        showToast(
+          `Запрос слишком длинный (${draft.length} из ${LEARN_DRAFT_LIMIT} знаков). Сократите его или сохраните заметки в файл и укажите путь.`,
+          "error",
+        );
+        return;
+      }
+      setLearnOpen(false);
+      navigate(`/agents?agent=${encodeURIComponent(selectedProfile || "default")}&draft=${encodeURIComponent(draft)}`);
+      return;
+    }
     setLearnOpen(false);
     navigate(`/chat?learn=${encodeURIComponent(composed)}`);
-  }, [learnDir, learnUrl, learnText, navigate]);
+  }, [learnDir, learnUrl, learnText, navigate, selectedProfile, showToast]);
   const openEditEditor = useCallback((skillName: string) => {
     setEditorSkill(skillName);
     setEditorOpen(true);
