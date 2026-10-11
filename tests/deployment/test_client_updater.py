@@ -3691,16 +3691,34 @@ def test_new_image_that_changes_a_shipped_dependency_breaks_a_working_package(up
     assert not any(call[0] in {"stop", "start_image"} for call in updater.calls)
 
 
-def test_requires_conflict_stays_preexisting_when_only_the_shipped_version_differs(updater, tmp_path):
+def test_requires_conflict_stays_preexisting_when_the_dependency_is_the_same_on_both_images(updater, tmp_path):
     make_user_package(updater.data, requires=["review_dep>=2"], cli=None)
-    for image, version in ((OLD, "1.0"), (NEW, "1.5")):
+    for image in (OLD, NEW):
         core = tmp_path / ("core-" + image[-1])
-        make_user_package(core, "review_dep", version, cli=None)
+        make_user_package(core, "review_dep", "1.5", cli=None)
         updater.image_cores[image] = core / "lazy-packages"
     updater.update("registry.example/korra:latest")
     assert updater.receipt["status"] == "succeeded"
     assert updater.receipt["user_packages"]["conflicts"] == []
     assert "1.5" in updater.receipt["user_packages"]["preexisting"][0]["detail"]
+
+
+def test_requires_conflict_does_not_hide_a_dependency_the_new_image_changed(updater, tmp_path):
+    """Прежний `requires` не доказывает, что при другой версии зависимости пакет цел (ревью, P2)."""
+    make_user_package(updater.data, requires=["review_dep<2"], cli=None)
+    for image, version in ((OLD, "2.0"), (NEW, "3.0")):
+        core = tmp_path / ("core-" + image[-1])
+        make_user_package(core, "review_dep", version, cli=None)
+        updater.image_cores[image] = core / "lazy-packages"
+    before = tree(updater.data)
+    with pytest.raises(u.UpdateError, match="Пакеты пользователя"):
+        updater.update("registry.example/korra:latest")
+    packages = updater.receipt["user_packages"]
+    assert updater.receipt["error_code"] == "user_packages_conflict"
+    assert [(c["kind"], c["have"]) for c in packages["conflicts"]] == [("requires", "core 3.0")]
+    assert packages["preexisting"] == []
+    assert not any(call[0] in {"stop", "start_image"} or call == ("native", "drain") for call in updater.calls)
+    assert updater.image == OLD and updater.running and tree(updater.data) == before
 
 
 @pytest.mark.parametrize("fault", ["command_error", "timeout"])

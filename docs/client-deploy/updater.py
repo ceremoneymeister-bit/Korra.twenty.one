@@ -126,7 +126,9 @@ print(json.dumps({'skills': skills}))
 # версий) выводятся списком `shadowed_modules` (владелец — `shadowed_by`); по ним
 # verify_user_packages сравнивает целевой образ с текущим: конфликт — модуль,
 # который раньше грузился из хранилища, а теперь перекрыт. Остальные конфликты
-# сравниваются по (пакет, вид, key): уже существующие в текущем образе не новые. `shadowed` (дубль
+# сравниваются по (пакет, вид, key, have): уже существующие в текущем образе не новые,
+# пока зависимость, из-за которой конфликт, отдаёт та же версия от того же
+# владельца (`have`): иной образ с иной версией мог сломать то, что работало. `shadowed` (дубль
 # версии или модуля, ярлыки kind) — только диагностика для receipt; конфликтом он
 # остаётся у пакета, перенесённого из writable слоя (третий аргумент).
 # ABI-токен повторяет tools.lazy_deps._python_abi_tag (тест следит).
@@ -138,10 +140,11 @@ migrated = set(json.loads(sys.argv[3])) if len(sys.argv) > 3 else set()
 store = root / 'lazy-packages'
 norm = lambda n: re.sub(r'[-_.]+', '-', n).lower()
 result = {'packages': [], 'conflicts': [], 'shadowed': [], 'shadowed_modules': [], 'shadowed_by': {}}
-def conflict(package, kind, detail, key=None):
+def conflict(package, kind, detail, key=None, have=None):
     # key — то же без версий поставки: verify_user_packages сопоставляет конфликты
-    # текущего и целевого образов, а версия зависимости от образа к образу меняется.
-    result['conflicts'].append({'package': package, 'kind': kind, 'detail': detail, 'key': key or detail})
+    # текущего и целевого образов. have — кто и какой версией фактически отвечает
+    # за зависимость: прежний конфликт безопасен, только пока это не изменилось.
+    result['conflicts'].append({'package': package, 'kind': kind, 'detail': detail, 'key': key or detail, 'have': have})
 def shadow(package, kind, detail, version, shipped):
     # Хранилище в конце sys.path: дубль поставки не загружается и ничего не меняет.
     # Перенесённый из writable слоя пакет раньше перекрывал поставку, поэтому
@@ -201,11 +204,12 @@ if dists:
             except Exception:
                 continue
             have = core.get(norm(req.name)) or user.get(norm(req.name))
+            provider = 'core' if norm(req.name) in core else 'store'
             if have is None:
                 conflict(name, 'requires', 'нет зависимости ' + req.name)
             elif req.specifier and not req.specifier.contains(have, prereleases=True):
                 conflict(name, 'requires', '%s %s не подходит под %s' % (req.name, have, req.specifier),
-                         '%s не подходит под %s' % (req.name, req.specifier))
+                         '%s не подходит под %s' % (req.name, req.specifier), provider + ' ' + have)
         scripts = sorted(ep.name for ep in d.entry_points if ep.group == 'console_scripts')
         for script in scripts:
             path = store / 'bin' / script
@@ -1833,6 +1837,11 @@ class Updater:
             raise UpdateError("Проверка пакетов пользователя вернула некорректный ответ") from None
         return result
 
+    @staticmethod
+    def conflict_identity(item):
+        """Конфликт без версий поставки, но с фактической версией зависимости."""
+        return (item["package"], item["kind"], item.get("key", item["detail"]), item.get("have"))
+
     def verify_user_packages(self, image, root=None, *, strict=True, current=None):
         """Сверить пакеты пользователя в DATA/lazy-packages с поставкой образа.
 
@@ -1849,6 +1858,9 @@ class Updater:
         (requires, cli, pinned, abi, incomplete), которые текущий образ над теми
         же данными даёт тоже (ключ: пакет, вид, `key` без версий поставки),
         обновление не ухудшает: они пишутся в `preexisting` и не останавливают.
+        Для `requires` ещё нужно, чтобы зависимость отдавала ту же версию тот же
+        владелец (`have`): новый образ с другой версией мог убрать то, чем пакет
+        пользовался, и прежний конфликт этого не доказывает.
         Без базового прогона (образа нет, таймаут, ответ некорректный) любое
         перекрытие и любой конфликт считаются новыми. Сбой основного прогона при обычной операции — отказ до
         drain, при автоматическом откате — запись и продолжение.
@@ -1872,14 +1884,14 @@ class Updater:
                     raise UpdateError("текущий образ неизвестен")
                 base = self.user_packages_probe(current, root, [])
                 known = set(base["shadowed_modules"])
-                seen = {(c["package"], c["kind"], c.get("key", c["detail"])) for c in base["conflicts"]}
+                seen = {self.conflict_identity(c) for c in base["conflicts"]}
                 result["baseline"] = {"image": current, "shadowed_modules": len(known)}
                 reason = "новый образ его перекрывает"
             except (UpdateError, KeyError, TypeError) as exc:
                 known, seen = set(), set()
                 result["baseline"] = {"image": current, "error": str(exc)}
                 reason = f"не удалось проверить текущую среду ({exc}), перекрытие считается новым"
-            result["preexisting"] = [c for c in conflicts if (c["package"], c["kind"], c.get("key", c["detail"])) in seen]
+            result["preexisting"] = [c for c in conflicts if self.conflict_identity(c) in seen]
             conflicts = [c for c in conflicts if c not in result["preexisting"]]
             for module in sorted(modules - known):
                 conflicts.append({"package": result["shadowed_by"].get(module, module), "kind": "module",
