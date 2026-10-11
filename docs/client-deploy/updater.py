@@ -574,6 +574,10 @@ class UpdateError(RuntimeError):
     pass
 
 
+class DataMissing(UpdateError):
+    pass
+
+
 def validate_capability(value):
     if value == {"mode": "foundation"}:
         return value
@@ -781,16 +785,21 @@ def checked_identifier(value):
     return value
 
 
-def canonical_data(value):
+def canonical_data(value, *, allow_missing=False):
+    """Validated DATA path. `allow_missing` admits an absent DATA for the recovery
+    of an interrupted restore swap only (:meth:`Updater.finish_interrupted_swap`)."""
     path = Path(value)
     if not path.is_absolute() or path.resolve() != path or len(path.parts) < 4:
         raise UpdateError("DATA must be an absolute, non-symlink dedicated directory")
-    if not path.is_dir():
-        raise UpdateError("DATA does not exist")
+    absent = allow_missing and not os.path.lexists(path)
+    if not path.is_dir() and not absent:
+        raise DataMissing("DATA does not exist")
     for parent in path.parents:
         info = parent.lstat()
         if info.st_uid != 0 or (info.st_mode & 0o022 and not info.st_mode & stat.S_ISVTX):
             raise UpdateError("DATA ancestors must prevent an agent from replacing the deployment directory")
+    if absent:
+        return path
     if not (path / "config.yaml").is_file():
         raise UpdateError("DATA is not an initialized Korra home (config.yaml missing)")
     return path
@@ -1161,10 +1170,11 @@ def overlay_credentials(latest, restored):
 
 
 class Updater:
-    def __init__(self, home=HERE):
+    def __init__(self, home=HERE, *, data_missing_ok=False):
         self.home = Path(home)
         self.name = checked_identifier(os.environ.get("NAME", "korra"))
-        self.data = canonical_data(os.environ.get("DATA", "/opt/korra/data"))
+        self.data = canonical_data(os.environ.get("DATA", "/opt/korra/data"), allow_missing=data_missing_ok)
+        self.data_missing = not self.data.is_dir()
         self.panel = int(os.environ.get("PANEL_PORT", "9119"))
         self.api = int(os.environ.get("API_PORT", "8650"))
         if not all(1024 <= p <= 65535 for p in (self.panel, self.api)) or self.panel == self.api:
@@ -2648,6 +2658,38 @@ print(json.dumps(changed))
             return {}
         return record if isinstance(record, dict) else {}
 
+    def require_data(self):
+        if self.data_missing:
+            raise UpdateError("DATA does not exist")
+
+    def pending_swap(self):
+        """The stage that completes an interrupted restore swap, or the plain DATA error.
+
+        A missing DATA is acceptable only when this job's own record says the
+        restore died between its two renames: phase `swapping`, `path` the
+        stage this job owns, `displaced` this job's `data.after-*` tree, both
+        real directories beside DATA. Anything else is not a swap in flight.
+        """
+        job_id = self.receipt.get("job_id")
+        record = self.restore_record()
+        stage = self.data.with_name(self.data.name + ".restore-" + str(job_id))
+        displaced = Path(str(record.get("displaced")))
+        owned = re.compile(re.escape(self.data.name + ".after-" + str(job_id)) + r"(?:\.retry-[0-9a-f]{8})?")
+        if (self.job is None or not self.data_missing or record.get("phase") != "swapping"
+                or record.get("path") != str(stage) or displaced.parent != self.data.parent
+                or not owned.fullmatch(displaced.name) or os.path.lexists(self.data)
+                or any(p.is_symlink() or not p.is_dir() for p in (stage, displaced))):
+            raise UpdateError("DATA does not exist")
+        return stage
+
+    def finish_interrupted_swap(self):
+        """Second rename of an interrupted restore. The caller holds the target lock."""
+        stage = self.pending_swap()
+        os.replace(stage, self.data)
+        self.data = canonical_data(self.data)
+        self.data_missing = False
+        self.log("restore: interrupted swap completed; DATA is the staged restored tree")
+
     def restore(self):
         """Put the verified `before` back as DATA; the failed DATA is set aside whole.
 
@@ -3093,8 +3135,13 @@ def main(argv=None):
     if args.warm_deps:
         warm_dependencies()
         return 0
-    updater = Updater()
+    try:
+        updater = Updater()
+    except DataMissing:
+        # Only the recovery of an interrupted restore swap may go on without DATA.
+        updater = Updater(data_missing_ok=True)
     if args.diagnose:
+        updater.require_data()
         print(json.dumps(updater.image_integrity(), ensure_ascii=False))
         return 0
     if updater.home == updater.data or updater.data in updater.home.parents or updater.home in updater.data.parents:
@@ -3107,18 +3154,22 @@ def main(argv=None):
         if not job_id:
             entries = sorted(updater.jobs.glob("*/status.json"), key=lambda p: p.stat().st_mtime)
             if not entries:
+                updater.require_data()
                 print(json.dumps({"job_id": None, "phase": "idle", "status": "pending", "error": None,
                                   "old_image_id": None, "target_image_id": None, "backup_path": None,
                                   "started_at": None, "updated_at": utc()}))
                 return 0
             job_id = entries[-1].parent.name
         load_job(updater, job_id)
+        if updater.data_missing:
+            updater.pending_swap()
         reconcile_interrupted(updater)
         print(json.dumps(updater.receipt))
         return 0
     updater.jobs.mkdir(mode=0o700, exist_ok=True)
     trusted_control(updater.jobs)
     if args.gc:
+        updater.require_data()
         # Housekeeping runs under the same target lock as an update: a live
         # operation's candidate tag is exactly what must not be removed.
         with target_lock_path(updater.data).open("a") as lock:
@@ -3133,6 +3184,8 @@ def main(argv=None):
             raise UpdateError("Worker requires inherited target lock")
         lock = os.fdopen(args.lock_fd, "a")
         load_job(updater, args.worker)
+        if updater.data_missing:
+            updater.finish_interrupted_swap()
     else:
         lock = target_lock_path(updater.data).open("a")
         try:
@@ -3156,10 +3209,13 @@ def main(argv=None):
             raise UpdateError("Another update holds the target lock") from exc
         if args.rollback:
             load_job(updater, args.rollback)
+            if updater.data_missing:
+                updater.finish_interrupted_swap()
             if updater.receipt.get("status") == "rolled_back":
                 print(json.dumps(updater.receipt))
                 return 0
         else:
+            updater.require_data()
             job_id = checked_identifier(args.job_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ-") + uuid.uuid4().hex[:8])
             if (updater.jobs / job_id).exists():
                 load_job(updater, job_id)

@@ -1,5 +1,6 @@
 """Updater transactions on real filesystem/SQLite with fake Docker boundaries."""
 import errno
+import fcntl
 import importlib.metadata
 import importlib.util
 import hashlib
@@ -8,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import shlex
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -20,6 +22,7 @@ SOURCE = Path(__file__).resolve().parents[2] / "docs/client-deploy/updater.py"
 spec = importlib.util.spec_from_file_location("client_updater", SOURCE)
 u = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(u)
+REAL_CANONICAL_DATA = u.canonical_data
 OLD = "sha256:" + "1" * 64
 NEW = "sha256:" + "2" * 64
 
@@ -50,8 +53,8 @@ def run_packages_isolated(core, root, pinned_json, migrated_json):
 
 
 class FakeDockerUpdater(u.Updater):
-    def __init__(self, home):
-        super().__init__(home)
+    def __init__(self, home, **options):
+        super().__init__(home, **options)
         self.image = OLD
         self.running = True
         self.calls = []
@@ -215,7 +218,7 @@ def updater(tmp_path, monkeypatch):
     # The real Docker integration covers privileged host ownership. Unit fake
     # boundaries must also run under an unprivileged CI account; DATA is this
     # test's freshly created directory and locks remain inside its temp root.
-    monkeypatch.setattr(u, "canonical_data", lambda value: Path(value))
+    monkeypatch.setattr(u, "canonical_data", lambda value, **_: Path(value))
     lock_root = tmp_path / "locks"
     lock_root.mkdir()
     monkeypatch.setattr(u, "LOCK_ROOT", lock_root)
@@ -1286,6 +1289,62 @@ def test_retried_legacy_rollback_never_lowers_the_recorded_changes_or_frees_the_
     assert job.is_dir() and (displaced / "unique-owner-record.txt").exists()
     assert "fixture-job" in updater.receipt["history_retention"]["review"]
     assert (job / "after" / "unique-owner-record.txt").exists()
+
+
+@pytest.mark.skipif(os.geteuid() != 0, reason="the real canonical_data demands root-owned ancestors")
+def test_sigkill_between_the_restore_renames_is_finished_by_a_fresh_process(updater, monkeypatch):
+    updater.update("registry.example/korra:latest")
+    (updater.data / "new-message.txt").write_text("written on the new release")
+    data = updater.data
+    displaced = _displaced(updater)
+    real_replace = os.replace
+    pid = os.fork()
+    if pid == 0:
+        def replace(src, dst, *args, **kwargs):
+            result = real_replace(src, dst, *args, **kwargs)
+            if Path(src) == data and Path(dst) == displaced:
+                os.kill(os.getpid(), signal.SIGKILL)
+            return result
+        u.os.replace = replace
+        updater.rollback()
+        os._exit(99)
+    _, status = os.waitpid(pid, 0)
+    assert os.WIFSIGNALED(status) and os.WTERMSIG(status) == signal.SIGKILL
+    assert not data.exists() and displaced.is_dir()
+    stage = data.with_name("data.restore-fixture-job")
+    assert json.loads((updater.job / "restore-stage.json").read_text())["phase"] == "swapping"
+
+    # A new process, with the real DATA check. Every operation but the targeted
+    # recovery still refuses a missing DATA.
+    monkeypatch.setattr(u, "canonical_data", REAL_CANONICAL_DATA)
+    with pytest.raises(u.UpdateError, match="DATA does not exist"):
+        FakeDockerUpdater(updater.home)
+    fresh = FakeDockerUpdater(updater.home, data_missing_ok=True)
+    assert fresh.data_missing
+    with pytest.raises(u.UpdateError, match="DATA does not exist"):
+        fresh.require_data()
+    u.load_job(fresh, "fixture-job")
+    assert fresh.pending_swap() == stage
+    record = json.loads((updater.job / "restore-stage.json").read_text())
+    for forged in (dict(record, phase="verified"), dict(record, path=str(stage) + "x"),
+                   dict(record, displaced=str(data.with_name("data.after-other-job")))):
+        u.atomic_json(updater.job / "restore-stage.json", forged)
+        with pytest.raises(u.UpdateError, match="DATA does not exist"):
+            fresh.pending_swap()
+    u.atomic_json(updater.job / "restore-stage.json", record)
+
+    fresh.image, fresh.running, fresh.tags = NEW, False, dict(updater.tags)
+    with u.target_lock_path(fresh.data).open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fresh.finish_interrupted_swap()
+    assert not fresh.data_missing and not stage.exists()
+    fresh.rollback()
+    assert fresh.receipt["status"] == "rolled_back" and fresh.image == OLD
+    assert not (data / "new-message.txt").exists()
+    assert (displaced / "new-message.txt").read_text() == "written on the new release"
+    with sqlite3.connect(data / "state.db") as database:
+        assert database.execute("SELECT * FROM messages").fetchall() == [("before",)]
+    assert fresh.receipt["displaced_data"] == str(displaced)
 
 
 class Killed(BaseException):
