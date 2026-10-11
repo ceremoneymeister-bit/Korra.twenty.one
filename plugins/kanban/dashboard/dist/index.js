@@ -304,7 +304,9 @@
   }
 
   function MoveDialog({ task, target, profiles, board, onClose, onSaved }) {
-    const [text, setText] = useState(target === "done" && task.status === "review" ? task.result || task.latest_summary || "" : "");
+    const [text, setText] = useState(target === "done" && (task.status === "review" || task.actor_kind === "human")
+      ? task.result || task.latest_summary || (task.actor_kind === "human" ? "Шаг выполнен владельцем." : "")
+      : "");
     const [assignee, setAssignee] = useState(task.assignee || "");
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
@@ -570,7 +572,7 @@
           legacyReview && h(Button, { onClick: () => onMove(task, "ready") }, "На доработку"),
           legacyReview && h(Button, { primary: true, onClick: () => onMove(task, "done") }, completionLabel(task)),
           task.status === "done" && task.actor_kind !== "human" && h(Button, { onClick: () => onMove(task, "ready") }, "Доработать"),
-          !["done", "archived", "review"].includes(task.status) && task.actor_kind !== "human" && h(Button, { onClick: () => onMove(task, "done") }, completionLabel(task)),
+          ["ready", "running", "blocked"].includes(task.status) && task.actor_kind !== "human" && h(Button, { onClick: () => onMove(task, "done") }, completionLabel(task)),
           (task.status === "ready" || task.status === "running" || task.status === "todo") && task.actor_kind !== "human" && h(Button, { onClick: () => onMove(task, "blocked") }, "Приостановить"),
           task.status !== "running" && h(Button, { onClick: () => onEdit(task) }, "Изменить задание"),
           task.status !== "archived" && h(Button, { onClick: () => onMove(task, "archived") }, "В архив")),

@@ -803,6 +803,30 @@ def test_dashboard_confirm_dispatches_expected_patch_body(client):
     assert body.get("result") == "shipped"
 
 
+def test_human_step_completion_prefills_editable_text_and_machine_wait_has_no_complete_button(client):
+    """K21-299: the owner confirms a human step in the dialog (text prefilled
+    but editable); a machine step still waiting for parents offers no
+    completion button. Backend gates are unchanged."""
+    repo_root = Path(__file__).resolve().parents[2]
+    js = (repo_root / "plugins" / "kanban" / "dashboard" / "dist" / "index.js").read_text(encoding="utf-8")
+    assert 'target === "done" && (task.status === "review" || task.actor_kind === "human")' in js
+    assert '"Шаг выполнен владельцем."' in js
+    assert 'onChange: e => setText(e.target.value), required: needsText' in js
+    assert '["ready", "running", "blocked"].includes(task.status) && task.actor_kind !== "human" && h(Button, { onClick: () => onMove(task, "done") }, completionLabel(task))' in js
+    assert '!["done", "archived", "review"].includes(task.status) && task.actor_kind !== "human" && h(Button' not in js
+
+    t = client.post("/api/plugins/kanban/tasks",
+                    json={"title": "Позвонить поставщику", "actor_kind": "human"}).json()["task"]
+    assert t["actor_kind"] == "human" and t["status"] == "ready"
+    r = client.patch(
+        f"/api/plugins/kanban/tasks/{t['id']}",
+        json={"status": "done", "result": "Шаг выполнен владельцем.",
+              "summary": "Шаг выполнен владельцем."},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["task"]["status"] == "done"
+
+
 def test_dashboard_confirm_dispatches_expected_delete(client):
     """Behavioral: the DELETE call the bundle issues on confirm
     (``fetchJSON(`${API}/tasks/${id}`, { method: 'DELETE' })``) must
