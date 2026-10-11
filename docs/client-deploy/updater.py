@@ -1127,6 +1127,52 @@ def merge_config_credentials(before, now):
                 merge_config_credentials(entry, other)
 
 
+def copy_budget(data):
+    """Bytes of every physical copy an update and a rollback write, read from DATA.
+
+    data_bytes: DATA itself (`before`; across file systems also the restore
+    stage). state_db_bytes: the databases the schema rehearsal copies.
+    sqlite_peak_bytes: the largest database with its WAL, the temporary page
+    backup `snapshot` writes beside the copied one. config_bytes: the files
+    :func:`link_tree` copies. credential_bytes: what :func:`overlay_credentials`
+    copies from the failed DATA. A new physical copy needs a term here.
+    """
+    terms = dict.fromkeys(("data_bytes", "credential_bytes", "config_bytes",
+                           "state_db_bytes", "sqlite_peak_bytes"), 0)
+    for root, _dirs, files in os.walk(data):
+        for name in files:
+            path = Path(root) / name
+            try:
+                info = path.lstat()
+            except FileNotFoundError:
+                # A running service may remove a temporary file after
+                # os.walk listed it. It no longer needs backup space.
+                continue
+            if stat.S_ISLNK(info.st_mode):
+                continue
+            relative = path.relative_to(data)
+            terms["data_bytes"] += info.st_size
+            if name in REWRITTEN_IN_PLACE:
+                terms["config_bytes"] += info.st_size
+            if credential_path(relative.as_posix()):
+                terms["credential_bytes"] += info.st_size
+            if info.st_size < 512 or not stat.S_ISREG(info.st_mode):
+                continue
+            try:
+                with path.open("rb") as stream:
+                    is_db = stream.read(16) == b"SQLite format 3\x00"
+            except FileNotFoundError:
+                continue
+            if is_db:
+                wal = path.with_name(name + "-wal")
+                size = info.st_size + (wal.lstat().st_size if wal.is_file() and not wal.is_symlink() else 0)
+                terms["sqlite_peak_bytes"] = max(terms["sqlite_peak_bytes"], size)
+                parts = relative.parts
+                if parts == ("state.db",) or (len(parts) == 3 and parts[0] == "profiles" and name == "state.db"):
+                    terms["state_db_bytes"] += size
+    return terms
+
+
 def overlay_credentials(latest, restored):
     """Keep latest credential stores, including deliberate deletions/revocations."""
     paths = set(tree_manifest(latest)) | set(tree_manifest(restored))
@@ -1455,29 +1501,45 @@ class Updater:
             probe.unlink(missing_ok=True)
 
     def free_space(self, image_bytes=0):
-        size = 0
-        for root, _dirs, files in os.walk(self.data):
-            for name in files:
-                try:
-                    info = (Path(root) / name).lstat()
-                except FileNotFoundError:
-                    # A running service may remove a temporary file after
-                    # os.walk listed it. It no longer needs backup space.
-                    continue
-                if not stat.S_ISLNK(info.st_mode):
-                    size += info.st_size
+        """Refuse before quiescing unless every file system holds all copies written on it.
+
+        The terms come from :func:`copy_budget` and are written to the receipt
+        (`rollback_budget`). Each location is held to its own copies plus the
+        headroom; locations on one file system add up.
+        """
+        terms = copy_budget(self.data)
         # The same sum sizes the readiness budget of a large contour.
-        self.receipt["data_bytes"] = size
-        # `before` is the one full copy an update writes. A rollback sets the
-        # failed DATA aside by rename and stages the restored one from `before`
-        # as hard links; only across filesystems is that stage a second copy.
-        # Plus dependency/image headroom. Each location is held to the sum.
+        self.receipt["data_bytes"] = terms["data_bytes"]
         mode = self.rollback_path()
-        required = (1 if mode == "link" else 2) * size + image_bytes + 2 * 1024**3
-        self.receipt.update(rollback_path=mode, rollback_required_bytes=required)
-        for location in {self.home, self.data.parent, Path("/var/lib/docker")}:
-            if location.exists() and shutil.disk_usage(location).free < required:
-                raise UpdateError(f"Insufficient space at {location}; need {required} bytes")
+        # Update: `before` and its SQLite peak, plus the schema rehearsal's DB
+        # copies, all under updates/. Rollback: the stage under DATA's parent is
+        # hard links to `before`, so only what the restore rewrites is new —
+        # config.yaml and every credential path, copied from the failed DATA;
+        # across file systems the stage is a second full copy.
+        update_bytes = terms["data_bytes"] + terms["state_db_bytes"] + terms["sqlite_peak_bytes"]
+        if mode == "link":
+            restore_bytes = terms["config_bytes"] + terms["credential_bytes"]
+        else:
+            restore_bytes = terms["data_bytes"] + terms["sqlite_peak_bytes"] + terms["credential_bytes"]
+        headroom = 2 * 1024**3
+        wanted = [(self.home, update_bytes), (self.data.parent, restore_bytes),
+                  (Path("/var/lib/docker"), image_bytes)]
+        devices = {}
+        for location, copies in wanted:
+            if location.exists():
+                devices.setdefault(location.stat().st_dev, []).append((location, copies))
+        required = {}
+        for group in devices.values():
+            need = headroom + sum(copies for _location, copies in group)
+            required.update({str(location): need for location, _copies in group})
+        self.receipt["rollback_budget"] = dict(terms, image_bytes=image_bytes, headroom_bytes=headroom,
+                                               update_copies_bytes=update_bytes,
+                                               restore_copies_bytes=restore_bytes,
+                                               required_by_location=required)
+        self.receipt.update(rollback_path=mode, rollback_required_bytes=max(required.values(), default=headroom))
+        for location, need in required.items():
+            if shutil.disk_usage(location).free < need:
+                raise UpdateError(f"Insufficient space at {location}; need {need} bytes")
 
     def resolve_image(self, reference):
         path = Path(reference)

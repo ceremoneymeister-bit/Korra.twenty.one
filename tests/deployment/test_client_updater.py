@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import shlex
+import shutil
 import signal
 import sqlite3
 import subprocess
@@ -1371,6 +1372,25 @@ def _data_size(root):
     return sum(path.lstat().st_size for path in Path(root).rglob("*") if path.is_file() and not path.is_symlink())
 
 
+def _copies_needed(updater, mode):
+    """Bytes of physical copies on one file system, summed by hand from the fixture's files.
+
+    Update: `before` (all of DATA), the rehearsal's state.db, the page-backup peak
+    (state.db is the only database). Rollback: config.yaml and every credential
+    file copied from the failed DATA (link); DATA again plus the peak (copy).
+    """
+    data = updater.data
+    credentials = [data / "auth.json", data / "revoked.token"]
+    credentials += [p for p in (data / "browser-profiles").rglob("*") if p.is_file()]
+    credential_bytes = sum(p.stat().st_size for p in credentials)
+    state = (data / "state.db").stat().st_size
+    size = _data_size(data)
+    update = size + state + state
+    if mode == "link":
+        return update + (data / "config.yaml").stat().st_size + credential_bytes
+    return update + size + state + credential_bytes
+
+
 def _cross_filesystem(monkeypatch):
     def refuse(*args, **kwargs):
         raise OSError(errno.EXDEV, "Invalid cross-device link")
@@ -1436,33 +1456,39 @@ def test_rollback_across_filesystems_copies_before_and_keeps_it(updater, monkeyp
 
 
 @pytest.mark.parametrize("mode", ["link", "copy"])
-def test_space_gate_is_before_plus_headroom_and_names_the_rollback_path(updater, monkeypatch, mode):
+def test_space_gate_counts_every_copy_and_names_the_rollback_path(updater, monkeypatch, mode):
     _blob(updater, 4)
+    (updater.data / "browser-profiles").mkdir()
+    (updater.data / "browser-profiles/profile-blob").write_bytes(os.urandom(1 << 20))
     updater.free_space = u.Updater.free_space.__get__(updater)
     if mode == "copy":
         _cross_filesystem(monkeypatch)
     size, gib = _data_size(updater.data), 1024**3
-    copies = 1 if mode == "link" else 2
+    required = _copies_needed(updater, mode) + 2 * gib
 
     def free(value):
         monkeypatch.setattr(u.shutil, "disk_usage", lambda path: types.SimpleNamespace(free=value))
 
-    free(copies * size + 2 * gib)
+    free(required)
     updater.free_space()
     assert updater.receipt["rollback_path"] == mode
-    assert updater.receipt["rollback_required_bytes"] == copies * size + 2 * gib
+    assert updater.receipt["rollback_required_bytes"] == required
     assert updater.receipt["data_bytes"] == size
-    free(copies * size + 2 * gib - 1)
+    budget = updater.receipt["rollback_budget"]
+    assert budget["credential_bytes"] >= 1 << 20 and budget["config_bytes"] > 0
+    assert budget["state_db_bytes"] == budget["sqlite_peak_bytes"] > 0
+    assert budget["headroom_bytes"] == 2 * gib and budget["image_bytes"] == 0
+    free(required - 1)
     with pytest.raises(u.UpdateError, match="Insufficient space"):
         updater.free_space()
-    # The old gate, 3 × DATA + 2 GiB, would have refused the first of these.
-    assert 3 * size + 2 * gib > copies * size + 2 * gib or mode == "copy" and size == 0
+    # The first draft of the hard-link gate, DATA + 2 GiB, would have let this through.
+    assert required > size + 2 * gib
 
 
-def test_a_disk_with_room_for_before_alone_updates_and_rolls_back(updater, monkeypatch):
+def test_a_disk_with_room_for_every_copy_updates_and_rolls_back(updater, monkeypatch):
     original = _blob(updater, 4).read_bytes()
     updater.free_space = u.Updater.free_space.__get__(updater)
-    free = _data_size(updater.data) + 2 * 1024**3
+    free = _copies_needed(updater, "link") + 2 * 1024**3
     monkeypatch.setattr(u.shutil, "disk_usage", lambda path: types.SimpleNamespace(free=free))
     updater.fail_smoke = True
     with pytest.raises(u.UpdateError, match="Injected model"):
@@ -1471,14 +1497,175 @@ def test_a_disk_with_room_for_before_alone_updates_and_rolls_back(updater, monke
     assert updater.receipt["rollback_path"] == "link"
 
 
-def test_a_disk_without_room_for_before_never_drains(updater, monkeypatch):
+def test_a_disk_without_room_for_every_copy_never_drains(updater, monkeypatch):
     _blob(updater, 4)
     updater.free_space = u.Updater.free_space.__get__(updater)
-    free = _data_size(updater.data) + 2 * 1024**3 - 1
+    free = _copies_needed(updater, "link") + 2 * 1024**3 - 1
     monkeypatch.setattr(u.shutil, "disk_usage", lambda path: types.SimpleNamespace(free=free))
     with pytest.raises(u.UpdateError, match="Insufficient space"):
         updater.update("registry.example/korra:latest")
     assert not any(call[0] in {"native", "stop", "pull"} for call in updater.calls)
+
+
+# Every place updater.py writes a physical copy, and the budget term that pays for it.
+COPY_SITES = {
+    ("snapshot", "copytree"): "data_bytes",
+    ("snapshot", "backup"): "sqlite_peak_bytes",
+    ("link_tree", "copy2"): "config_bytes",
+    ("overlay_credentials", "copy2"): "credential_bytes",
+    ("Updater.rehearse_schema", "copy2"): "state_db_bytes",
+    # Runs in the container, once, sized by the old container's diff: unknown
+    # when the gate runs and absorbed by its headroom.
+    ("MIGRATE_PACKAGES_CODE", "copy2"): "headroom_bytes",
+}
+
+
+def _copy_sites():
+    import ast
+    tree = ast.parse(SOURCE.read_text())
+    copies = {"copy", "copy2", "copyfile", "copyfileobj", "copytree", "move", "backup", "sendfile",
+              "copy_file_range", "write_bytes"}
+    found = set()
+
+    def calls(node):
+        for call in ast.walk(node):
+            if isinstance(call, ast.Call):
+                name = getattr(call.func, "attr", getattr(call.func, "id", None))
+                if name in copies:
+                    yield name
+
+    def visit(node, scope):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.ClassDef):
+                visit(child, child.name + ".")
+            elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                found.update((scope + child.name, name) for name in calls(child))
+            elif (isinstance(child, ast.Assign) and isinstance(child.value, ast.Constant)
+                  and isinstance(child.value.value, str)):
+                for name in copies:
+                    if "." + name + "(" in child.value.value:
+                        found.add((child.targets[0].id, name))
+    visit(tree, "")
+    return found
+
+
+def test_every_physical_copy_of_the_update_and_rollback_path_has_a_budget_term(updater):
+    # A new copy that is not listed here (and so not paid by free_space) fails this test.
+    assert _copy_sites() == set(COPY_SITES)
+    updater.free_space = u.Updater.free_space.__get__(updater)
+    updater.free_space()
+    budget = updater.receipt["rollback_budget"]
+    for term in COPY_SITES.values():
+        assert term in budget
+
+
+@pytest.mark.parametrize("mode", ["link", "copy"])
+def test_the_bytes_an_update_and_rollback_add_stay_within_what_the_gate_reserved(updater, monkeypatch, mode):
+    _blob(updater, 4)
+    (updater.data / "browser-profiles").mkdir()
+    (updater.data / "browser-profiles/profile-blob").write_bytes(os.urandom(1 << 20))
+    if mode == "copy":
+        _cross_filesystem(monkeypatch)
+
+    def distinct_bytes(*roots):
+        seen = {}
+        for root in roots:
+            for path in [Path(root), *Path(root).rglob("*")]:
+                info = path.lstat()
+                if path.is_file() and not path.is_symlink():
+                    seen[(info.st_dev, info.st_ino)] = info.st_size
+        return sum(seen.values())
+
+    updater.free_space = u.Updater.free_space.__get__(updater)
+    monkeypatch.setattr(u.shutil, "disk_usage", lambda path: types.SimpleNamespace(free=1 << 60))
+    updater.free_space()
+    reserved = updater.receipt["rollback_required_bytes"] - 2 * 1024**3
+    roots = (updater.jobs, updater.data, updater.data.parent / "data.after-fixture-job")
+    grown_from = distinct_bytes(updater.jobs, updater.data)
+    updater.fail_smoke = True
+    with pytest.raises(u.UpdateError, match="Injected model"):
+        updater.update("registry.example/korra:latest")
+    assert updater.receipt["status"] == "rolled_back" and updater.receipt["rollback_path"] == mode
+    grown_by = distinct_bytes(*roots) - grown_from
+    assert 0 < grown_by <= reserved
+    # The copies are real: more than DATA itself was written.
+    assert grown_by > _data_size(updater.data)
+
+
+def test_gate_refuses_what_the_hard_link_gate_alone_would_have_let_through(updater, monkeypatch):
+    """Byte-budget fault injection, not a real full volume: a 3 GiB credential blob is scaled
+    through lstat while a tiny file is stored. The old gate, DATA + 2 GiB, passed this."""
+    gib = 1024**3
+    large = updater.data / "browser-profiles" / "profile-blob"
+    large.parent.mkdir()
+    large.write_bytes(b"synthetic large profile")
+    real_lstat = Path.lstat
+    logical_blob_size = 3 * gib
+
+    def lstat(path, *args, **kwargs):
+        info = real_lstat(path, *args, **kwargs)
+        if path == large:
+            return types.SimpleNamespace(st_mode=info.st_mode, st_size=logical_blob_size)
+        return info
+
+    actual_data = sum(p.stat().st_size for p in updater.data.rglob("*") if p.is_file())
+    logical_data = actual_data - large.stat().st_size + logical_blob_size
+    free = logical_data + 2 * gib + 1
+    monkeypatch.setattr(Path, "lstat", lstat)
+    monkeypatch.setattr(u.shutil, "disk_usage", lambda _: types.SimpleNamespace(free=free))
+    with pytest.raises(u.UpdateError, match="Insufficient space"):
+        u.Updater.free_space(updater, image_bytes=1)
+    budget = updater.receipt["rollback_budget"]
+    assert budget["credential_bytes"] >= logical_blob_size
+    assert updater.receipt["rollback_required_bytes"] >= logical_data + logical_blob_size + 2 * gib
+
+
+def test_a_disk_with_exactly_the_reserved_bytes_never_runs_out_during_rollback(updater, monkeypatch):
+    """The same scaled blob, a byte budget that every physical copy draws on."""
+    gib = 1024**3
+    large = updater.data / "browser-profiles" / "profile-blob"
+    large.parent.mkdir()
+    large.write_bytes(b"synthetic large profile")
+    real_lstat, real_copy2, real_snapshot = Path.lstat, shutil.copy2, u.snapshot
+    logical_blob_size = 3 * gib
+    actual_data = sum(p.stat().st_size for p in updater.data.rglob("*") if p.is_file())
+    logical_data = actual_data - large.stat().st_size + logical_blob_size
+    budget = {"free": 0, "armed": False}
+
+    def lstat(path, *args, **kwargs):
+        info = real_lstat(path, *args, **kwargs)
+        if path == large:
+            return types.SimpleNamespace(st_mode=info.st_mode, st_size=logical_blob_size)
+        return info
+
+    with monkeypatch.context() as gate:
+        gate.setattr(Path, "lstat", lstat)
+        gate.setattr(u.shutil, "disk_usage", lambda _: types.SimpleNamespace(free=1 << 60))
+        u.Updater.free_space(updater)
+    budget["free"] = updater.receipt["rollback_required_bytes"]
+
+    def snapshot(source, destination):
+        result = real_snapshot(source, destination)
+        if destination == updater.job / "before":
+            budget["free"] -= logical_data
+            budget["armed"] = True
+        return result
+
+    def copy2(source, destination, *args, **kwargs):
+        if budget["armed"]:
+            required = logical_blob_size if Path(source).name == large.name else Path(source).stat().st_size
+            if required > budget["free"]:
+                raise OSError(errno.ENOSPC, "synthetic volume capacity exhausted")
+            budget["free"] -= required
+        return real_copy2(source, destination, *args, **kwargs)
+
+    monkeypatch.setattr(u, "snapshot", snapshot)
+    monkeypatch.setattr(u.shutil, "copy2", copy2)
+    updater.fail_smoke = True
+    with pytest.raises(u.UpdateError, match="Injected model"):
+        updater.update("registry.example/korra:latest")
+    assert updater.receipt["status"] == "rolled_back" and updater.running
+    assert budget["free"] >= 2 * gib
 
 
 def test_rollback_path_is_asked_of_the_filesystem(updater, monkeypatch):
