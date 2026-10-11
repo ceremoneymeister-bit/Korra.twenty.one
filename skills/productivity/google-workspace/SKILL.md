@@ -215,16 +215,23 @@ $GAPI sheets append SHEET_ID "Sheet1!A:C" --values '[["new","row","data"]]'
 ### Docs
 
 ```bash
-# Read
+# Read every tab (result has a "tabs" list with tabId, title, level, body)
 $GAPI docs get DOC_ID
+# Read one tab
+$GAPI docs get DOC_ID --tab TAB_ID
 
 # Create a new Doc (optionally seeded with body text)
 $GAPI docs create --title "Meeting Notes"
 $GAPI docs create --title "Draft" --body "First paragraph..."
 
-# Append text to the end of an existing Doc
-$GAPI docs append DOC_ID --text "Additional content to append"
+# Append text to the end of one tab. Without --tab the first tab is used;
+# the result always names the tab that was written ("tab", "tabTitle").
+$GAPI docs append DOC_ID --text "Additional content to append" --tab TAB_ID
 ```
+
+Docs can have several tabs. Read with `docs get` first when the user means a
+specific tab, then pass its `tabId` to `docs append --tab`, and tell the user
+which tab you wrote to.
 
 ## Output Format
 

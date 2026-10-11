@@ -566,3 +566,94 @@ def test_tasks_cli_rejects_missing_scope_before_transport(api_module, monkeypatc
     monkeypatch.setattr(api_module.subprocess, 'run', lambda *_args, **_kwargs: pytest.fail('No request without Tasks consent'))
     with pytest.raises(SystemExit):
         api_module.main()
+
+
+def _tabbed_doc():
+    def tab(tab_id, title, text, children=()):
+        return {
+            "tabProperties": {"tabId": tab_id, "title": title},
+            "documentTab": {"body": {"content": [
+                {"endIndex": len(text) + 2,
+                 "paragraph": {"elements": [{"textRun": {"content": text + "\n"}}]}},
+            ]}},
+            "childTabs": list(children),
+        }
+
+    return {
+        "title": "План",
+        "documentId": "doc-1",
+        "tabs": [
+            tab("t.a", "Первая", "alpha", [tab("t.a1", "Вложенная", "alpha-child")]),
+            tab("t.b", "Вторая", "beta"),
+            tab("t.c", "Третья", "gamma"),
+        ],
+    }
+
+
+def _fake_docs_gws(api_module, monkeypatch, doc):
+    calls = []
+
+    def fake_run(cmd, params=None, body=None, **kwargs):
+        calls.append((cmd, params, body))
+        return doc if cmd[-1] == "get" else {}
+
+    monkeypatch.setattr(api_module, "_run_gws", fake_run)
+    return calls
+
+
+def test_docs_get_reads_every_tab(api_module, monkeypatch, capsys):
+    calls = _fake_docs_gws(api_module, monkeypatch, _tabbed_doc())
+    api_module.docs_get(SimpleNamespace(doc_id="doc-1", tab=None))
+
+    assert calls[0][1]["includeTabsContent"] is True
+    out = json.loads(capsys.readouterr().out)
+    assert [(t["tabId"], t["body"], t["level"]) for t in out["tabs"]] == [
+        ("t.a", "alpha\n", 0),
+        ("t.a1", "alpha-child\n", 1),
+        ("t.b", "beta\n", 0),
+        ("t.c", "gamma\n", 0),
+    ]
+
+
+def test_docs_get_single_tab_and_legacy_shape(api_module, monkeypatch, capsys):
+    _fake_docs_gws(api_module, monkeypatch, _tabbed_doc())
+    api_module.docs_get(SimpleNamespace(doc_id="doc-1", tab="t.c"))
+    assert json.loads(capsys.readouterr().out)["body"] == "gamma\n"
+
+    legacy = {"title": "Старый", "documentId": "d", "body": {"content": [
+        {"paragraph": {"elements": [{"textRun": {"content": "text\n"}}]}}]}}
+    _fake_docs_gws(api_module, monkeypatch, legacy)
+    api_module.docs_get(SimpleNamespace(doc_id="d", tab=None))
+    assert json.loads(capsys.readouterr().out)["body"] == "text\n"
+
+
+def test_docs_append_writes_to_chosen_tab(api_module, monkeypatch, capsys):
+    calls = _fake_docs_gws(api_module, monkeypatch, _tabbed_doc())
+    api_module.docs_append(SimpleNamespace(doc_id="doc-1", text="новое", tab="t.b"))
+
+    request = calls[1][2]["requests"][0]["insertText"]
+    assert request["location"] == {"index": 5, "tabId": "t.b"}
+    assert request["text"] == "новое\n"
+    out = json.loads(capsys.readouterr().out)
+    assert out["tab"] == "t.b" and out["tabTitle"] == "Вторая"
+    assert "note" not in out
+
+
+def test_docs_append_without_tab_reports_where_it_wrote(api_module, monkeypatch, capsys):
+    calls = _fake_docs_gws(api_module, monkeypatch, _tabbed_doc())
+    api_module.docs_append(SimpleNamespace(doc_id="doc-1", text="x", tab=None))
+
+    assert calls[1][2]["requests"][0]["insertText"]["location"]["tabId"] == "t.a"
+    out = json.loads(capsys.readouterr().out)
+    assert out["tab"] == "t.a" and out["tabTitle"] == "Первая"
+    assert "--tab" in out["note"]
+    assert [t["tabId"] for t in out["tabs"]] == ["t.a", "t.a1", "t.b", "t.c"]
+
+
+def test_docs_append_unknown_tab_fails_without_writing(api_module, monkeypatch, capsys):
+    calls = _fake_docs_gws(api_module, monkeypatch, _tabbed_doc())
+    with pytest.raises(SystemExit):
+        api_module.docs_append(SimpleNamespace(doc_id="doc-1", text="x", tab="t.zzz"))
+
+    assert len(calls) == 1
+    assert "t.zzz" in capsys.readouterr().err
