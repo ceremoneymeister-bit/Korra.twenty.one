@@ -1655,8 +1655,12 @@ def _handle_create(args: dict, **kw) -> str:
             )
             new_task = kb.get_task(conn, new_tid)
             subscribed = _maybe_auto_subscribe(conn, new_tid)
+            execution = _created_card_execution(
+                kb, conn, new_task, subscribed=bool(subscribed),
+            )
             return _ok(
                 task_id=new_tid,
+                execution=execution,
                 status=new_task.status if new_task else None,
                 workspace_kind=new_task.workspace_kind if new_task else None,
                 workspace_path=new_task.workspace_path if new_task else None,
@@ -1671,6 +1675,91 @@ def _handle_create(args: dict, **kw) -> str:
     except Exception as e:
         logger.exception("kanban_create failed")
         return tool_error(f"kanban_create: {e}")
+
+
+def _created_card_execution(kb: Any, conn: Any, task: Any, *, subscribed: bool) -> dict:
+    """What actually happened to a card right after it was created.
+
+    ``started`` is true only when the card is claimed with a live run; creating
+    a card never starts it. In exact-request mode this is also where the
+    request to start it is recorded; the dispatcher does the starting.
+    """
+    notify = "subscribed" if subscribed else "not_subscribed"
+    out: dict[str, Any] = {
+        "state": "unknown", "started": False, "will_start": False,
+        "run_id": None, "notify": notify, "reason": "",
+    }
+    if task is None:
+        out["reason"] = "The card could not be read back."
+        return out
+    status = task.status
+    if (getattr(task, "actor_kind", None) or "") == "human":
+        out.update(state="human_step", reason="A step for the owner: nothing is started.")
+    elif status == "running":
+        alive = bool(task.current_run_id and task.claim_lock and kb._pid_alive(task.worker_pid))
+        out.update(
+            state="running" if alive else "claimed", started=alive,
+            run_id=task.current_run_id,
+            reason="" if alive else "Claimed, but no live worker process is linked to the run yet.",
+        )
+    elif status == "todo":
+        out.update(state="waiting_for_parents", will_start=True,
+                   reason="Starts after its parent steps are done.")
+    elif status == "blocked":
+        out.update(state="blocked", reason=task.block_reason or "The card is blocked.")
+    elif status == "triage":
+        out.update(state="triage", reason="Waiting to be specified before it can start.")
+    elif status != "ready":
+        out.update(state=status, reason=f"Card status is {status}; nothing is started.")
+    else:
+        settings = kb.owner_kanban_settings()
+        general = settings.get("dispatch_in_gateway", True) is not False
+        exact = kb.exact_dispatch_requests_enabled()
+        refused = ""
+        if not general and exact:
+            outcome = kb.request_exact_dispatch(conn, task.id, source="kanban_create")
+            if outcome not in ("requested", "already"):
+                refused = f"The request to start was not recorded ({outcome})."
+        try:
+            from agent.estop import is_engaged
+            paused = bool(is_engaged())
+        except Exception:
+            paused = False
+        if refused:
+            out.update(state="start_refused", reason=refused)
+        elif general:
+            running, note = _dispatcher_presence()
+            out.update(
+                state="queued" if running else "no_dispatcher", will_start=running,
+                reason=("The dispatcher picks it up on its next check (about a minute)."
+                        if running else note or "No dispatcher is running."),
+            )
+        elif exact:
+            out.update(state="queued", will_start=True,
+                       reason="Start requested; the dispatcher picks it up on its next check.")
+        else:
+            out.update(
+                state="no_dispatcher",
+                reason=("The general queue and exact start requests are both off: nothing "
+                        f"starts this card. The owner can run `korra kanban dispatch --task-id {task.id}`."),
+            )
+        if paused and out["will_start"]:
+            out.update(state="paused", will_start=False,
+                       reason="The global emergency stop is on; the card starts after it is lifted.")
+    if not subscribed:
+        out["reason"] = (out["reason"] + " " if out["reason"] else "") + (
+            "This chat is not subscribed to the card: results will not arrive here; "
+            "check with `kanban_show`."
+        )
+    return out
+
+
+def _dispatcher_presence() -> tuple[bool, str]:
+    try:
+        from korra_cli.kanban import _check_dispatcher_presence
+        return _check_dispatcher_presence()
+    except Exception:
+        return True, ""
 
 
 def _maybe_auto_subscribe(conn: Any, task_id: str) -> bool:
