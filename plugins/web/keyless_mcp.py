@@ -64,6 +64,34 @@ def _is_rate_limitish(message: str) -> bool:
     return any(marker in lowered for marker in _RATE_LIMIT_MARKERS)
 
 
+_NO_RESULTS_MARKERS = ("no results", "no text content", "нет результатов")
+
+
+def search_outcome(result: Dict[str, Any]) -> str:
+    """'' when *result* is a successful search with hits, else a short Russian reason."""
+    if result.get("success"):
+        hits = (result.get("data") or {}).get("web") or []
+        return "" if hits else "нет результатов"
+    error = str(result.get("error") or "")
+    if any(marker in error.lower() for marker in _NO_RESULTS_MARKERS):
+        return "нет результатов"
+    if _is_rate_limitish(error):
+        return "лимит запросов"
+    return " ".join(error.split(". Set ")[0].split())[:160] or "ошибка"
+
+
+def not_found_message(attempts: List[Dict[str, str]]) -> str:
+    """Honest final answer after every provider was tried: who was asked and what came back."""
+    tried = "; ".join(f"{a['provider']} — {a['outcome']}" for a in attempts)
+    empty = any(a["outcome"] == "нет результатов" for a in attempts)
+    head = (
+        "Не нашёл: ни один поставщик поиска не вернул результатов."
+        if empty
+        else "Поиск не сработал: ни один поставщик не ответил."
+    )
+    return f"{head} Пробовал: {tried}."
+
+
 def keyless_enabled() -> bool:
     """Return True when the keyless fallback tier is enabled.
 
@@ -718,13 +746,14 @@ def _ring_order(name: str) -> List[str]:
 
 
 def search_with_failover(name: str, query: str, limit: int = 5) -> Dict[str, Any]:
-    """Keyless search across the vendor ring with next-in-line failover.
+    """Keyless search across the whole vendor ring.
 
     Starts at *name* when the user pinned it, otherwise at the round-robin
-    cursor. Rate-limit-shaped errors advance to the next ring vendor;
-    non-throttle errors stop the walk (a malformed query fails everywhere).
-    The result notes the serving vendor via ``data.served_by`` whenever it
-    differs from *name*.
+    cursor. A vendor that is throttled, fails, or answers with no results
+    hands over to the next ring vendor; the first non-empty answer wins and
+    notes the serving vendor via ``data.served_by`` whenever it differs from
+    *name*. If every vendor is exhausted the failure lists each attempt
+    (``attempts``) instead of a bare "no results".
     """
     order = _ring_order(name)
     if not order:
@@ -732,26 +761,19 @@ def search_with_failover(name: str, query: str, limit: int = 5) -> Dict[str, Any
             "success": False,
             "error": "All keyless web providers are pinned to paid tiers.",
         }
-    last: Dict[str, Any] = {}
+    attempts: List[Dict[str, str]] = []
     for i, vendor in enumerate(order):
         result = _KEYLESS_SEARCHERS[vendor](query, limit)
-        if result.get("success"):
+        outcome = search_outcome(result)
+        if not outcome:
             if vendor != name:
                 result.setdefault("data", {})["served_by"] = vendor
             return result
-        last = result
-        if not _is_rate_limitish(result.get("error", "")):
-            return result
+        attempts.append({"provider": vendor, "outcome": outcome})
         nxt = order[i + 1] if i + 1 < len(order) else None
         if nxt:
-            logger.info(
-                "keyless %s search throttled; failing over to %s", vendor, nxt
-            )
-    last["error"] = (
-        f"{last.get('error', '')} (all keyless vendors throttled: "
-        f"{', '.join(order)})"
-    )
-    return last
+            logger.info("keyless %s search gave nothing (%s); trying %s", vendor, outcome, nxt)
+    return {"success": False, "error": not_found_message(attempts), "attempts": attempts}
 
 
 def extract_with_failover(name: str, urls: List[str]) -> List[Dict[str, Any]]:

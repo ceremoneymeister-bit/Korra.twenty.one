@@ -502,20 +502,40 @@ class TestKeylessFailover:
         assert out["success"] is True
         assert out["data"]["served_by"] == "parallel"
 
-    def test_search_no_failover_on_non_throttle_error(self, monkeypatch):
+    def test_search_fails_over_on_non_throttle_error_too(self, monkeypatch):
+        # A vendor-specific failure must not end the walk: the next vendor may answer.
         self._pin(monkeypatch, "exa")
         monkeypatch.setitem(
             keyless_mcp._KEYLESS_SEARCHERS, "exa",
             lambda q, l: {"success": False, "error": "Unrecognized MCP response shape"},
         )
-        called = []
-        monkeypatch.setitem(
-            keyless_mcp._KEYLESS_SEARCHERS, "parallel",
-            lambda q, l: called.append(1) or self._ok("parallel"),
-        )
+        monkeypatch.setitem(keyless_mcp._KEYLESS_SEARCHERS, "parallel", lambda q, l: self._ok("parallel"))
+        out = keyless_mcp.search_with_failover("exa", "q")
+        assert out["success"] is True
+        assert out["data"]["served_by"] == "parallel"
+
+    def test_search_fails_over_on_empty_answer(self, monkeypatch):
+        self._pin(monkeypatch, "exa")
+        monkeypatch.setitem(keyless_mcp._KEYLESS_SEARCHERS, "exa", lambda q, l: {"success": True, "data": {"web": []}})
+        monkeypatch.setitem(keyless_mcp._KEYLESS_SEARCHERS, "parallel", lambda q, l: self._ok("parallel"))
+        out = keyless_mcp.search_with_failover("exa", "q")
+        assert out["success"] is True
+        assert out["data"]["served_by"] == "parallel"
+
+    def test_search_all_empty_is_honest_not_found_with_attempts(self, monkeypatch):
+        self._pin(monkeypatch, "exa")
+        for vendor in keyless_mcp._KEYLESS_RING:
+            monkeypatch.setitem(
+                keyless_mcp._KEYLESS_SEARCHERS, vendor,
+                lambda q, l: {"success": True, "data": {"web": []}},
+            )
         out = keyless_mcp.search_with_failover("exa", "q")
         assert out["success"] is False
-        assert not called  # peer never tried
+        assert out["error"].startswith("Не нашёл")
+        assert "No results found" not in out["error"]
+        assert [a["provider"] for a in out["attempts"]] == list(keyless_mcp._KEYLESS_RING)
+        for vendor in keyless_mcp._KEYLESS_RING:
+            assert f"{vendor} — нет результатов" in out["error"]
 
     def test_search_all_throttled_reports_ring(self, monkeypatch):
         self._pin(monkeypatch, "exa")
@@ -526,7 +546,8 @@ class TestKeylessFailover:
             )
         out = keyless_mcp.search_with_failover("exa", "q")
         assert out["success"] is False
-        assert "all keyless vendors throttled" in out["error"]
+        assert out["error"].startswith("Поиск не сработал")
+        assert all(f"{v} — лимит запросов" in out["error"] for v in keyless_mcp._KEYLESS_RING)
 
     def test_search_walks_ring_past_multiple_throttles(self, monkeypatch):
         # exa -> parallel all throttled; firecrawl serves.

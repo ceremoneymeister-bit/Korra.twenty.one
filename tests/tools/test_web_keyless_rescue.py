@@ -158,6 +158,80 @@ class TestSearchRescue:
         assert "HTTP 500 upstream exploded" in out["error"]
         assert "keyless rescue also failed" in out["error"]
 
+    def _ring_walk(self, monkeypatch, outcomes):
+        """Real ring walk with scripted per-vendor answers (pinned to start at exa)."""
+        monkeypatch.setattr(keyless_mcp, "_vendor_pinned", lambda n: True)
+        for vendor in keyless_mcp._KEYLESS_RING:  # never reach the network
+            result = outcomes.get(vendor, {"success": True, "data": {"web": []}})
+            monkeypatch.setitem(keyless_mcp._KEYLESS_SEARCHERS, vendor, lambda q, l, r=result: r)
+
+    def test_ddgs_no_results_walks_whole_ring(self, monkeypatch):
+        class _DuckProvider(_KeyedBoomProvider):
+            name = "ddgs"
+            display_name = "DuckDuckGo (ddgs)"
+
+            def search(self, query, limit=5):
+                return {"success": False, "error": "DuckDuckGo search failed: No results found."}
+
+        empty = {"success": True, "data": {"web": []}}
+        self._ring_walk(monkeypatch, {
+            "exa": empty,
+            "parallel": {"success": False, "error": "Keyless parallel search failed: HTTP 500"},
+            "firecrawl": empty,
+            "keenable": _ring_ok("keenable"),
+        })
+        out = self._dispatch(monkeypatch, _DuckProvider())
+        assert out["success"] is True
+        assert out["data"]["served_by"] == "keenable"
+        assert out["data"]["rescued_from"] == "ddgs"
+
+    def test_empty_success_from_chosen_backend_is_rescued(self, monkeypatch):
+        class _EmptyProvider(_KeyedBoomProvider):
+            name = "searxng"
+
+            def search(self, query, limit=5):
+                return {"success": True, "data": {"web": []}}
+
+        self._ring_walk(monkeypatch, {"exa": {"success": True, "data": {"web": []}}, "parallel": _ring_ok("parallel")})
+        out = self._dispatch(monkeypatch, _EmptyProvider())
+        assert out["success"] is True
+        assert out["data"]["served_by"] == "parallel"
+
+    def test_nothing_anywhere_is_honest_not_found_listing_every_attempt(self, monkeypatch):
+        class _DuckProvider(_KeyedBoomProvider):
+            name = "ddgs"
+            display_name = "DuckDuckGo (ddgs)"
+
+            def search(self, query, limit=5):
+                return {"success": False, "error": "DuckDuckGo search failed: No results found."}
+
+        empty = {"success": True, "data": {"web": []}}
+        self._ring_walk(monkeypatch, {v: empty for v in keyless_mcp._KEYLESS_RING})
+        out = self._dispatch(monkeypatch, _DuckProvider())
+        assert out["success"] is False
+        assert out["error"].startswith("Не нашёл")
+        assert "No results found" not in out["error"]
+        assert "DuckDuckGo (ddgs) — нет результатов" in out["error"]
+        for vendor in keyless_mcp._KEYLESS_RING:
+            assert f"{vendor} — нет результатов" in out["error"]
+
+    def test_empty_answer_without_rescue_is_still_honest_not_found(self, monkeypatch):
+        monkeypatch.setattr(
+            web_tools, "_load_web_config",
+            lambda: {"backend": "keenable", "keyless_rescue": False},
+        )
+
+        class _EmptyProvider(_KeyedBoomProvider):
+            display_name = "Keenable"
+
+            def search(self, query, limit=5):
+                return {"success": True, "data": {"web": []}}
+
+        out = self._dispatch(monkeypatch, _EmptyProvider())
+        assert out["success"] is False
+        assert out["error"].startswith("Не нашёл")
+        assert "Keenable — нет результатов" in out["error"]
+
     def test_no_rescue_when_disabled(self, monkeypatch):
         monkeypatch.setattr(
             web_tools, "_load_web_config",

@@ -426,7 +426,8 @@ class TestWebSearchSchema:
         # tool dispatcher resolves a provider from the registry and calls
         # provider.search(query, limit). Mock the provider lookup so we can
         # assert the limit is clamped before reaching the backend.
-        fake_search = MagicMock(return_value={"success": True, "data": {"web": []}})
+        hits = {"success": True, "data": {"web": [{"url": "https://docs.example"}]}}
+        fake_search = MagicMock(return_value=hits)
         fake_provider = MagicMock(
             name="ParallelWebSearchProvider",
             supports_search=MagicMock(return_value=True),
@@ -441,7 +442,7 @@ class TestWebSearchSchema:
              patch.object(tools.web_tools._debug, "save"):
             result = json.loads(tools.web_tools.web_search_tool("docs", limit=500))
 
-        assert result == {"success": True, "data": {"web": []}}
+        assert result == hits
         fake_search.assert_called_once_with("docs", 100)
 
 
