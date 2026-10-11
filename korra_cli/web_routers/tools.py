@@ -127,19 +127,22 @@ async def get_toolsets(profile: Optional[str] = None):
 
 @router.put("/api/tools/toolsets/{name}")
 async def toggle_toolset(name: str, body: ToolsetToggle, profile: Optional[str] = None):
-    """Enable/disable a configurable toolset for its configuration platform.
+    """Enable/disable a configurable toolset for the whole profile.
 
-    Most toolsets persist to ``platform_toolsets.cli``. Platform-restricted
-    toolsets instead target their supported platform (for example, Discord's
-    native toolsets persist to ``platform_toolsets.discord``). The shared
-    ``_save_platform_tools`` helper keeps the GUI and CLI in lockstep. Scoped
-    to ``body.profile`` when provided. Returns 400 for unknown toolset keys.
+    The configuration platform (``cli``, or the supported platform of a
+    platform-restricted toolset such as Discord's) is always written; every
+    other platform that may carry the toolset is brought to the same state
+    when it differs. The shared ``_save_platform_tools`` helper keeps the GUI
+    and CLI in lockstep. Scoped to ``body.profile`` when provided. Returns 400
+    for unknown toolset keys.
     """
+    from korra_cli.platforms import get_all_platforms
     from korra_cli.tools_config import (
         _CONFIG_ONLY_TOOLSETS,
         _get_effective_configurable_toolsets,
         _get_platform_tools,
         _save_platform_tools,
+        _toolset_allowed_for_platform,
         _toolset_configuration_platform,
     )
 
@@ -166,18 +169,29 @@ async def toggle_toolset(name: str, body: ToolsetToggle, profile: Optional[str] 
         with _profile_scope(body.profile or profile):
             with _CONFIG_MUTATION_LOCK:
                 config = load_config()
-                enabled = set(
-                    _get_platform_tools(
-                        config,
-                        target_platform,
-                        include_default_mcp_servers=False,
+                # The switch is a profile-wide decision: Telegram, the web chat
+                # and cron read their own ``platform_toolsets`` entries, so
+                # writing only the configuration platform left the cabinet
+                # saying "on" while the agent in other channels disagreed.
+                # Other platforms are rewritten only when they differ, which
+                # keeps untouched ones on their live platform defaults.
+                for platform in get_all_platforms():
+                    if not _toolset_allowed_for_platform(name, platform):
+                        continue
+                    enabled = set(
+                        _get_platform_tools(
+                            config,
+                            platform,
+                            include_default_mcp_servers=False,
+                        )
                     )
-                )
-                if body.enabled:
-                    enabled.add(name)
-                else:
-                    enabled.discard(name)
-                _save_platform_tools(config, target_platform, enabled)
+                    if platform != target_platform and (name in enabled) == body.enabled:
+                        continue
+                    if body.enabled:
+                        enabled.add(name)
+                    else:
+                        enabled.discard(name)
+                    _save_platform_tools(config, platform, enabled)
 
     await asyncio.to_thread(_run)
 

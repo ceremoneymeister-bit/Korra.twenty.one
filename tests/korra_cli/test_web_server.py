@@ -2951,6 +2951,57 @@ class TestNewEndpoints:
             config["platform_toolsets"]["discord"]
         )
 
+    def test_toolset_switch_applies_to_every_channel_of_the_profile(self):
+        """K21-283: the cabinet switch must not leave Telegram or the web chat behind."""
+        from korra_cli.config import load_config, save_config
+        from korra_cli.tools_config import _get_platform_tools
+
+        config = load_config()
+        config["platform_toolsets"] = {
+            "cli": ["web", "file"],
+            "telegram": ["web", "file"],
+            "api_server": ["web", "file"],
+        }
+        save_config(config)
+
+        resp = self.client.put("/api/tools/toolsets/web", json={"enabled": False})
+        assert resp.status_code == 200
+        config = load_config()
+        for platform in ("cli", "telegram", "api_server", "cron", "slack"):
+            assert "web" not in _get_platform_tools(
+                config, platform, include_default_mcp_servers=False
+            ), platform
+        assert "file" in config["platform_toolsets"]["telegram"]
+
+        resp = self.client.put("/api/tools/toolsets/web", json={"enabled": True})
+        assert resp.status_code == 200
+        config = load_config()
+        for platform in ("cli", "telegram", "api_server", "cron", "slack"):
+            assert "web" in _get_platform_tools(
+                config, platform, include_default_mcp_servers=False
+            ), platform
+
+    def test_toolset_switch_leaves_platforms_already_in_that_state_on_defaults(self):
+        from korra_cli.config import load_config
+
+        resp = self.client.put("/api/tools/toolsets/web", json={"enabled": True})
+        assert resp.status_code == 200
+        platform_toolsets = load_config().get("platform_toolsets") or {}
+        assert set(platform_toolsets) <= {"cli"}
+
+    def test_toolset_switch_does_not_spread_restricted_toolset(self):
+        from korra_cli.config import load_config
+
+        resp = self.client.put("/api/tools/toolsets/discord", json={"enabled": True})
+        assert resp.status_code == 200
+        platform_toolsets = load_config()["platform_toolsets"]
+        assert "discord" in platform_toolsets["discord"]
+        assert not any(
+            "discord" in names
+            for platform, names in platform_toolsets.items()
+            if platform != "discord"
+        )
+
     def test_toolsets_resolve_subscription_features_once(self, monkeypatch):
         import korra_cli.tools_config as tools_config
         from korra_cli.nous_subscription import NousSubscriptionFeatures
