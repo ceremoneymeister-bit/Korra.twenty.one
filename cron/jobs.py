@@ -3378,6 +3378,55 @@ def _write_missed_oneshot_diagnostic(job: Dict[str, Any], next_run: str) -> None
         )
 
 
+_missed_oneshot_notices: List[Dict[str, Any]] = []
+_missed_oneshot_notices_lock = threading.Lock()
+
+
+def _queue_missed_oneshot_notice(job: Dict[str, Any], next_run: str) -> None:
+    """Remember a retired one-shot so the tick can tell its owner once.
+
+    The due scan runs under the jobs lock and has no delivery channel; the tick
+    drains this queue right after the scan. A crash in between loses only the
+    message, never the "skipped" record written by the scan itself.
+    """
+    when = str(next_run)
+    try:
+        when = datetime.fromisoformat(str(next_run)).strftime("%d.%m в %H:%M")
+    except (TypeError, ValueError):
+        pass
+    label = "Напоминание" if job.get("reminder") else "Разовое задание"
+    name = str(job.get("name") or "").strip()
+    text = (
+        f"{label}{' «' + name + '»' if name else ''} не сработало вовремя: "
+        f"Korra не работала в назначенное время ({when}). "
+        "Само по себе оно не запустится — создайте его заново, если оно ещё нужно."
+    )
+    with _missed_oneshot_notices_lock:
+        _missed_oneshot_notices.append({"job": copy.deepcopy(job), "text": text})
+
+
+def pop_missed_oneshot_notices() -> List[Dict[str, Any]]:
+    with _missed_oneshot_notices_lock:
+        items = list(_missed_oneshot_notices)
+        _missed_oneshot_notices.clear()
+    return items
+
+
+def _record_skipped_oneshot(job: Dict[str, Any]) -> None:
+    """Keep a ledger trace for a one-shot that is removed without running."""
+    try:
+        from cron.executions import create_execution, finish_execution
+
+        reason = "Разовое задание пропущено: Korra не работала в назначенное время."
+        attempt = create_execution(job["id"], source="missed")
+        finish_execution(
+            attempt["id"], success=False, error=reason,
+            delivery_outcome="skipped", delivery_error=reason,
+        )
+    except Exception as e:
+        logger.warning("Failed to record skipped one-shot %r: %s", job.get("id"), e)
+
+
 def claim_dispatch(job_id: str) -> bool:
     """Atomically claim a finite one-shot job dispatch BEFORE execution.
 
@@ -4236,6 +4285,7 @@ def _get_due_jobs_locked() -> List[Dict[str, Any]]:
                         # a diagnostic so it stops being scanned and the miss
                         # is operator-visible (retire-not-silently-delete).
                         _write_missed_oneshot_diagnostic(job, next_run)
+                        _queue_missed_oneshot_notice(job, next_run)
                         for rj in raw_jobs:
                             if rj["id"] == job["id"]:
                                 if rj.get("reminder"):
@@ -4243,13 +4293,17 @@ def _get_due_jobs_locked() -> List[Dict[str, Any]]:
                                     # owner, never an invitation to send it hours late.
                                     reason = "Напоминание пропущено: Korra не работала в назначенное время. Перенесите его, если оно ещё нужно."
                                     from cron.executions import create_execution, finish_execution
-                                    attempt = create_execution(job["id"], source="missed")
-                                    finish_execution(attempt["id"], success=False, error=reason,
-                                                     delivery_outcome="expired", delivery_error=reason, result_text=rj["reminder"])
+                                    try:
+                                        attempt = create_execution(job["id"], source="missed")
+                                        finish_execution(attempt["id"], success=False, error=reason,
+                                                         delivery_outcome="expired", delivery_error=reason, result_text=rj["reminder"])
+                                    except Exception as e:
+                                        logger.warning("Failed to record missed reminder %r: %s", job.get("id"), e)
                                     rj.update(enabled=False, state="error", next_run_at=None,
                                               last_status="missed", last_error=reason,
                                               last_delivery_error=reason)
                                 else:
+                                    _record_skipped_oneshot(job)
                                     raw_jobs.remove(rj)
                                     intentionally_removed.add(str(job["id"]))
                                 needs_save = True

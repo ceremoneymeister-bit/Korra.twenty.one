@@ -8470,6 +8470,21 @@ def _maybe_run_worktree_maintenance() -> None:
     ).start()
 
 
+def _notify_missed_oneshots(adapters, loop) -> None:
+    """One message to the owner per one-shot retired unrun by the due scan."""
+    from cron.jobs import pop_missed_oneshot_notices
+
+    for item in pop_missed_oneshot_notices():
+        job = dict(item["job"])
+        job.pop("delivery_ttl_seconds", None)
+        try:
+            error = _deliver_result(job, item["text"], adapters=adapters, loop=loop, failure_notice=True)
+        except Exception as e:
+            error = str(e)
+        if error:
+            logger.warning("Missed one-shot notice for job %s not delivered: %s", job.get("id"), error)
+
+
 def tick(
     verbose: bool = True,
     adapters=None,
@@ -8612,6 +8627,7 @@ def tick(
             logger.debug("Worktree maintenance dispatch failed: %s", _wt_exc)
 
         due_jobs = get_due_jobs()
+        _notify_missed_oneshots(adapters, loop)
 
         # Bound the in-flight set BEFORE the dedup guard is consulted, so a
         # leaked claim is force-released in-cycle rather than silently eating
