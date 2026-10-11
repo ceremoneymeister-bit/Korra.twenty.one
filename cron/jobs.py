@@ -1717,14 +1717,34 @@ def load_jobs() -> List[Dict[str, Any]]:
                 if isinstance(v, dict)
             ]
             needs_shape_repair = True
-        if jobs and (_strict_retry or needs_shape_repair):
+        elif not isinstance(jobs, list):
+            logger.warning(
+                "Replacing invalid jobs.json 'jobs' field (%s) with an empty list",
+                type(jobs).__name__,
+            )
+            jobs = []
+            needs_shape_repair = True
+        if any(not isinstance(j, dict) for j in jobs):
+            # One junk entry would crash the due scan on every tick and freeze
+            # every healthy job; drop it (types only: raw values are arbitrary
+            # file content and must not reach the logs).
+            junk = [j for j in jobs if not isinstance(j, dict)]
+            logger.warning(
+                "Skipping %d non-object entr%s in jobs.json (types: %s)",
+                len(junk),
+                "y" if len(junk) == 1 else "ies",
+                ", ".join(sorted({type(j).__name__ for j in junk})),
+            )
+            jobs = [j for j in jobs if isinstance(j, dict)]
+            needs_shape_repair = True
+        if needs_shape_repair or (jobs and _strict_retry):
             # Rewrite into the canonical {"jobs": [...]} form: either the parse
             # hit control-character corruption (_strict_retry) or the store was
             # an id-keyed map. save_jobs() re-emits the list shape every reader
             # expects.
             save_jobs(jobs)
             if needs_shape_repair:
-                logger.warning("Auto-repaired jobs.json (id-keyed jobs map flattened to list)")
+                logger.warning("Auto-repaired jobs.json (non-list or junk entries replaced by a clean list)")
             else:
                 logger.warning("Auto-repaired jobs.json (had invalid control characters)")
         _record_load_stamp(pre_read_stamp)
@@ -1732,6 +1752,9 @@ def load_jobs() -> List[Dict[str, Any]]:
     if isinstance(data, list):
         # Bare array — likely saved/edited outside save_jobs(). Wrap it back
         # into the expected {"jobs": [...]} structure.
+        data = [j for j in data if isinstance(j, dict)] if any(
+            not isinstance(j, dict) for j in data
+        ) else data
         if data:
             save_jobs(data)
             logger.warning("Auto-repaired jobs.json (bare list wrapped as dict)")
