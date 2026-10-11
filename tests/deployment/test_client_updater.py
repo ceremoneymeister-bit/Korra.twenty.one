@@ -1246,6 +1246,48 @@ def test_rollback_retry_after_old_image_start_failure_preserves_all_exports(upda
     assert sorted(p.name for p in updater.data.parent.glob("data.after-*")) == ["data.after-fixture-job"]
 
 
+def _legacy_swapped_then_old_image_failed(updater, **recorded):
+    """State left by a 0.21.16/17 rollback: DATA swapped, the old image then failed to start."""
+    updater.update("registry.example/korra:latest")
+    job = updater.job
+    (updater.data / "unique-owner-record.txt").write_text("only created on failed release")
+    u.snapshot(updater.data, job / "after")
+    displaced = updater.data.with_name("data.after-fixture-job")
+    os.replace(updater.data, displaced)
+    u.snapshot(job / "before", updater.data)
+    stage = updater.data.with_name("data.restore-fixture-job")
+    u.atomic_json(job / "restore-stage.json",
+                  {"path": str(stage), "source": str(job / "before"), "phase": "verified"})
+    updater.receipt.update(displaced_data=str(displaced), displaced_data_history=[str(displaced)],
+                           post_update_exports=[str(job / "after")], **recorded)
+    updater.phase("rollback", status="rollback_failed")
+    updater.running = False
+    return job, displaced
+
+
+@pytest.mark.parametrize("recorded, expected", [({"post_update_changes": 1}, 1), ({}, None)])
+def test_retried_legacy_rollback_never_lowers_the_recorded_changes_or_frees_the_export(
+        updater, monkeypatch, recorded, expected):
+    monkeypatch.delenv("UPDATE_HISTORY", raising=False)
+    job, displaced = _legacy_swapped_then_old_image_failed(updater, **recorded)
+    real_overlay = u.overlay_credentials
+    monkeypatch.setattr(u, "overlay_credentials", lambda *a: (_ for _ in ()).throw(u.UpdateError("injected")))
+    with pytest.raises(u.UpdateError, match="injected"):
+        updater.rollback()
+    # The failed attempt wrote a zero-change comparison; the next one must not trust it.
+    monkeypatch.setattr(u, "overlay_credentials", real_overlay)
+    updater.rollback()
+    assert updater.receipt["status"] == "rolled_back"
+    assert updater.receipt["post_update_changes"] == expected
+    assert (displaced / "unique-owner-record.txt").exists()
+    assert not (job / u.EXPORTS_REVIEWED).exists()
+    assert not updater.exports_reviewed(job, updater.receipt)
+    updater.update(_second_update(updater, image=NEW))
+    assert job.is_dir() and (displaced / "unique-owner-record.txt").exists()
+    assert "fixture-job" in updater.receipt["history_retention"]["review"]
+    assert (job / "after" / "unique-owner-record.txt").exists()
+
+
 class Killed(BaseException):
     """A process that died: no `except Exception` and no cleanup runs for it."""
 

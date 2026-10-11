@@ -2687,6 +2687,13 @@ print(json.dumps(changed))
         raw = tree_manifest(self.data)
         after = {k: v for k, v in raw.items() if Path(k).name not in VOLATILE}
         changes = sorted(k for k in set(manifest) | set(after) if manifest.get(k) != after.get(k))
+        count = len(changes)
+        if displaced.exists() or displaced.is_symlink():
+            # A rollback of an older updater already swapped DATA, so `changes`
+            # compares the restored copy with itself. The earlier export stays
+            # the only copy of its writes: its count is never lowered, and an
+            # unknown one stays unknown (null) for every later attempt.
+            changes, count = self.retried_changes(changes)
         atomic_json(self.job / "post-update-changes.json", changes)
         if stage.exists() or stage.is_symlink():
             if stage.is_symlink() or record.get("path") != str(stage):
@@ -2723,7 +2730,7 @@ print(json.dumps(changed))
             displaced = displaced.with_name(displaced.name + ".retry-" + uuid.uuid4().hex[:8])
         atomic_json(self.job / (displaced.name + ".manifest.json"), raw)
         done = {"path": str(stage), "source": str(backup), "mode": "link" if link else "copy",
-                "displaced": str(displaced), "post_update_changes": len(changes),
+                "displaced": str(displaced), "post_update_changes": count,
                 "preserved_credentials": len(credentials), "restored_gateways": len(gateways)}
         atomic_json(stage_record, dict(done, phase="swapping"))
         os.replace(self.data, displaced)
@@ -2735,6 +2742,20 @@ print(json.dumps(changed))
             raise
         atomic_json(stage_record, dict(done, phase="swapped"))
         self.finish_restore(dict(done, phase="swapped"))
+
+    def retried_changes(self, changes):
+        """(paths, count) of a retry that finds an earlier export; count None = unknown."""
+        try:
+            listed = json.loads((self.job / "post-update-changes.json").read_text())
+        except (OSError, ValueError):
+            listed = None
+        recorded = self.receipt.get("post_update_changes")
+        known = [n for n in (recorded if type(recorded) is int else None,
+                             len(listed) if isinstance(listed, list) else None) if n is not None]
+        if not known:
+            return None, None
+        merged = sorted(set(listed if isinstance(listed, list) else []) | set(changes))
+        return merged, max(*known, len(merged))
 
     def finish_restore(self, record):
         """Report a completed swap; drop a `before` that now shares live DATA's inodes."""
@@ -2752,8 +2773,9 @@ print(json.dumps(changed))
                 shutil.rmtree(backup)
             except OSError as exc:
                 self.log(f"restore: linked before not removed: {exc}")
-        self.log(f"Post-update writes kept in {displaced}: {record['post_update_changes']} paths "
-                 "differ; see post-update-changes.json")
+        differ = record["post_update_changes"]
+        self.log(f"Post-update writes kept in {displaced}: {'an unknown number of' if differ is None else differ} "
+                 "paths differ; see post-update-changes.json")
 
     def update(self, reference, dry_run=False):
         stopped = False
