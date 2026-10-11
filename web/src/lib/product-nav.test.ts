@@ -162,15 +162,19 @@ describe("selectProductSidebar", () => {
 
   it("в клиентском кабинете не показывает экраны, закрытые кабинетом (K21-253)", () => {
     const client = selectProductSidebar(ADMIN_NAV, PLUGIN_NAV, "fleet", true);
-    const paths = client.service.map((item) => item.path);
+    const paths = [...client.settings, ...client.service].map((item) => item.path);
     for (const hidden of CLIENT_CABINET_HIDDEN_PATHS) {
       expect(paths).not.toContain(hidden);
     }
+    expect(CLIENT_CABINET_HIDDEN_PATHS).toContain("/logs");
+    expect(client.settings.map((item) => item.path)).toEqual(
+      expect.arrayContaining(["/env", "/models", "/help"]),
+    );
     expect(paths).toEqual(expect.arrayContaining(["/sessions", "/achievements", "/skills", "/profiles"]));
     // Режим администратора видит все экраны, как раньше.
-    expect(groups.service.map((item) => item.path)).toEqual(
-      expect.arrayContaining(CLIENT_CABINET_HIDDEN_PATHS),
-    );
+    expect(
+      [...groups.settings, ...groups.service].map((item) => item.path),
+    ).toEqual(expect.arrayContaining(CLIENT_CABINET_HIDDEN_PATHS));
   });
 
   it("не создаёт мёртвый пункт, когда плагина в контуре нет", () => {

@@ -125,9 +125,11 @@ export const SERVICE_PATHS = [
  * Экраны оператора. В клиентском режиме кабинет закрывает их API
  * (`app/perimeter.py` кабинета), и страница открывалась пустой (K21-253).
  * «Каналы» владельцу не открываем — решение Дмитрия 01.10: боты подключаем
- * мы или агент по просьбе владельца.
+ * мы или агент по просьбе владельца. «Журналы» тоже: `api/logs` для клиента
+ * закрыт (K21-293), раньше экран открывался с «Записи журнала не найдены».
  */
 export const CLIENT_CABINET_HIDDEN_PATHS = [
+  "/logs",
   "/plugins",
   "/mcp",
   "/channels",
@@ -309,6 +311,8 @@ export function selectProductSidebar<T extends NavEntry>(
   mode: ProductUiMode,
   clientCabinet = false,
 ): ProductSidebarGroups<T> {
+  const visibleInCabinet = (item: T) =>
+    !clientCabinet || !CLIENT_CABINET_HIDDEN_PATHS.includes(item.path);
   const main = selectProductNav(items, mode);
   const mainPlugins = MAIN_PLUGIN_PATHS.flatMap((path) =>
     pluginItems.filter((item) => item.path === path),
@@ -317,9 +321,7 @@ export function selectProductSidebar<T extends NavEntry>(
   main.splice(anchor < 0 ? main.length : anchor + 1, 0, ...mainPlugins);
   return {
     main,
-    settings: selectProductSettingsNav(items),
-    service: selectServiceNav(items, pluginItems).filter(
-      (item) => !clientCabinet || !CLIENT_CABINET_HIDDEN_PATHS.includes(item.path),
-    ),
+    settings: selectProductSettingsNav(items).filter(visibleInCabinet),
+    service: selectServiceNav(items, pluginItems).filter(visibleInCabinet),
   };
 }

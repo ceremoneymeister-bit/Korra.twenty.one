@@ -3,14 +3,14 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ allowed: false, pin: false, getSkills: vi.fn(), getToolsets: vi.fn(), toggleSkill: vi.fn(), setSkillAutoLoad: vi.fn(),
+const mocks = vi.hoisted(() => ({ allowed: false, clientRole: false, pin: false, getSkills: vi.fn(), getToolsets: vi.fn(), toggleSkill: vi.fn(), setSkillAutoLoad: vi.fn(),
   setEnd: vi.fn(), setAfterTitle: vi.fn() }));
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
   return { ...actual, api: { ...actual.api, getSkills: mocks.getSkills, getToolsets: mocks.getToolsets, toggleSkill: mocks.toggleSkill, setSkillAutoLoad: mocks.setSkillAutoLoad } };
 });
 vi.mock("@/hooks/useCabinetSession", () => ({ useCabinetSession: () => ({ canManageSkills: mocks.allowed, canPinSkills: mocks.pin,
-  canBrowseSkillsHub: mocks.allowed, canConfigureToolsets: mocks.allowed }) }));
+  canBrowseSkillsHub: mocks.allowed, canConfigureToolsets: mocks.allowed && !mocks.clientRole }) }));
 vi.mock("@/contexts/usePageHeader", () => ({ usePageHeader: () => ({ setEnd: mocks.setEnd, setAfterTitle: mocks.setAfterTitle }) }));
 vi.mock("@/plugins", () => ({ PluginSlot: () => null }));
 vi.mock("@/components/KorraLoader", () => ({ KorraLoader: () => <span>Загрузка</span> }));
@@ -20,6 +20,7 @@ let root: Root;
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.allowed = false;
+  mocks.clientRole = false;
   mocks.pin = false;
   mocks.getSkills.mockResolvedValue([{ name: "visual-design", description: "Визуальный дизайн", enabled: true }]);
   mocks.getToolsets.mockResolvedValue([{ name: "image_gen", label: "Генерация", description: "Изображения", enabled: true, configured: false, tools: ["image_generate"] }]);
@@ -76,4 +77,11 @@ it("lets a client pin skills to every chat while editing, toggling and creating 
   expect(host.querySelector('[aria-label="visual-design: в каждом чате"]')!.getAttribute("aria-checked")).toBe("true");
   await act(async () => enable.click());
   expect(mocks.toggleSkill).not.toHaveBeenCalled();
+});
+it("tells a client who may edit skills that only the image generator is the administrator's", async () => {
+  mocks.allowed = true;
+  mocks.clientRole = true;
+  await render();
+  expect(host.textContent).toContain("Подключение генератора изображений меняет администратор");
+  expect(host.textContent).not.toContain("доступны для просмотра");
 });
