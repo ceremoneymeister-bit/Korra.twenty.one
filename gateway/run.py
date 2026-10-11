@@ -28790,7 +28790,20 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             else:
                 await adapter.interrupt_session_activity(session_key, source.chat_id)
         if adapter and hasattr(adapter, "get_pending_message"):
-            adapter.get_pending_message(session_key)  # consume and discard
+            # Discard a stale human follow-up, but keep a parked service event
+            # (e.g. the completion of a background delegation): it was settled
+            # when the adapter admitted it, so dropping it would lose the
+            # result for good and the session would idle until the next user
+            # message. The post-command drain starts the kept event.
+            parked = adapter.get_pending_message(session_key)
+            wake = parked if getattr(parked, "internal", False) else None
+            if wake is None:
+                overflow = _iac_state.conversation.queued_events if _iac_state else None
+                wake = next((e for e in overflow or [] if getattr(e, "internal", False)), None)
+                if wake is not None:
+                    overflow.remove(wake)
+            if wake is not None and isinstance(getattr(adapter, "_pending_messages", None), dict):
+                adapter._pending_messages[session_key] = wake
         if _iac_state is not None:
             _iac_state.persistent.pending_command_text = None
         if release_running_state:
