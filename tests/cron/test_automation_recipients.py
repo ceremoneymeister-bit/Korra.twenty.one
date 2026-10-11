@@ -1012,6 +1012,30 @@ def test_the_result_reaches_other_people_masked_and_the_owner_as_is(store):
     assert SECRET_TEXT in texts["42"]
 
 
+def test_the_chat_history_copy_of_the_result_is_masked_for_other_people(store):
+    from cron import jobs
+    from cron.scheduler import _deliver_result
+    from gateway.config import Platform
+
+    job = jobs.create_job(prompt="Отчёт", schedule="every 1h", deliver="telegram:555,telegram:42",
+                          created_by_owner=True, recipients_policy=1,
+                          recipients_confirmed={"targets": ["telegram:555"]})
+    cfg = MagicMock()
+    cfg.platforms = {Platform.TELEGRAM: MagicMock(enabled=True)}
+    send = AsyncMock(return_value={"success": True})
+    copies = {}
+
+    def record(_job, text, _platform, _pconfig, chat_id, *_rest, **_kw):
+        copies[str(chat_id)] = text
+
+    with (patch("gateway.config.load_gateway_config", return_value=cfg),
+          patch("tools.send_message_tool._send_to_platform", new=send),
+          patch("cron.result_links.record_delivery", new=record)):
+        assert _deliver_result(job, f"Ключ: {SECRET_TEXT}") is None
+    assert SECRET_TEXT not in copies["555"]
+    assert SECRET_TEXT in copies["42"]
+
+
 def test_home_channel_shorthand_and_its_id_are_one_send(live_send, monkeypatch):
     """Второе чистое ревью Astra, P2-1: ``telegram`` уходит в домашний канал
     555 — тот же получатель, что ``telegram:555``, и повтор не уходит дважды."""

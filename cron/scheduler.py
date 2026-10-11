@@ -3440,10 +3440,11 @@ def _deliver_result(
     # the seed receive an empty string and return False, which is exactly the
     # live failure reproduced three times on Alice (job ef7bd2869d15).
     if job.get("reminder"):
-        mirror_text = content
+        raw_mirror_text = content
     else:
-        _, mirror_text = BasePlatformAdapter.extract_media(content)
-    mirror_text = (mirror_text or "").strip()
+        _, raw_mirror_text = BasePlatformAdapter.extract_media(content)
+    raw_mirror_text = (raw_mirror_text or "").strip()
+    mirror_text = raw_mirror_text
 
     try:
         config = load_gateway_config()
@@ -3476,11 +3477,14 @@ def _deliver_result(
         # Постороннему получателю результат уходит с замаскированными
         # секретами; свой канал владельца видит текст как есть (решение
         # Дмитрия 28.09; чистое ревью Astra, P1-3).
+        # То же для копии в историю чата: она живёт дольше сообщения.
         target_content = cleaned_delivery_content
+        mirror_text = raw_mirror_text
         if not _is_owner_side_chat(job, platform_name, chat_id):
             from cron.recipients import mask_outgoing_text
 
             target_content = mask_outgoing_text(cleaned_delivery_content)
+            mirror_text = mask_outgoing_text(raw_mirror_text)
 
         # Тот же текст этому адресату уже ушёл из этого выполнения через
         # `korra send` (или сервис мог его принять): вторая копия — дубль.
