@@ -1072,6 +1072,35 @@ def test_new_credential_ancestors_preserve_latest_owner_mode_under_private_umask
         parent = parent.parent
 
 
+def test_rollback_carries_credential_sqlite_with_its_wal(updater):
+    path = updater.data / "telegram.session"
+    with sqlite3.connect(path) as db:
+        db.execute("CREATE TABLE credentials(value TEXT)")
+        db.execute("INSERT INTO credentials VALUES ('old')")
+    updater.update("registry.example/korra:latest")
+    # A crashed writer leaves committed WAL frames and no process remains open.
+    script = """import os, sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+db.execute('PRAGMA journal_mode=WAL')
+db.execute('PRAGMA wal_autocheckpoint=0')
+db.execute("UPDATE credentials SET value='rotated'")
+db.commit()
+os._exit(0)
+"""
+    subprocess.run([sys.executable, "-I", "-B", "-c", script, str(path)], check=True)
+    wal = path.with_name(path.name + "-wal")
+    assert wal.stat().st_size > 0
+    failed_tree = u.tree_manifest(updater.data)
+    assert u.credential_path("telegram.session-wal")
+    updater.rollback()
+    assert updater.receipt["status"] == "rolled_back"
+    with sqlite3.connect(path) as db:
+        assert db.execute("SELECT value FROM credentials").fetchone() == ("rotated",)
+    # The failed DATA stays exactly as the crashed writer left it.
+    displaced = updater.data.with_name("data.after-fixture-job")
+    assert {k: v for k, v in u.tree_manifest(displaced).items() if k != ".drain_request.json"} == failed_tree
+
+
 def test_rollback_resumes_verified_export_after_two_credential_failures(updater):
     updater.update("registry.example/korra:latest")
     (updater.data / "auth.json").write_text('{"refresh_token": "latest"}')

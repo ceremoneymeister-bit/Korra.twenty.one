@@ -1063,7 +1063,15 @@ def gateway_intent(root):
     return intent
 
 
+SQLITE_SIDECARS = ("-wal", "-shm", "-journal")
+
+
 def credential_path(relative):
+    # A credential SQLite is one database with its sidecars: committed rows may
+    # live only in the WAL until a checkpoint, so they travel together.
+    for suffix in SQLITE_SIDECARS:
+        if str(relative).lower().endswith(suffix):
+            return credential_path(str(relative)[:-len(suffix)])
     p = Path(relative)
     low = p.name.lower()
     parts = tuple(part.lower() for part in p.parts)
