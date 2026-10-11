@@ -5858,8 +5858,17 @@ class BasePlatformAdapter(ABC):
         if result.success:
             return result
 
+        if self._is_partial_delivery(result):
+            return await self._finish_partial_send(
+                chat_id, result, reply_to, metadata, max_retries, base_delay
+            )
+
         error_str = result.error or ""
-        is_network = result.retryable or self._is_retryable_error(error_str)
+        # A throttled send (flood control) is transient even without a
+        # retry_after: waiting is the fix, and the plain-text fallback below
+        # would re-enter the ban and cut the reply short.
+        rate_limited = self._is_rate_limited_result(result)
+        is_network = result.retryable or rate_limited or self._is_retryable_error(error_str)
 
         # Timeout errors are not safe to retry (message may have been
         # delivered) and not formatting errors — return the failure as-is.
@@ -5891,14 +5900,22 @@ class BasePlatformAdapter(ABC):
                 if result.success:
                     logger.info("[%s] Send succeeded on retry %d", self.name, attempt)
                     return result
+                if self._is_partial_delivery(result):
+                    return await self._finish_partial_send(
+                        chat_id, result, reply_to, metadata, max_retries, base_delay
+                    )
                 error_str = result.error or ""
                 if result.retry_after is not None:
                     server_retry_after = result.retry_after
-                if not (result.retryable or self._is_retryable_error(error_str)):
+                rate_limited = self._is_rate_limited_result(result)
+                if not (result.retryable or rate_limited or self._is_retryable_error(error_str)):
                     break  # error switched to non-transient — fall through to plain-text fallback
             else:
                 # All retries exhausted (loop completed without break) — notify user
                 logger.error("[%s] Failed to deliver response after %d retries: %s", self.name, max_retries, error_str)
+                if rate_limited:
+                    # The notice would land inside the same flood penalty.
+                    return result
                 notice = (
                     '''⚠️ Не удалось доставить ответ после нескольких попыток. Ваш запрос обработан — отправьте сообщение ещё раз.'''
                 )
@@ -5907,6 +5924,9 @@ class BasePlatformAdapter(ABC):
                 except Exception as notify_err:
                     logger.debug("[%s] Could not send delivery-failure notice: %s", self.name, notify_err)
                 return result
+
+        if rate_limited:
+            return result
 
         # Non-network / post-retry formatting failure: try plain text as fallback
         logger.warning("[%s] Send failed: %s — trying plain-text fallback", self.name, error_str)
@@ -5919,6 +5939,79 @@ class BasePlatformAdapter(ABC):
         if not fallback_result.success:
             logger.error("[%s] Fallback send also failed: %s", self.name, fallback_result.error)
         return fallback_result
+
+    @staticmethod
+    def _is_rate_limited_result(result: "SendResult") -> bool:
+        return result.retry_after is not None or result.error_kind == "rate_limited" or (
+            classify_send_error(None, result.error or "") == "rate_limited"
+        )
+
+    @staticmethod
+    def _is_partial_delivery(result: "SendResult") -> bool:
+        """True when a split reply was PARTLY delivered: its start is already on
+        screen and must never be sent again."""
+        raw = getattr(result, "raw_response", None)
+        return isinstance(raw, dict) and bool(raw.get("partial_overflow"))
+
+    async def _resume_partial_send(
+        self, chat_id: str, result: "SendResult", *, reply_to: Optional[str], metadata: Any
+    ) -> "Optional[SendResult]":
+        """Deliver only the rest of a partly delivered reply. ``None`` (the
+        default) means the adapter cannot do that safely; the partial failure
+        is then returned as is instead of re-sending the whole reply."""
+        return None
+
+    async def _finish_partial_send(
+        self,
+        chat_id: str,
+        result: "SendResult",
+        reply_to: Optional[str],
+        metadata: Any,
+        max_retries: int,
+        base_delay: float,
+    ) -> "SendResult":
+        """Send the undelivered rest of a split reply; never the whole payload again."""
+        for attempt in range(1, max_retries + 1):
+            raw = result.raw_response if isinstance(result.raw_response, dict) else {}
+            if not raw.get("resume_chunks") or not (
+                result.retryable or result.retry_after is not None
+            ):
+                break
+            if result.retry_after is not None:
+                delay = result.retry_after + random.uniform(0, 1)
+            else:
+                delay = base_delay * (2 ** (attempt - 1)) + random.uniform(0, 1)
+            logger.warning(
+                "[%s] Split reply stopped at %s/%s parts (attempt %d/%d); sending the rest in %.1fs: %s",
+                self.name, raw.get("delivered_chunks"), raw.get("total_chunks"),
+                attempt, max_retries, delay, result.error,
+            )
+            await asyncio.sleep(delay)
+            resumed = await self._resume_partial_send(
+                chat_id, result, reply_to=reply_to, metadata=metadata
+            )
+            if resumed is None:
+                break
+            result = resumed
+            if result.success:
+                return result
+            if not self._is_partial_delivery(result):
+                break
+        logger.error(
+            "[%s] Reply delivered only in part, the rest was not sent: %s",
+            self.name, result.error,
+        )
+        if not self._is_rate_limited_result(result):
+            try:
+                await self.send(
+                    chat_id=chat_id,
+                    content="⚠️ Ответ дошёл не полностью. Отправьте сообщение ещё раз, и я пришлю его заново.",
+                    reply_to=reply_to,
+                    metadata=metadata,
+                )
+            except Exception as notify_err:
+                logger.debug("[%s] Could not send partial-delivery notice: %s", self.name, notify_err)
+        return result
 
     @staticmethod
     def _merge_caption(existing_text: Optional[str], new_text: str) -> str:

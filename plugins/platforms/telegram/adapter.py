@@ -286,6 +286,16 @@ _TELEGRAM_IMAGE_EXTENSIONS = {
 _FLOOD_INLINE_WAIT_CAP_SECS = 5.0
 
 
+# The Bot API answered with a server error: the message was not accepted.
+_SERVER_REJECTION_MARKERS = (
+    "bad gateway",
+    "internal server error",
+    "service unavailable",
+    "gateway time-out",
+    "gateway timeout",
+)
+
+
 def _flood_cap_result(wait: float) -> "SendResult":
     """The shared fail-closed SendResult for an over-cap flood wait."""
     return SendResult(
@@ -5695,13 +5705,18 @@ class TelegramAdapter(BasePlatformAdapter):
         chat_id: str,
         content: str,
         reply_to: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        _resume: Optional[Dict[str, Any]] = None,
     ) -> SendResult:
-        """Send a message to a Telegram chat."""
+        """Send a message to a Telegram chat.
+
+        ``_resume`` is the ``raw_response`` of a partly delivered split reply:
+        only the chunks after the delivered ones are sent.
+        """
         if not self._bot:
             live = self._replacement_telegram_adapter()
             if live is not None:
-                return await live.send(chat_id, content, reply_to, metadata)
+                return await live.send(chat_id, content, reply_to, metadata, _resume=_resume)
             if self._is_permanent_fatal() or not await self._wait_for_reconnection():
                 return SendResult(
                     success=False,
@@ -5719,16 +5734,19 @@ class TelegramAdapter(BasePlatformAdapter):
             return SendResult(success=False, error="send_path_degraded", retryable=True)
 
         # Skip whitespace-only text to prevent Telegram 400 empty-text errors.
-        if not content or not content.strip():
+        if _resume is None and (not content or not content.strip()):
             return SendResult(success=True, message_id=None)
-        
+
+        chunks: List[str] = []
+        message_ids: List[str] = []
+        message_receipts: List[Dict[str, Any]] = []
         try:
             # Bot API 10.1 rich fast-path: send the raw agent markdown via
             # sendRichMessage so tables/task lists/etc. render natively. Falls
             # through to the legacy MarkdownV2 path on permanent/capability
             # errors or DM-topic routing skips; returns directly on success or
             # on a transient failure (which must NOT be legacy-resent).
-            if self._should_attempt_rich(content, metadata=metadata):
+            if _resume is None and self._should_attempt_rich(content, metadata=metadata):
                 rich_result = await self._try_send_rich(chat_id, content, reply_to, metadata)
                 if rich_result is not None:
                     if rich_result.success:
@@ -5746,11 +5764,16 @@ class TelegramAdapter(BasePlatformAdapter):
                     return rich_result
 
             # Format and split message if needed
-            formatted = self.format_message(content)
-            chunks = self.truncate_message(
-                formatted, self.MAX_MESSAGE_LENGTH, len_fn=utf16_len,
-            )
-            if len(chunks) > 1:
+            if _resume is not None:
+                chunks = list(_resume["resume_chunks"])
+                message_ids = list(_resume.get("message_ids") or ())
+                message_receipts = list(_resume.get("message_receipts") or ())
+            else:
+                formatted = self.format_message(content)
+                chunks = self.truncate_message(
+                    formatted, self.MAX_MESSAGE_LENGTH, len_fn=utf16_len,
+                )
+            if _resume is None and len(chunks) > 1:
                 # truncate_message appends a raw " (1/2)" suffix. Escape the
                 # MarkdownV2-special parentheses so Telegram doesn't reject the
                 # chunk and fall back to plain text.
@@ -5761,8 +5784,6 @@ class TelegramAdapter(BasePlatformAdapter):
                     for chunk in chunks
                 ]
             
-            message_ids = []
-            message_receipts = []
             thread_id = self._metadata_thread_id(metadata)
             requested_thread_id = self._message_thread_id_for_send(thread_id)
             used_thread_fallback = False
@@ -5783,6 +5804,8 @@ class TelegramAdapter(BasePlatformAdapter):
                 _TimedOut = None  # type: ignore[assignment,misc]
 
             for i, chunk in enumerate(chunks):
+                if i < len(message_ids):
+                    continue  # already delivered by the send being resumed
                 retried_thread_not_found = False
                 metadata_reply_to = self._metadata_reply_to_message_id(metadata)
                 private_dm_topic_send = self._is_private_dm_topic_send(chat_id, thread_id, metadata)
@@ -5979,7 +6002,9 @@ class TelegramAdapter(BasePlatformAdapter):
                                     _FLOOD_INLINE_WAIT_CAP_SECS,
                                     safe_send_error,
                                 )
-                                return _flood_cap_result(wait)
+                                return self._partial_send_result(
+                                    _flood_cap_result(wait), chunks, message_ids, message_receipts, certain=True,
+                                )
                             if _send_attempt < 2:
                                 logger.warning(
                                     "[%s] Telegram flood control on send (attempt %d/3), retrying in %.1fs: %s",
@@ -6049,12 +6074,61 @@ class TelegramAdapter(BasePlatformAdapter):
             is_timeout = (_to and isinstance(e, _to)) or "timed out" in err_str
             is_connect_timeout = self._looks_like_connect_timeout(e)
             is_pool_timeout = self._looks_like_pool_timeout(e)
-            return SendResult(
+            failed = SendResult(
                 success=False,
                 error=safe_error,
                 retryable=(is_connect_timeout or is_pool_timeout or not is_timeout),
                 error_kind=error_kind,
             )
+            # Earlier chunks of a split reply are already in the chat: the rest
+            # may be resumed only when it certainly did not reach Telegram.
+            _bad_request = locals().get("_BadReq")
+            certain = bool(
+                is_connect_timeout
+                or is_pool_timeout
+                or (_bad_request and isinstance(e, _bad_request))
+                or error_kind in ("forbidden", "bad_format", "not_found", "rate_limited")
+                or any(mark in err_str for mark in _SERVER_REJECTION_MARKERS)
+            )
+            return self._partial_send_result(failed, chunks, message_ids, message_receipts, certain=certain)
+
+    @staticmethod
+    def _partial_send_result(
+        result: SendResult,
+        chunks: List[str],
+        message_ids: List[str],
+        message_receipts: List[Dict[str, Any]],
+        *,
+        certain: bool,
+    ) -> SendResult:
+        """Mark a failure that came after some chunks of a split reply landed.
+
+        Callers must not send the head again. ``resume_chunks`` (all chunks)
+        is attached only when the rest certainly did not reach Telegram.
+        """
+        if not message_ids:
+            return result
+        raw = dict(result.raw_response) if isinstance(result.raw_response, dict) else {}
+        raw.update({
+            "partial_overflow": True,
+            "delivered_chunks": len(message_ids),
+            "total_chunks": len(chunks),
+            "last_message_id": message_ids[-1],
+        })
+        if certain and len(message_ids) < len(chunks):
+            raw["resume_chunks"] = tuple(chunks)
+            raw["message_ids"] = list(message_ids)
+            raw["message_receipts"] = list(message_receipts)
+        result.raw_response = raw
+        return result
+
+    async def _resume_partial_send(
+        self, chat_id: str, result: SendResult, *, reply_to: Optional[str], metadata: Any
+    ) -> Optional[SendResult]:
+        raw = result.raw_response if isinstance(result.raw_response, dict) else {}
+        if not raw.get("resume_chunks"):
+            return None
+        return await self.send(chat_id, "", reply_to, metadata, _resume=raw)
 
     async def send_or_update_status(
         self,
@@ -11507,12 +11581,15 @@ class TelegramAdapter(BasePlatformAdapter):
         # marker on purpose; the gateway then stays quiet instead of
         # reporting "no answer" to everyone in the chat.
         _event_metadata: Dict[str, Any] = {}
-        if (
-            self._is_group_chat(message)
-            and not self._is_reply_to_bot(message)
-            and not self._message_mentions_bot(message)
-        ):
-            _event_metadata["reply_expected"] = False
+        try:
+            if (
+                self._is_group_chat(message)
+                and not self._is_reply_to_bot(message)
+                and not self._message_mentions_bot(message)
+            ):
+                _event_metadata["reply_expected"] = False
+        except Exception:
+            logger.debug("[%s] could not tell whether a reply is expected", self.name, exc_info=True)
 
         return MessageEvent(
             text=self._with_forward_attribution(message, message.text),
