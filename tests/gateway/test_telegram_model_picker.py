@@ -47,6 +47,7 @@ class TestTelegramModelPicker:
     @pytest.mark.asyncio
     async def test_back_button_escapes_dynamic_provider_label(self):
         adapter = _make_adapter()
+        adapter._is_callback_user_authorized = MagicMock(return_value=True)
         adapter._model_picker_state["12345"] = {
             "providers": [{"slug": "provider_one", "name": "Provider One", "total_models": 1, "is_current": True}],
             "current_model": "model_1",
@@ -71,4 +72,32 @@ class TestTelegramModelPicker:
         assert "provider\\_one" in edit_kwargs["text"]
         assert "`model_1`" in edit_kwargs["text"]
 
+    @pytest.mark.asyncio
+    async def test_unauthorized_user_cannot_switch_model_from_picker(self):
+        adapter = _make_adapter()
+        adapter._is_callback_user_authorized = MagicMock(return_value=False)
+        on_selected = AsyncMock()
+        adapter._model_picker_state["12345"] = {
+            "providers": [{"slug": "provider_one", "name": "Provider One", "total_models": 1, "is_current": True}],
+            "current_model": "model_1",
+            "current_provider": "provider_one",
+            "session_key": "s",
+            "on_model_selected": on_selected,
+            "msg_id": 42,
+            "selected_provider": "provider_one",
+            "model_list": ["model_1", "model_2"],
+        }
 
+        query = AsyncMock()
+        query.message = MagicMock()
+        query.message.chat_id = 12345
+        query.from_user = MagicMock()
+        query.from_user.id = 777
+
+        for data in ("mm:0", "mp:provider_one", "mb", "mx"):
+            await adapter._handle_model_picker_callback(query, data, "12345")
+
+        on_selected.assert_not_awaited()
+        query.edit_message_text.assert_not_called()
+        assert "12345" in adapter._model_picker_state
+        assert "нет прав" in query.answer.call_args[1]["text"]
