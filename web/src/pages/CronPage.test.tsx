@@ -53,6 +53,11 @@ vi.mock("@/lib/api", async () => {
   return { ...actual, api: { ...actual.api, ...apiMocks } };
 });
 
+const session = vi.hoisted(() => ({ client: false }));
+vi.mock("@/hooks/useCabinetSession", () => ({
+  useCabinetSession: () => ({ clientMode: session.client }),
+}));
+
 import CronPage from "./CronPage";
 
 let container: HTMLDivElement;
@@ -202,6 +207,7 @@ afterEach(async () => {
   vi.unstubAllGlobals();
   vi.clearAllMocks();
   delete window.__KORRA_UI_MODE__;
+  session.client = false;
 });
 
 describe("CronPage в режиме клиента", () => {
@@ -318,5 +324,22 @@ describe("CronPage в режиме клиента", () => {
     expect(apiMocks.createCronJob.mock.calls[0][1]).toBe("secretary");
     expect(toastText()).toContain("будет запускаться по расписанию");
     expect(toastText()).not.toContain("Черновик");
+  });
+
+  it.each([
+    [true, "команду Korra", "настройках агента"],
+    [false, "настройках агента", "команду Korra"],
+  ])("подсказка о доставке при client=%s не ведёт в недоступное (K21-312)", async (client, shown, absent) => {
+    session.client = client;
+    await renderPage();
+    await click(
+      findButton(
+        "Добавить задачу",
+        document.querySelector('[data-testid="page-header-end"]')!,
+      ),
+    );
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!;
+    expect(dialog.textContent).toContain(shown);
+    expect(dialog.textContent).not.toContain(absent);
   });
 });

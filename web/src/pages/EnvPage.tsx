@@ -45,6 +45,7 @@ import { useI18n } from "@/i18n";
 import { usePageHeader } from "@/contexts/usePageHeader";
 import { ProfileScopeChip } from "@/components/ProfileScopeChip";
 import { PluginSlot } from "@/plugins";
+import { useCabinetSession } from "@/hooks/useCabinetSession";
 import { isProductUiMode } from "@/lib/dashboard-flags";
 
 /* ------------------------------------------------------------------ */
@@ -671,6 +672,7 @@ function scrollToSection(id: string, behavior: ScrollBehavior = "auto") {
 export default function EnvPage() {
   const { hash } = useLocation();
   const clientMode = isProductUiMode();
+  const { clientMode: cabinetClient } = useCabinetSession();
   const [vars, setVars] = useState<Record<string, EnvVarInfo> | null>(null);
   useEffect(() => {
     if (hash !== "#section-icloud-calendar" || !vars) return;
@@ -932,7 +934,9 @@ export default function EnvPage() {
       setting: t.app.nav.config,
     };
     const CATEGORY_META_HINTS: Record<string, string | undefined> = {
-      messaging: "Мессенджеры и другие каналы настраиваются в разделе «Каналы». Здесь — общие параметры подключений.",
+      messaging: cabinetClient
+        ? "Мессенджеры и другие каналы подключает команда Korra. Здесь — общие параметры подключений."
+        : "Мессенджеры и другие каналы настраиваются в разделе «Каналы». Здесь — общие параметры подключений.",
     };
     const otherCategories = ["tool", "messaging", "setting"];
     const nonProvider = otherCategories.map((cat) => {
@@ -967,7 +971,7 @@ export default function EnvPage() {
       nonProviderGrouped: nonProvider,
       customEntries,
     };
-  }, [vars, showAdvanced, t]);
+  }, [vars, showAdvanced, t, cabinetClient]);
 
   if (loadError) {
     return (
@@ -1089,7 +1093,11 @@ export default function EnvPage() {
         </CardContent>
       </Card>
 
-      <p className="text-sm text-muted-foreground">Telegram, почта и другие способы связи с агентами — в разделе <Link to="/channels" className="underline">Каналы</Link>.</p>
+      <p className="text-sm text-muted-foreground">
+        {cabinetClient
+          ? "Telegram, почту и другие способы связи с агентами подключает команда Korra или агент по вашей просьбе."
+          : <>Telegram, почта и другие способы связи с агентами — в разделе <Link to="/channels" className="underline">Каналы</Link>.</>}
+      </p>
       {nonProviderGrouped.map((section) => {
         if (section.totalEntries === 0) return null;
 

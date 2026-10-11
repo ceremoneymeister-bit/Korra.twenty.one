@@ -1,12 +1,17 @@
 import { themeColorScheme } from "@/themes/color";
-import { useLayoutEffect, useRef, type ReactNode } from 'react';
+import { createContext, useContext, useLayoutEffect, useMemo, useRef, type ReactNode } from 'react';
 import { ArrowLeft, ArrowRight, BookOpen, Check, ChevronRight, Clock3, Search } from 'lucide-react';
 import { Link, useHref, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { usePageHeader } from '@/contexts/usePageHeader';
 import { useTheme } from '@/themes';
 import { HELP_ARTICLES, HELP_GROUPS, QUICK_HELP } from './help/articles';
-import { helpPath, searchHelp, type HelpArticle, type HelpImage, type HelpLink } from './help/catalog';
+import { useCabinetSession } from '@/hooks/useCabinetSession';
+import { CLIENT_CABINET_HIDDEN_PATHS } from '@/lib/product-nav';
+import { forClientCabinet, helpPath, searchHelp, type HelpArticle, type HelpImage, type HelpLink } from './help/catalog';
 import './help/help.css';
+
+/** Инструкции, видимые этому человеку: клиентскому кабинету не показываем разделы, которых нет в его меню. */
+const HelpArticles = createContext<HelpArticle[]>(HELP_ARTICLES);
 
 function ActionLink({ to, children, primary = false }: { to: string; children: ReactNode; primary?: boolean }) {
   return <Link to={to} className="help-action" data-primary={primary || undefined}>
@@ -43,7 +48,7 @@ function HelpFigure({ illustration }: { illustration: HelpImage }) {
 function HelpIndex() {
   const [params, setParams] = useSearchParams();
   const query = params.get('q') ?? '';
-  const filtered = searchHelp(HELP_ARTICLES, query);
+  const filtered = searchHelp(useContext(HelpArticles), query);
   return <>
     <header className="help-welcome">
       <div className="help-welcome-copy">
@@ -88,12 +93,13 @@ function HelpIndex() {
 
 function HelpNavigation({ current }: { current: HelpArticle }) {
   const navigate = useNavigate();
+  const articles = useContext(HelpArticles);
   return <>
     <div className="help-mobile-nav">
       <label htmlFor="help-page-select">Другие инструкции</label>
       <select id="help-page-select" value={current.id} onChange={event => void navigate(helpPath(event.target.value))}>
         {HELP_GROUPS.map(group => <optgroup key={group} label={group}>
-          {HELP_ARTICLES.filter(article => article.group === group).map(article => <option key={article.id} value={article.id}>{article.label}</option>)}
+          {articles.filter(article => article.group === group).map(article => <option key={article.id} value={article.id}>{article.label}</option>)}
         </optgroup>)}
       </select>
     </div>
@@ -102,7 +108,7 @@ function HelpNavigation({ current }: { current: HelpArticle }) {
         <Link to="/help" className="help-back"><ArrowLeft size={16} aria-hidden />Оглавление и поиск</Link>
         {HELP_GROUPS.map(group => <div key={group} className="help-nav-group">
           <p>{group}</p>
-          {HELP_ARTICLES.filter(article => article.group === group).map(article => <Link key={article.id} to={helpPath(article.id)}
+          {articles.filter(article => article.group === group).map(article => <Link key={article.id} to={helpPath(article.id)}
             aria-current={current.id === article.id ? 'page' : undefined}>{article.label}</Link>)}
         </div>)}
       </nav>
@@ -111,7 +117,8 @@ function HelpNavigation({ current }: { current: HelpArticle }) {
 }
 
 function HelpArticleView({ article }: { article: HelpArticle }) {
-  const related = article.related.map(id => HELP_ARTICLES.find(item => item.id === id)).filter(item => item !== undefined);
+  const articles = useContext(HelpArticles);
+  const related = article.related.map(id => articles.find(item => item.id === id)).filter(item => item !== undefined);
   return <>
     <nav aria-label="Путь в помощи" className="help-breadcrumbs">
       <Link to="/help"><ArrowLeft size={16} aria-hidden />Вся помощь</Link><ChevronRight size={14} aria-hidden /><span>{article.label}</span>
@@ -166,7 +173,9 @@ export default function ClientHelpPage() {
   const location = useLocation();
   const { setTitle } = usePageHeader();
   const container = useRef<HTMLDivElement>(null);
-  const article = HELP_ARTICLES.find(item => item.id === articleId);
+  const { clientMode } = useCabinetSession();
+  const articles = useMemo(() => clientMode ? forClientCabinet(HELP_ARTICLES, CLIENT_CABINET_HIDDEN_PATHS) : HELP_ARTICLES, [clientMode]);
+  const article = articles.find(item => item.id === articleId);
   useLayoutEffect(() => {
     setTitle('Помощь');
     return () => setTitle(null);
@@ -183,11 +192,11 @@ export default function ClientHelpPage() {
       target.focus({ preventScroll: true });
     }
   }, [location.pathname, location.hash]);
-  return <div ref={container} className="korra-help">
+  return <HelpArticles.Provider value={articles}><div ref={container} className="korra-help">
     {!articleId ? <HelpIndex /> : article ? <HelpArticleView key={article.id} article={article} /> : <section className="help-missing">
       <h2 id="help-heading" tabIndex={-1}>Такой инструкции пока нет</h2>
       <p>Откройте оглавление или найдите нужное действие через поиск.</p>
       <ActionLink to="/help" primary>Оглавление и поиск</ActionLink>
     </section>}
-  </div>;
+  </div></HelpArticles.Provider>;
 }

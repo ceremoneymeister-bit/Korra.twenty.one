@@ -39,11 +39,37 @@ export interface HelpArticle {
   sections: HelpSection[];
   problems: { question: string; answer: string; link?: HelpLink }[];
   related: string[];
+  /** Вариант для клиентского кабинета, где нет части разделов (K21-312). */
+  client?: Partial<Pick<HelpArticle, 'summary' | 'action' | 'sections' | 'problems'>>;
 }
 
 export const step = (title: string, action: string, result: string): HelpStep => ({ title, action, result });
 export const link = (label: string, to: string): HelpLink => ({ label, to });
 export const helpPath = (id: string) => `/help/${id}`;
+
+const pathOf = (to: string) => to.split(/[?#]/)[0];
+
+/**
+ * Помощь для клиентского кабинета: применяет `client`-варианты и убирает
+ * инструкции и ссылки на разделы, которых в его меню нет, чтобы подсказка не
+ * вела в «Такого раздела нет».
+ */
+export function forClientCabinet(articles: HelpArticle[], hiddenPaths: readonly string[]): HelpArticle[] {
+  const adapted = articles.map(({ client, ...article }) => ({ ...article, ...client }));
+  const kept = adapted.filter(article => !hiddenPaths.includes(pathOf(article.action.to)));
+  const keptIds = new Set(kept.map(article => article.id));
+  const reachable = (item: HelpLink) => {
+    const path = pathOf(item.to);
+    if (hiddenPaths.includes(path)) return false;
+    return !path.startsWith('/help/') || keptIds.has(path.split('/')[2]);
+  };
+  return kept.map(article => ({
+    ...article,
+    related: article.related.filter(id => keptIds.has(id)),
+    sections: article.sections.map(section => ({ ...section, links: section.links?.filter(reachable) })),
+    problems: article.problems.map(({ link: target, ...problem }) => target && !reachable(target) ? problem : { ...problem, link: target }),
+  }));
+}
 
 /** Поиск по смысловым подсказкам и всему тексту, включая шаги и частые ошибки. */
 export function searchHelp(articles: HelpArticle[], query: string): HelpArticle[] {
