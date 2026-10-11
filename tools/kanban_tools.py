@@ -2399,8 +2399,11 @@ KANBAN_CREATE_SCHEMA = {
         "one (pass the current task id in ``parents``). Used by "
         "orchestrator workers to fan out — decompose work into child "
         "tasks with specific assignees, link them into a pipeline, "
-        "then complete your own task. The dispatcher picks up the new "
-        "tasks on its next tick and spawns the assigned profiles."
+        "then complete your own task. In an owner chat call it only when "
+        "the owner explicitly asked for a board card or background work by "
+        "another agent, or agreed to your offer; otherwise do the work "
+        "yourself. The result's ``execution`` block says whether the "
+        "executor actually started."
     ),
     "parameters": {
         "type": "object",
