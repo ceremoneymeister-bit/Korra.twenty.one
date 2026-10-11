@@ -145,5 +145,19 @@ def test_documented_limits_match_the_defaults_in_code():
     assert f"{delegation['max_concurrent_children']} параллельных" in skill
 
 
+def test_documented_approvals_default_matches_the_config():
+    """K21-312: агент пересказывает клиенту режим подтверждений — он должен быть тем, что в конфиге."""
+    from korra_cli.config_defaults import DEFAULT_CONFIG as cfg
+
+    default = cfg["approvals"]["mode"]
+    text = (SKILL_DIR / "references" / "security-privacy.md").read_text(encoding="utf-8")
+    assert f"By default (`approvals.mode: {default}`)" in text
+    other_modes = {"off", "smart", "manual"} - {default}
+    for mode in other_modes:
+        assert f"By default (`approvals.mode: {mode}`)" not in text
+        assert not re.search(rf"`{mode}`[^\n]*\(default\)", text)
+    assert re.search(rf"`{default}`[^\n]*\(default\)", text)
+
+
 def test_skill_tells_how_to_pin_a_skill_into_every_chat(skill_text: str) -> None:
     assert "skills.auto_load" in skill_text
