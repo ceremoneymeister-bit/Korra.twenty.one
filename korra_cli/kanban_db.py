@@ -4721,6 +4721,8 @@ def recompute_ready(
                     conn, task_id, "promoted",
                     {"status": resume_status} if resume_status != "ready" else None,
                 )
+                if resume_status == "ready":
+                    _continue_exact_request(conn, task_id)
                 promoted += 1
     return promoted
 
@@ -10752,6 +10754,166 @@ def _memory_pressure_level(sample: Optional[Mapping[str, Any]] = None) -> str:
         return "unknown"
 
 
+# ---------------------------------------------------------------------------
+# Exact dispatch requests
+#
+# A board owner can turn the general ready queue off (``dispatch_in_gateway:
+# false``) and still want cards they just asked for to run
+# (``dispatch_exact_requests: true``). A request is a ``dispatch_requested``
+# event on the card: permission to start THIS piece of work. It stays valid
+# through retries, blocks and answers, and ends when the work is finished,
+# archived or handed to another agent. No schema change.
+# ---------------------------------------------------------------------------
+
+EXACT_REQUEST_EVENT = "dispatch_requested"
+EXACT_LAPSED_EVENT = "dispatch_request_lapsed"
+_EXACT_BOUNDARY_KINDS = ("completed", "archived", "assigned")
+_EXACT_CONFIG_CACHE: dict[str, Any] = {}
+
+
+def owner_kanban_settings() -> dict[str, Any]:
+    """The ``kanban:`` section of the BOARD OWNER's ``config.yaml``.
+
+    Read from ``<kanban_home>/config.yaml`` rather than the active profile's
+    config: an executor profile never sets these flags, and a card it creates
+    must follow the owner's choice. Empty when the file is missing or unreadable.
+    """
+    try:
+        path = kanban_home() / "config.yaml"
+        st = path.stat()
+    except Exception:
+        return {}
+    key = (str(path), st.st_mtime_ns, st.st_size)
+    cached = _EXACT_CONFIG_CACHE.get("v")
+    if cached is not None and cached[0] == key:
+        return cached[1]
+    section: dict[str, Any] = {}
+    try:
+        import yaml
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        raw = data.get("kanban") if isinstance(data, dict) else None
+        section = dict(raw) if isinstance(raw, dict) else {}
+    except Exception:
+        section = {}
+    _EXACT_CONFIG_CACHE["v"] = (key, section)
+    return section
+
+
+def exact_dispatch_requests_enabled() -> bool:
+    """``kanban.dispatch_exact_requests`` of the board owner; off by default."""
+    return owner_kanban_settings().get("dispatch_exact_requests") is True
+
+
+_EXACT_SCAN_SQL = (
+    "SELECT t.id, t.assignee, "
+    "(SELECT MAX(e.id) FROM task_events e WHERE e.task_id = t.id AND e.kind = ?) AS req, "
+    "(SELECT MAX(e.id) FROM task_events e WHERE e.task_id = t.id "
+    f"AND e.kind IN ({', '.join('?' for _ in _EXACT_BOUNDARY_KINDS)})) AS bnd, "
+    "(SELECT MAX(e.id) FROM task_events e WHERE e.task_id = t.id AND e.kind = ?) AS lapsed "
+    "FROM tasks t WHERE t.status = 'ready' AND t.claim_lock IS NULL "
+    "AND COALESCE(t.assignee, '') != '' AND COALESCE(t.actor_kind, '') != 'human' "
+    "AND EXISTS (SELECT 1 FROM task_events e WHERE e.task_id = t.id AND e.kind = ?) "
+    "ORDER BY t.priority DESC, t.created_at ASC"
+)
+_EXACT_SCAN_ARGS = (EXACT_REQUEST_EVENT, *_EXACT_BOUNDARY_KINDS, EXACT_LAPSED_EVENT, EXACT_REQUEST_EVENT)
+
+
+def _request_exact_in_txn(
+    conn: sqlite3.Connection, task_id: str, *, source: str, parent_id: Optional[str] = None,
+) -> str:
+    """Record a request inside an open transaction; returns the outcome."""
+    row = conn.execute(
+        "SELECT status, assignee, actor_kind FROM tasks WHERE id = ?", (task_id,),
+    ).fetchone()
+    if row is None:
+        return "missing"
+    if (row["actor_kind"] or "") == "human":
+        return "human"
+    if row["status"] != "ready":
+        return "not_ready"
+    if not (row["assignee"] or "").strip():
+        return "unassigned"
+    st = conn.execute(
+        "SELECT (SELECT MAX(id) FROM task_events WHERE task_id = ? AND kind = ?) AS req, "
+        f"(SELECT MAX(id) FROM task_events WHERE task_id = ? AND kind IN ({', '.join('?' for _ in _EXACT_BOUNDARY_KINDS)})) AS bnd",
+        (task_id, EXACT_REQUEST_EVENT, task_id, *_EXACT_BOUNDARY_KINDS),
+    ).fetchone()
+    if st["req"] is not None and st["req"] > (st["bnd"] or 0):
+        return "already"
+    payload: dict[str, Any] = {"source": source}
+    if parent_id:
+        payload["parent_id"] = parent_id
+    _append_event(conn, task_id, EXACT_REQUEST_EVENT, payload)
+    return "requested"
+
+
+def request_exact_dispatch(
+    conn: sqlite3.Connection, task_id: str, *, source: str = "request",
+) -> str:
+    """Ask the dispatcher to start one ready card. Must run OUTSIDE a write txn.
+
+    Returns ``requested`` / ``already`` (a valid request exists) or the reason
+    nothing was written: ``missing``, ``human``, ``not_ready``, ``unassigned``.
+    """
+    with write_txn(conn):
+        return _request_exact_in_txn(conn, task_id, source=source)
+
+
+def _continue_exact_request(conn: sqlite3.Connection, task_id: str) -> None:
+    """A step that became ready after a requested parent keeps the request."""
+    parent = conn.execute(
+        "SELECT l.parent_id FROM task_links l JOIN task_events e "
+        "ON e.task_id = l.parent_id AND e.kind = ? "
+        "WHERE l.child_id = ? LIMIT 1",
+        (EXACT_REQUEST_EVENT, task_id),
+    ).fetchone()
+    if parent is not None and exact_dispatch_requests_enabled():
+        _request_exact_in_txn(
+            conn, task_id, source="continuation", parent_id=parent["parent_id"],
+        )
+
+
+def pending_exact_dispatch_ids(
+    conn: sqlite3.Connection, *, record_lapsed: bool = False, spawnable_only: bool = False,
+) -> list[str]:
+    """Ready cards with a valid request, in dispatch order.
+
+    A request older than the card's last completion/archive/reassignment is
+    not honoured. With ``record_lapsed`` such a card gets one visible
+    ``dispatch_request_lapsed`` event so it does not sit in ``ready`` unexplained.
+    """
+    rows = conn.execute(_EXACT_SCAN_SQL, _EXACT_SCAN_ARGS).fetchall()
+    valid: list[Any] = []
+    stale: list[Any] = []
+    for r in rows:
+        if r["req"] is None:
+            continue
+        if r["req"] > (r["bnd"] or 0):
+            valid.append(r)
+        elif (r["lapsed"] or 0) < r["req"]:
+            stale.append(r)
+    if record_lapsed and stale:
+        with write_txn(conn):
+            for r in stale:
+                _append_event(conn, r["id"], EXACT_LAPSED_EVENT, {
+                    "request_event": r["req"],
+                    "after_event": r["bnd"],
+                    "message": (
+                        "The earlier request to start this card was for work that has "
+                        "since finished or moved on, so it is not started again. "
+                        "Ask again to run it."
+                    ),
+                })
+    ids = [r["id"] for r in valid]
+    if spawnable_only and ids:
+        try:
+            from korra_cli.profiles import profile_exists
+            ids = [r["id"] for r in valid if profile_exists(r["assignee"])]
+        except Exception:
+            pass
+    return ids
+
+
 def dispatch_once(
     conn: sqlite3.Connection,
     *,
@@ -10766,6 +10928,7 @@ def dispatch_once(
     default_assignee: Optional[str] = None,
     max_in_progress_per_profile: Optional[int] = None,
     reconcile_orphans: bool = True,
+    only_task_ids: Optional[Iterable[str]] = None,
 ) -> DispatchResult:
     """Run one dispatcher tick under the board's single-writer lock.
 
@@ -10801,6 +10964,7 @@ def dispatch_once(
             default_assignee=default_assignee,
             max_in_progress_per_profile=max_in_progress_per_profile,
             reconcile_orphans=reconcile_orphans,
+            only_task_ids=only_task_ids,
         )
         _fire_dispatch_tick_hook(result, board=board, dry_run=dry_run)
         return result
@@ -10821,6 +10985,7 @@ def dispatch_once(
                 default_assignee=default_assignee,
                 max_in_progress_per_profile=max_in_progress_per_profile,
                 reconcile_orphans=reconcile_orphans,
+                only_task_ids=only_task_ids,
             )
             # Still under the dispatch lock: run the periodic PASSIVE WAL
             # checkpoint (see _maybe_checkpoint_wal; the -wal file size is
@@ -10883,6 +11048,7 @@ def _dispatch_once_locked(
     default_assignee: Optional[str] = None,
     max_in_progress_per_profile: Optional[int] = None,
     reconcile_orphans: bool = True,
+    only_task_ids: Optional[Iterable[str]] = None,
 ) -> DispatchResult:
     """Run one dispatcher tick.
 
@@ -11015,6 +11181,9 @@ def _dispatch_once_locked(
             )
             spawn_budget = 1
 
+    # Restricted mode (exact requests): only the named cards may start; the
+    # housekeeping above has already run for the whole board.
+    _only_ids = None if only_task_ids is None else frozenset(only_task_ids)
     # Human steps are done by the owner: never spawned or auto-assigned.
     ready_rows = conn.execute(
         "SELECT id, assignee FROM tasks "
@@ -11022,6 +11191,8 @@ def _dispatch_once_locked(
         "AND COALESCE(actor_kind, '') != 'human' "
         "ORDER BY priority DESC, created_at ASC"
     ).fetchall()
+    if _only_ids is not None:
+        ready_rows = [r for r in ready_rows if r["id"] in _only_ids]
     # Review rows are enumerated up front (not after the ready loop) so the
     # budget split below can see whether review work exists at all.
     review_rows = []
@@ -11035,6 +11206,8 @@ def _dispatch_once_locked(
             "AND COALESCE(actor_kind, '') != 'human' "
             "ORDER BY priority DESC, created_at ASC"
         ).fetchall()
+        if _only_ids is not None:
+            review_rows = [r for r in review_rows if r["id"] in _only_ids]
     # Review-lane reservation (OOF-30 review finding): the ready loop runs
     # first and used to consume the ENTIRE shared budget, so a sustained
     # ready backlog permanently starved autonomous reviews — completed work
