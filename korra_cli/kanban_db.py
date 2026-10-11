@@ -5350,6 +5350,64 @@ def reassign_task(
         return False
 
 
+def _board_file(slug: str) -> Path:
+    return (kanban_home() / "kanban.db") if slug == DEFAULT_BOARD else board_dir(slug) / "kanban.db"
+
+
+def count_board_tasks(slug: str) -> int:
+    """Live (not archived) cards on a board, read-only; 0 if it cannot be read."""
+    path = _board_file(slug)
+    if not path.is_file():
+        return 0
+    try:
+        other = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1)
+        try:
+            return int(other.execute(
+                "SELECT COUNT(*) FROM tasks WHERE status != 'archived'"
+            ).fetchone()[0])
+        finally:
+            other.close()
+    except sqlite3.Error:
+        return 0
+
+
+def _tasks_on_other_boards(
+    ids: Iterable[str], only: Optional[str] = None,
+) -> dict[str, tuple[str, Optional[str]]]:
+    """Look ids up read-only on every board; returns ``{id: (board, created_by)}``.
+
+    A card made on another board is a real card. The phantom detectors read
+    only the board they run on, so without this a correct reference to a
+    sibling board would be reported as invented. An unreadable board is
+    skipped: this is an advisory lookup, never a reason to block anything.
+    """
+    wanted = list(dict.fromkeys(i for i in ids if i))
+    found: dict[str, tuple[str, Optional[str]]] = {}
+    if not wanted:
+        return found
+    try:
+        slugs = [only] if only else [m.get("slug") for m in list_boards(include_archived=True)]
+    except OSError:
+        return found
+    marks = ",".join(["?"] * len(wanted))
+    for slug in slugs:
+        path = _board_file(slug) if slug else None
+        if path is None or not path.is_file():
+            continue
+        try:
+            other = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1)
+            try:
+                for row in other.execute(
+                    f"SELECT id, created_by FROM tasks WHERE id IN ({marks})", tuple(wanted),
+                ):
+                    found.setdefault(row[0], (slug, row[1]))
+            finally:
+                other.close()
+        except sqlite3.Error:
+            continue
+    return found
+
+
 def _verify_created_cards(
     conn: sqlite3.Connection,
     completing_task_id: str,
@@ -5401,6 +5459,10 @@ def _verify_created_cards(
         tuple(ordered),
     ).fetchall()
     found = {r["id"]: r["created_by"] for r in rows}
+    for cid, (_slug, created_by) in _tasks_on_other_boards(
+        [c for c in ordered if c not in found]
+    ).items():
+        found[cid] = created_by
 
     # Pull the set of cards linked as children of the completing task.
     # Cheap: one query, indexed on parent_id.
@@ -5461,6 +5523,9 @@ def _scan_prose_for_phantom_ids(
         tuple(unique),
     ).fetchall()
     existing = {r["id"] for r in rows}
+    missing = [m for m in unique if m not in existing]
+    if missing:
+        existing |= set(_tasks_on_other_boards(missing))
     return [m for m in unique if m not in existing]
 
 

@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any, Optional
 
 from agent.redact import redact_sensitive_text
@@ -179,6 +180,70 @@ def _principal_guard(handler):
         return handler(args, **kw)
 
     return guarded
+
+
+def _board_aware(handler):
+    """Name the board in every answer and show the agent the other boards.
+
+    A card made on another board looks missing to a call without ``board``.
+    Successful answers carry ``board``; read answers (``kanban_show`` and
+    ``kanban_list``) and "unknown id" errors also list the other boards
+    with their task counts, and an id found elsewhere is named.
+    """
+    import functools
+
+    @functools.wraps(handler)
+    def aware(args: dict, **kw) -> str:
+        raw = handler(args, **kw)
+        try:
+            data = json.loads(raw)
+            if not isinstance(data, dict):
+                return raw
+            from korra_cli import kanban_db as kb
+            slug = kb._normalize_board_slug(args.get("board")) or kb.get_current_board()
+            failed = "error" in data
+            missing = failed and bool(
+                re.search(r"not found|unknown", str(data.get("error")), re.I)
+            )
+            reading = handler.__name__ in ("_handle_show", "_handle_list")
+            if failed and not missing:
+                return raw
+            data.setdefault("board", slug)
+            if not (missing or reading):
+                return json.dumps(data)
+            others = _other_boards(kb, slug)
+            if others:
+                data["other_boards"] = others
+            tid = args.get("task_id") or ""
+            if missing and tid:
+                where = [
+                    b["board"] for b in others
+                    if kb._tasks_on_other_boards([tid], only=b["board"])
+                ]
+                if where:
+                    data["found_on_boards"] = where
+                    data["error"] = (
+                        f"{data['error']}; the card exists on board "
+                        f"{', '.join(where)} - repeat the call with board=\"{where[0]}\""
+                    )
+            return json.dumps(data)
+        except Exception:
+            logger.debug("kanban board hint skipped", exc_info=True)
+            return raw
+
+    return aware
+
+
+def _other_boards(kb, current: str) -> list[dict[str, Any]]:
+    result = []
+    try:
+        for meta in kb.list_boards(include_archived=False):
+            slug = meta.get("slug")
+            if slug and slug != current:
+                result.append({"board": slug, "tasks": kb.count_board_tasks(slug)})
+    except Exception:
+        logger.debug("kanban other boards unavailable", exc_info=True)
+    return result
 
 
 @no_cache_check_fn
@@ -2705,7 +2770,7 @@ for _handler_name in (
     "_handle_edit",
     "_handle_link",
 ):
-    globals()[_handler_name] = _principal_guard(globals()[_handler_name])
+    globals()[_handler_name] = _principal_guard(_board_aware(globals()[_handler_name]))
 del _handler_name
 
 
