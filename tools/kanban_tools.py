@@ -210,7 +210,7 @@ def _board_aware(handler):
                 return raw
             data.setdefault("board", slug)
             if not (missing or reading):
-                return json.dumps(data)
+                return json.dumps(data, ensure_ascii=False)
             others = _other_boards(kb, slug)
             if others:
                 data["other_boards"] = others
@@ -226,7 +226,7 @@ def _board_aware(handler):
                         f"{data['error']}; the card exists on board "
                         f"{', '.join(where)} - repeat the call with board=\"{where[0]}\""
                     )
-            return json.dumps(data)
+            return json.dumps(data, ensure_ascii=False)
         except Exception:
             logger.debug("kanban board hint skipped", exc_info=True)
             return raw
@@ -662,15 +662,92 @@ def _task_summary_dict(kb, conn, task) -> dict[str, Any]:
 # Handlers
 # ---------------------------------------------------------------------------
 
+SHOW_DEFAULT_CHARS = 12000
+SHOW_MIN_CHARS = 2000
+SHOW_MAX_CHARS = 200000
+_SHOW_SECTIONS = ("comments", "events", "runs", "body", "result", "worker_context")
+_SHOW_TEXT_SECTIONS = ("body", "result", "worker_context")
+_SHOW_FIELD_CHARS = 2000
+
+
+def _clip(text: Any, limit: int) -> tuple[Any, int]:
+    """Cut a long string; returns (text, original length) - length only when cut."""
+    if isinstance(text, str) and len(text) > limit:
+        return text[:limit] + " ...[cut]", len(text)
+    return text, 0
+
+
+def _size(value: Any) -> int:
+    return len(json.dumps(value, ensure_ascii=False, default=str))
+
+
+def _newest_within(items: list, budget: int) -> list:
+    """Newest items that fit ``budget`` characters, in chronological order."""
+    kept: list = []
+    used = 0
+    for item in reversed(items):
+        cost = _size(item) + 2
+        if kept and used + cost > budget:
+            break
+        if not kept and cost > budget:
+            break
+        kept.append(item)
+        used += cost
+    kept.reverse()
+    return kept
+
+
+def _card_stage(kb, conn, t) -> dict[str, Any]:
+    """Who holds the card now. ``review``/``done`` never prove delivery to the owner."""
+    if t.status == "running":
+        return {"stage": "executor_working",
+                "stage_note": "An executor is working on it; no result version exists yet."}
+    if t.status == "review" and t.acceptance == "owner":
+        version = kb.submitted_version(conn, t.id)
+        return {"stage": "version_on_acceptance", "submitted_version": version,
+                "stage_note": (
+                    "A result version is waiting for the owner's decision. It is "
+                    "not final and not accepted; the card stays open until the owner decides.")}
+    if t.status == "review":
+        return {"stage": "in_review",
+                "stage_note": "Waiting in the review lane; not finished."}
+    if t.status == "done":
+        return {"stage": "accepted" if t.acceptance == "owner" else "done_on_board",
+                "stage_note": (
+                    "The board marks the card finished. This field does not prove "
+                    "the result was delivered to the owner's chat.")}
+    return {"stage": t.status, "stage_note": None}
+
+
+def _item_text(item: Any, limit: int) -> Any:
+    if isinstance(item, dict):
+        return {k: _clip(v, limit)[0] if isinstance(v, str) else v for k, v in item.items()}
+    return item
+
+
 def _handle_show(args: dict, **kw) -> str:
-    """Read a task's full state: task row, parents, children, comments,
-    runs (attempt history), and the last N events."""
+    """Read a task's state within a size budget (``max_chars``, 12k by default).
+
+    Counters say what was left out; ``section`` (+ ``offset``/``limit``) reads
+    one part in full.
+    """
     tid = _default_task_id(args.get("task_id"))
     if not tid:
         return tool_error(
             "task_id is required (or set HERMES_KANBAN_TASK in the env)"
         )
     board = args.get("board")
+    section = args.get("section")
+    if section is not None and section not in _SHOW_SECTIONS:
+        return tool_error(f"section must be one of: {', '.join(_SHOW_SECTIONS)}")
+    try:
+        max_chars = int(args.get("max_chars") or SHOW_DEFAULT_CHARS)
+        offset = max(0, int(args.get("offset") or 0))
+        raw_limit = args.get("limit")
+        limit = int(raw_limit) if raw_limit is not None else None
+    except (TypeError, ValueError):
+        return tool_error("max_chars, offset and limit must be integers")
+    max_chars = min(max(max_chars, SHOW_MIN_CHARS), SHOW_MAX_CHARS)
     try:
         kb, conn = _connect(board=board)
         try:
@@ -679,46 +756,28 @@ def _handle_show(args: dict, **kw) -> str:
                 return tool_error(f"task {tid} not found")
             comments = kb.list_comments(conn, tid)
             events = kb.list_events(conn, tid)
+            owner_events = [
+                e for e in events
+                if e.kind == "owner_responded" and isinstance(e.payload, dict)
+            ]
             # Where the owner's answers came from (comment id -> source).
             sources = {
                 e.payload["comment_id"]: e.payload["source"]
-                for e in events
-                if e.kind == "owner_responded" and isinstance(e.payload, dict)
-                and e.payload.get("source") and e.payload.get("comment_id")
+                for e in owner_events
+                if e.payload.get("source") and e.payload.get("comment_id")
             }
             runs = kb.list_runs(conn, tid)
             parents = kb.parent_ids(conn, tid)
             children = kb.child_ids(conn, tid)
 
-            def _task_dict(t):
-                waiting = t.status in ("blocked", "triage")
-                owner_review = t.status == "review" and t.acceptance == "owner"
-                return {
-                    "id": t.id, "title": t.title, "body": t.body,
-                    "assignee": t.assignee, "status": t.status,
-                    "tenant": t.tenant, "priority": t.priority,
-                    "workspace_kind": t.workspace_kind,
-                    "workspace_path": t.workspace_path,
-                    "created_by": t.created_by, "created_at": t.created_at,
-                    "started_at": t.started_at,
-                    "completed_at": t.completed_at,
-                    "result": t.result,
-                    "current_run_id": t.current_run_id,
-                    "model_override": t.model_override,
-                    "provider_override": t.provider_override,
-                    # What the card waits for — the chat answers a question
-                    # with this ``block_revision`` and leaves a permission
-                    # (``needs_approval``) and an acceptance to the owner.
-                    "block_kind": t.block_kind if waiting else None,
-                    "block_reason": t.block_reason if waiting else None,
-                    "block_revision": kb.block_revision(conn, t.id) if waiting else None,
-                    "needs_approval": waiting and t.block_kind == kb.APPROVAL_BLOCK_KIND,
-                    "acceptance": t.acceptance,
-                    "submitted_version": kb.submitted_version(conn, t.id) if owner_review else None,
-                    "actor_kind": t.actor_kind,
-                    "plan_id": t.plan_id,
-                    "plan_title": t.plan_title,
-                }
+            def _comment_dict(c):
+                return {"author": c.author, "body": c.body,
+                        "created_at": c.created_at,
+                        **({"source": sources[c.id]} if c.id in sources else {})}
+
+            def _event_dict(e):
+                return {"kind": e.kind, "payload": e.payload,
+                        "created_at": e.created_at, "run_id": e.run_id}
 
             def _run_dict(r):
                 return {
@@ -729,28 +788,122 @@ def _handle_show(args: dict, **kw) -> str:
                     "started_at": r.started_at, "ended_at": r.ended_at,
                 }
 
-            return json.dumps({
-                "task": _task_dict(task),
-                "parents": parents,
-                "children": children,
-                "comments": [
-                    {"author": c.author, "body": c.body,
-                     "created_at": c.created_at,
-                     **({"source": sources[c.id]} if c.id in sources else {})}
-                    for c in comments
-                ],
-                "events": [
-                    {"kind": e.kind, "payload": e.payload,
-                     "created_at": e.created_at, "run_id": e.run_id}
-                    for e in events[-50:]   # cap; full log via CLI
-                ],
-                "runs": [_run_dict(r) for r in runs],
-                # Also surface the worker's own context block so the
-                # agent can include it directly if it wants. This is
-                # the same string build_worker_context returns to the
-                # dispatcher at spawn time.
-                "worker_context": kb.build_worker_context(conn, tid),
-            })
+            if section:
+                return _show_section(
+                    kb, conn, task, section, offset, limit,
+                    comments=[_comment_dict(c) for c in comments],
+                    events=[_event_dict(e) for e in events],
+                    runs=[_run_dict(r) for r in runs],
+                )
+
+            waiting = task.status in ("blocked", "triage")
+            owner_review = task.status == "review" and task.acceptance == "owner"
+            body, body_len = _clip(task.body, _SHOW_FIELD_CHARS)
+            result, result_len = _clip(task.result, _SHOW_FIELD_CHARS)
+            reason, reason_len = _clip(task.block_reason if waiting else None, _SHOW_FIELD_CHARS)
+            task_view: dict[str, Any] = {
+                "id": task.id, "title": task.title, "body": body,
+                "assignee": task.assignee, "status": task.status,
+                "tenant": task.tenant, "priority": task.priority,
+                "workspace_kind": task.workspace_kind,
+                "workspace_path": task.workspace_path,
+                "created_by": task.created_by, "created_at": task.created_at,
+                "started_at": task.started_at,
+                "completed_at": task.completed_at,
+                "result": result,
+                "current_run_id": task.current_run_id,
+                "model_override": task.model_override,
+                "provider_override": task.provider_override,
+                # What the card waits for — the chat answers a question
+                # with this ``block_revision`` and leaves a permission
+                # (``needs_approval``) and an acceptance to the owner.
+                "block_kind": task.block_kind if waiting else None,
+                "block_reason": reason,
+                "block_revision": kb.block_revision(conn, task.id) if waiting else None,
+                "needs_approval": waiting and task.block_kind == kb.APPROVAL_BLOCK_KIND,
+                "acceptance": task.acceptance,
+                "submitted_version": kb.submitted_version(conn, task.id) if owner_review else None,
+                "actor_kind": task.actor_kind,
+                "plan_id": task.plan_id,
+                "plan_title": task.plan_title,
+                **_card_stage(kb, conn, task),
+            }
+            last_owner = None
+            if owner_events:
+                e = owner_events[-1]
+                by_id = {c.id: c for c in comments}
+                c = by_id.get(e.payload.get("comment_id"))
+                last_owner = {
+                    "source": e.payload.get("source"),
+                    "decision": e.payload.get("decision"),
+                    "answered": e.payload.get("answered"),
+                    "revision": e.payload.get("revision"),
+                    "created_at": e.created_at,
+                    **({"answer": _clip(c.body, 600)[0]} if c is not None else {}),
+                }
+            cut = {k: n for k, n in (
+                ("body", body_len), ("result", result_len), ("block_reason", reason_len)
+            ) if n}
+            core = {
+                "task": task_view,
+                "parents": parents[:40],
+                "children": children[:40],
+                "last_owner_decision": last_owner,
+                "truncated_fields": cut,
+            }
+            if len(parents) > 40 or len(children) > 40:
+                core["links_total"] = {"parents": len(parents), "children": len(children)}
+            comment_items = [_item_text(_comment_dict(c), 1200) for c in comments]
+            run_items = []
+            for r in runs:
+                d = _item_text(_run_dict(r), 1200)
+                if _size(d.get("metadata")) > 600:
+                    d["metadata"] = {"cut": _clip(json.dumps(d["metadata"], ensure_ascii=False, default=str), 500)[0]}
+                run_items.append(d)
+            event_items = []
+            for e in events:
+                d = _event_dict(e)
+                if _size(d["payload"]) > 500:
+                    d["payload"] = {"cut": _clip(json.dumps(d["payload"], ensure_ascii=False, default=str), 400)[0]}
+                event_items.append(d)
+            context_full = kb.build_worker_context(conn, tid)
+            room = max(max_chars - _size(core) - 1300, 0)
+            for _ in range(8):
+                shown_comments = _newest_within(comment_items, room * 40 // 100)
+                shown_runs = _newest_within(run_items, room * 30 // 100)
+                shown_events = _newest_within(event_items, room * 15 // 100)
+                spare = room - _size(shown_comments) - _size(shown_runs) - _size(shown_events)
+                context, context_len = _clip(context_full, max(min(spare, 3000), 0))
+                out = {
+                    **core,
+                    "comments": shown_comments,
+                    "events": shown_events,
+                    "runs": shown_runs,
+                    "worker_context": context if spare > 0 else "",
+                    "counts": {
+                        "comments": {"total": len(comments), "shown": len(shown_comments)},
+                        "events": {"total": len(events), "shown": len(shown_events)},
+                        "runs": {"total": len(runs), "shown": len(shown_runs)},
+                        "worker_context_chars": len(context_full),
+                    },
+                }
+                omitted = (
+                    len(comments) > len(shown_comments) or len(events) > len(shown_events)
+                    or len(runs) > len(shown_runs) or bool(cut) or bool(context_len)
+                    or spare <= 0
+                )
+                out["truncated"] = omitted
+                out["read_more"] = (
+                    f"The newest items are shown (budget {max_chars} chars). Read a part in "
+                    "full with kanban_show(task_id, section=comments|events|runs|body|result|"
+                    "worker_context, offset=N, limit=M); raise max_chars for a bigger overview."
+                    if omitted else None
+                )
+                text = json.dumps(out, ensure_ascii=False)
+                if len(text) <= max_chars - 250 or room == 0:
+                    break
+                room = room * 3 // 4
+            return text
         finally:
             conn.close()
     except ValueError as e:
@@ -759,6 +912,31 @@ def _handle_show(args: dict, **kw) -> str:
     except Exception as e:
         logger.exception("kanban_show failed")
         return tool_error(f"kanban_show: {e}")
+
+
+def _show_section(kb, conn, task, section, offset, limit, *, comments, events, runs) -> str:
+    out: dict[str, Any] = {"task_id": task.id, "section": section, "offset": offset}
+    if section in _SHOW_TEXT_SECTIONS:
+        text = {
+            "body": task.body, "result": task.result,
+            "worker_context": None,
+        }.get(section)
+        if section == "worker_context":
+            text = kb.build_worker_context(conn, task.id)
+        text = text or ""
+        size = limit if limit and limit > 0 else 8000
+        out.update({
+            "text": text[offset:offset + size], "total_chars": len(text),
+            "next_offset": offset + size if offset + size < len(text) else None,
+        })
+        return json.dumps(out)
+    items = {"comments": comments, "events": events, "runs": runs}[section]
+    count = limit if limit and limit > 0 else 20
+    out.update({
+        "items": items[offset:offset + count], "total": len(items),
+        "next_offset": offset + count if offset + count < len(items) else None,
+    })
+    return json.dumps(out)
 
 
 def _handle_list(args: dict, **kw) -> str:
@@ -2014,12 +2192,14 @@ def _board_schema_prop() -> dict[str, str]:
 KANBAN_SHOW_SCHEMA = {
     "name": "kanban_show",
     "description": (
-        "Read a task's full state — title, body, assignee, parent task "
-        "handoffs, your prior attempts on this task if any, comments, "
-        "and recent events. Use this to (re)orient yourself before "
-        "starting work, especially on retries. The response includes a "
-        "pre-formatted ``worker_context`` string suitable for inclusion "
-        "verbatim in your reasoning."
+        "Read a task's state within a size budget (about 12000 characters) — "
+        "title, body, assignee, the current blocker and its revision, who holds "
+        "the card now (``stage``: executor working / version on acceptance / "
+        "accepted; ``review`` and ``done`` never prove delivery to the owner), "
+        "the last owner decision with its source, and the newest comments, "
+        "events and attempts. ``counts`` and ``truncated`` say what was left "
+        "out; read it in full with ``section``/``offset``/``limit``. Use this "
+        "to (re)orient yourself before starting work, especially on retries."
     ),
     "parameters": {
         "type": "object",
@@ -2029,6 +2209,24 @@ KANBAN_SHOW_SCHEMA = {
                 "description": _DESC_TASK_ID_DEFAULT,
             },
             "board": _board_schema_prop(),
+            "section": {
+                "type": "string",
+                "enum": list(_SHOW_SECTIONS),
+                "description": (
+                    "Read one part in full instead of the overview: comments, "
+                    "events, runs (paged by offset/limit items) or body, result, "
+                    "worker_context (paged by offset/limit characters)."
+                ),
+            },
+            "offset": {"type": "integer", "description": "Start of the section page."},
+            "limit": {"type": "integer", "description": "Page size of the section."},
+            "max_chars": {
+                "type": "integer",
+                "description": (
+                    "Size budget of the overview (default 12000). The newest comments, "
+                    "events and runs fit; counters tell what was left out."
+                ),
+            },
         },
         "required": [],
     },
