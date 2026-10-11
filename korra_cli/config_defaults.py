@@ -2801,6 +2801,10 @@ DEFAULT_CONFIG = {
         # job. Interactive toolsets (messaging/clarify) stay denied in cron
         # context regardless of this setting.
         "allow_agent_scheduling": False,
+        # Повторяющийся сбой одного и того же задания сообщается один раз, а затем
+        # молчит; напоминание приходит, когда пройдёт столько часов. 0 — сообщать
+        # о каждом неудачном запуске.
+        "failure_repeat_alert_hours": 6,
         # Pre-dispatch configuration validation (T1-26): before constructing
         # any agent machinery for a job, verify the provider API key resolves
         # (unless a fallback chain is configured), attached skills are ready

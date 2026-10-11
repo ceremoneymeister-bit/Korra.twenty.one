@@ -26,7 +26,7 @@ import threading
 import time
 import tempfile
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 # fcntl is Unix-only; on Windows use msvcrt for file locking
 try:
@@ -465,19 +465,48 @@ def _summarize_cron_failure_for_delivery(job: dict, error: str | None) -> str:
     return message
 
 
+DEFAULT_FAILURE_REPEAT_ALERT_HOURS = 6.0
+
+
+def _failure_repeat_alert_hours() -> float:
+    """``cron.failure_repeat_alert_hours``: how long an already-reported failure stays quiet
+    before one reminder. ``0`` (or negative) reports every failing run, as before."""
+    try:
+        cron_cfg = (load_config() or {}).get("cron") or {}
+        return float(cron_cfg.get("failure_repeat_alert_hours", DEFAULT_FAILURE_REPEAT_ALERT_HOURS))
+    except Exception:
+        return DEFAULT_FAILURE_REPEAT_ALERT_HOURS
+
+
+def _repeat_alert_withheld(incident: dict) -> bool:
+    """True while the owner was already told about this failure less than the pause ago.
+    A missing/unreadable ``alerted_at`` (ledger from an older version) delivers instead of
+    swallowing the report."""
+    hours = _failure_repeat_alert_hours()
+    if hours <= 0 or not incident.get("alerted_at"):
+        return False
+    try:
+        from cron.jobs import _ensure_aware
+
+        last = _ensure_aware(datetime.fromisoformat(str(incident["alerted_at"])))
+    except (TypeError, ValueError):
+        return False
+    return _hermes_now() - last < timedelta(hours=hours)
+
+
 def _upsert_incident_for_failure(
     job: dict, error: str, *, output_file: Optional[Any] = None
 ) -> tuple[bool, Optional[str]]:
     """Record a durable failure incident for this run.
 
-    The incident store groups "same job + same error signature" across runs so
-    an operator-acked failure stops re-pinging every run. Returns
-    ``(acked, incident_id)``: ``acked`` is True when the incident for this
-    exact signature is already ``closed`` (acked) — the per-run failure ping
-    should be suppressed. ``incident_id`` lets the caller mark the incident
-    ``alerted`` after the ping actually goes out. The streak nudge and
-    ``_summarize_cron_failure_for_delivery`` text stay intact for un-acked
-    failures.
+    The incident store groups "same job + same error signature" across runs.
+    Returns ``(withheld, incident_id)``: ``withheld`` is True when the incident
+    is already ``closed`` (acked) or was reported (``alerted``) less than
+    ``cron.failure_repeat_alert_hours`` ago — the per-run failure ping is then
+    suppressed, and exactly one reminder goes out after the pause. A new error
+    text, or the same error after a green run, is reported at once.
+    ``incident_id`` lets the caller mark the incident ``alerted`` after the
+    ping actually goes out.
 
     Best-effort: an incident-store error must never break the cron run or the
     delivery path — failures are logged at debug and the caller delivers as if
@@ -493,14 +522,25 @@ def _upsert_incident_for_failure(
             output_file=output_file,
         )
         incident = get_incident(incident_id)
-        acked = bool(incident and incident.get("state") == "closed")
-        return acked, incident_id
+        state = incident.get("state") if incident else None
+        withheld = state == "closed" or (state == "alerted" and _repeat_alert_withheld(incident))
+        return withheld, incident_id
     except Exception as exc:
         logger.debug(
             "Incident store unavailable for job %s (delivery unaffected): %s",
             job["id"], exc,
         )
         return False, None
+
+
+def _resolve_incidents_for_recovered_job(job: dict) -> None:
+    """Best-effort: a successful run marks the job's open incidents ``resolved``."""
+    try:
+        from cron.incidents import close_incidents_for_recovered_job
+
+        close_incidents_for_recovered_job(job["id"])
+    except Exception as exc:
+        logger.debug("Incident store unavailable for job %s (delivery unaffected): %s", job["id"], exc)
 
 
 def _mark_incident_alerted(incident_id: Optional[str]) -> None:
@@ -7905,6 +7945,7 @@ def _run_one_job_body(
             else:
                 if success:
                     deliver_content = final_response
+                    _resolve_incidents_for_recovered_job(job)
                 else:
                     # Durable failure incident: record this job+error
                     # signature once and, when the operator already acked it,
