@@ -36,6 +36,8 @@ else:
     import fcntl
 
 _GATEWAY_KIND = "hermes-gateway"
+# Both console scripts start the same entrypoint (``[project.scripts]``).
+_CLI_BINARY_NAMES = ("korra", "korra.exe", "hermes", "hermes.exe")
 _RUNTIME_STATUS_FILE = "gateway_state.json"
 _LOCKS_DIRNAME = "gateway-locks"
 _IS_WINDOWS = sys.platform == "win32"
@@ -506,7 +508,7 @@ def _gateway_command_subcommand(command: str | None) -> str | None:
     has_gateway_entry = (
         "korra_cli.main" in joined
         or "korra_cli/main.py" in joined
-        or any(t.rsplit("/", 1)[-1] in ("hermes", "hermes.exe") for t in tokens)
+        or any(t.rsplit("/", 1)[-1] in _CLI_BINARY_NAMES for t in tokens)
     )
     if not has_gateway_entry:
         return None

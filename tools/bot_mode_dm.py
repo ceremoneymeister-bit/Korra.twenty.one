@@ -563,7 +563,7 @@ def _delivery_lock(argv: list[str], *, stdin_file: bool):
     if (
         stdin_file
         or len(argv) < 3
-        or cli not in ("hermes", "hermes.exe")
+        or cli not in ("korra", "korra.exe", "hermes", "hermes.exe")
         or argv[1] != "-p"
     ):
         return contextlib.nullcontext()

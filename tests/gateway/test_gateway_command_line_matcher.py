@@ -27,6 +27,12 @@ ACCEPT = [
     "hermes-gateway.exe",
     "hermes gateway",          # bare `hermes gateway` defaults to run
     "hermes gateway run",
+    # `korra` is the canonical console script of the same entrypoint (K21-331)
+    "/opt/hermes/.venv/bin/python3 /opt/hermes/.venv/bin/korra gateway run --replace",
+    "/opt/hermes/.venv/bin/korra -p work gateway run",
+    "korra gateway",
+    r"C:\Users\me\venv\Scripts\korra.exe gateway run",
+    r'"C:\Program Files\Hermes\Scripts\korra.exe" gateway run',
     # profile selector AFTER the `gateway` token (argv is profile-position
     # agnostic — _apply_profile_override strips --profile/-p anywhere)
     "hermes gateway --profile work run",
@@ -46,6 +52,9 @@ REJECT = [
     "python -m korra_cli.main gateway status",           # other subcommand
     "python -m korra_cli.main gateway restart",
     "python -m korra_cli.main gateway stop",
+    "/opt/hermes/.venv/bin/korra gateway status",       # korra, other subcommand
+    "/opt/hermes/.venv/bin/korra dashboard",
+    "/opt/hermes/.venv/bin/korrawatch gateway run",     # not the korra binary
     "python -m korra_cli.main --profile x dashboard",    # non-gateway subcommand
     "some random python -m mygateway thing",
     "",
@@ -58,3 +67,9 @@ def test_accepts_real_gateway_run(cmd):
     assert matches(cmd) is True
 
 
+
+
+def test_korra_binary_restart_counts_as_runtime_but_not_run():
+    cmd = "/opt/hermes/.venv/bin/korra gateway restart"
+    assert matches(cmd) is False
+    assert matches_runtime(cmd) is True

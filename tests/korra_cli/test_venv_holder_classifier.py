@@ -31,6 +31,8 @@ class TestHolderSubcommand:
             (r"python -m korra_cli.main -c mysession serve", "serve"),
             (r"C:\bin\hermes.exe dashboard", "dashboard"),
             (r"/usr/local/bin/hermes serve", "serve"),
+            (r"/opt/hermes/.venv/bin/korra serve", "serve"),
+            (r"C:\bin\korra.exe gateway run", "gateway"),
             # no hermes entry at all
             (r"python -c import time; time.sleep(3)", None),
             # entry but no subcommand
