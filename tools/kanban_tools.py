@@ -1834,6 +1834,10 @@ def _handle_create(args: dict, **kw) -> str:
                     if _self_task is not None and _self_task.project_id:
                         project_id = _self_task.project_id
                         project_source_task_id = _self_task.id
+            if _dispatcher_worker_turn():
+                _creator = kb.get_task(conn, korra_env("KORRA_KANBAN_TASK"))
+                if _creator is not None and _creator.session_id:
+                    session_id = _creator.session_id
             new_tid = kb.create_task(
                 conn,
                 title=str(title).strip(),
@@ -1884,6 +1888,19 @@ def _handle_create(args: dict, **kw) -> str:
     except Exception as e:
         logger.exception("kanban_create failed")
         return tool_error(f"kanban_create: {e}")
+
+
+def _inherit_creator_subs(conn: Any, task_id: str) -> bool:
+    """Give a task born in a worker turn the owner chat of the card that made it."""
+    creator = korra_env("KORRA_KANBAN_TASK") if _dispatcher_worker_turn() else ""
+    if not creator or creator == task_id:
+        return False
+    from korra_cli import kanban_db as _kb
+    with _kb.write_txn(conn):
+        _kb._inherit_notify_subs(conn, task_id, (creator,))
+    return conn.execute(
+        "SELECT 1 FROM kanban_notify_subs WHERE task_id = ? LIMIT 1", (task_id,),
+    ).fetchone() is not None
 
 
 def _maybe_auto_subscribe(conn: Any, task_id: str) -> bool:
@@ -1957,7 +1974,9 @@ def _maybe_auto_subscribe(conn: Any, task_id: str) -> bool:
                 or korra_env("KORRA_SESSION_KEY", "")
             )
             if not session_key:
-                return False  # CLI / cron / test — no persistent channel
+                # A dispatcher worker has no chat of its own: its card's owner
+                # chat is the trusted origin. CLI / cron / test have none.
+                return _inherit_creator_subs(conn, task_id)
             platform = "tui"
             chat_id = session_key
         is_gateway_session = platform != "tui"

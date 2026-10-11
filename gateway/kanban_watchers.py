@@ -59,6 +59,53 @@ from korra_constants import korra_env, korra_env_set, korra_env_pop
 logger = logging.getLogger("gateway.run")
 
 
+def _follow_owner_session(_kb, conn, sub: dict, notifier_profile: str, kinds) -> dict:
+    """Move an api_server subscription from a reset/compressed chat to its live one.
+
+    Looks only in the subscription owner's profile database, only when events
+    wait, and only along an explicit reset/compression link; the cursor moves
+    with the row.
+    """
+    chat_id = sub.get("chat_id") or ""
+    if (sub.get("platform") or "").lower() != "api_server" or not chat_id:
+        return sub
+    try:
+        _, waiting = _kb.unseen_events_for_sub(
+            conn, task_id=sub["task_id"], platform=sub["platform"], chat_id=chat_id,
+            thread_id=sub.get("thread_id") or "", kinds=kinds,
+        )
+        if not waiting:
+            return sub
+        from korra_constants import get_hermes_home
+        from korra_cli.kanban_decisions import live_successor
+        from korra_cli.web_server import _open_session_db_at_path
+
+        profile = sub.get("notifier_profile") or notifier_profile
+        if profile == notifier_profile:
+            home = Path(get_hermes_home())
+        else:
+            from korra_cli.profiles import resolve_profile_env
+            home = Path(resolve_profile_env(profile))
+        path = home / "state.db"
+        if not path.is_file():
+            return sub
+        db = _open_session_db_at_path(path, read_only=True)
+        try:
+            successor = live_successor(db, chat_id)
+        finally:
+            db.close()
+        if successor and _kb.reroute_notify_sub(
+            conn, task_id=sub["task_id"], platform=sub["platform"], chat_id=chat_id,
+            thread_id=sub.get("thread_id") or "", new_chat_id=successor,
+        ):
+            logger.info("kanban notifier: %s follows reset chat to a live session", sub["task_id"])
+            return {**sub, "chat_id": successor}
+    except Exception:
+        logger.debug("kanban notifier: session successor lookup failed for %s",
+                     sub.get("task_id"), exc_info=True)
+    return sub
+
+
 _LOCAL_PATH_RE = re.compile(
     r"(?<![\w:/])(?:/(?:Users|home|private|tmp|var|etc|workspace)/[^\s,;]+|"
     r"[A-Za-z]:\\[^\s,;]+)"
@@ -528,6 +575,7 @@ class GatewayKanbanWatchersMixin:
                                             sub.get("task_id"), platform or "<missing>",
                                         )
                                         continue
+                                    sub = _follow_owner_session(_kb, conn, sub, notifier_profile, TERMINAL_KINDS)
                                     old_cursor, cursor, events = _kb.claim_unseen_events_for_sub(
                                         conn,
                                         task_id=sub["task_id"],

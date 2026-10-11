@@ -12579,6 +12579,57 @@ def remove_notify_sub(
     return cur.rowcount > 0
 
 
+def reroute_notify_sub(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str,
+    platform: str,
+    chat_id: str,
+    thread_id: Optional[str] = None,
+    new_chat_id: str,
+) -> bool:
+    """Move one subscription to *new_chat_id*, keeping its event cursor.
+
+    The row is rewritten in place, so ``last_event_id`` travels with the route
+    and nothing is replayed. If the target route already follows the task, the
+    older row is dropped and the target keeps the larger cursor.
+    """
+    if not new_chat_id or new_chat_id == chat_id:
+        return False
+    thread = thread_id or ""
+    with write_txn(conn):
+        old = conn.execute(
+            "SELECT last_event_id FROM kanban_notify_subs WHERE task_id = ? "
+            "AND platform = ? AND chat_id = ? AND thread_id = ?",
+            (task_id, platform, chat_id, thread),
+        ).fetchone()
+        if old is None:
+            return False
+        existing = conn.execute(
+            "SELECT last_event_id FROM kanban_notify_subs WHERE task_id = ? "
+            "AND platform = ? AND chat_id = ? AND thread_id = ?",
+            (task_id, platform, new_chat_id, thread),
+        ).fetchone()
+        if existing is None:
+            conn.execute(
+                "UPDATE kanban_notify_subs SET chat_id = ? WHERE task_id = ? "
+                "AND platform = ? AND chat_id = ? AND thread_id = ?",
+                (new_chat_id, task_id, platform, chat_id, thread),
+            )
+        else:
+            conn.execute(
+                "UPDATE kanban_notify_subs SET last_event_id = MAX(last_event_id, ?) "
+                "WHERE task_id = ? AND platform = ? AND chat_id = ? AND thread_id = ?",
+                (old["last_event_id"], task_id, platform, new_chat_id, thread),
+            )
+            conn.execute(
+                "DELETE FROM kanban_notify_subs WHERE task_id = ? "
+                "AND platform = ? AND chat_id = ? AND thread_id = ?",
+                (task_id, platform, chat_id, thread),
+            )
+    return True
+
+
 def purge_stale_done_notify_subs(
     conn: sqlite3.Connection,
     *,
