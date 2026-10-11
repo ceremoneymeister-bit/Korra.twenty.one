@@ -39,6 +39,7 @@ from typing import Optional, Dict, List, Any, Set, Tuple, Union, Collection
 logger = logging.getLogger(__name__)
 
 from korra_time import now as _hermes_now
+from cron import unreachable_retry
 from utils import atomic_replace, atomic_write_text
 
 # ``croniter`` compiles ~15 ms of regexes at import and only matters for
@@ -3006,6 +3007,7 @@ def mark_job_run(
     status: Optional[str] = None,
     *,
     expected_fire_owner: Optional[str] = None,
+    model_unreachable: bool = False,
 ) -> bool:
     with _fire_job_lock(job_id) as acquired:
         if not acquired:
@@ -3017,6 +3019,7 @@ def mark_job_run(
             delivery_error,
             status=status,
             expected_fire_owner=expected_fire_owner,
+            model_unreachable=model_unreachable,
         )
 
 
@@ -3111,6 +3114,7 @@ def _mark_job_run_locked(
     *,
     status: Optional[str] = None,
     expected_fire_owner: Optional[str] = None,
+    model_unreachable: bool = False,
 ) -> bool:
     """
     Mark a job as having been run.
@@ -3140,6 +3144,14 @@ def _mark_job_run_locked(
                             job_id,
                         )
                         return False
+                # Failed before any model call (network down): a recurring job gets a
+                # bounded automatic re-run instead of waiting a full period, and this
+                # attempt consumes neither a repeat slot nor the failure streak.
+                retry_dt = None
+                if model_unreachable and not success:
+                    retry_dt = unreachable_retry.retry_instant(job, _hermes_now())
+                if retry_dt is None:
+                    unreachable_retry.clear_state(job)
                 now = _hermes_now().isoformat()
                 job["last_run_at"] = now
                 job.pop("manual_run_at", None)
@@ -3167,7 +3179,7 @@ def _mark_job_run_locked(
                 # (Poke-inspired; see cron/scheduler._failure_streak_nudge).
                 if success:
                     job["failure_streak"] = 0
-                else:
+                elif retry_dt is None:
                     job["failure_streak"] = int(job.get("failure_streak") or 0) + 1
                 # Track delivery failures separately — cleared on successful delivery
                 job["last_delivery_error"] = delivery_error
@@ -3185,7 +3197,7 @@ def _mark_job_run_locked(
                 # (issue #38758), which already incremented completed — do not
                 # double-count them here.  Recurring jobs and direct callers
                 # with no pre-run claim still get the legacy increment.
-                if job.get("repeat"):
+                if job.get("repeat") and retry_dt is None:
                     repeat = job["repeat"]
                     times = repeat.get("times")
                     completed = repeat.get("completed", 0)
@@ -3249,6 +3261,16 @@ def _mark_job_run_locked(
                         job["state"] = "completed"
                 elif job.get("state") != "paused":
                     job["state"] = "scheduled"
+                    if retry_dt is not None:
+                        unreachable_retry.park(job, retry_dt)
+                        logger.info(
+                            "Job '%s': model unreachable with zero API calls — automatic "
+                            "re-run %d/%d at %s",
+                            job.get("name", job.get("id", "?")),
+                            job[unreachable_retry.STATE_KEY]["attempt"],
+                            len(unreachable_retry.RETRY_DELAYS_SECONDS),
+                            job["next_run_at"],
+                        )
 
                 save_jobs(jobs)
                 return True
@@ -4115,8 +4137,11 @@ def _get_due_jobs_locked() -> List[Dict[str, Any]]:
                 # so re-anchor before either can fire. Recomputation uses the
                 # current expression, so this converges — it cannot defer
                 # forever.
-                if not manual_run and kind == "cron" and not _cron_next_run_matches_expr(
-                    schedule, next_run_dt
+                if (
+                    not manual_run
+                    and kind == "cron"
+                    and not unreachable_retry.is_retry_fire(job, next_run)
+                    and not _cron_next_run_matches_expr(schedule, next_run_dt)
                 ):
                     new_next = compute_next_run(schedule, now.isoformat())
                     logger.info(

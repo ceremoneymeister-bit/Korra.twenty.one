@@ -7311,6 +7311,13 @@ def _run_job_inner(
     except Exception as e:
         error_msg = f"{type(e).__name__}: {str(e)}"
         logger.exception("Job '%s' failed: %s", job_name, error_msg)
+        try:
+            from cron.unreachable_retry import is_model_unreachable_failure
+
+            if is_model_unreachable_failure(e, agent):
+                job["_model_unreachable"] = True
+        except Exception:  # classification must never mask the real failure
+            logger.debug("Job '%s': unreachable-failure classification failed", job_id)
         # Best-effort audit write on failure path. _audit_fire_id
         # may be unset if the exception fired before submit() — guard
         # with a None check so the audit write itself never raises.
@@ -7986,6 +7993,14 @@ def _run_one_job_body(
             should_deliver = bool(deliver_content.strip())
             if blocked_config_silent or drift_skip_silent:
                 should_deliver = False
+            if should_deliver and not success and job.get("_model_unreachable"):
+                from cron.unreachable_retry import will_retry
+
+                if will_retry(job):
+                    should_deliver = False
+                    logger.info(
+                        "Job '%s': holding failure notice — automatic re-run pending", job["id"]
+                    )
             unresolved_origin = False
             # Cron silence suppression — see _is_cron_silence_response.  Replaces the
             # old `SILENT_MARKER in ...upper()` substring check, which both leaked
@@ -8118,6 +8133,8 @@ def _run_one_job_body(
             mark_kwargs["expected_fire_owner"] = fire_owner
         if blocked_config:
             mark_kwargs["status"] = "blocked_config"
+        if not success and job.pop("_model_unreachable", False):
+            mark_kwargs["model_unreachable"] = True
         marked = mark_job_run(job["id"], success, error, **mark_kwargs)
         if fire_owner is not None and not marked:
             finish_execution(
