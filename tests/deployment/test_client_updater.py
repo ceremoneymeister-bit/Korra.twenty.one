@@ -3328,13 +3328,13 @@ def package_conflict_case(updater, monkeypatch, tmp_path, kind):
     return make_user_package(updater.data, cli=None, abi="2.7:.cpython-27")
 
 
-def old_image_without_conflicts(updater, monkeypatch):
-    """Текущий образ, у которого конфликтов нет (его проверка отвечает чисто)."""
+def old_image_without_conflicts(updater, monkeypatch, clean=OLD):
+    """Образ `clean` (по умолчанию текущий), у которого конфликтов нет."""
     real = updater.user_packages_probe
 
     def probe(image, root, migrated):
         result = real(image, root, migrated)
-        return {**result, "conflicts": []} if image == OLD else result
+        return {**result, "conflicts": []} if image == clean else result
 
     monkeypatch.setattr(updater, "user_packages_probe", probe)
 
@@ -3648,6 +3648,7 @@ def test_rollback_refuses_before_stopping_when_the_old_image_conflicts(updater, 
     make_user_package(updater.data)
     updater.update("registry.example/korra:latest")
     monkeypatch.setattr(updater, "pinned_dependencies", lambda: {"korra-demo-pkg": "9.9"})
+    old_image_without_conflicts(updater, monkeypatch, clean=NEW)  # работающий NEW этого конфликта не имеет
     mark = len(updater.calls)
     with pytest.raises(u.UpdateError, match="Пакеты пользователя"):
         updater.rollback()
@@ -3655,10 +3656,21 @@ def test_rollback_refuses_before_stopping_when_the_old_image_conflicts(updater, 
     assert updater.image == NEW and updater.running
 
 
+def test_rollback_does_not_stop_on_a_conflict_the_running_image_has_too(updater, monkeypatch):
+    make_user_package(updater.data)
+    updater.update("registry.example/korra:latest")
+    monkeypatch.setattr(updater, "pinned_dependencies", lambda: {"korra-demo-pkg": "9.9"})
+    updater.rollback()
+    assert updater.receipt["status"] == "rolled_back" and updater.image == OLD
+    assert updater.receipt["user_packages"]["conflicts"] == []
+    assert updater.receipt["user_packages"]["preexisting"][0]["kind"] == "pinned"
+
+
 def test_automatic_rollback_records_the_conflict_but_still_restores(updater, monkeypatch):
     make_user_package(updater.data)
     answers = iter([{}, {}])
     monkeypatch.setattr(updater, "pinned_dependencies", lambda: next(answers, {"korra-demo-pkg": "9.9"}))
+    old_image_without_conflicts(updater, monkeypatch, clean=NEW)
     updater.fail_smoke = True
     with pytest.raises(u.UpdateError, match="Injected model"):
         updater.update("registry.example/korra:latest")
