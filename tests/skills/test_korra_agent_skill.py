@@ -161,3 +161,11 @@ def test_documented_approvals_default_matches_the_config():
 
 def test_skill_tells_how_to_pin_a_skill_into_every_chat(skill_text: str) -> None:
     assert "skills.auto_load" in skill_text
+
+
+def test_usage_questions_route_to_provider_limit_not_session_counters(skill_text):
+    """K21-306: «на что ушли N % лимита» — проценты окна у провайдера и ряд по дням."""
+    section = skill_text.split("## Расход и лимит подписки", 1)[1].split("\n## ", 1)[0]
+    assert "korra insights" in section
+    assert "Лимит Codex у провайдера" in section
+    assert "накопительные" in section

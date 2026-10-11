@@ -33,6 +33,99 @@ from agent.usage_pricing import (
 )
 
 
+_CODEX_LIMIT_NOTE = (
+    "Токены и вызовы выше — накопительные счётчики целых сессий: сессия, начатая вчера, "
+    "целиком попадает в период. Для вопроса «на что ушёл процент лимита» бери проценты "
+    "окна у провайдера и ряд по дням ниже."
+)
+
+
+def _codex_window_line(name: str, raw: Any, now: float) -> Optional[str]:
+    try:
+        used = float(raw.get("used_percent"))
+    except (AttributeError, TypeError, ValueError):
+        return None
+    minutes = raw.get("window_minutes")
+    if isinstance(minutes, (int, float)) and minutes > 0:
+        name = f"окно {minutes / 1440:g} дн." if minutes >= 1440 else f"окно {minutes / 60:g} ч"
+    resets_at = raw.get("resets_at")
+    if isinstance(resets_at, (int, float)) and resets_at <= now:
+        return f"{name}: окно обновилось после последнего замера, лимит снова полный"
+    line = f"{name}: израсходовано {used:g} %"
+    if isinstance(resets_at, (int, float)):
+        line += f", сброс {datetime.fromtimestamp(resets_at).strftime('%d.%m %H:%M')}"
+    return line
+
+
+def codex_limit_section(conn: Any, days: int, *, now: Optional[float] = None, root: Any = None) -> Dict[str, Any]:
+    """Provider-side Codex limit plus a per-day call series, never session counters."""
+    now = time.time() if now is None else now
+    section: Dict[str, Any] = {"windows": [], "captured_at": None, "daily": [], "tracked_since": None}
+    try:
+        from agent.rate_limit_tracker import load_codex_quota
+
+        quota = load_codex_quota(root=root)
+    except Exception:
+        quota = None
+    if quota:
+        section["captured_at"] = quota.get("captured_at")
+        for key, name in (("primary", "короткое окно"), ("secondary", "длинное окно")):
+            raw = quota.get(key)
+            if key == "secondary":
+                try:
+                    from agent.rate_limit_tracker import is_placeholder_window
+
+                    if isinstance(raw, dict) and is_placeholder_window(raw):
+                        continue
+                except Exception:
+                    pass
+            line = _codex_window_line(name, raw, now) if isinstance(raw, dict) else None
+            if line:
+                section["windows"].append(line)
+    cutoff = now - days * 86400
+    try:
+        section["daily"] = [
+            {"day": day, "calls": int(calls), "output_tokens": int(tokens)}
+            for day, calls, tokens in conn.execute(
+                "SELECT date(recorded_at, 'unixepoch', 'localtime') AS day, "
+                "SUM(api_call_count), SUM(output_tokens) FROM codex_usage_events "
+                "WHERE recorded_at >= ? AND recorded_at <= ? GROUP BY day ORDER BY day",
+                (cutoff, now),
+            ).fetchall()
+        ]
+        row = conn.execute("SELECT value FROM state_meta WHERE key = 'codex_usage_since'").fetchone()
+        if row:
+            section["tracked_since"] = float(row[0])
+    except (sqlite3.Error, TypeError, ValueError):
+        section["daily"] = []
+    return section
+
+
+def _codex_limit_lines(section: Optional[Dict[str, Any]], days: int, *, bold: bool = False) -> List[str]:
+    if not section or not (section.get("windows") or section.get("daily")):
+        return []
+    title = "Лимит Codex у провайдера"
+    pad = "" if bold else "  "
+    lines = [f"{pad}**{title}**" if bold else f"{pad}{title}"]
+    captured = section.get("captured_at")
+    if section["windows"]:
+        stamp = ""
+        if isinstance(captured, (int, float)):
+            stamp = f" (замер {datetime.fromtimestamp(captured).strftime('%d.%m %H:%M')})"
+        lines.append(f"{pad}Замер у провайдера{stamp}:")
+        lines.extend(f"{pad}  {line}" for line in section["windows"])
+    if section["daily"]:
+        lines.append(f"{pad}Вызовы Codex по дням (за {days} дн., все источники профиля):")
+        for item in section["daily"][-14:]:
+            lines.append(f"{pad}  {item['day']}: {item['calls']:,} вызовов, {item['output_tokens']:,} выходных токенов")
+        since = section.get("tracked_since")
+        if isinstance(since, (int, float)) and since > time.time() - days * 86400:
+            lines.append(f"{pad}  ряд ведётся с {datetime.fromtimestamp(since).strftime('%d.%m %H:%M')}")
+    lines.append(f"{pad}{_CODEX_LIMIT_NOTE}")
+    lines.append("")
+    return lines
+
+
 def _fmt_est_cost(est_cost: float) -> str:
     """Format an aggregate estimated cost via the shared cost-label helper.
 
@@ -163,11 +256,14 @@ class InsightsEngine:
         skill_usage = self._get_skill_usage(cutoff, source)
         message_stats = self._get_message_stats(cutoff, source)
 
+        codex_limit = codex_limit_section(self._conn, days)
+
         if not sessions:
             return {
                 "days": days,
                 "source_filter": source,
                 "empty": True,
+                "codex_limit": codex_limit,
                 "overview": {},
                 "models": [],
                 "platforms": [],
@@ -206,6 +302,7 @@ class InsightsEngine:
             "skills": skills,
             "activity": activity,
             "top_sessions": top_sessions,
+            "codex_limit": codex_limit,
         }
 
     def get_usage_breakdown(self, days: int = 30, source: str = None) -> Dict[str, Any]:
@@ -972,7 +1069,8 @@ class InsightsEngine:
         if report.get("empty"):
             days = report.get("days", 30)
             src = f" (source: {report['source_filter']})" if report.get("source_filter") else ""
-            return f"  No sessions found in the last {days} days{src}."
+            tail = _codex_limit_lines(report.get("codex_limit"), days)
+            return "\n".join([f"  No sessions found in the last {days} days{src}.", *([""] + tail if tail else [])])
 
         lines = []
         o = report["overview"]
@@ -1128,13 +1226,16 @@ class InsightsEngine:
                 lines.append(f"  {ts['label']:<20} {ts['value']:<18} ({ts['date']}, {ts['session_id']})")
             lines.append("")
 
+        lines.extend(_codex_limit_lines(report.get("codex_limit"), days))
+
         return "\n".join(lines)
 
     def format_gateway(self, report: Dict) -> str:
         """Format the insights report for gateway/messaging (shorter)."""
         if report.get("empty"):
             days = report.get("days", 30)
-            return f"No sessions found in the last {days} days."
+            tail = _codex_limit_lines(report.get("codex_limit"), days, bold=True)
+            return "\n".join([f"No sessions found in the last {days} days.", *([""] + tail if tail else [])])
 
         lines = []
         o = report["overview"]
@@ -1208,5 +1309,10 @@ class InsightsEngine:
                 lines.append(f"**Active days:** {act['active_days']}", )
             if act.get("max_streak", 0) > 1:
                 lines.append(f"**Best streak:** {act['max_streak']} consecutive days")
+
+        tail = _codex_limit_lines(report.get("codex_limit"), days, bold=True)
+        if tail:
+            lines.append("")
+            lines.extend(tail)
 
         return "\n".join(lines)
