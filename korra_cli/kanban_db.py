@@ -6549,6 +6549,14 @@ def block_task(
             else 0
         )
 
+        # A dependency wait needs an open parent to wait for. With none,
+        # ``recompute_ready`` would promote the card on the next tick and spawn
+        # a fresh worker with no memory of why it stopped, round and round.
+        # Record it as a question for the owner instead: it stays put.
+        requested_kind = None
+        if kind == "dependency" and _parents_satisfied(conn, task_id):
+            requested_kind, kind = kind, "needs_input"
+
         # Dependency blocks never enter the human ``blocked`` bucket — they
         # wait in ``todo`` and let ``recompute_ready`` gate on parents. Routing
         # here (rather than ``blocked``) is what keeps a cron from ever seeing
@@ -6737,6 +6745,7 @@ def block_task(
                     "kind": kind,
                     "recurrences": recurrences,
                     "source_status": source_status,
+                    **({"requested_kind": requested_kind} if requested_kind else {}),
                 },
                 run_id=run_id,
             )
@@ -10705,15 +10714,6 @@ def dispatch_once(
     return result
 
 
-def _dispatch_once_locked(
-    conn: sqlite3.Connection,
-    *,
-    spawn_fn=None,
-    ttl_seconds: Optional[int] = None,
-    dry_run: bool = False,
-    max_spawn: Optional[int] = None,
-    max_in_progress: Optional[int] = None,
-    failure_limit: int = DEFAULT_SPAWN_FAILURE_LIMIT,
 def unavailable_task_skills(assignee: Optional[str], skills: Optional[Iterable[str]]) -> list[str]:
     """Skills of ``skills`` the ``assignee`` profile cannot load.
 
@@ -10749,6 +10749,15 @@ def skills_block_reason(assignee: str, missing: list[str]) -> str:
     )
 
 
+def _dispatch_once_locked(
+    conn: sqlite3.Connection,
+    *,
+    spawn_fn=None,
+    ttl_seconds: Optional[int] = None,
+    dry_run: bool = False,
+    max_spawn: Optional[int] = None,
+    max_in_progress: Optional[int] = None,
+    failure_limit: int = DEFAULT_SPAWN_FAILURE_LIMIT,
     stale_timeout_seconds: int = 0,
     board: Optional[str] = None,
     default_assignee: Optional[str] = None,
@@ -11074,15 +11083,6 @@ def skills_block_reason(assignee: str, missing: list[str]) -> str:
                         {"reason": guard_reason},
                     )
             continue
-        if dry_run:
-            result.spawned.append((row["id"], row_assignee, ""))
-            spawned += 1
-            # Increment per-profile counter even in dry_run so the cap
-            # check sees the would-be spawn on subsequent iterations.
-            # Without this, dry_run reports every task as spawnable and
-            # under-reports the capped subset (#21582).
-            if _per_profile_cap is not None and row_assignee:
-                _per_profile_running[row_assignee] = (
         # Skills may have been removed or disabled since the card was made:
         # a worker that cannot load any of them exits at once and would be
         # respawned for nothing. Stop the card here with a readable reason.
@@ -11099,6 +11099,15 @@ def skills_block_reason(assignee: str, missing: list[str]) -> str:
                 )
             result.auto_blocked.append(row["id"])
             continue
+        if dry_run:
+            result.spawned.append((row["id"], row_assignee, ""))
+            spawned += 1
+            # Increment per-profile counter even in dry_run so the cap
+            # check sees the would-be spawn on subsequent iterations.
+            # Without this, dry_run reports every task as spawnable and
+            # under-reports the capped subset (#21582).
+            if _per_profile_cap is not None and row_assignee:
+                _per_profile_running[row_assignee] = (
                     _per_profile_running.get(row_assignee, 0) + 1
                 )
             continue

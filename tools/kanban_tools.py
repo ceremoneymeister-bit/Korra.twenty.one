@@ -1008,11 +1008,19 @@ def _handle_block(args: dict, **kw) -> str:
             # Tell the worker where the task actually landed so it doesn't
             # assume it's sitting in 'blocked' when routing sent it elsewhere.
             landed = kb.get_task(conn, tid)
+            extra: dict = {}
+            if kind == "dependency" and landed and landed.block_kind != "dependency":
+                extra["note"] = (
+                    "kind='dependency' needs an unfinished parent card and none "
+                    "is open, so this was recorded as needs_input and waits for "
+                    "the owner instead of restarting."
+                )
             return _ok(
                 task_id=tid,
                 run_id=run.id if run else None,
                 status=landed.status if landed else "blocked",
-                block_kind=kind,
+                block_kind=landed.block_kind if landed and landed.block_kind else kind,
+                **extra,
             )
         finally:
             conn.close()
@@ -1557,14 +1565,6 @@ def _handle_create(args: dict, **kw) -> str:
         return tool_error(bool_error)
     idempotency_key = args.get("idempotency_key")
     max_runtime_seconds = args.get("max_runtime_seconds")
-    initial_status = args.get("initial_status") or "running"
-    skills = args.get("skills")
-    if isinstance(skills, str):
-        # Accept a single skill name as a string for convenience.
-        skills = [skills]
-    if skills is not None and not isinstance(skills, (list, tuple)):
-        return tool_error(
-            f"skills must be a list of skill names, got {type(skills).__name__}"
     if (
         max_runtime_seconds is None
         and not human_step
@@ -1573,15 +1573,15 @@ def _handle_create(args: dict, **kw) -> str:
         # A card made from an owner chat must not run unbounded: the default
         # keeps a stuck executor from holding the slot for hours.
         max_runtime_seconds = CHAT_CARD_MAX_RUNTIME_SECONDS
+    initial_status = args.get("initial_status") or "running"
+    skills = args.get("skills")
+    if isinstance(skills, str):
+        # Accept a single skill name as a string for convenience.
+        skills = [skills]
+    if skills is not None and not isinstance(skills, (list, tuple)):
+        return tool_error(
+            f"skills must be a list of skill names, got {type(skills).__name__}"
         )
-    goal_mode, goal_bool_error = _parse_bool_arg(args, "goal_mode")
-    if goal_bool_error:
-        return tool_error(goal_bool_error)
-    goal_max_turns = args.get("goal_max_turns")
-    model_override = args.get("model")
-    provider_override = args.get("provider")
-    if provider_override and not model_override:
-        return tool_error("'provider' requires 'model' to be set as well")
     if assignee and not human_step and skills:
         from korra_cli.kanban_db import unavailable_task_skills
 
@@ -1592,6 +1592,14 @@ def _handle_create(args: dict, **kw) -> str:
                 f"{', '.join(missing_skills)}. Nothing was created. Drop them, "
                 "pick other skills, or ask the owner to install them for that agent."
             )
+    goal_mode, goal_bool_error = _parse_bool_arg(args, "goal_mode")
+    if goal_bool_error:
+        return tool_error(goal_bool_error)
+    goal_max_turns = args.get("goal_max_turns")
+    model_override = args.get("model")
+    provider_override = args.get("provider")
+    if provider_override and not model_override:
+        return tool_error("'provider' requires 'model' to be set as well")
     if isinstance(parents, str):
         parents = [parents]
     if not isinstance(parents, (list, tuple)):
@@ -1653,6 +1661,7 @@ def _handle_create(args: dict, **kw) -> str:
                 workspace_kind=new_task.workspace_kind if new_task else None,
                 workspace_path=new_task.workspace_path if new_task else None,
                 project_id=new_task.project_id if new_task else None,
+                max_runtime_seconds=new_task.max_runtime_seconds if new_task else None,
                 subscribed=subscribed,
             )
         finally:
@@ -1661,7 +1670,6 @@ def _handle_create(args: dict, **kw) -> str:
         return tool_error(f"kanban_create: {e}")
     except Exception as e:
         logger.exception("kanban_create failed")
-                max_runtime_seconds=new_task.max_runtime_seconds if new_task else None,
         return tool_error(f"kanban_create: {e}")
 
 

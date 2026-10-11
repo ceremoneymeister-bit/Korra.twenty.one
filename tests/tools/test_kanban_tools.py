@@ -231,6 +231,15 @@ def test_block_happy_path(worker_env):
         conn.close()
 
 
+def test_block_dependency_without_open_parent_tells_the_worker(worker_env):
+    from tools import kanban_tools as kt
+    d = json.loads(kt._handle_block({"reason": "wait", "kind": "dependency"}))
+    assert d["ok"] is True
+    assert d["status"] == "blocked"
+    assert d["block_kind"] == "needs_input"
+    assert "waits for the owner" in d["note"]
+
+
 def _make_goal_mode_worker_env(monkeypatch, tmp_path):
     """Set up an isolated HERMES_HOME with one claimed goal_mode task,
     matching the pattern used by the kanban_complete judge gate tests."""
