@@ -657,3 +657,11 @@ def test_docs_append_unknown_tab_fails_without_writing(api_module, monkeypatch, 
 
     assert len(calls) == 1
     assert "t.zzz" in capsys.readouterr().err
+
+
+def test_skill_doc_matches_connection_behaviour():
+    text = (API_PATH.parents[1] / "SKILL.md").read_text(encoding="utf-8")
+    assert "remain\nisolated" not in text and "remain isolated" not in text
+    assert "shared-all" in text
+    assert "off by default" in text and "Settings → Keys → Google Workspace" in text
+    assert "First call `google_workspace_auth`" not in text

@@ -14,7 +14,7 @@ platforms: [linux, macos, windows]
 # deliberately never handed to a sandbox.
 required_credential_files:
   - path: google-workspace/token.json
-    description: Profile-local Google OAuth grant (created by google_workspace_auth)
+    description: Profile-local Google OAuth grant (created when the owner connects Google)
 metadata:
   hermes:
     tags: [Google, Gmail, Calendar, Drive, Sheets, Docs, Contacts, Tasks, Email, OAuth]
@@ -54,23 +54,27 @@ gateway:
       telegram: ["123456789"]
 ```
 
-First call `google_workspace_auth` with `action=status`. If the installation
-OAuth app is configured, ask which services the user needs and call
-`action=start` with that exact service list. Send the returned Google URL. The
-user finishes the flow in **Settings → Keys → Google Workspace** by pasting the
-full `http://localhost/?...` browser URL into the password-style field there.
+The owner connects Google in **Settings → Keys → Google Workspace**; that web
+route works without any toolset. The `google_workspace_auth` tool is optional
+and its toolset is off by default: use it only when it is actually in your tool
+list. Then call `action=status` first; if the installation OAuth app is
+configured, ask which services the user needs and call `action=start` with that
+exact service list, and send the returned Google URL. If the tool is not
+available, do not try to call it — send the user to Settings → Keys → Google
+Workspace instead. Either way the user pastes the full `http://localhost/?...`
+browser URL into the password-style field there, never into chat.
 
 The installed Desktop OAuth credential belongs to the installation operator.
 It is managed outside profile DATA, shared by profiles, and never added to the
 image or repository. The host file is `root:<runtime-group>` mode `0640` and is mounted
 at `/run/korra-secrets/google-oauth-client.json` as an exact read-only file
-mount: the runtime can read it and cannot install or replace it. By default
-each profile has its own mutable grant at
-`$HERMES_HOME/google-workspace/token.json` (mode `0600`), outside the
-operator-owned installation directory. During a controlled migration, the
-installation owner may explicitly give named profiles access to one source
-profile's grant. Korra keeps one token, and profiles created later remain
-isolated until the owner names them too.
+mount: the runtime can read it and cannot install or replace it. Each profile
+can have its own mutable grant at `$HERMES_HOME/google-workspace/token.json`
+(mode `0600`), outside the operator-owned installation directory. The
+installation owner may also give access to one source profile's grant: to named
+profiles, or to everyone with **Доступно всем агентам** (`shared-all`). Korra
+keeps one token; the "everyone" setting covers every profile without its own
+grant, including profiles created later, while named sharing does not.
 
 The launcher requires the OAuth app source to remain an operator-owned exact
 read-only file mount. This remains valid when the separately managed
