@@ -440,6 +440,19 @@ DEFAULT_CRASH_GRACE_SECONDS = 30
 # conventional "temporary failure, retry later" code, and well clear of the
 # 0/1/2 codes the worker uses for success / generic failure / usage error.
 KANBAN_RATE_LIMIT_EXIT_CODE = 75
+# 78 == ``EX_CONFIG``: the provider refused the worker's credentials or model
+# (auth, unknown model, TLS trust). A retry cannot fix it, so the dispatcher
+# blocks the card at once instead of burning attempts.
+KANBAN_TERMINAL_PROVIDER_EXIT_CODE = 78
+# 128 + SIGHUP/SIGINT/SIGTERM: the worker was asked to stop by whoever owns
+# the process tree (container stop, gateway restart), not by its own failure.
+KANBAN_INTERRUPTED_EXIT_CODES = frozenset({129, 130, 143})
+# Continuous provider wait / interruption: how many automatic retries come
+# before the card stops and waits for a person.
+KANBAN_AUTO_RETRY_LIMIT = 2
+# Workers that were running when this dispatcher process started belong to a
+# previous process: a restart or drain took them, they did not crash.
+_DISPATCHER_PROCESS_STARTED_AT = time.time()
 
 
 def _resolve_crash_grace_seconds() -> int:
@@ -4601,7 +4614,7 @@ def _resume_status_from_events(conn: sqlite3.Connection, task_id: str) -> str:
         "WHERE task_id = ? AND kind IN ("
         "'blocked', 'block_loop_detected', 'dependency_wait', 'gave_up', "
         "'unblocked', 'changes_requested', 'review_reopened', 'status', 'reclaimed', "
-        "'stale', 'timed_out', 'crashed', 'spawn_failed', 'rate_limited'"
+        "'stale', 'timed_out', 'crashed', 'spawn_failed', 'rate_limited', 'interrupted'"
         ") ORDER BY id DESC LIMIT 1",
         (task_id,),
     ).fetchone()
@@ -8914,6 +8927,11 @@ def _classify_worker_exit(pid: int) -> "tuple[str, Optional[int]]":
       provider rate-limited / exhausted quota, NOT because the task failed.
       ``detect_crashed_workers`` releases the task back to ``ready`` without
       counting a failure, so a long quota window can't trip the breaker.
+    * ``"terminal_provider"`` — ``WIFEXITED`` with status
+      ``KANBAN_TERMINAL_PROVIDER_EXIT_CODE``: credentials/model refused, a
+      retry cannot help.
+    * ``"interrupted"`` — ``WIFEXITED`` with 128+SIGHUP/SIGINT/SIGTERM: the
+      worker was stopped from outside (restart, container stop).
     * ``"nonzero_exit"`` — ``WIFEXITED`` with non-zero status. Real error.
     * ``"signaled"`` — ``WIFSIGNALED`` (OOM killer, SIGKILL, etc). Real crash.
     * ``"unknown"`` — pid was not in the reap registry (either reaped by
@@ -8935,6 +8953,10 @@ def _classify_worker_exit(pid: int) -> "tuple[str, Optional[int]]":
                 return ("clean_exit", 0)
             if code == KANBAN_RATE_LIMIT_EXIT_CODE:
                 return ("rate_limited", code)
+            if code == KANBAN_TERMINAL_PROVIDER_EXIT_CODE:
+                return ("terminal_provider", code)
+            if code in KANBAN_INTERRUPTED_EXIT_CODES:
+                return ("interrupted", code)
             return ("nonzero_exit", code)
         if os.WIFSIGNALED(raw):
             return ("signaled", os.WTERMSIG(raw))
@@ -9629,6 +9651,29 @@ def _protocol_violation_streak(conn: sqlite3.Connection, task_id: str) -> int:
     return streak
 
 
+_STREAK_RESET_KINDS = (
+    "rate_limited", "interrupted", "crashed", "timed_out", "gave_up",
+    "completed", "blocked", "unblocked", "spawn_failed", "stale", "reclaimed",
+)
+
+
+def _trailing_event_streak(conn: sqlite3.Connection, task_id: str, kind: str) -> int:
+    """How many ``kind`` events end the task's history without anything else
+    that decides the outcome of a run in between."""
+    rows = conn.execute(
+        "SELECT kind FROM task_events WHERE task_id = ? AND kind IN ("
+        + ",".join("?" * len(_STREAK_RESET_KINDS)) + ") "
+        "ORDER BY id DESC LIMIT 10",
+        (task_id, *_STREAK_RESET_KINDS),
+    ).fetchall()
+    streak = 0
+    for row in rows:
+        if row["kind"] != kind:
+            break
+        streak += 1
+    return streak
+
+
 def detect_crashed_workers(conn: sqlite3.Connection) -> list[str]:
     """Reclaim ``running`` tasks whose worker PID is no longer alive.
 
@@ -9666,6 +9711,9 @@ def detect_crashed_workers(conn: sqlite3.Connection) -> list[str]:
     # own bounded violation streak instead of the unified failure
     # counter (see the post-txn loop below).
     crash_details: list[tuple[str, int, str, bool, str]] = []
+    # Cards that must stop and wait for a person instead of another try:
+    # (task_id, kind, reason). Blocked after the txn, like crash accounting.
+    explicit_blocks: list[tuple[str, str, str]] = []
     # (task_id, pid, claimer, protocol_violation, error_text)
     # Worker-exit observer payloads (RFC #58548), collected inside the main
     # txn and fired only after every reclaim/accounting txn has committed.
@@ -9695,7 +9743,24 @@ def detect_crashed_workers(conn: sqlite3.Connection) -> list[str]:
 
             pid = int(row["worker_pid"])
             kind, code = _classify_worker_exit(pid)
+            if (
+                kind == "unknown"
+                and started_at is not None
+                and started_at < _DISPATCHER_PROCESS_STARTED_AT
+            ):
+                # The worker belongs to a previous dispatcher process: the
+                # restart/drain took it with it. Not the card's fault.
+                kind = "interrupted"
+            if (
+                kind == "interrupted"
+                and _trailing_event_streak(conn, row["id"], "interrupted")
+                >= KANBAN_AUTO_RETRY_LIMIT
+            ):
+                # Interrupted again and again is no longer a planned restart.
+                kind = "nonzero_exit" if code else "unknown"
             rate_limited_exit = False
+            interrupted_exit = False
+            terminal_exit = False
             if kind == "clean_exit":
                 # Worker subprocess returned 0 but its task is still
                 # ``running`` in the DB — it exited without calling
@@ -9743,6 +9808,32 @@ def detect_crashed_workers(conn: sqlite3.Connection) -> list[str]:
                     "claimer": row["claim_lock"],
                     "exit_code": code,
                 }
+            elif kind == "interrupted":
+                protocol_violation = False
+                interrupted_exit = True
+                error_text = (
+                    f"pid {pid} was interrupted by a restart or shutdown — "
+                    f"requeued without counting a failure"
+                )
+                event_kind = "interrupted"
+                event_payload = {
+                    "pid": pid,
+                    "claimer": row["claim_lock"],
+                    "exit_code": code,
+                }
+            elif kind == "terminal_provider":
+                protocol_violation = False
+                terminal_exit = True
+                error_text = (
+                    f"pid {pid} stopped: the model provider refused the "
+                    f"agent's access (credentials, model or certificate)"
+                )
+                event_kind = "worker_access_error"
+                event_payload = {
+                    "pid": pid,
+                    "claimer": row["claim_lock"],
+                    "exit_code": code,
+                }
             else:
                 protocol_violation = False
                 if kind == "nonzero_exit":
@@ -9770,7 +9861,12 @@ def detect_crashed_workers(conn: sqlite3.Connection) -> list[str]:
                 # Rate-limited requeues are a clean release, not a crash —
                 # record the run outcome as ``rate_limited`` so the board
                 # history doesn't show a phantom crash for a quota wall.
-                _run_outcome = "rate_limited" if rate_limited_exit else "crashed"
+                _run_outcome = (
+                    "rate_limited" if rate_limited_exit
+                    else "interrupted" if interrupted_exit
+                    else "blocked" if terminal_exit
+                    else "crashed"
+                )
                 run_id = _end_run(
                     conn, row["id"],
                     outcome=_run_outcome, status=_run_outcome,
@@ -9803,6 +9899,27 @@ def detect_crashed_workers(conn: sqlite3.Connection) -> list[str]:
                         (error_text[:500], row["id"]),
                     )
                     rate_limited.append(row["id"])
+                    if (
+                        _trailing_event_streak(conn, row["id"], "rate_limited")
+                        > KANBAN_AUTO_RETRY_LIMIT
+                    ):
+                        explicit_blocks.append((
+                            row["id"], "transient",
+                            "The model provider kept refusing or timing out "
+                            f"({KANBAN_AUTO_RETRY_LIMIT + 1} runs in a row: "
+                            "subscription limit, 429 or timeout). Automatic "
+                            "retries stopped; unblock the card when the "
+                            "provider is available again.",
+                        ))
+                elif interrupted_exit:
+                    pass
+                elif terminal_exit:
+                    explicit_blocks.append((
+                        row["id"], "capability",
+                        "The model provider refused this agent's access "
+                        "(credentials, model or certificate). Fix the agent's "
+                        "provider settings, then unblock the card.",
+                    ))
                 else:
                     if protocol_violation:
                         # Stamp the failure error now: a below-budget
@@ -9838,6 +9955,9 @@ def detect_crashed_workers(conn: sqlite3.Connection) -> list[str]:
     # top precedence it has for every other failure kind. Systemic same-error
     # crashes still trip immediately.
     auto_blocked: list[str] = []
+    for tid, block_kind, reason in explicit_blocks:
+        if block_task(conn, tid, reason=reason, kind=block_kind):
+            auto_blocked.append(tid)
     if crash_details:
         # Fingerprint errors to detect systemic failures.
         _fp_counts: dict[str, int] = {}

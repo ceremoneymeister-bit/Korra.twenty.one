@@ -17339,6 +17339,7 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
 
             # Get the final response
             response = result.get("final_response", "") if result else ""
+            self._last_turn_result = result
 
             # Session titling now runs at TURN START (agent/turn_context.py)
             # from the user's message alone, so it is already done — or in
@@ -21453,6 +21454,44 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
 # Main Entry Point
 # ============================================================================
 
+# Provider failures that say nothing about the card: wait and try again later.
+_TRANSIENT_PROVIDER_REASONS = frozenset({
+    "rate_limit", "upstream_rate_limit", "billing", "overloaded",
+    "server_error", "timeout",
+})
+# Provider failures a retry cannot fix: access or configuration must change.
+_TERMINAL_PROVIDER_REASONS = frozenset({
+    "auth", "auth_permanent", "model_not_found", "ssl_cert_verification",
+})
+
+
+def _single_query_exit_code(result) -> int:
+    """One exit contract for ``chat -q`` and ``chat -Q``.
+
+    Outside a kanban worker a failed run is 1 for ``-Q`` and 0 for ``-q``
+    (callers decide).  Inside a worker the code tells the dispatcher why:
+    75 = wait (subscription, 429, timeout), 78 = access/configuration,
+    1 = ordinary failure, 0 = the turn finished.
+    """
+    if not (isinstance(result, dict) and result.get("failed")):
+        return 0
+    if not korra_env("KORRA_KANBAN_TASK"):
+        return 1
+    reason = result.get("failure_reason")
+    try:
+        from korra_cli.kanban_db import (
+            KANBAN_RATE_LIMIT_EXIT_CODE as _WAIT,
+            KANBAN_TERMINAL_PROVIDER_EXIT_CODE as _TERMINAL,
+        )
+    except Exception:
+        return 1
+    if reason in _TRANSIENT_PROVIDER_REASONS:
+        return _WAIT
+    if reason in _TERMINAL_PROVIDER_REASONS:
+        return _TERMINAL
+    return 1
+
+
 def _run_kanban_goal_loop_q(cli: "HermesCLI", first_response: str) -> None:
     """Drive a kanban goal_mode worker through the Ralph-style goal loop.
 
@@ -21510,9 +21549,14 @@ def _run_kanban_goal_loop_q(cli: "HermesCLI", first_response: str) -> None:
             and cli.agent.session_id != cli.session_id
         ):
             cli.session_id = cli.agent.session_id
+        cli._last_turn_result = result
         resp = result.get("final_response", "") if isinstance(result, dict) else str(result)
         if resp:
             print(resp)
+        if isinstance(result, dict) and result.get("failed"):
+            if not resp and result.get("error"):
+                print(f"Ошибка: {result['error']}", file=sys.stderr)
+            raise RuntimeError("goal turn failed")
         return resp or ""
 
     def _task_status() -> "str | None":
@@ -21893,7 +21937,7 @@ def main(
                 if hasattr(_sig_mod, "SIGALRM"):
                     # Cancel any pre-existing alarm to avoid colliding with
                     # caller-installed timers.
-                    _sig_mod.signal(_sig_mod.SIGALRM, lambda *_: os._exit(0))
+                    _sig_mod.signal(_sig_mod.SIGALRM, lambda *_: os._exit(128 + int(signum)))
                     _sig_mod.alarm(5)
             except Exception:
                 pass
@@ -21915,7 +21959,10 @@ def main(
                     _stream.flush()
                 except Exception:
                     pass
-            os._exit(0)
+            # 128+signal tells the dispatcher "stopped from outside" (restart,
+            # container stop) instead of a clean exit that skipped the
+            # terminal kanban call.
+            os._exit(128 + int(signum))
         raise KeyboardInterrupt()
     try:
         import signal as _signal
@@ -22130,41 +22177,26 @@ def main(
                         # out (→ sticky block). Gated on the env vars the
                         # dispatcher sets in `_default_spawn`; a no-op for every
                         # normal worker and every non-kanban `-q` run.
-                        if korra_env("KORRA_KANBAN_GOAL_MODE") == "1":
+                        if (
+                            korra_env("KORRA_KANBAN_GOAL_MODE") == "1"
+                            and not (isinstance(result, dict) and result.get("failed"))
+                        ):
                             try:
                                 _run_kanban_goal_loop_q(cli, response)
                             except Exception as _goal_exc:
                                 logger.debug("kanban goal loop failed: %s", _goal_exc)
+                            # A late goal turn can fail too; its outcome is
+                            # the worker's outcome.
+                            result = getattr(cli, "_last_turn_result", None) or result
 
                         # Session ID goes to stderr so piped stdout is clean.
                         print(f"\nsession_id: {cli.session_id}", file=sys.stderr)
 
-                        # Ensure proper exit code for automation wrappers.
-                        #
-                        # Kanban workers get a special case: when the run failed
-                        # purely because the provider rate-limited / exhausted
-                        # quota (not because the task itself is broken), exit with
-                        # the EX_TEMPFAIL sentinel instead of the generic 1. The
-                        # dispatcher's reap classifier maps that code to a
-                        # ``rate_limited`` exit and releases the task back to
-                        # ``ready`` WITHOUT incrementing the failure counter, so a
-                        # 5-hour quota window can't trip the circuit breaker and
-                        # permanently block the card. Non-kanban runs keep the
-                        # plain 0/1 contract automation wrappers expect.
-                        _exit_code = 0
-                        if isinstance(result, dict) and result.get("failed"):
-                            _exit_code = 1
-                            if korra_env("KORRA_KANBAN_TASK") and result.get(
-                                "failure_reason"
-                            ) in ("rate_limit", "billing"):
-                                try:
-                                    from korra_cli.kanban_db import (
-                                        KANBAN_RATE_LIMIT_EXIT_CODE as _RL_CODE,
-                                    )
-                                    _exit_code = _RL_CODE
-                                except Exception:
-                                    _exit_code = 1
-                        sys.exit(_exit_code)
+                        # Exit code for automation wrappers. Inside a kanban
+                        # worker it also tells the dispatcher why the run
+                        # stopped (wait / access / failure); see
+                        # _single_query_exit_code.
+                        sys.exit(_single_query_exit_code(result))
 
                 # Exit with error code if credentials or agent init fails
                 sys.exit(1)
@@ -22190,6 +22222,16 @@ def main(
                 cli._show_security_advisories()
                 cli.chat(query, images=single_query_images or None)
                 cli._print_exit_summary(clear_screen=False)
+                if korra_env("KORRA_KANBAN_TASK"):
+                    # A worker must not report success for a turn that never
+                    # ran or failed: the dispatcher reads the exit code.
+                    _worker_result = getattr(cli, "_last_turn_result", None)
+                    _worker_code = (
+                        _single_query_exit_code(_worker_result)
+                        if _worker_result is not None else 1
+                    )
+                    if _worker_code:
+                        sys.exit(_worker_code)
         finally:
             _finalize_single_query(cli)
         return
