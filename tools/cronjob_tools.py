@@ -640,8 +640,24 @@ def _local_delivery_notice(job: Dict[str, Any], user_deliver: Optional[str]) -> 
     try:
         from cron.scheduler import _resolve_delivery_targets
 
-        if _resolve_delivery_targets(job):
-            return None  # Will actually deliver somewhere — nothing to flag.
+        targets = _resolve_delivery_targets(job)
+        if targets:
+            from cron.scheduler import WEB_CHAT_PLATFORM, web_chat_unreachable_reason
+
+            for target in targets:
+                if str(target.get("platform") or "").lower() != WEB_CHAT_PLATFORM:
+                    return None  # Another channel will deliver — nothing to flag.
+            reason = next(
+                (r for r in (web_chat_unreachable_reason(t.get("chat_id")) for t in targets) if r),
+                None,
+            )
+            if reason is None:
+                return None  # The result lands in this web chat.
+            return (
+                f"Напоминание НЕ придёт в этот чат: {reason}. Скажи человеку об этом прямо "
+                "и предложи канал, куда оно дойдёт: Telegram (deliver='telegram') "
+                "или другой подключённый канал."
+            )
     except Exception:
         # If resolution can't be evaluated, fall back to the origin signal.
         if job.get("origin"):

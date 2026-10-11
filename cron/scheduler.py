@@ -2626,6 +2626,54 @@ def _get_bot_chat_delivery_timeout() -> int:
         return 600
 
 
+WEB_CHAT_PLATFORM = "api_server"
+
+
+def web_chat_unreachable_reason(chat_id) -> Optional[str]:
+    """Русская причина, по которой в этот веб-чат кабинета нечего доставлять, либо None."""
+    session_id = str(chat_id or "").strip()
+    if not session_id:
+        return "у задания нет чата кабинета"
+    db = None
+    try:
+        from korra_state import SessionDB
+
+        db = SessionDB()
+        if not db.get_session(session_id):
+            return "этот чат кабинета не найден (возможно, он удалён)"
+        return None
+    except Exception as exc:
+        return f"история чатов кабинета недоступна ({type(exc).__name__})"
+    finally:
+        if db is not None:
+            db.close()
+
+
+def _deliver_to_web_chat(chat_id, text: str) -> Optional[str]:
+    """Положить результат в историю веб-чата кабинета строкой ассистента.
+
+    У веб-чата нет канала отправки (HTTP запрос-ответ), поэтому результат
+    записывается в сессию тем же способом, что и сообщение «Учёл»: строка видна
+    после обновления страницы и входит в историю для следующих ходов.
+    """
+    reason = web_chat_unreachable_reason(chat_id)
+    if reason:
+        return f"Не удалось положить результат в чат кабинета: {reason}."
+    db = None
+    try:
+        from korra_state import SessionDB
+
+        db = SessionDB()
+        db.append_message(str(chat_id).strip(), "assistant", text, display_kind="cron_delivery")
+        return None
+    except Exception as exc:
+        logger.warning("Cron delivery to the web chat %s failed: %s", chat_id, exc, exc_info=True)
+        return f"Не удалось положить результат в чат кабинета: {type(exc).__name__}."
+    finally:
+        if db is not None:
+            db.close()
+
+
 def _deliver_to_bot_chat(job: dict, content: str, profile: str) -> Optional[str]:
     """Deliver job output into a profile's canonical Bot Chat as an inbound turn.
 
@@ -3122,8 +3170,15 @@ def _is_creator_private_chat(job: dict, platform_name: str, chat_id) -> bool:
     So a job anybody set up may answer its creator without a decision (Dmitry,
     28.09.2026: a user of their own agent automates for themselves).
     """
-    chat = _private_telegram_chat(platform_name, chat_id)
     origin = job.get("origin") if isinstance(job.get("origin"), dict) else {}
+    if str(platform_name or "").strip().lower() == WEB_CHAT_PLATFORM:
+        # Чат кабинета, из которого задание создано: тот же человек, тот же чат.
+        return (
+            str(origin.get("platform") or "").strip().lower() == WEB_CHAT_PLATFORM
+            and bool(str(chat_id or "").strip())
+            and str(origin.get("chat_id") or "").strip() == str(chat_id).strip()
+        )
+    chat = _private_telegram_chat(platform_name, chat_id)
     return bool(chat) and (
         str(origin.get("platform") or "").strip().lower() == "telegram"
         and str(origin.get("user_id") or "").strip() == chat
@@ -3443,6 +3498,12 @@ def _deliver_result(
                     f"{target_label(platform_name, chat_id, thread_id)}"
                 )
                 continue
+
+        if platform_name == WEB_CHAT_PLATFORM:
+            web_error = _deliver_to_web_chat(chat_id, target_content)
+            if web_error:
+                delivery_errors.append(web_error)
+            continue
 
         # Diagnostic: log thread_id for topic-aware delivery debugging
         origin = _resolve_origin(job) or {}
