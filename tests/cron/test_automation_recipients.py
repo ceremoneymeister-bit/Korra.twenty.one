@@ -1127,3 +1127,75 @@ def test_the_result_is_not_delivered_again_after_the_run_sent_it(live_send, monk
         assert delivered.await_count == 0
         assert _deliver_result(scheduled, "Другой отчёт", execution_id=grant["execution_id"]) is None
         assert delivered.await_count == 1
+
+
+# --- K21-299: a kanban worker never confirms recipients for the owner -------
+
+@pytest.fixture
+def worker(store, monkeypatch):
+    monkeypatch.setenv("KORRA_KANBAN_TASK", "t_000000000001")
+    return store
+
+
+def test_worker_flag_is_ignored_and_new_recipients_wait_for_the_owner(worker, monkeypatch):
+    from tools.effect_decisions import get_decision
+
+    monkeypatch.setattr("korra_cli.kanban_db.current_task_origin_session", lambda: "owner-chat-1")
+    result = _tool({}, action="create", prompt="Поздравления", schedule="every 1h",
+                   deliver="telegram:555", recipients_confirmed=True)
+    assert result["success"] is True
+    assert result["recipient_confirmation_deferred"] is True
+    assert result["recipients"]["targets"] == ["telegram:555"]
+    job = _job(result["job_id"])
+    assert not job["enabled"] and job["paused_reason"] == recipients.PAUSE_REASON
+    assert job["deliver"] != "telegram:555"
+    assert "telegram:555" not in (job.get("recipients_confirmed") or {}).get("targets", [])
+    card = get_decision(result["recipients"]["decision_id"])
+    assert card["status"] == "pending"
+    assert card["source_session_id"] == "owner-chat-1"
+
+
+def test_worker_flag_without_an_owner_chat_still_leaves_a_card(worker):
+    result = _tool({}, action="create", prompt="Поздравления", schedule="every 1h",
+                   deliver="telegram:555", recipients_confirmed=True)
+    assert result["success"] is True
+    assert result["recipient_confirmation_deferred"] is True
+    assert result["recipients"]["decision_id"]
+    assert not _job(result["job_id"])["enabled"]
+
+
+def test_worker_flag_with_no_new_recipient_pauses_nothing_and_claims_nothing(worker):
+    result = _tool({}, action="create", prompt="Отчёт", schedule="every 1h",
+                   recipients_confirmed=True)
+    assert result["success"] is True
+    assert "recipient_confirmation_deferred" not in result
+    assert "recipients" not in result
+    assert _job(result["job_id"])["enabled"]
+
+
+def test_worker_update_with_flag_adds_a_card_for_a_new_recipient(worker):
+    created = _tool({}, action="create", prompt="Отчёт", schedule="every 1h")
+    result = _tool({}, action="update", job_id=created["job_id"], deliver="telegram:555",
+                   recipients_confirmed=True)
+    assert result["success"] is True
+    assert result["recipient_confirmation_deferred"] is True
+    job = _job(created["job_id"])
+    assert not job["enabled"] and job["recipients_pending"]["targets"] == ["telegram:555"]
+
+
+def test_worker_update_with_only_the_flag_is_not_a_confirmation_or_a_pause(worker):
+    created = _tool({}, action="create", prompt="Отчёт", schedule="every 1h")
+    result = _tool({}, action="update", job_id=created["job_id"], recipients_confirmed=True)
+    assert result["success"] is False
+    assert "No updates provided" not in result["error"]
+    assert "recipient_confirmation_deferred" not in result
+    assert _job(created["job_id"])["enabled"]
+
+
+def test_worker_flag_does_not_confirm_a_pending_question(worker):
+    created = _tool({}, action="create", prompt="Поздравления", schedule="every 1h",
+                    deliver="telegram:555")
+    again = _tool({}, action="update", job_id=created["job_id"], recipients_confirmed=True)
+    assert again["success"] is False
+    job = _job(created["job_id"])
+    assert not job["enabled"] and job["recipients_pending"]["targets"] == ["telegram:555"]
