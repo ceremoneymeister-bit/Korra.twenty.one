@@ -668,6 +668,70 @@ def _dispatch_resolved_send(
     return result
 
 
+def _execute_gmail_decision(decision_id: str, payload: dict) -> dict:
+    """Send an approved Gmail message by re-running the Google skill script.
+
+    The script sends only when this decision is ``executing`` and its recorded
+    arguments are exactly the ones it was started with. Any failure after the
+    script started is an unknown outcome, never a retry.
+    """
+    import subprocess
+    import sys
+
+    from tools import effect_decisions as decisions
+
+    try:
+        from korra_cli.google_workspace import workspace_skill_status
+
+        script = workspace_skill_status().get("execution_path")
+        argv = list((payload.get("tool_args") or {}).get("argv") or [])
+        if not script or not argv:
+            raise RuntimeError("google skill script is unavailable")
+    except Exception as exc:
+        return decisions.finish_execution(
+            decision_id,
+            status=decisions.FAILED,
+            outcome={
+                "reason": "google_skill_unavailable",
+                "detail": _sanitize_error_text(str(exc)),
+                "retry": False,
+            },
+        )
+    try:
+        run = subprocess.run(
+            [sys.executable, str(script), *argv],
+            env={**os.environ, "KORRA_EFFECT_DECISION_ID": decision_id},
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except BaseException as exc:
+        return decisions.finish_execution(
+            decision_id,
+            status=decisions.UNKNOWN,
+            outcome={
+                "reason": "transport_outcome_unknown",
+                "detail": _sanitize_error_text(str(exc)),
+                "retry": False,
+            },
+        )
+    if run.returncode == 0:
+        return decisions.finish_execution(
+            decision_id,
+            status=decisions.SUCCEEDED,
+            outcome={"transport": {"success": True, "output": _sanitize_error_text(run.stdout)[:500]}},
+        )
+    return decisions.finish_execution(
+        decision_id,
+        status=decisions.UNKNOWN,
+        outcome={
+            "reason": "transport_reported_failure",
+            "detail": _sanitize_error_text(run.stderr or run.stdout)[:500],
+            "retry": False,
+        },
+    )
+
+
 def resolve_outbound_message_decision(
     decision_id: str,
     choice: str,
@@ -728,6 +792,9 @@ def resolve_outbound_message_decision(
     decisions.claim_execution(
         decision_id, expected_payload_sha256=decision["payload_sha256"]
     )
+
+    if payload.get("platform") == "gmail":
+        return _execute_gmail_decision(decision_id, payload)
 
     try:
         prepare_send_message_platforms()

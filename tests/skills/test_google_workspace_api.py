@@ -665,3 +665,135 @@ def test_skill_doc_matches_connection_behaviour():
     assert "shared-all" in text
     assert "off by default" in text and "Settings → Keys → Google Workspace" in text
     assert "First call `google_workspace_auth`" not in text
+
+
+def _gmail_send_args(**over):
+    base = dict(to="client@example.com", subject="Счёт", body="Здравствуйте", cc="", html=False,
+                from_header="", thread_id="")
+    base.update(over)
+    return SimpleNamespace(**base)
+
+
+def _agent_turn_env(monkeypatch):
+    for name in ("KORRA_CRON_SESSION", "KORRA_CRON_RUN_TOKEN", "KORRA_EFFECT_DECISION_ID"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("KORRA_SESSION_KEY", "agent:main:telegram:dm:1")
+    monkeypatch.setenv("KORRA_SESSION_ID", "sess-1")
+    monkeypatch.setenv("KORRA_SESSION_PLATFORM", "telegram")
+    monkeypatch.setattr(sys, "argv", ["google_api.py", "gmail", "send", "--to", "client@example.com",
+                                      "--subject", "Счёт", "--body", "Здравствуйте"])
+
+
+def _sent_calls(api_module, monkeypatch):
+    sent = []
+
+    def fake_run(cmd, params=None, body=None, **kwargs):
+        sent.append(cmd)
+        return {"id": "m1", "threadId": "t1"}
+
+    monkeypatch.setattr(api_module, "_run_gws", fake_run)
+    return sent
+
+
+def test_gmail_send_by_agent_waits_for_owner_decision(api_module, monkeypatch, capsys):
+    from tools import effect_decisions as decisions
+
+    _agent_turn_env(monkeypatch)
+    sent = _sent_calls(api_module, monkeypatch)
+    with pytest.raises(SystemExit):
+        api_module.gmail_send(_gmail_send_args())
+
+    out = json.loads(capsys.readouterr().out)
+    assert out["status"] == "pending_decision" and not sent
+    decision = decisions.get_decision(out["decision_id"])
+    assert decision["kind"] == "outbound_message" and decision["status"] == decisions.PENDING
+    assert decision["payload"]["chat_id"] == "client@example.com"
+    assert "Здравствуйте" in decision["payload"]["message"]
+    assert decisions.approval_payload(decision)["choices"] == ["once", "deny"]
+
+
+def test_gmail_reply_by_agent_waits_for_owner_decision(api_module, monkeypatch, capsys):
+    _agent_turn_env(monkeypatch)
+    monkeypatch.setattr(sys, "argv", ["google_api.py", "gmail", "reply", "m0", "--body", "Спасибо"])
+    sent = []
+
+    def fake_run(cmd, params=None, body=None, **kwargs):
+        sent.append(cmd)
+        return {"threadId": "t0", "payload": {"headers": [
+            {"name": "From", "value": "ivan@example.com"}, {"name": "Subject", "value": "Вопрос"}]}}
+
+    monkeypatch.setattr(api_module, "_run_gws", fake_run)
+    with pytest.raises(SystemExit):
+        api_module.gmail_reply(SimpleNamespace(message_id="m0", body="Спасибо", from_header=""))
+
+    out = json.loads(capsys.readouterr().out)
+    assert out["status"] == "pending_decision"
+    assert all(cmd[-1] == "get" for cmd in sent)
+
+
+def test_gmail_send_from_owner_automation_needs_no_decision(api_module, monkeypatch, capsys):
+    _agent_turn_env(monkeypatch)
+    monkeypatch.setenv("KORRA_CRON_SESSION", "1")
+    monkeypatch.setenv("KORRA_CRON_RUN_TOKEN", "run-token")
+    sent = _sent_calls(api_module, monkeypatch)
+    api_module.gmail_send(_gmail_send_args())
+
+    assert json.loads(capsys.readouterr().out)["status"] == "sent" and len(sent) == 1
+
+
+def test_gmail_send_by_a_person_at_the_shell_needs_no_decision(api_module, monkeypatch, capsys):
+    _agent_turn_env(monkeypatch)
+    for name in ("KORRA_SESSION_KEY", "KORRA_SESSION_ID", "KORRA_SESSION_PLATFORM"):
+        monkeypatch.delenv(name)
+    monkeypatch.delenv("KORRA_KANBAN_TASK", raising=False)
+    sent = _sent_calls(api_module, monkeypatch)
+    api_module.gmail_send(_gmail_send_args())
+
+    assert json.loads(capsys.readouterr().out)["status"] == "sent" and len(sent) == 1
+
+
+def test_approved_gmail_decision_runs_the_script_once_and_binds_its_arguments(api_module, monkeypatch, capsys):
+    from tools import effect_decisions as decisions
+    from tools import send_message_tool
+
+    _agent_turn_env(monkeypatch)
+    with pytest.raises(SystemExit):
+        api_module.gmail_send(_gmail_send_args())
+    decision_id = json.loads(capsys.readouterr().out)["decision_id"]
+
+    runs = []
+
+    def fake_subprocess(cmd, env=None, **kwargs):
+        runs.append((cmd, env["KORRA_EFFECT_DECISION_ID"]))
+        return SimpleNamespace(returncode=0, stdout='{"status": "sent"}', stderr="")
+
+    monkeypatch.setattr("subprocess.run", fake_subprocess)
+    monkeypatch.setattr("korra_cli.google_workspace.workspace_skill_status",
+                        lambda *a, **k: {"execution_path": str(API_PATH)})
+    result = send_message_tool.resolve_outbound_message_decision(
+        decision_id, "once", source_session_key="agent:main:telegram:dm:1")
+    assert result["status"] == decisions.SUCCEEDED
+    assert runs[0][0][2:] == ["gmail", "send", "--to", "client@example.com", "--subject", "Счёт",
+                              "--body", "Здравствуйте"]
+    assert runs[0][1] == decision_id
+
+    # The script itself sends only for the exact arguments of an executing decision.
+    sent = _sent_calls(api_module, monkeypatch)
+    monkeypatch.setenv("KORRA_EFFECT_DECISION_ID", decision_id)
+    with pytest.raises(SystemExit):
+        api_module.gmail_send(_gmail_send_args())
+    assert not sent
+
+
+def test_denied_gmail_decision_never_runs_the_script(api_module, monkeypatch, capsys):
+    from tools import effect_decisions as decisions
+    from tools import send_message_tool
+
+    _agent_turn_env(monkeypatch)
+    with pytest.raises(SystemExit):
+        api_module.gmail_send(_gmail_send_args())
+    decision_id = json.loads(capsys.readouterr().out)["decision_id"]
+    monkeypatch.setattr("subprocess.run", lambda *a, **k: pytest.fail("denied send must not run"))
+    result = send_message_tool.resolve_outbound_message_decision(
+        decision_id, "deny", source_session_key="agent:main:telegram:dm:1")
+    assert result["status"] == decisions.DENIED

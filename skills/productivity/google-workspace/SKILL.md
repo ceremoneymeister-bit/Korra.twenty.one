@@ -243,7 +243,7 @@ All commands return JSON. Parse with `jq` or read directly. Key fields:
 
 - **Gmail search**: `[{id, threadId, from, to, subject, date, snippet, labels}]`
 - **Gmail get**: `{id, threadId, from, to, subject, date, labels, body}`
-- **Gmail send/reply**: `{status: "sent", id, threadId}`
+- **Gmail send/reply**: `{status: "sent", id, threadId}`; for an agent's one-off send `{success: false, status: "pending_decision", decision_id}` (exit code 1, nothing sent)
 - **Calendar list**: `[{id, summary, start, end, location, description, htmlLink}]`
 - **Calendar create**: `{status: "created", id, summary, htmlLink}`
 - **Drive search**: `[{id, name, mimeType, modifiedTime, webViewLink}]`
@@ -270,11 +270,12 @@ consent through **Добавить сервисы**, never editing token metadat
 
 ## Rules
 
-1. **Never send email, create/delete calendar events, delete Drive files, share files, or modify Docs/Sheets without confirming with the user first.** Show what will be done (recipients, file IDs, content, share role) and ask for approval. For `drive delete`, prefer the default trash (reversible) over `--permanent`.
-2. **Verify read access with the service command.** Use [scripts/google_api.py](scripts/google_api.py) for the requested read before claiming Google is disconnected. A small read-only probe is `drive search "" --max 1`, `calendar list`, or `gmail labels`; for Sheets/Docs read the requested document/range. `owner_required` from `google_workspace_auth` means connection management is unavailable to this principal, not that a shared grant is absent. `not_authenticated` means this agent has no grant; `service_not_selected` means the service needs additional owner consent. File permission errors, disabled APIs, network and refresh failures are separate problems, not a missing connection. Manage the connection only in a verified owner context; extend access in Settings → Keys → Google Workspace without disconnecting existing access.
-3. **Use the Gmail search syntax reference** for complex queries — load it with `skill_view("google-workspace", file_path="references/gmail-search-syntax.md")`.
-4. **Calendar times must include timezone** — always use ISO 8601 with offset (e.g., `2026-03-01T10:00:00-06:00`) or UTC (`Z`).
-5. **Respect rate limits** — avoid rapid-fire sequential API calls. Batch reads when possible.
+1. **`gmail send` and `gmail reply` go through the owner's decision ledger.** When you send on your own initiative, the script saves the draft and prints `status: "pending_decision"` with a `decision_id`; nothing is sent until the owner approves the card. Do not retry or re-run it: tell the user the draft waits for their approval. In an automation the owner configured, the same commands send without a confirmation.
+2. **Never create/delete calendar events, delete Drive files, share files, or modify Docs/Sheets without confirming with the user first.** Show what will be done (recipients, file IDs, content, share role) and ask for approval. For `drive delete`, prefer the default trash (reversible) over `--permanent`.
+3. **Verify read access with the service command.** Use [scripts/google_api.py](scripts/google_api.py) for the requested read before claiming Google is disconnected. A small read-only probe is `drive search "" --max 1`, `calendar list`, or `gmail labels`; for Sheets/Docs read the requested document/range. `owner_required` from `google_workspace_auth` means connection management is unavailable to this principal, not that a shared grant is absent. `not_authenticated` means this agent has no grant; `service_not_selected` means the service needs additional owner consent. File permission errors, disabled APIs, network and refresh failures are separate problems, not a missing connection. Manage the connection only in a verified owner context; extend access in Settings → Keys → Google Workspace without disconnecting existing access.
+4. **Use the Gmail search syntax reference** for complex queries — load it with `skill_view("google-workspace", file_path="references/gmail-search-syntax.md")`.
+5. **Calendar times must include timezone** — always use ISO 8601 with offset (e.g., `2026-03-01T10:00:00-06:00`) or UTC (`Z`).
+6. **Respect rate limits** — avoid rapid-fire sequential API calls. Batch reads when possible.
 
 ## Troubleshooting
 

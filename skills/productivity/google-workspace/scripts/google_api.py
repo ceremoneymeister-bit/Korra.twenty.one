@@ -408,7 +408,100 @@ def gmail_get(args):
 
 
 
+def _gmail_effect_allowed(*, target: str, subject: str, body: str) -> bool:
+    """Gate a Gmail send through the durable outbound-message ledger.
+
+    Runs without a decision when a person runs the script, when the owner's
+    automation does (no confirmation, even with approvals.mode off), or when
+    the gateway executes an already approved decision for exactly these
+    arguments. An agent's one-off send is recorded as a pending decision and
+    nothing is sent until the owner approves it.
+    """
+    from gateway.session_context import get_session_env
+    from korra_cli.send_cmd import _run_by_agent
+    from tools.effect_decisions import EXECUTING, create_pending, get_decision
+
+    argv = list(sys.argv[1:])
+    decision_id = os.environ.get("KORRA_EFFECT_DECISION_ID", "").strip()
+    if decision_id:
+        decision = get_decision(decision_id) or {}
+        payload = decision.get("payload") or {}
+        if (
+            decision.get("kind") == "outbound_message"
+            and decision.get("status") == EXECUTING
+            and payload.get("platform") == "gmail"
+            and (payload.get("tool_args") or {}).get("argv") == argv
+        ):
+            return True
+        print(json.dumps({"success": False, "error": "decision does not match this send"}), file=sys.stderr)
+        sys.exit(1)
+    if get_session_env("KORRA_CRON_SESSION", "") == "1" and get_session_env("KORRA_CRON_RUN_TOKEN", "").strip():
+        return True
+    if not _run_by_agent():
+        return True
+
+    from tools.send_message_tool import _decision_session_identity
+
+    session_id, session_key, profile, owner_id = _decision_session_identity()
+    decision, _ = create_pending(
+        kind="outbound_message",
+        owner_id=owner_id,
+        profile=profile,
+        source_session_id=session_id,
+        source_session_key=session_key,
+        payload={
+            "platform": "gmail",
+            "account": "gmail",
+            "chat_id": target,
+            "thread_id": None,
+            "target_label": f"Gmail: {target}",
+            "message": f"Тема: {subject}\n\n{body}",
+            "attachments": [],
+            "force_document": False,
+            "used_home_channel": False,
+            "tool_args": {"argv": argv},
+            "source_label": get_session_env("KORRA_SESSION_PLATFORM", "cli") or "cli",
+            "source_user_id": get_session_env("KORRA_SESSION_USER_ID", "") or None,
+            "validity": {"version": 1},
+        },
+    )
+    print(json.dumps({
+        "success": False,
+        "status": "pending_decision",
+        "decision_id": decision["id"],
+        "message": (
+            "Письмо не отправлено. Черновик сохранён и ждёт точного решения "
+            "владельца; не повторяйте вызов."
+        ),
+    }, indent=2, ensure_ascii=False))
+    sys.exit(1)
+
+
+def _gmail_reply_preview(message_id: str) -> tuple[str, str]:
+    """Recipient and subject a reply would use, for the owner's decision card."""
+    params = {
+        "userId": "me",
+        "id": message_id,
+        "format": "metadata",
+        "metadataHeaders": ["From", "Subject", "Message-ID"],
+    }
+    try:
+        if _gws_binary():
+            original = _run_gws(["gmail", "users", "messages", "get"], params=params)
+        else:
+            original = build_service("gmail", "v1").users().messages().get(**params).execute()
+        headers = _headers_dict(original)
+    except (Exception, SystemExit):
+        return f"ответ на письмо {message_id}", ""
+    subject = headers.get("subject", "")
+    return headers.get("from", "") or f"ответ на письмо {message_id}", (
+        subject if subject.startswith("Re:") else f"Re: {subject}"
+    )
+
+
 def gmail_send(args):
+    if not _gmail_effect_allowed(target=args.to, subject=args.subject, body=args.body):
+        return
     if _gws_binary():
         message = MIMEText(args.body, "html" if args.html else "plain")
         message["To"] = args.to
@@ -452,6 +545,9 @@ def gmail_send(args):
 
 
 def gmail_reply(args):
+    target, subject = _gmail_reply_preview(args.message_id)
+    if not _gmail_effect_allowed(target=target, subject=subject, body=args.body):
+        return
     if _gws_binary():
         original = _run_gws(
             ["gmail", "users", "messages", "get"],
