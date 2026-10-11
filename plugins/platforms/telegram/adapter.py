@@ -11489,12 +11489,25 @@ class TelegramAdapter(BasePlatformAdapter):
             _chat_id_str if thread_id_str else None,
         )
 
+        # A group message admitted without addressing the bot (free-response
+        # chat/topic, mention requirement off) may be answered with a silence
+        # marker on purpose; the gateway then stays quiet instead of
+        # reporting "no answer" to everyone in the chat.
+        _event_metadata: Dict[str, Any] = {}
+        if (
+            self._is_group_chat(message)
+            and not self._is_reply_to_bot(message)
+            and not self._message_mentions_bot(message)
+        ):
+            _event_metadata["reply_expected"] = False
+
         return MessageEvent(
             text=self._with_forward_attribution(message, message.text),
             message_type=msg_type,
             source=source,
             raw_message=message,
             message_id=str(message.message_id),
+            metadata=_event_metadata,
             platform_update_id=update_id,
             update_ids={update_id} if update_id is not None else set(),
             reply_to_message_id=reply_to_id,

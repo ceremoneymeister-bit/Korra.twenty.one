@@ -120,6 +120,37 @@ def is_intentional_silence_agent_result(agent_result: dict | None, response: Any
     return is_intentional_silence_response(response)
 
 
+# Служебные ходы шлёт сам шлюз, а не человек: только им разрешено молчать.
+MACHINERY_DISPLAY_KINDS = frozenset({"internal_notification", "model_switch", "auto_continue"})
+
+# Показывается человеку, чьё сообщение модель оставила без ответа.
+UNEXPECTED_SILENCE_REPLY = (
+    "⚠️ Не получилось ответить на ваше сообщение. Попробуйте ещё раз или задайте вопрос иначе."
+)
+
+
+def should_swallow_silence(
+    agent_result: dict | None,
+    response: Any,
+    *,
+    display_kind: Any = None,
+    reply_expected: Any = None,
+) -> bool:
+    """Bare silence is allowed for a service turn or a message not addressed to the bot.
+
+    ``display_kind`` is the persisted kind of the CURRENT turn: a previous
+    service row in the transcript must never authorize silence for a human turn.
+    ``reply_expected=False`` is set by an adapter for a message it admitted
+    without the bot being addressed (e.g. free-response group chatter), where
+    a deliberate marker is the right answer and a notice would be spam.
+    """
+    if not is_intentional_silence_agent_result(agent_result, response):
+        return False
+    if isinstance(display_kind, str) and display_kind in MACHINERY_DISPLAY_KINDS:
+        return True
+    return reply_expected is False
+
+
 def is_partial_silence_marker(text: Any) -> bool:
     """Return True while ``text`` could still resolve to a silence marker.
 

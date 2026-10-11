@@ -22257,12 +22257,22 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             if _is_gateway_hidden_reasoning_incomplete_turn(agent_result):
                 response = ""
             try:
-                from gateway.response_filters import is_intentional_silence_agent_result
+                from gateway.response_filters import (
+                    is_intentional_silence_agent_result,
+                    should_swallow_silence,
+                )
                 _intentional_silence = is_intentional_silence_agent_result(
                     agent_result, response,
                 )
+                _swallow_silence = _intentional_silence and should_swallow_silence(
+                    agent_result,
+                    response,
+                    display_kind=persist_user_display_kind,
+                    reply_expected=(getattr(event, "metadata", None) or {}).get("reply_expected"),
+                )
             except Exception:
                 _intentional_silence = False
+                _swallow_silence = False
 
             # Convert the agent's internal "(empty)" sentinel into a
             # user-friendly message.  "(empty)" means the model failed to
@@ -22761,12 +22771,22 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             # still persisted in session history so later turns keep normal
             # user/assistant alternation; only the outbound chat delivery is
             # suppressed.
-            if _intentional_silence:
+            if _intentional_silence and _swallow_silence:
                 logger.info(
                     "Suppressing intentional silence marker for session %s",
                     session_entry.session_id,
                 )
                 response = ""
+            elif _intentional_silence:
+                # A person wrote and the model answered with a bare silence
+                # marker: tell them, instead of leaving the chat without a reply.
+                from gateway.response_filters import UNEXPECTED_SILENCE_REPLY
+                logger.warning(
+                    "Silence marker for a human turn in session %s; sending a notice",
+                    session_entry.session_id,
+                )
+                response = UNEXPECTED_SILENCE_REPLY
+                agent_result["already_sent"] = False
 
             # Auto voice reply: send TTS audio before the text response
             _already_sent = bool(agent_result.get("already_sent"))
@@ -31532,10 +31552,22 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     # This direct queued-send branch predates intentional-silence
                     # filtering, so without this check it leaks the literal marker.
                     try:
-                        from gateway.response_filters import is_intentional_silence_agent_result
+                        from gateway.response_filters import (
+                            UNEXPECTED_SILENCE_REPLY,
+                            is_intentional_silence_agent_result,
+                            should_swallow_silence,
+                        )
                         _intentional_silence = is_intentional_silence_agent_result(
                             _delivery_result, first_response,
                         )
+                        if _intentional_silence and not should_swallow_silence(
+                            _delivery_result,
+                            first_response,
+                            display_kind=persist_user_display_kind,
+                        ):
+                            first_response = UNEXPECTED_SILENCE_REPLY
+                            _already_streamed = False
+                            _intentional_silence = False
                     except Exception:
                         _intentional_silence = False
                     if _intentional_silence:
