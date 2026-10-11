@@ -81,8 +81,8 @@ READINESS_TIMEOUT_CODES = {"native_readiness_timeout", "profile_gateway_timeout"
 # UPDATE_HISTORY counts real version installs only, from the one that put the
 # running image in place backwards. A dry run, an already-current check or a
 # failed preflight is no install and never moves that boundary. Without a
-# proven install nothing is retired. A rollback's exports (`after`,
-# `data.after-*`) hold the owner's writes the rollback did not restore; they
+# proven install nothing is retired. A rollback's export (`data.after-*`; a
+# 0.21.16/0.21.17 rollback also left `after`) holds the owner's writes the rollback did not restore; they
 # stay until an operator reconciles them and leaves `exports-reviewed` in the
 # job directory. An incident review raises the number with UPDATE_HISTORY or
 # a root-owned `update-history` file beside the updater.
@@ -983,6 +983,54 @@ def snapshot(source, destination):
     return manifest
 
 
+# Rewritten in place by the credential merge of a restore (a container writes
+# them), so they are copied, never linked: a write through a shared inode would
+# alter the verified `before` too.
+REWRITTEN_IN_PLACE = {"config.yaml"}
+
+
+def link_tree(source, destination):
+    """Zero-copy clone of a snapshot: files become hard links, nothing is read.
+
+    Directories and symlinks are created anew with their owners; the files in
+    REWRITTEN_IN_PLACE are real copies. Both trees MUST be on one filesystem
+    (:meth:`Updater.rollback_path`). Every other write to the clone replaces a
+    file instead of writing through it. Once the clone is live, the source
+    shares its inodes with writable DATA and stops being a verifiable copy.
+    """
+    if destination.exists():
+        raise UpdateError("Refusing to overwrite an existing snapshot")
+    directories = []
+
+    def own(target, original):
+        info = original.lstat()
+        os.chown(target, info.st_uid, info.st_gid, follow_symlinks=False)
+
+    destination.mkdir()
+    directories.append((source, destination))
+    for directory, dirs, files in os.walk(source, followlinks=False):
+        relative = Path(directory).relative_to(source)
+        for name in dirs + files:
+            original, target = Path(directory) / name, destination / relative / name
+            mode = original.lstat().st_mode
+            if stat.S_ISLNK(mode):
+                target.symlink_to(os.readlink(original))
+                own(target, original)
+            elif stat.S_ISDIR(mode):
+                target.mkdir()
+                directories.append((original, target))
+            elif not stat.S_ISREG(mode):
+                raise UpdateError("Unsupported file type in snapshot: " + original.relative_to(source).as_posix())
+            elif name in REWRITTEN_IN_PLACE:
+                shutil.copy2(original, target)
+                own(target, original)
+            else:
+                os.link(original, target, follow_symlinks=False)
+    for original, target in reversed(directories):
+        shutil.copystat(original, target)
+        own(target, original)
+
+
 def gateway_intent(root):
     """Durable start/stop intent of the root and per-profile gateways.
 
@@ -1361,6 +1409,29 @@ class Updater:
                               "Для замены явно передайте --accept-custom-current " + info["Image"])
         return integrity
 
+    def rollback_path(self):
+        """How a rollback will stage the restored DATA: 'link' or 'copy'.
+
+        'link' needs `before` and DATA's directory on one filesystem that
+        accepts hard links; it is asked of the filesystem, not inferred.
+        """
+        directory = self.jobs if self.jobs.is_dir() else self.home
+        try:
+            fd, name = tempfile.mkstemp(prefix=".link-probe-", dir=directory)
+        except OSError:
+            return "copy"
+        os.close(fd)
+        probe = Path(name)
+        linked = self.data.parent / (probe.name + ".link")
+        try:
+            os.link(probe, linked)
+            return "link"
+        except OSError:
+            return "copy"
+        finally:
+            linked.unlink(missing_ok=True)
+            probe.unlink(missing_ok=True)
+
     def free_space(self, image_bytes=0):
         size = 0
         for root, _dirs, files in os.walk(self.data):
@@ -1375,8 +1446,13 @@ class Updater:
                     size += info.st_size
         # The same sum sizes the readiness budget of a large contour.
         self.receipt["data_bytes"] = size
-        # Before + after + restoration staging, plus dependency/image headroom.
-        required = 3 * size + image_bytes + 2 * 1024**3
+        # `before` is the one full copy an update writes. A rollback sets the
+        # failed DATA aside by rename and stages the restored one from `before`
+        # as hard links; only across filesystems is that stage a second copy.
+        # Plus dependency/image headroom. Each location is held to the sum.
+        mode = self.rollback_path()
+        required = (1 if mode == "link" else 2) * size + image_bytes + 2 * 1024**3
+        self.receipt.update(rollback_path=mode, rollback_required_bytes=required)
         for location in {self.home, self.data.parent, Path("/var/lib/docker")}:
             if location.exists() and shutil.disk_usage(location).free < required:
                 raise UpdateError(f"Insufficient space at {location}; need {required} bytes")
@@ -1540,12 +1616,12 @@ class Updater:
     def exports_reviewed(self, directory, receipt):
         """May a rolled-back operation's exports go?
 
-        Its `after` export and `data.after-*` tree are the only copies of what
-        the owner wrote on the failed release: the rollback restored the older
-        DATA and carried forward only credentials. They may go when the export
-        differs from the restored copy in nothing, or when an operator has
-        reconciled them and left a root-owned `exports-reviewed` beside the
-        receipt. A receipt without the count is never assumed empty.
+        Its `data.after-*` tree (and `after` of a 0.21.16/0.21.17 rollback) is
+        the only copy of what the owner wrote on the failed release: the
+        rollback restored the older DATA and carried forward only credentials.
+        They may go when the export differs from the restored copy in nothing,
+        or when an operator has reconciled them and left a root-owned
+        `exports-reviewed` beside the receipt. A receipt without the count is never assumed empty.
         """
         marker = directory / EXPORTS_REVIEWED
         if not marker.is_symlink() and marker.is_file() and marker.stat().st_uid == directory.stat().st_uid:
@@ -2406,35 +2482,6 @@ class Updater:
             raise UpdateError("Snapshot verification mismatch")
         return destination
 
-    def latest_snapshot(self):
-        """Resume with a verified export only while stopped DATA is identical.
-
-        If the container restarted/wrote since the last attempt, retain the old
-        export and create another one. No snapshot is overwritten by a retry.
-        """
-        source_manifest = {k: v for k, v in tree_manifest(self.data).items()
-                           if Path(k).name not in VOLATILE}
-        candidates = [self.job / "after", *sorted(p for p in self.job.glob("after-retry-*") if p.is_dir())]
-        for path in reversed(candidates):
-            if not path.exists():
-                continue
-            if path.is_symlink():
-                raise UpdateError("Export snapshot is a symlink")
-            recorded = json.loads((self.job / (path.name + ".manifest.json")).read_text())
-            if tree_manifest(path) != recorded:
-                raise UpdateError("Export snapshot checksum mismatch")
-            source_file = self.job / (path.name + ".source.json")
-            if source_file.exists() and json.loads(source_file.read_text()) == source_manifest:
-                return path
-        name = "after" if not (self.job / "after").exists() else "after-retry-" + uuid.uuid4().hex[:8]
-        path = self.verified_snapshot(name)
-        # A SQLite reader may clean up idle sidecars; fingerprint only after
-        # snapshot connections have closed, matching what a retry will see.
-        source_manifest = {k: v for k, v in tree_manifest(self.data).items()
-                           if Path(k).name not in VOLATILE}
-        atomic_json(self.job / (name + ".source.json"), source_manifest)
-        return path
-
     def verify_backup(self):
         backup = self.job / "before"
         if backup.is_symlink() or str(backup) != self.receipt.get("backup_path"):
@@ -2573,63 +2620,120 @@ print(json.dumps(changed))
             restored.append(relative)
         return restored
 
+    def restore_record(self):
+        """The restore's own stage record, or {} when it has not begun."""
+        try:
+            record = json.loads((self.job / "restore-stage.json").read_text())
+        except (OSError, ValueError):
+            return {}
+        return record if isinstance(record, dict) else {}
+
     def restore(self):
-        backup, manifest = self.verify_backup()
-        latest = self.latest_snapshot()
-        after_manifest = tree_manifest(latest)
-        changes = sorted(k for k in set(manifest) | set(after_manifest)
-                         if manifest.get(k) != after_manifest.get(k))
-        atomic_json(self.job / "post-update-changes.json", changes)
-        stage = self.data.with_name(self.data.name + ".restore-" + self.receipt["job_id"])
+        """Put the verified `before` back as DATA; the failed DATA is set aside whole.
+
+        DATA is stopped. No full copy is made beyond `before` itself:
+
+        * the restored tree is staged from `before` by hard links
+          (:func:`link_tree`); across filesystems it is a copy of `before`;
+        * the failed release's DATA is not exported, it is renamed to
+          `data.after-<job>` and hashed into `<that name>.manifest.json`; its
+          credentials are carried into the stage from that very tree;
+        * `before` is hashed first and, when linked from, again after the
+          stage is finished: nothing may have written through a shared inode.
+
+        Once the swap is recorded (`swapped`) a retry does nothing: DATA is the
+        restored tree, `data.after-<job>` is never touched or repeated, and a
+        linked `before`, which now shares inodes with live DATA, is dropped.
+        Before that point a retry rebuilds the stage from `before`; the
+        previous partial stage is kept aside, never reused.
+        """
         stage_record = self.job / "restore-stage.json"
+        stage = self.data.with_name(self.data.name + ".restore-" + self.receipt["job_id"])
+        displaced = self.data.with_name(self.data.name + ".after-" + self.receipt["job_id"])
+        record = self.restore_record()
+        if record.get("phase") == "swapping":
+            # Killed between the two renames, or just after them.
+            target = Path(record["displaced"])
+            if not self.data.exists() and target.is_dir() and stage.is_dir():
+                os.replace(stage, self.data)
+            if self.data.is_dir() and target.is_dir() and not stage.exists():
+                record = dict(record, phase="swapped")
+                atomic_json(stage_record, record)
+        if record.get("phase") == "swapped":
+            self.finish_restore(record)
+            return
+        backup, manifest = self.verify_backup()
+        link = self.rollback_path() == "link"
+        raw = tree_manifest(self.data)
+        after = {k: v for k, v in raw.items() if Path(k).name not in VOLATILE}
+        changes = sorted(k for k in set(manifest) | set(after) if manifest.get(k) != after.get(k))
+        atomic_json(self.job / "post-update-changes.json", changes)
         if stage.exists() or stage.is_symlink():
-            if stage.is_symlink() or not stage_record.exists():
+            if stage.is_symlink() or record.get("path") != str(stage):
                 raise UpdateError("Unowned restore staging directory")
-            record = json.loads(stage_record.read_text())
-            if record.get("path") != str(stage):
-                raise UpdateError("Restore staging identity mismatch")
             # A failed credential step may have partially transformed this
-            # derived stage. Keep it for diagnosis, then rebuild from verified
-            # before/after; never trust a partly applied stage on retry.
+            # derived stage. Keep it for diagnosis, then rebuild from the
+            # verified before; never trust a partly applied stage on retry.
             retired = stage.with_name(stage.name + ".attempt-" + uuid.uuid4().hex[:8])
             atomic_json(self.job / (retired.name + ".manifest.json"), tree_manifest(stage))
             os.replace(stage, retired)
-        atomic_json(stage_record, {"path": str(stage), "source": str(backup), "phase": "preparing"})
-        snapshot(backup, stage)
+        atomic_json(stage_record, {"path": str(stage), "source": str(backup), "phase": "preparing",
+                                   "mode": "link" if link else "copy"})
+        if link:
+            link_tree(backup, stage)
+        else:
+            snapshot(backup, stage)
         if tree_manifest(stage) != manifest:
             raise UpdateError("Restore stage does not match verified backup")
         self.judge_sqlite(self.judge_image(), stage)
-        credentials = overlay_credentials(latest, stage)
-        config_credentials = self.preserve_config_credentials(latest, stage)
+        credentials = overlay_credentials(self.data, stage)
+        config_credentials = self.preserve_config_credentials(self.data, stage)
         gateways = self.apply_gateway_intent(stage)
         atomic_json(self.job / "restored-gateway-intent.json", gateways)
+        if link and tree_manifest(backup) != manifest:
+            raise UpdateError("Restore altered the verified backup")
         atomic_json(self.job / "restore-stage.manifest.json", tree_manifest(stage))
-        atomic_json(stage_record, {"path": str(stage), "source": str(backup), "phase": "verified"})
         atomic_json(self.job / "preserved-credentials.json", credentials)
         atomic_json(self.job / "preserved-config-credentials.json", config_credentials)
-        # The old directory is retained even after success. Nothing is erased;
-        # every post-update write remains in after + the displaced directory.
-        displaced = self.data.with_name(self.data.name + ".after-" + self.receipt["job_id"])
+        # The failed DATA is retained even after success. Nothing is erased;
+        # every post-update write remains in the displaced directory.
         if displaced.exists() or displaced.is_symlink():
-            # A prior rollback may have swapped DATA successfully before
-            # restarting the old image failed. Preserve every displaced tree
-            # and repeat from the verified backup plus latest auth.
+            # A rollback of an older updater may have swapped DATA before it
+            # failed. Preserve that tree too and displace under a new name.
             displaced = displaced.with_name(displaced.name + ".retry-" + uuid.uuid4().hex[:8])
+        atomic_json(self.job / (displaced.name + ".manifest.json"), raw)
+        done = {"path": str(stage), "source": str(backup), "mode": "link" if link else "copy",
+                "displaced": str(displaced), "post_update_changes": len(changes),
+                "preserved_credentials": len(credentials), "restored_gateways": len(gateways)}
+        atomic_json(stage_record, dict(done, phase="swapping"))
         os.replace(self.data, displaced)
         try:
             os.replace(stage, self.data)
         except BaseException:
             os.replace(displaced, self.data)
+            atomic_json(stage_record, dict(done, phase="verified"))
             raise
-        self.receipt.update(post_update_export=str(latest), post_update_changes=len(changes),
-                            displaced_data=str(displaced), preserved_credentials=len(credentials),
-                            restored_gateways=len(gateways))
+        atomic_json(stage_record, dict(done, phase="swapped"))
+        self.finish_restore(dict(done, phase="swapped"))
+
+    def finish_restore(self, record):
+        """Report a completed swap; drop a `before` that now shares live DATA's inodes."""
+        displaced = record["displaced"]
+        self.receipt.update(post_update_export=displaced, post_update_changes=record["post_update_changes"],
+                            displaced_data=displaced, preserved_credentials=record["preserved_credentials"],
+                            restored_gateways=record["restored_gateways"], restore_mode=record.get("mode"))
         history = self.receipt.setdefault("displaced_data_history", [])
-        if str(displaced) not in history:
-            history.append(str(displaced))
-        self.receipt["post_update_exports"] = [str(self.job / "after"),
-            *[str(p) for p in sorted(self.job.glob("after-retry-*")) if p.is_dir()]]
-        self.log(f"Post-update writes exported: {len(changes)} paths; see post-update-changes.json")
+        if displaced not in history:
+            history.append(displaced)
+        self.receipt["post_update_exports"] = list(history)
+        backup = self.job / "before"
+        if record.get("mode") == "link" and backup.is_dir() and not backup.is_symlink():
+            try:
+                shutil.rmtree(backup)
+            except OSError as exc:
+                self.log(f"restore: linked before not removed: {exc}")
+        self.log(f"Post-update writes kept in {displaced}: {record['post_update_changes']} paths "
+                 "differ; see post-update-changes.json")
 
     def update(self, reference, dry_run=False):
         stopped = False
@@ -2764,7 +2868,9 @@ print(json.dumps(changed))
         # a refused rollback that changed nothing is recoverable, a finished
         # one that silently moved the owner's day is not.
         self.verify_launcher(rollback=True)
-        backup, _ = self.verify_backup()  # validate before quiescing a healthy newer gateway
+        # Validate before quiescing a healthy newer gateway. Once the restore
+        # has swapped, `before` is spent and DATA itself is the restored tree.
+        backup = self.data if self.restore_record().get("phase") == "swapped" else self.verify_backup()[0]
         self.verify_user_packages(self.receipt["old_image_id"], backup, strict=not automatic,
                                   current=self.receipt.get("target_image_id"))
         allowed = {self.receipt.get("old_image_id"), self.receipt.get("target_image_id")}
