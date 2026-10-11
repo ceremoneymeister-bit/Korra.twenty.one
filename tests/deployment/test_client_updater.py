@@ -1,4 +1,5 @@
 """Updater transactions on real filesystem/SQLite with fake Docker boundaries."""
+import errno
 import importlib.metadata
 import importlib.util
 import hashlib
@@ -682,11 +683,13 @@ def test_failed_update_rolls_back_data_preserving_new_auth_and_export(updater):
     assert json.loads((updater.data / "auth.json").read_text())["refresh_token"] == "rotated"
     assert not (updater.data / "revoked.token").exists()
     assert not (updater.data / "new-message.txt").exists()
-    assert (updater.job / "after/new-message.txt").read_text() == "write during new boot"
+    exported = updater.data.with_name(updater.data.name + ".after-" + updater.receipt["job_id"])
+    assert (exported / "new-message.txt").read_text() == "write during new boot"
+    assert not (updater.job / "after").exists()
     assert (updater.data / "profiles/secretary/.no-bundled-skills").exists()
     with sqlite3.connect(updater.data / "state.db") as database:
         assert database.execute("SELECT * FROM messages").fetchall() == [("before",)]
-    with sqlite3.connect(updater.job / "after/state.db") as database:
+    with sqlite3.connect(exported / "state.db") as database:
         assert database.execute("SELECT count(*) FROM messages").fetchone() == (2,)
     changes = json.loads((updater.job / "post-update-changes.json").read_text())
     assert {"auth.json", "state.db", "new-message.txt", "revoked.token"} <= set(changes)
@@ -1086,13 +1089,16 @@ def test_rollback_resumes_verified_export_after_two_credential_failures(updater)
         with pytest.raises(u.UpdateError, match="parser outage"):
             updater.rollback()
         assert not updater.running
-        assert (updater.job / "after/new-message.txt").read_text() == "retain this"
+        # Before the swap the failed release's DATA is untouched where it is.
+        assert (updater.data / "new-message.txt").read_text() == "retain this"
     updater.rollback()
     assert updater.receipt["status"] == "rolled_back" and updater.running
     assert (updater.data / "config.yaml").read_text() == "model: fixture\n"
     assert json.loads((updater.data / "auth.json").read_text())["refresh_token"] == "latest"
     assert len(list(updater.data.parent.glob("data.restore-fixture-job.attempt-*"))) == 2
-    assert (updater.job / "after/new-message.txt").read_text() == "retain this"
+    displaced = updater.data.with_name("data.after-fixture-job")
+    assert (displaced / "new-message.txt").read_text() == "retain this"
+    assert not (updater.job / "after").exists()
 
 
 def test_rollback_retry_exports_writes_after_container_restarts(updater):
@@ -1105,7 +1111,8 @@ def test_rollback_retry_exports_writes_after_container_restarts(updater):
     updater.preserve_config_credentials = lambda *args: []
     updater.rollback()
     assert updater.receipt["status"] == "rolled_back"
-    assert len(updater.receipt["post_update_exports"]) == 2
+    # The tree is set aside whole, so a write made after the failed attempt is in the one export.
+    assert updater.receipt["post_update_exports"] == [str(updater.data.with_name("data.after-fixture-job"))]
     assert Path(updater.receipt["post_update_export"]).joinpath("late-message.txt").read_text() == "later write"
 
 
@@ -1194,14 +1201,304 @@ def test_rollback_retry_after_old_image_start_failure_preserves_all_exports(upda
     updater.start_image = fails_once
     with pytest.raises(u.UpdateError, match="old image start failure"):
         updater.rollback()
-    assert (updater.job / "after/new-message.txt").read_text() == "new image business write"
+    displaced = updater.data.with_name("data.after-fixture-job")
+    assert (displaced / "new-message.txt").read_text() == "new image business write"
     assert not (updater.data / "new-message.txt").exists()
+    # The old image wrote while failing to start: a retry must keep those writes,
+    # not rebuild DATA, and must not touch or duplicate the displaced tree.
+    (updater.data / "written-by-old-image.txt").write_text("boot write")
     updater.rollback()
     assert updater.receipt["status"] == "rolled_back" and updater.running
     assert updater.image == OLD
     assert (updater.home / "IMAGE.prev").read_text().strip() == NEW
-    assert len(updater.receipt["displaced_data_history"]) == 2
-    assert (updater.job / "after/new-message.txt").read_text() == "new image business write"
+    assert updater.receipt["displaced_data_history"] == [str(displaced)]
+    assert (displaced / "new-message.txt").read_text() == "new image business write"
+    assert (updater.data / "written-by-old-image.txt").read_text() == "boot write"
+    assert sorted(p.name for p in updater.data.parent.glob("data.after-*")) == ["data.after-fixture-job"]
+
+
+class Killed(BaseException):
+    """A process that died: no `except Exception` and no cleanup runs for it."""
+
+
+def _blob(updater, megabytes=2):
+    (updater.data / "big.bin").write_bytes(os.urandom(megabytes << 20))
+    return updater.data / "big.bin"
+
+
+def _large_inodes(*roots, minimum=1 << 20):
+    """Distinct physical files of at least `minimum` bytes under the given trees."""
+    found = set()
+    for root in roots:
+        for path in Path(root).rglob("*"):
+            info = path.lstat()
+            if path.is_file() and not path.is_symlink() and info.st_size >= minimum:
+                found.add((info.st_dev, info.st_ino))
+    return found
+
+
+def _data_size(root):
+    return sum(path.lstat().st_size for path in Path(root).rglob("*") if path.is_file() and not path.is_symlink())
+
+
+def _cross_filesystem(monkeypatch):
+    def refuse(*args, **kwargs):
+        raise OSError(errno.EXDEV, "Invalid cross-device link")
+    monkeypatch.setattr(u.os, "link", refuse)
+
+
+def _displaced(updater, job_id="fixture-job"):
+    return updater.data.with_name(updater.data.name + ".after-" + job_id)
+
+
+def _assert_restored_to_before(updater, original):
+    assert updater.receipt["status"] == "rolled_back" and updater.image == OLD and updater.running
+    assert (updater.data / "big.bin").read_bytes() == original
+    with sqlite3.connect(updater.data / "state.db") as database:
+        assert database.execute("SELECT * FROM messages").fetchall() == [("before",)]
+    assert not (updater.data / "new-message.txt").exists()
+    displaced = _displaced(updater)
+    assert (displaced / "new-message.txt").read_text() == "write during new boot"
+    assert sorted(p.name for p in updater.data.parent.glob("data.after-*")) == [displaced.name]
+    assert json.loads((updater.job / (displaced.name + ".manifest.json")).read_text()) == u.tree_manifest(displaced)
+
+
+def test_automatic_rollback_keeps_one_copy_of_data_beyond_the_failed_tree(updater):
+    original = _blob(updater).read_bytes()
+    updater.fail_smoke = True
+    with pytest.raises(u.UpdateError, match="Injected model"):
+        updater.update("registry.example/korra:latest")
+    _assert_restored_to_before(updater, original)
+    displaced = _displaced(updater)
+    # The failed release's DATA, and the one `before` that became DATA. No `after`, no stage copy.
+    assert len(_large_inodes(updater.jobs, updater.data, displaced)) == 2
+    assert not (updater.job / "after").exists() and not (updater.job / "before").exists()
+    assert (updater.job / "before.manifest.json").is_file()
+    assert updater.receipt["restore_mode"] == "link"
+    assert updater.receipt["post_update_export"] == str(displaced)
+    assert json.loads((updater.job / "restore-stage.json").read_text())["phase"] == "swapped"
+    assert not list(updater.data.parent.glob("data.restore-*"))
+
+
+def test_manual_rollback_keeps_one_copy_of_data_beyond_the_failed_tree(updater):
+    original = _blob(updater).read_bytes()
+    updater.update("registry.example/korra:latest")
+    (updater.data / "new-message.txt").write_text("write during new boot")
+    updater.rollback()
+    _assert_restored_to_before(updater, original)
+    assert len(_large_inodes(updater.jobs, updater.data, _displaced(updater))) == 2
+    assert updater.receipt["restore_mode"] == "link"
+
+
+def test_rollback_across_filesystems_copies_before_and_keeps_it(updater, monkeypatch):
+    original = _blob(updater).read_bytes()
+    _cross_filesystem(monkeypatch)
+    updater.fail_smoke = True
+    with pytest.raises(u.UpdateError, match="Injected model"):
+        updater.update("registry.example/korra:latest")
+    _assert_restored_to_before(updater, original)
+    displaced = _displaced(updater)
+    # before stays a verified, separate copy; the restored DATA is a second one.
+    assert len(_large_inodes(updater.jobs, updater.data, displaced)) == 3
+    assert u.tree_manifest(updater.job / "before") == json.loads((updater.job / "before.manifest.json").read_text())
+    assert updater.receipt["restore_mode"] == "copy"
+    assert not (updater.job / "after").exists()
+
+
+@pytest.mark.parametrize("mode", ["link", "copy"])
+def test_space_gate_is_before_plus_headroom_and_names_the_rollback_path(updater, monkeypatch, mode):
+    _blob(updater, 4)
+    updater.free_space = u.Updater.free_space.__get__(updater)
+    if mode == "copy":
+        _cross_filesystem(monkeypatch)
+    size, gib = _data_size(updater.data), 1024**3
+    copies = 1 if mode == "link" else 2
+
+    def free(value):
+        monkeypatch.setattr(u.shutil, "disk_usage", lambda path: types.SimpleNamespace(free=value))
+
+    free(copies * size + 2 * gib)
+    updater.free_space()
+    assert updater.receipt["rollback_path"] == mode
+    assert updater.receipt["rollback_required_bytes"] == copies * size + 2 * gib
+    assert updater.receipt["data_bytes"] == size
+    free(copies * size + 2 * gib - 1)
+    with pytest.raises(u.UpdateError, match="Insufficient space"):
+        updater.free_space()
+    # The old gate, 3 × DATA + 2 GiB, would have refused the first of these.
+    assert 3 * size + 2 * gib > copies * size + 2 * gib or mode == "copy" and size == 0
+
+
+def test_a_disk_with_room_for_before_alone_updates_and_rolls_back(updater, monkeypatch):
+    original = _blob(updater, 4).read_bytes()
+    updater.free_space = u.Updater.free_space.__get__(updater)
+    free = _data_size(updater.data) + 2 * 1024**3
+    monkeypatch.setattr(u.shutil, "disk_usage", lambda path: types.SimpleNamespace(free=free))
+    updater.fail_smoke = True
+    with pytest.raises(u.UpdateError, match="Injected model"):
+        updater.update("registry.example/korra:latest")
+    _assert_restored_to_before(updater, original)
+    assert updater.receipt["rollback_path"] == "link"
+
+
+def test_a_disk_without_room_for_before_never_drains(updater, monkeypatch):
+    _blob(updater, 4)
+    updater.free_space = u.Updater.free_space.__get__(updater)
+    free = _data_size(updater.data) + 2 * 1024**3 - 1
+    monkeypatch.setattr(u.shutil, "disk_usage", lambda path: types.SimpleNamespace(free=free))
+    with pytest.raises(u.UpdateError, match="Insufficient space"):
+        updater.update("registry.example/korra:latest")
+    assert not any(call[0] in {"native", "stop", "pull"} for call in updater.calls)
+
+
+def test_rollback_path_is_asked_of_the_filesystem(updater, monkeypatch):
+    assert updater.rollback_path() == "link"
+    _cross_filesystem(monkeypatch)
+    assert updater.rollback_path() == "copy"
+    assert not [p for p in updater.jobs.iterdir() if p.name.startswith(".link-probe")]
+    assert not [p for p in updater.data.parent.iterdir() if p.name.startswith(".link-probe")]
+
+
+def test_link_tree_shares_files_and_copies_what_a_restore_rewrites(tmp_path):
+    source, clone = tmp_path / "source", tmp_path / "clone"
+    (source / "profiles/a").mkdir(parents=True)
+    (source / "config.yaml").write_text("model: x\n")
+    (source / "profiles/a/config.yaml").write_text("model: y\n")
+    (source / "state.db").write_bytes(b"data")
+    (source / "profiles/a/state.db").write_bytes(b"more")
+    (source / "alias").symlink_to("state.db")
+    (source / "profiles/a").chmod(0o750)
+    u.link_tree(source, clone)
+    assert u.tree_manifest(clone) == u.tree_manifest(source)
+    assert (clone / "state.db").stat().st_ino == (source / "state.db").stat().st_ino
+    assert (clone / "profiles/a/state.db").stat().st_nlink == 2
+    for name in ("config.yaml", "profiles/a/config.yaml"):
+        assert (clone / name).stat().st_ino != (source / name).stat().st_ino
+    assert os.readlink(clone / "alias") == "state.db"
+    assert (clone / "profiles/a").stat().st_mode & 0o777 == 0o750
+    with pytest.raises(u.UpdateError, match="overwrite"):
+        u.link_tree(source, clone)
+
+
+@pytest.mark.parametrize("step", ["judge", "overlay", "gateway", "swap-in", "killed-between-renames",
+                                  "killed-before-swap-record", "killed-after-swap-record"])
+def test_rollback_retry_after_a_failure_at_every_restore_step(updater, monkeypatch, step):
+    original = _blob(updater).read_bytes()
+    updater.update("registry.example/korra:latest")
+    (updater.data / "new-message.txt").write_text("write during new boot")
+    with sqlite3.connect(updater.data / "state.db") as database:
+        database.execute("INSERT INTO messages VALUES ('new turn')")
+    armed = [True]
+    stage = updater.data.with_name(updater.data.name + ".restore-fixture-job")
+    displaced = _displaced(updater)
+
+    def once(obj, name, error):
+        real = getattr(obj, name)
+
+        def wrapper(*args, **kwargs):
+            if armed[0]:
+                armed[0] = False
+                raise error
+            return real(*args, **kwargs)
+        monkeypatch.setattr(obj, name, wrapper)
+
+    if step == "judge":
+        once(updater, "judge_sqlite", u.UpdateError("Injected judge outage"))
+    elif step == "overlay":
+        once(u, "overlay_credentials", u.UpdateError("Injected overlay failure"))
+    elif step == "gateway":
+        once(updater, "apply_gateway_intent", u.UpdateError("Injected gateway failure"))
+    elif step == "killed-after-swap-record":
+        once(updater, "finish_restore", Killed())
+    elif step == "killed-before-swap-record":
+        real_json = u.atomic_json
+
+        def record(path, value):
+            if armed[0] and Path(path).name == "restore-stage.json" and value.get("phase") == "swapped":
+                armed[0] = False
+                raise Killed()
+            return real_json(path, value)
+        monkeypatch.setattr(u, "atomic_json", record)
+    else:
+        real_replace = u.os.replace
+
+        def replace(src, dst, *args, **kwargs):
+            if armed[0] and Path(src) == stage and Path(dst) == updater.data:
+                armed[0] = False
+                raise Killed() if step == "killed-between-renames" else OSError("Injected rename failure")
+            return real_replace(src, dst, *args, **kwargs)
+        monkeypatch.setattr(u.os, "replace", replace)
+
+    failure = Killed if step.startswith("killed") else (OSError if step == "swap-in" else u.UpdateError)
+    with pytest.raises(failure):
+        updater.rollback()
+    armed[0] = False
+    assert not updater.running
+    if step in ("judge", "overlay", "gateway", "swap-in"):
+        # Nothing was swapped: DATA is still the failed release's, before is untouched.
+        assert (updater.data / "new-message.txt").is_file() and not displaced.exists()
+        assert u.tree_manifest(updater.job / "before") == json.loads((updater.job / "before.manifest.json").read_text())
+
+    updater.rollback()
+
+    _assert_restored_to_before(updater, original)
+    with sqlite3.connect(_displaced(updater) / "state.db") as database:
+        assert database.execute("SELECT count(*) FROM messages").fetchone() == (2,)
+    assert len(_large_inodes(updater.jobs, updater.data, _displaced(updater))) == 2
+    assert not (updater.job / "before").exists()
+
+
+def test_a_restore_that_writes_through_a_shared_inode_is_refused(updater):
+    updater.update("registry.example/korra:latest")
+    real = updater.apply_gateway_intent
+
+    def hostile(stage):
+        with (stage / "profiles/secretary/.no-bundled-skills").open("ab") as stream:
+            stream.write(b"written in place")
+        return real(stage)
+    updater.apply_gateway_intent = hostile
+    live = {k: v for k, v in u.tree_manifest(updater.data).items() if k != ".drain_request.json"}
+    with pytest.raises(u.UpdateError, match="altered the verified backup"):
+        updater.rollback()
+    kept = {k: v for k, v in u.tree_manifest(updater.data).items() if k != ".drain_request.json"}
+    assert kept == live and not _displaced(updater).exists()
+    assert not updater.running
+
+
+def test_a_linked_before_that_cannot_be_removed_does_not_fail_the_rollback(updater, monkeypatch):
+    updater.update("registry.example/korra:latest")
+    real = u.shutil.rmtree
+
+    def refuse(path, *args, **kwargs):
+        if Path(path) == updater.job / "before":
+            raise OSError("Injected busy")
+        return real(path, *args, **kwargs)
+    monkeypatch.setattr(u.shutil, "rmtree", refuse)
+    updater.rollback()
+    assert updater.receipt["status"] == "rolled_back"
+    assert (updater.job / "before").is_dir()
+
+
+def test_rollback_recognises_the_after_and_stage_of_an_older_job_and_loses_neither(updater):
+    updater.update("registry.example/korra:latest")
+    (updater.data / "new-message.txt").write_text("write during new boot")
+    # What 0.21.16/0.21.17 left behind after a rollback that failed midway.
+    legacy = updater.job / "after"
+    u.atomic_json(updater.job / "after.manifest.json", u.snapshot(updater.data, legacy))
+    stage = updater.data.with_name(updater.data.name + ".restore-fixture-job")
+    u.snapshot(updater.job / "before", stage)
+    u.atomic_json(updater.job / "restore-stage.json",
+                  {"path": str(stage), "source": str(updater.job / "before"), "phase": "verified"})
+    kept = u.tree_manifest(legacy)
+
+    updater.rollback()
+
+    assert updater.receipt["status"] == "rolled_back"
+    assert u.tree_manifest(legacy) == kept
+    attempts = list(updater.data.parent.glob("data.restore-fixture-job.attempt-*"))
+    assert len(attempts) == 1 and (attempts[0] / "config.yaml").is_file()
+    assert {path.name for path in updater.displaced_copies("fixture-job")} >= {
+        "data.after-fixture-job", attempts[0].name}
 
 
 def test_rollback_recomputes_gateway_expectations_from_restored_data(updater):
@@ -2793,7 +3090,7 @@ def test_rollback_exports_outlive_the_next_install_until_reviewed(updater, histo
         updater.update("registry.example/korra:latest")
     failed_job = updater.job
     displaced = updater.data.with_name(updater.data.name + ".after-fixture-job")
-    assert (displaced / "new-message.txt").is_file() and (failed_job / "after/new-message.txt").is_file()
+    assert (displaced / "new-message.txt").is_file()
 
     updater.fail_smoke = False
     updater.update(_second_update(updater, image=NEW))
@@ -2802,7 +3099,7 @@ def test_rollback_exports_outlive_the_next_install_until_reviewed(updater, histo
     retention = updater.receipt["history_retention"]
     assert retention["retired"] == [] and retention["review"] == ["fixture-job"]
     assert retention["reasons"]["fixture-job"] == "unreviewed_rollback_exports"
-    assert (displaced / "new-message.txt").is_file() and (failed_job / "after/new-message.txt").is_file()
+    assert (displaced / "new-message.txt").is_file()
 
     # Оператор сверил записи и оставил отметку — теперь выгрузка уходит вместе с data.after-*.
     (failed_job / u.EXPORTS_REVIEWED).write_text("reconciled 2026-09-23\n")
@@ -2922,9 +3219,8 @@ def test_gc_after_a_dry_run_keeps_a_failed_updates_only_export(updater, history_
     updater.fail_smoke = True
     with pytest.raises(u.UpdateError, match="Injected model"):
         updater.update("registry.example/korra:latest")
-    exported = updater.job / "after" / "new-message.txt"
     displaced = updater.data.with_name(updater.data.name + ".after-fixture-job")
-    assert exported.is_file() and (displaced / "new-message.txt").is_file()
+    assert (displaced / "new-message.txt").is_file()
     assert not (updater.data / "new-message.txt").exists()
 
     _dry_run(updater, "new-preflight")
@@ -2933,7 +3229,7 @@ def test_gc_after_a_dry_run_keeps_a_failed_updates_only_export(updater, history_
     assert history["status"] == "skipped" and history["reason"] == "no_proven_install"
     assert history["retired"] == [] and history["current_rollback"] is None
     assert history["review"] == ["fixture-job"]
-    assert exported.is_file() and (displaced / "new-message.txt").is_file()
+    assert (displaced / "new-message.txt").is_file()
     assert _jobs(updater) == ["fixture-job", "new-preflight"]
 
 
@@ -2964,7 +3260,7 @@ def test_an_install_rolled_back_later_leaves_no_proven_install(updater, history_
 
     assert history["reason"] == "no_proven_install" and history["retired"] == []
     assert (displaced / "later-note.txt").is_file()
-    assert (updater.jobs / "fixture-job" / "before").is_dir()
+    assert (updater.jobs / "fixture-job" / "status.json").is_file()
 
 
 def test_two_rollbacks_in_a_row_keep_both_exports_across_the_next_install(updater, history_env):
@@ -2983,7 +3279,7 @@ def test_two_rollbacks_in_a_row_keep_both_exports_across_the_next_install(update
     assert retention["review"] == ["fail-2", "fail-1"]
     for job, copy, name in ((first_job, first_copy, "fail-1"), (second_job, second_copy, "fail-2")):
         assert (copy / ("owner-note-" + name + ".txt")).is_file()
-        assert (job / "after" / ("owner-note-" + name + ".txt")).is_file()
+        assert not (job / "after").exists()
 
 
 def test_dry_runs_and_current_checks_never_take_a_history_place(updater, monkeypatch):
@@ -3029,7 +3325,7 @@ def test_a_neighbour_installation_on_the_host_is_never_touched(updater, history_
     updater.update(_second_update(updater))
 
     assert [item["job_id"] for item in updater.receipt["history_retention"]["retired"]] == ["fixture-job"]
-    assert neighbour_copy.is_dir() and (home_b / "updates" / "fixture-job" / "before").is_dir()
+    assert neighbour_copy.is_dir() and (home_b / "updates" / "fixture-job" / "status.json").is_file()
     assert decoy.is_dir(), "только точные имена своих вытесненных копий"
 
 
@@ -3316,24 +3612,108 @@ def test_user_package_survives_update_rollback_update(updater, tmp_path):
     assert subprocess.run(["korra-demo"], env=env, capture_output=True, text=True, check=True).stdout.strip() == "user-cli-ok"
 
 
-@pytest.mark.parametrize("kind", ["pinned", "requires", "abi"])
-def test_package_conflict_stops_update_before_drain_and_keeps_data(updater, monkeypatch, kind):
-    build = {
-        "pinned": lambda: make_user_package(updater.data, cli=None),
-        "requires": lambda: make_user_package(updater.data, requires=["pytest>=999"], cli=None),
-        "abi": lambda: make_user_package(updater.data, cli=None, abi="2.7:.cpython-27"),
-    }[kind]
-    store = build()
+def package_conflict_case(updater, monkeypatch, tmp_path, kind):
+    """Хранилище с конфликтом вида `kind` для обоих образов (одно окружение)."""
     if kind == "pinned":
         monkeypatch.setattr(updater, "pinned_dependencies", lambda: {"korra-demo-pkg": "2.0"})
+        return make_user_package(updater.data, cli=None)
+    if kind == "requires":
+        return make_user_package(updater.data, requires=["pytest>=999"], cli=None)
+    if kind == "cli":
+        return make_user_package(updater.data, cli="python")
+    return make_user_package(updater.data, cli=None, abi="2.7:.cpython-27")
+
+
+def old_image_without_conflicts(updater, monkeypatch, clean=OLD):
+    """Образ `clean` (по умолчанию текущий), у которого конфликтов нет."""
+    real = updater.user_packages_probe
+
+    def probe(image, root, migrated):
+        result = real(image, root, migrated)
+        return {**result, "conflicts": []} if image == clean else result
+
+    monkeypatch.setattr(updater, "user_packages_probe", probe)
+
+
+@pytest.mark.parametrize("kind", ["pinned", "requires", "cli", "abi"])
+def test_new_package_conflict_stops_update_before_drain_and_keeps_data(updater, monkeypatch, tmp_path, kind):
+    store = package_conflict_case(updater, monkeypatch, tmp_path, kind)
+    old_image_without_conflicts(updater, monkeypatch)
     before = tree(updater.data)
     with pytest.raises(u.UpdateError, match="Пакеты пользователя"):
         updater.update("registry.example/korra:latest")
     assert updater.receipt["error_code"] == "user_packages_conflict"
     assert kind in {item["kind"] for item in updater.receipt["user_packages"]["conflicts"]}
+    assert updater.receipt["user_packages"]["preexisting"] == []
     assert not any(call[0] in {"stop", "start_image"} or call == ("native", "drain") for call in updater.calls)
     assert updater.image == OLD and updater.running
     assert tree(updater.data) == before and store.is_dir()
+
+
+@pytest.mark.parametrize("kind", ["pinned", "requires", "cli", "abi"])
+def test_package_conflict_already_present_in_the_current_image_does_not_stop_the_update(
+        updater, monkeypatch, tmp_path, kind):
+    store = package_conflict_case(updater, monkeypatch, tmp_path, kind)
+    before = tree(store)
+    updater.update("registry.example/korra:latest")
+    assert updater.receipt["status"] == "succeeded" and updater.image == NEW
+    packages = updater.receipt["user_packages"]
+    assert packages["conflicts"] == []
+    assert kind in {item["kind"] for item in packages["preexisting"]}
+    assert tree(store) == before
+    updater.rollback()
+    assert updater.receipt["status"] == "rolled_back" and updater.image == OLD
+
+
+def test_pymupdf_layout_requires_conflict_of_the_current_release_does_not_stop_the_update(updater):
+    # Хранилище Доломановой: PyMuPDF 1.26.4, а надстройки просят 1.28.2.
+    make_user_package(updater.data, "PyMuPDF", "1.26.4", cli=None, modules=["pymupdf"])
+    make_user_package(updater.data, "pymupdf_layout", "1.0", requires=["PyMuPDF==1.28.2"], cli=None)
+    make_user_package(updater.data, "pymupdf4llm", "1.0", requires=["PyMuPDF>=1.28.2", "pymupdf-layout"], cli=None)
+    updater.update("registry.example/korra:latest")
+    assert updater.receipt["status"] == "succeeded" and updater.image == NEW
+    packages = updater.receipt["user_packages"]
+    assert packages["conflicts"] == []
+    assert {(item["package"], item["kind"]) for item in packages["preexisting"]} == {
+        ("pymupdf-layout", "requires"), ("pymupdf4llm", "requires")}
+
+
+def test_new_image_that_changes_a_shipped_dependency_breaks_a_working_package(updater, tmp_path):
+    make_user_package(updater.data, requires=["review_dep>=2"], cli=None)
+    for image, version in ((OLD, "3.0"), (NEW, "1.0")):
+        core = tmp_path / ("core-" + image[-1])
+        make_user_package(core, "review_dep", version, cli=None)
+        updater.image_cores[image] = core / "lazy-packages"
+    with pytest.raises(u.UpdateError, match="Пакеты пользователя"):
+        updater.update("registry.example/korra:latest")
+    conflict, = updater.receipt["user_packages"]["conflicts"]
+    assert (conflict["kind"], conflict["package"]) == ("requires", "korra-demo-pkg")
+    assert not any(call[0] in {"stop", "start_image"} for call in updater.calls)
+
+
+def test_requires_conflict_stays_preexisting_when_only_the_shipped_version_differs(updater, tmp_path):
+    make_user_package(updater.data, requires=["review_dep>=2"], cli=None)
+    for image, version in ((OLD, "1.0"), (NEW, "1.5")):
+        core = tmp_path / ("core-" + image[-1])
+        make_user_package(core, "review_dep", version, cli=None)
+        updater.image_cores[image] = core / "lazy-packages"
+    updater.update("registry.example/korra:latest")
+    assert updater.receipt["status"] == "succeeded"
+    assert updater.receipt["user_packages"]["conflicts"] == []
+    assert "1.5" in updater.receipt["user_packages"]["preexisting"][0]["detail"]
+
+
+@pytest.mark.parametrize("fault", ["command_error", "timeout"])
+def test_package_conflict_without_a_baseline_probe_stops_the_update(updater, monkeypatch, fault):
+    make_user_package(updater.data, requires=["pytest>=999"], cli=None)
+    fail_package_probe(updater, monkeypatch, OLD, fault)
+    with pytest.raises(u.UpdateError, match="Пакеты пользователя"):
+        updater.update("registry.example/korra:latest")
+    packages = updater.receipt["user_packages"]
+    assert updater.receipt["error_code"] == "user_packages_conflict"
+    assert packages["baseline"]["error"] and packages["preexisting"] == []
+    assert [item["kind"] for item in packages["conflicts"]] == ["requires"]
+    assert not any(call[0] in {"stop", "start_image"} for call in updater.calls)
 
 
 def test_shipped_duplicates_in_the_store_do_not_stop_the_update(updater):
@@ -3564,6 +3944,7 @@ def test_rollback_refuses_before_stopping_when_the_old_image_conflicts(updater, 
     make_user_package(updater.data)
     updater.update("registry.example/korra:latest")
     monkeypatch.setattr(updater, "pinned_dependencies", lambda: {"korra-demo-pkg": "9.9"})
+    old_image_without_conflicts(updater, monkeypatch, clean=NEW)  # работающий NEW этого конфликта не имеет
     mark = len(updater.calls)
     with pytest.raises(u.UpdateError, match="Пакеты пользователя"):
         updater.rollback()
@@ -3571,10 +3952,21 @@ def test_rollback_refuses_before_stopping_when_the_old_image_conflicts(updater, 
     assert updater.image == NEW and updater.running
 
 
+def test_rollback_does_not_stop_on_a_conflict_the_running_image_has_too(updater, monkeypatch):
+    make_user_package(updater.data)
+    updater.update("registry.example/korra:latest")
+    monkeypatch.setattr(updater, "pinned_dependencies", lambda: {"korra-demo-pkg": "9.9"})
+    updater.rollback()
+    assert updater.receipt["status"] == "rolled_back" and updater.image == OLD
+    assert updater.receipt["user_packages"]["conflicts"] == []
+    assert updater.receipt["user_packages"]["preexisting"][0]["kind"] == "pinned"
+
+
 def test_automatic_rollback_records_the_conflict_but_still_restores(updater, monkeypatch):
     make_user_package(updater.data)
     answers = iter([{}, {}])
     monkeypatch.setattr(updater, "pinned_dependencies", lambda: next(answers, {"korra-demo-pkg": "9.9"}))
+    old_image_without_conflicts(updater, monkeypatch, clean=NEW)
     updater.fail_smoke = True
     with pytest.raises(u.UpdateError, match="Injected model"):
         updater.update("registry.example/korra:latest")
