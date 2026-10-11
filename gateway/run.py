@@ -6353,10 +6353,23 @@ class TurnRunner:
             for queued in pending:
                 _deliver_bg_review_message(queued)
 
-        # Background review delivery — send "💾 Memory updated" etc. to user
+        # Background review delivery — human "✅ Учёл…" line (see _bg_review_send)
         def _bg_review_send(message: str) -> None:
             if not ctx._status_adapter or not ctx._run_still_current():
                 return
+            # В мессенджере — та же человеческая строка «Учёл», что и в вебе, без
+            # технической английской сводки и без обещания отмены (кнопки нет).
+            _mode = str(getattr(agent, "memory_notifications", "on") or "on").lower()
+            if _mode == "off":
+                return
+            _receipt = getattr(agent, "background_review_receipt", None)
+            try:
+                from agent.learning_receipt import format_notice
+
+                message = format_notice(_receipt or {}, _mode)
+            except Exception:
+                logger.debug("learning notice formatting failed", exc_info=True)
+                message = "✅ Учёл."
             if not _bg_review_release.is_set():
                 with _bg_review_pending_lock:
                     if not _bg_review_release.is_set():

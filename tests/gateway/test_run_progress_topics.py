@@ -970,6 +970,32 @@ class BackgroundReviewAgent:
         }
 
 
+class LearningReceiptAgent:
+    """Фоновый разбор завершился: callback получает английскую сводку, квитанция лежит на агенте."""
+
+    receipt = {
+        "version": 1,
+        "id": "r1",
+        "skills": [],
+        "memory": [{"target": "user", "added": ["Пишет коротко и по делу"], "removed": []}],
+    }
+
+    def __init__(self, **kwargs):
+        self.background_review_callback = kwargs.get("background_review_callback")
+        self.background_review_receipt = None
+        self.tools = []
+
+    def run_conversation(self, message, conversation_history=None, task_id=None):
+        self.background_review_receipt = self.receipt
+        self.background_review_callback("💾 Self-improvement review: User profile updated")
+        self.background_review_receipt = None
+        return {"final_response": "done", "messages": [], "api_calls": 1}
+
+
+class LearningNoReceiptAgent(LearningReceiptAgent):
+    receipt = None
+
+
 class VerboseAgent:
     """Agent that emits a tool call with args whose JSON exceeds 200 chars."""
     LONG_CODE = "x" * 300
@@ -1393,6 +1419,46 @@ async def test_run_agent_defers_background_review_notification_until_release(mon
 
     assert result["final_response"] == "done"
     assert adapter.sent == []
+
+
+async def _released_background_notices(monkeypatch, tmp_path, agent_cls, display=None):
+    adapter, _ = await _run_with_agent(
+        monkeypatch,
+        tmp_path,
+        agent_cls,
+        session_id="sess-learning-notice",
+        config_data={"display": display} if display else None,
+    )
+    assert adapter.sent == []
+    for entry in list(adapter._post_delivery_callbacks.values()):
+        (entry[1] if isinstance(entry, tuple) else entry)()
+    await asyncio.sleep(0.1)
+    return [call["content"] for call in adapter.sent]
+
+
+@pytest.mark.asyncio
+async def test_messenger_gets_human_learning_notice(monkeypatch, tmp_path):
+    sent = await _released_background_notices(monkeypatch, tmp_path, LearningReceiptAgent)
+
+    assert sent == ["✅ Учёл: «Пишет коротко и по делу». Сохранено в заметках о вас."]
+    assert "Self-improvement" not in sent[0]
+    assert "Отмен" not in sent[0]
+
+
+@pytest.mark.asyncio
+async def test_messenger_learning_notice_without_receipt_is_short_russian(monkeypatch, tmp_path):
+    sent = await _released_background_notices(monkeypatch, tmp_path, LearningNoReceiptAgent)
+
+    assert sent == ["✅ Учёл."]
+
+
+@pytest.mark.asyncio
+async def test_messenger_learning_notice_off_sends_nothing(monkeypatch, tmp_path):
+    sent = await _released_background_notices(
+        monkeypatch, tmp_path, LearningReceiptAgent, display={"memory_notifications": "off"}
+    )
+
+    assert sent == []
 
 
 @pytest.mark.asyncio
