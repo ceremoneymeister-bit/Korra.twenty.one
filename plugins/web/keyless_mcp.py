@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -149,28 +150,53 @@ def _parse_mcp_body(body: str) -> str:
         for item in content:
             if isinstance(item, dict) and item.get("text"):
                 return str(item["text"])
-        return None
+        return ""
 
+    # SSE lines end with CRLF, CR or LF only: ``str.splitlines()`` also breaks on
+    # U+0085 / U+2028 / U+2029, which occur inside CJK page text and cut a ``data:``
+    # line in two.
+    candidates: List[str] = []
     stripped = body.strip()
     if stripped.startswith("{"):
+        candidates.append(stripped)
+    candidates += [
+        line[len("data: "):]
+        for line in re.split(r"\r\n|\r|\n", body)
+        if line.startswith("data: ")
+    ]
+    envelope_seen = False
+    for candidate in candidates:
         try:
-            text = _from_payload(stripped)
-            if text is not None:
-                return text
-        except json.JSONDecodeError:
-            pass
-
-    for line in body.splitlines():
-        if not line.startswith("data: "):
-            continue
-        try:
-            text = _from_payload(line[len("data: "):])
+            text = _from_payload(candidate)
         except json.JSONDecodeError:
             continue
-        if text is not None:
+        if text:
             return text
+        envelope_seen = envelope_seen or text == ""
 
-    raise KeylessMCPError("Unrecognized MCP response shape")
+    raise KeylessMCPError(
+        "MCP response contained no text content"
+        if envelope_seen
+        else "Unrecognized MCP response shape"
+    )
+
+
+def _response_text(response: Any) -> str:
+    """Body decoded with the declared charset, else UTF-8.
+
+    JSON-RPC and SSE bodies are UTF-8 by spec, but ``text/event-stream`` carries no
+    charset and ``requests`` then decodes ``.text`` as ISO-8859-1: Cyrillic and CJK
+    results come back as mojibake.
+    """
+    from requests.utils import get_encoding_from_headers
+
+    content_type = response.headers.get("Content-Type", "")
+    declared = (
+        get_encoding_from_headers({"content-type": content_type})
+        if "charset=" in content_type.lower()
+        else None
+    )
+    return response.content.decode(declared or "utf-8", errors="replace")
 
 
 def mcp_call(
@@ -203,9 +229,9 @@ def mcp_call(
         raise KeylessMCPError(f"request failed: {exc}") from exc
     if response.status_code >= 400:
         raise KeylessMCPError(
-            f"HTTP {response.status_code}: {response.text[:300]}"
+            f"HTTP {response.status_code}: {_response_text(response)[:300]}"
         )
-    return _parse_mcp_body(response.text)
+    return _parse_mcp_body(_response_text(response))
 
 
 # ---------------------------------------------------------------------------
@@ -537,7 +563,7 @@ def keenable_search_keyless(query: str, limit: int = 5) -> Dict[str, Any]:
         )
         if response.status_code >= 400:
             raise KeylessMCPError(
-                (response.text or "").strip() or f"HTTP {response.status_code}"
+                _response_text(response).strip() or f"HTTP {response.status_code}"
             )
         data = response.json()
     except KeylessMCPError as exc:
@@ -588,7 +614,7 @@ def keenable_extract_keyless(urls: List[str]) -> List[Dict[str, Any]]:
             )
             if response.status_code >= 400:
                 raise KeylessMCPError(
-                    (response.text or "").strip() or f"HTTP {response.status_code}"
+                    _response_text(response).strip() or f"HTTP {response.status_code}"
                 )
             data = response.json()
             content = data.get("content") or ""
