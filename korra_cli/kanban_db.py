@@ -10714,6 +10714,41 @@ def _dispatch_once_locked(
     max_spawn: Optional[int] = None,
     max_in_progress: Optional[int] = None,
     failure_limit: int = DEFAULT_SPAWN_FAILURE_LIMIT,
+def unavailable_task_skills(assignee: Optional[str], skills: Optional[Iterable[str]]) -> list[str]:
+    """Skills of ``skills`` the ``assignee`` profile cannot load.
+
+    Uses the same resolver the worker uses at start-up (``-s``/``--skills``),
+    scoped to the assignee's own home. A worker whose requested skills are all
+    unknown exits at once, so catching them here turns an endless respawn into
+    one readable block. An unresolvable profile or a resolver error returns
+    ``[]``: other checks own those failures, and a guess must not stop a card.
+    """
+    names = [str(s).strip() for s in (skills or []) if s and str(s).strip()]
+    if not names or not assignee:
+        return []
+    try:
+        from korra_cli.profiles import normalize_profile_name, resolve_profile_env
+        from korra_constants import reset_hermes_home_override, set_hermes_home_override
+        from agent.skill_commands import build_preloaded_skills_prompt
+
+        home = resolve_profile_env(normalize_profile_name(assignee))
+        token = set_hermes_home_override(home)
+        try:
+            return list(build_preloaded_skills_prompt(names)[2])
+        finally:
+            reset_hermes_home_override(token)
+    except Exception:
+        _log.debug("kanban: skill preflight for %r failed", assignee, exc_info=True)
+        return []
+
+
+def skills_block_reason(assignee: str, missing: list[str]) -> str:
+    return (
+        f"Agent {assignee} cannot load skill(s): {', '.join(missing)}. "
+        "Install or enable them for that agent, or recreate the card without them."
+    )
+
+
     stale_timeout_seconds: int = 0,
     board: Optional[str] = None,
     default_assignee: Optional[str] = None,
@@ -11048,6 +11083,22 @@ def _dispatch_once_locked(
             # under-reports the capped subset (#21582).
             if _per_profile_cap is not None and row_assignee:
                 _per_profile_running[row_assignee] = (
+        # Skills may have been removed or disabled since the card was made:
+        # a worker that cannot load any of them exits at once and would be
+        # respawned for nothing. Stop the card here with a readable reason.
+        _card = get_task(conn, row["id"])
+        _missing = unavailable_task_skills(
+            row_assignee, _card.skills if _card else None,
+        )
+        if _missing:
+            if not dry_run:
+                block_task(
+                    conn, row["id"],
+                    reason=skills_block_reason(row_assignee, _missing),
+                    kind="capability",
+                )
+            result.auto_blocked.append(row["id"])
+            continue
                     _per_profile_running.get(row_assignee, 0) + 1
                 )
             continue

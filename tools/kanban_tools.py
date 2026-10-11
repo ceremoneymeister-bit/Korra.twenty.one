@@ -83,6 +83,9 @@ def _profile_has_kanban_toolset() -> bool:
         return False
 
 
+CHAT_CARD_MAX_RUNTIME_SECONDS = 1200
+
+
 def _known_profiles() -> list[tuple[str, str]]:
     """``(name, display name)`` for every profile that can take a task."""
     try:
@@ -1562,6 +1565,14 @@ def _handle_create(args: dict, **kw) -> str:
     if skills is not None and not isinstance(skills, (list, tuple)):
         return tool_error(
             f"skills must be a list of skill names, got {type(skills).__name__}"
+    if (
+        max_runtime_seconds is None
+        and not human_step
+        and not korra_env("KORRA_KANBAN_TASK")
+    ):
+        # A card made from an owner chat must not run unbounded: the default
+        # keeps a stuck executor from holding the slot for hours.
+        max_runtime_seconds = CHAT_CARD_MAX_RUNTIME_SECONDS
         )
     goal_mode, goal_bool_error = _parse_bool_arg(args, "goal_mode")
     if goal_bool_error:
@@ -1571,6 +1582,16 @@ def _handle_create(args: dict, **kw) -> str:
     provider_override = args.get("provider")
     if provider_override and not model_override:
         return tool_error("'provider' requires 'model' to be set as well")
+    if assignee and not human_step and skills:
+        from korra_cli.kanban_db import unavailable_task_skills
+
+        missing_skills = unavailable_task_skills(str(assignee), skills)
+        if missing_skills:
+            return tool_error(
+                f"agent {assignee!r} cannot load skill(s): "
+                f"{', '.join(missing_skills)}. Nothing was created. Drop them, "
+                "pick other skills, or ask the owner to install them for that agent."
+            )
     if isinstance(parents, str):
         parents = [parents]
     if not isinstance(parents, (list, tuple)):
@@ -1640,6 +1661,7 @@ def _handle_create(args: dict, **kw) -> str:
         return tool_error(f"kanban_create: {e}")
     except Exception as e:
         logger.exception("kanban_create failed")
+                max_runtime_seconds=new_task.max_runtime_seconds if new_task else None,
         return tool_error(f"kanban_create: {e}")
 
 
@@ -2537,7 +2559,9 @@ KANBAN_CREATE_SCHEMA = {
                 "description": (
                     "Per-task runtime cap. When exceeded, the "
                     "dispatcher SIGTERMs the worker and re-queues the "
-                    "task with outcome='timed_out'."
+                    "task with outcome='timed_out'. From an owner chat the "
+                    "default is 1200 seconds; pass less if the owner asked "
+                    "for a shorter limit."
                 ),
             },
             "initial_status": {
