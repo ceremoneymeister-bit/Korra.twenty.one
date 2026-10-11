@@ -3078,6 +3078,28 @@ _OWN_POLICY_OPEN_ENV = {
 }
 
 
+_LOCAL_BOT_API_KEYS = ("base_url", "base_file_url", "local_mode")
+
+
+def _inherit_local_bot_api_transport(config: Any, root: Any) -> None:
+    """Second Telegram bot reaches the same Bot API server as the root bot.
+
+    Without this a secondary profile's bot talks to the cloud API while files
+    of the root bot live on the local server, and large media or voice of the
+    second bot silently break. A profile that names its own ``base_url`` keeps
+    its whole transport; nothing is changed for a bot with no local server.
+    """
+    own = getattr(config, "extra", None)
+    shared = getattr(root, "extra", None)
+    if config is root or not isinstance(own, dict) or not isinstance(shared, dict):
+        return
+    if own.get("base_url") or not shared.get("base_url"):
+        return
+    for key in _LOCAL_BOT_API_KEYS:
+        if key in shared and key not in own:
+            own[key] = shared[key]
+
+
 def _own_policy_open_startup_violation(config) -> Optional[str]:
     """Return a startup-abort reason when open policy lacks allow-all opt-in."""
     for platform, platform_config in getattr(config, "platforms", {}).items():
@@ -17375,6 +17397,10 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             config.extra.setdefault(
                 "thread_sessions_per_user",
                 getattr(self.config, "thread_sessions_per_user", False),
+            )
+        if platform is Platform.TELEGRAM:
+            _inherit_local_bot_api_transport(
+                config, self.config.platforms.get(Platform.TELEGRAM)
             )
 
         # ── Plugin-registered platforms (checked first) ───────────────────
