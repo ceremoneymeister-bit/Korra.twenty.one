@@ -14,7 +14,7 @@ platforms: [linux, macos, windows]
 # deliberately never handed to a sandbox.
 required_credential_files:
   - path: google-workspace/token.json
-    description: Profile-local Google OAuth grant (created by google_workspace_auth)
+    description: Profile-local Google OAuth grant (created when the owner connects Google)
 metadata:
   hermes:
     tags: [Google, Gmail, Calendar, Drive, Sheets, Docs, Contacts, Tasks, Email, OAuth]
@@ -54,23 +54,27 @@ gateway:
       telegram: ["123456789"]
 ```
 
-First call `google_workspace_auth` with `action=status`. If the installation
-OAuth app is configured, ask which services the user needs and call
-`action=start` with that exact service list. Send the returned Google URL. The
-user finishes the flow in **Settings → Keys → Google Workspace** by pasting the
-full `http://localhost/?...` browser URL into the password-style field there.
+The owner connects Google in **Settings → Keys → Google Workspace**; that web
+route works without any toolset. The `google_workspace_auth` tool is optional
+and its toolset is off by default: use it only when it is actually in your tool
+list. Then call `action=status` first; if the installation OAuth app is
+configured, ask which services the user needs and call `action=start` with that
+exact service list, and send the returned Google URL. If the tool is not
+available, do not try to call it — send the user to Settings → Keys → Google
+Workspace instead. Either way the user pastes the full `http://localhost/?...`
+browser URL into the password-style field there, never into chat.
 
 The installed Desktop OAuth credential belongs to the installation operator.
 It is managed outside profile DATA, shared by profiles, and never added to the
 image or repository. The host file is `root:<runtime-group>` mode `0640` and is mounted
 at `/run/korra-secrets/google-oauth-client.json` as an exact read-only file
-mount: the runtime can read it and cannot install or replace it. By default
-each profile has its own mutable grant at
-`$HERMES_HOME/google-workspace/token.json` (mode `0600`), outside the
-operator-owned installation directory. During a controlled migration, the
-installation owner may explicitly give named profiles access to one source
-profile's grant. Korra keeps one token, and profiles created later remain
-isolated until the owner names them too.
+mount: the runtime can read it and cannot install or replace it. Each profile
+can have its own mutable grant at `$HERMES_HOME/google-workspace/token.json`
+(mode `0600`), outside the operator-owned installation directory. The
+installation owner may also give access to one source profile's grant: to named
+profiles, or to everyone with **Доступно всем агентам** (`shared-all`). Korra
+keeps one token; the "everyone" setting covers every profile without its own
+grant, including profiles created later, while named sharing does not.
 
 The launcher requires the OAuth app source to remain an operator-owned exact
 read-only file mount. This remains valid when the separately managed
@@ -215,16 +219,23 @@ $GAPI sheets append SHEET_ID "Sheet1!A:C" --values '[["new","row","data"]]'
 ### Docs
 
 ```bash
-# Read
+# Read every tab (result has a "tabs" list with tabId, title, level, body)
 $GAPI docs get DOC_ID
+# Read one tab
+$GAPI docs get DOC_ID --tab TAB_ID
 
 # Create a new Doc (optionally seeded with body text)
 $GAPI docs create --title "Meeting Notes"
 $GAPI docs create --title "Draft" --body "First paragraph..."
 
-# Append text to the end of an existing Doc
-$GAPI docs append DOC_ID --text "Additional content to append"
+# Append text to the end of one tab. Without --tab the first tab is used;
+# the result always names the tab that was written ("tab", "tabTitle").
+$GAPI docs append DOC_ID --text "Additional content to append" --tab TAB_ID
 ```
+
+Docs can have several tabs. Read with `docs get` first when the user means a
+specific tab, then pass its `tabId` to `docs append --tab`, and tell the user
+which tab you wrote to.
 
 ## Output Format
 
@@ -232,7 +243,7 @@ All commands return JSON. Parse with `jq` or read directly. Key fields:
 
 - **Gmail search**: `[{id, threadId, from, to, subject, date, snippet, labels}]`
 - **Gmail get**: `{id, threadId, from, to, subject, date, labels, body}`
-- **Gmail send/reply**: `{status: "sent", id, threadId}`
+- **Gmail send/reply**: `{status: "sent", id, threadId}`; for an agent's one-off send `{success: false, status: "pending_decision", decision_id}` (exit code 1, nothing sent)
 - **Calendar list**: `[{id, summary, start, end, location, description, htmlLink}]`
 - **Calendar create**: `{status: "created", id, summary, htmlLink}`
 - **Drive search**: `[{id, name, mimeType, modifiedTime, webViewLink}]`
@@ -259,11 +270,12 @@ consent through **Добавить сервисы**, never editing token metadat
 
 ## Rules
 
-1. **Never send email, create/delete calendar events, delete Drive files, share files, or modify Docs/Sheets without confirming with the user first.** Show what will be done (recipients, file IDs, content, share role) and ask for approval. For `drive delete`, prefer the default trash (reversible) over `--permanent`.
-2. **Verify read access with the service command.** Use [scripts/google_api.py](scripts/google_api.py) for the requested read before claiming Google is disconnected. A small read-only probe is `drive search "" --max 1`, `calendar list`, or `gmail labels`; for Sheets/Docs read the requested document/range. `owner_required` from `google_workspace_auth` means connection management is unavailable to this principal, not that a shared grant is absent. `not_authenticated` means this agent has no grant; `service_not_selected` means the service needs additional owner consent. File permission errors, disabled APIs, network and refresh failures are separate problems, not a missing connection. Manage the connection only in a verified owner context; extend access in Settings → Keys → Google Workspace without disconnecting existing access.
-3. **Use the Gmail search syntax reference** for complex queries — load it with `skill_view("google-workspace", file_path="references/gmail-search-syntax.md")`.
-4. **Calendar times must include timezone** — always use ISO 8601 with offset (e.g., `2026-03-01T10:00:00-06:00`) or UTC (`Z`).
-5. **Respect rate limits** — avoid rapid-fire sequential API calls. Batch reads when possible.
+1. **`gmail send` and `gmail reply` go through the owner's decision ledger.** When you send on your own initiative, the script saves the draft and prints `status: "pending_decision"` with a `decision_id`; nothing is sent until the owner approves the card. Do not retry or re-run it: tell the user the draft waits for their approval. In an automation the owner configured, the same commands send without a confirmation.
+2. **Never create/delete calendar events, delete Drive files, share files, or modify Docs/Sheets without confirming with the user first.** Show what will be done (recipients, file IDs, content, share role) and ask for approval. For `drive delete`, prefer the default trash (reversible) over `--permanent`.
+3. **Verify read access with the service command.** Use [scripts/google_api.py](scripts/google_api.py) for the requested read before claiming Google is disconnected. A small read-only probe is `drive search "" --max 1`, `calendar list`, or `gmail labels`; for Sheets/Docs read the requested document/range. `owner_required` from `google_workspace_auth` means connection management is unavailable to this principal, not that a shared grant is absent. `not_authenticated` means this agent has no grant; `service_not_selected` means the service needs additional owner consent. File permission errors, disabled APIs, network and refresh failures are separate problems, not a missing connection. Manage the connection only in a verified owner context; extend access in Settings → Keys → Google Workspace without disconnecting existing access.
+4. **Use the Gmail search syntax reference** for complex queries — load it with `skill_view("google-workspace", file_path="references/gmail-search-syntax.md")`.
+5. **Calendar times must include timezone** — always use ISO 8601 with offset (e.g., `2026-03-01T10:00:00-06:00`) or UTC (`Z`).
+6. **Respect rate limits** — avoid rapid-fire sequential API calls. Batch reads when possible.
 
 ## Troubleshooting
 

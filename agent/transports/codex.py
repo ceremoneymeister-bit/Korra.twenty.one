@@ -190,6 +190,25 @@ def _xai_prefers_native_web_search() -> bool:
         return True
 
 
+def _openai_prefers_native_web_search() -> bool:
+    """True when the Codex backend should use OpenAI's server-side ``web_search``.
+
+    Search then runs on the ChatGPT/Codex subscription (no API key). Used only for the
+    Codex backend. It applies when ``web.search_backend``/``web.backend`` is unset, names
+    ``openai-native``, or names ``ddgs`` (free scraping that is often throttled to empty
+    answers). Any other explicit backend is the user's choice and is kept. Fails closed:
+    a config read failure keeps the client tool.
+    """
+    try:
+        from tools.web_tools import _load_web_config
+
+        cfg = _load_web_config()
+        configured = (cfg.get("search_backend") or cfg.get("backend") or "").strip().lower()
+        return configured in ("", "openai-native", "ddgs")
+    except Exception:
+        return False
+
+
 def _rename_client_web_search_for_xai(response_tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Rename client ``web_search`` → alias so xAI won't hijack it server-side."""
     rewritten: List[Dict[str, Any]] = []
@@ -688,6 +707,15 @@ class ResponsesApiTransport(ProviderTransport):
                 else:
                     response_tools = _rename_client_web_search_for_xai(response_tools)
                     wire_aliases[_XAI_CLIENT_WEB_SEARCH_ALIAS] = "web_search"
+
+        # OpenAI Codex: same collision and the same 1:1 swap, for the subscription's own search.
+        if is_codex_backend and response_tools:
+            if any(isinstance(t, dict) and t.get("name") == "web_search" for t in response_tools):
+                if _openai_prefers_native_web_search():
+                    response_tools = [
+                        t for t in response_tools
+                        if not (isinstance(t, dict) and t.get("name") == "web_search")
+                    ] + [{"type": "web_search"}]
 
         # OpenCode Responses backends reserve web_search / search_files as
         # function names (HTTP 400 "custom function name 'X' is reserved",

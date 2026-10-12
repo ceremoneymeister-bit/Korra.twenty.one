@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -61,6 +62,34 @@ def _is_rate_limitish(message: str) -> bool:
     """Heuristic: does an error message look like free-tier throttling?"""
     lowered = (message or "").lower()
     return any(marker in lowered for marker in _RATE_LIMIT_MARKERS)
+
+
+_NO_RESULTS_MARKERS = ("no results", "no text content", "нет результатов")
+
+
+def search_outcome(result: Dict[str, Any]) -> str:
+    """'' when *result* is a successful search with hits, else a short Russian reason."""
+    if result.get("success"):
+        hits = (result.get("data") or {}).get("web") or []
+        return "" if hits else "нет результатов"
+    error = str(result.get("error") or "")
+    if any(marker in error.lower() for marker in _NO_RESULTS_MARKERS):
+        return "нет результатов"
+    if _is_rate_limitish(error):
+        return "лимит запросов"
+    return " ".join(error.split(". Set ")[0].split())[:160] or "ошибка"
+
+
+def not_found_message(attempts: List[Dict[str, str]]) -> str:
+    """Honest final answer after every provider was tried: who was asked and what came back."""
+    tried = "; ".join(f"{a['provider']} — {a['outcome']}" for a in attempts)
+    empty = any(a["outcome"] == "нет результатов" for a in attempts)
+    head = (
+        "Не нашёл: ни один поставщик поиска не вернул результатов."
+        if empty
+        else "Поиск не сработал: ни один поставщик не ответил."
+    )
+    return f"{head} Пробовал: {tried}."
 
 
 def keyless_enabled() -> bool:
@@ -149,28 +178,53 @@ def _parse_mcp_body(body: str) -> str:
         for item in content:
             if isinstance(item, dict) and item.get("text"):
                 return str(item["text"])
-        return None
+        return ""
 
+    # SSE lines end with CRLF, CR or LF only: ``str.splitlines()`` also breaks on
+    # U+0085 / U+2028 / U+2029, which occur inside CJK page text and cut a ``data:``
+    # line in two.
+    candidates: List[str] = []
     stripped = body.strip()
     if stripped.startswith("{"):
+        candidates.append(stripped)
+    candidates += [
+        line[len("data: "):]
+        for line in re.split(r"\r\n|\r|\n", body)
+        if line.startswith("data: ")
+    ]
+    envelope_seen = False
+    for candidate in candidates:
         try:
-            text = _from_payload(stripped)
-            if text is not None:
-                return text
-        except json.JSONDecodeError:
-            pass
-
-    for line in body.splitlines():
-        if not line.startswith("data: "):
-            continue
-        try:
-            text = _from_payload(line[len("data: "):])
+            text = _from_payload(candidate)
         except json.JSONDecodeError:
             continue
-        if text is not None:
+        if text:
             return text
+        envelope_seen = envelope_seen or text == ""
 
-    raise KeylessMCPError("Unrecognized MCP response shape")
+    raise KeylessMCPError(
+        "MCP response contained no text content"
+        if envelope_seen
+        else "Unrecognized MCP response shape"
+    )
+
+
+def _response_text(response: Any) -> str:
+    """Body decoded with the declared charset, else UTF-8.
+
+    JSON-RPC and SSE bodies are UTF-8 by spec, but ``text/event-stream`` carries no
+    charset and ``requests`` then decodes ``.text`` as ISO-8859-1: Cyrillic and CJK
+    results come back as mojibake.
+    """
+    from requests.utils import get_encoding_from_headers
+
+    content_type = response.headers.get("Content-Type", "")
+    declared = (
+        get_encoding_from_headers({"content-type": content_type})
+        if "charset=" in content_type.lower()
+        else None
+    )
+    return response.content.decode(declared or "utf-8", errors="replace")
 
 
 def mcp_call(
@@ -203,9 +257,9 @@ def mcp_call(
         raise KeylessMCPError(f"request failed: {exc}") from exc
     if response.status_code >= 400:
         raise KeylessMCPError(
-            f"HTTP {response.status_code}: {response.text[:300]}"
+            f"HTTP {response.status_code}: {_response_text(response)[:300]}"
         )
-    return _parse_mcp_body(response.text)
+    return _parse_mcp_body(_response_text(response))
 
 
 # ---------------------------------------------------------------------------
@@ -537,7 +591,7 @@ def keenable_search_keyless(query: str, limit: int = 5) -> Dict[str, Any]:
         )
         if response.status_code >= 400:
             raise KeylessMCPError(
-                (response.text or "").strip() or f"HTTP {response.status_code}"
+                _response_text(response).strip() or f"HTTP {response.status_code}"
             )
         data = response.json()
     except KeylessMCPError as exc:
@@ -588,7 +642,7 @@ def keenable_extract_keyless(urls: List[str]) -> List[Dict[str, Any]]:
             )
             if response.status_code >= 400:
                 raise KeylessMCPError(
-                    (response.text or "").strip() or f"HTTP {response.status_code}"
+                    _response_text(response).strip() or f"HTTP {response.status_code}"
                 )
             data = response.json()
             content = data.get("content") or ""
@@ -692,13 +746,14 @@ def _ring_order(name: str) -> List[str]:
 
 
 def search_with_failover(name: str, query: str, limit: int = 5) -> Dict[str, Any]:
-    """Keyless search across the vendor ring with next-in-line failover.
+    """Keyless search across the whole vendor ring.
 
     Starts at *name* when the user pinned it, otherwise at the round-robin
-    cursor. Rate-limit-shaped errors advance to the next ring vendor;
-    non-throttle errors stop the walk (a malformed query fails everywhere).
-    The result notes the serving vendor via ``data.served_by`` whenever it
-    differs from *name*.
+    cursor. A vendor that is throttled, fails, or answers with no results
+    hands over to the next ring vendor; the first non-empty answer wins and
+    notes the serving vendor via ``data.served_by`` whenever it differs from
+    *name*. If every vendor is exhausted the failure lists each attempt
+    (``attempts``) instead of a bare "no results".
     """
     order = _ring_order(name)
     if not order:
@@ -706,26 +761,19 @@ def search_with_failover(name: str, query: str, limit: int = 5) -> Dict[str, Any
             "success": False,
             "error": "All keyless web providers are pinned to paid tiers.",
         }
-    last: Dict[str, Any] = {}
+    attempts: List[Dict[str, str]] = []
     for i, vendor in enumerate(order):
         result = _KEYLESS_SEARCHERS[vendor](query, limit)
-        if result.get("success"):
+        outcome = search_outcome(result)
+        if not outcome:
             if vendor != name:
                 result.setdefault("data", {})["served_by"] = vendor
             return result
-        last = result
-        if not _is_rate_limitish(result.get("error", "")):
-            return result
+        attempts.append({"provider": vendor, "outcome": outcome})
         nxt = order[i + 1] if i + 1 < len(order) else None
         if nxt:
-            logger.info(
-                "keyless %s search throttled; failing over to %s", vendor, nxt
-            )
-    last["error"] = (
-        f"{last.get('error', '')} (all keyless vendors throttled: "
-        f"{', '.join(order)})"
-    )
-    return last
+            logger.info("keyless %s search gave nothing (%s); trying %s", vendor, outcome, nxt)
+    return {"success": False, "error": not_found_message(attempts), "attempts": attempts}
 
 
 def extract_with_failover(name: str, urls: List[str]) -> List[Dict[str, Any]]:

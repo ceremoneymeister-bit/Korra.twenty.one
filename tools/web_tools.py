@@ -487,7 +487,9 @@ def _rescue_eligible(provider) -> bool:
         return False
 
 
-def _rescue_search(provider_name: str, original_error: str, query: str, limit: int) -> dict:
+def _rescue_search(
+    provider_name: str, original_error: str, query: str, limit: int, provider_label: str = ""
+) -> dict:
     """One-shot keyless-ring rescue for a failed keyed/configured search.
 
     Stateless by design: this call alone routes to the free-tier ring; the
@@ -512,8 +514,15 @@ def _rescue_search(provider_name: str, original_error: str, query: str, limit: i
             f"'{provider_name}' again."
         )
         return rescued
-    # Ring also failed: surface the ORIGINAL backend error (it names the
-    # user's configured setup) with the rescue note appended.
+    # Ring also failed. When the chosen backend simply found nothing, say so
+    # honestly and list every attempt; otherwise surface the ORIGINAL backend
+    # error (it names the user's configured setup) with the rescue note appended.
+    from plugins.web.keyless_mcp import not_found_message, search_outcome
+
+    if search_outcome({"success": False, "error": original_error}) == "нет результатов":
+        attempts = [{"provider": provider_label or provider_name, "outcome": "нет результатов"}]
+        attempts += list(rescued.get("attempts") or [])
+        return {"success": False, "error": not_found_message(attempts), "attempts": attempts}
     return {
         "success": False,
         "error": (
@@ -994,17 +1003,29 @@ def web_search_tool(query: str, limit: int = 5) -> str:
                     else:
                         raise
                 else:
-                    if not _resp.get("success") and _rescue_eligible(provider):
+                    from plugins.web.keyless_mcp import not_found_message, search_outcome
+
+                    _label = getattr(provider, "display_name", "") or provider.name
+                    _empty = _resp.get("success") and search_outcome(_resp) == "нет результатов"
+                    if (not _resp.get("success") or _empty) and _rescue_eligible(provider):
                         # One-shot keyless rescue: THIS call rides the
                         # free-tier ring; the next call attempts the chosen
-                        # backend again.
+                        # backend again. An empty answer counts as a miss.
                         _rescued = True
                         _resp = _rescue_search(
                             provider.name,
-                            str(_resp.get("error", "")),
+                            "нет результатов" if _empty else str(_resp.get("error", "")),
                             query,
                             _fetch_limit,
+                            _label,
                         )
+                    elif _empty:
+                        _attempts = [{"provider": _label, "outcome": "нет результатов"}]
+                        _resp = {
+                            "success": False,
+                            "error": not_found_message(_attempts),
+                            "attempts": _attempts,
+                        }
                 return _resp, _rescued
 
             response_data = _search_memo.lookup(provider.name, query, limit)

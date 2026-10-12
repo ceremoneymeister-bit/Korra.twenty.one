@@ -89,6 +89,59 @@ class TestParseMcpBody:
         with pytest.raises(keyless_mcp.KeylessMCPError):
             keyless_mcp._parse_mcp_body("<html>nope</html>")
 
+    def test_cyrillic_and_cjk_sse_body_survives_charset_less_event_stream(self):
+        """Exa answers ``text/event-stream`` without a charset; ``requests`` then decodes ``.text`` as
+        ISO-8859-1 (mojibake for Cyrillic, and U+0085 inside CJK sequences cut the ``data:`` line)."""
+        import requests
+
+        for title in ("Монтаж солнечных панелей: нормы и допуски", "光伏发电站组件清洗与性能监测规范"):
+            payload = {"result": {"content": [{"type": "text", "text": f"Title: {title}\nURL: https://x.example"}]}}
+            response = requests.Response()
+            response.status_code = 200
+            response.headers["Content-Type"] = "text/event-stream"
+            response.encoding = "ISO-8859-1"
+            response._content = f"event: message\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n".encode("utf-8")
+            assert title not in response.text
+            with patch.object(requests, "post", return_value=response):
+                text = keyless_mcp.mcp_call(keyless_mcp.EXA_MCP_URL, "web_search_exa", {"query": title})
+            assert title in text
+
+    def test_parsed_envelope_without_text_names_the_condition(self):
+        body = json.dumps({"result": {"content": []}})
+        with pytest.raises(keyless_mcp.KeylessMCPError, match="no text content"):
+            keyless_mcp._parse_mcp_body(body)
+
+    @pytest.mark.parametrize("terminator", ["\r", "\r\n"])
+    def test_sse_frames_split_on_every_spec_line_terminator(self, terminator):
+        payload = json.dumps({"result": {"content": [{"type": "text", "text": "Title: hello"}]}})
+        body = f"event: message{terminator}data: {payload}{terminator}{terminator}"
+        assert keyless_mcp._parse_mcp_body(body) == "Title: hello"
+
+    def test_declared_charset_wins_over_utf8_default(self):
+        import requests
+
+        title = "Привет"
+        payload = json.dumps({"result": {"content": [{"type": "text", "text": f"Title: {title}"}]}}, ensure_ascii=False)
+        response = requests.Response()
+        response.status_code = 200
+        response.headers["Content-Type"] = "text/event-stream; charset=windows-1251"
+        response.encoding = "windows-1251"
+        response._content = f"event: message\ndata: {payload}\n\n".encode("windows-1251")
+        with patch.object(requests, "post", return_value=response):
+            assert keyless_mcp.mcp_call(keyless_mcp.EXA_MCP_URL, "web_search_exa", {"query": title}) == f"Title: {title}"
+
+    def test_non_ascii_error_body_without_charset_is_decoded_as_utf8(self):
+        import requests
+
+        response = requests.Response()
+        response.status_code = 429
+        response.headers["Content-Type"] = "text/plain"
+        response.encoding = "ISO-8859-1"
+        response._content = "Слишком много запросов".encode("utf-8")
+        with patch.object(requests, "post", return_value=response):
+            with pytest.raises(keyless_mcp.KeylessMCPError, match="Слишком много запросов"):
+                keyless_mcp.mcp_call(keyless_mcp.EXA_MCP_URL, "web_search_exa", {"query": "q"})
+
 
 class TestExaTextParsing:
     def test_parses_blocks(self):
@@ -449,20 +502,40 @@ class TestKeylessFailover:
         assert out["success"] is True
         assert out["data"]["served_by"] == "parallel"
 
-    def test_search_no_failover_on_non_throttle_error(self, monkeypatch):
+    def test_search_fails_over_on_non_throttle_error_too(self, monkeypatch):
+        # A vendor-specific failure must not end the walk: the next vendor may answer.
         self._pin(monkeypatch, "exa")
         monkeypatch.setitem(
             keyless_mcp._KEYLESS_SEARCHERS, "exa",
             lambda q, l: {"success": False, "error": "Unrecognized MCP response shape"},
         )
-        called = []
-        monkeypatch.setitem(
-            keyless_mcp._KEYLESS_SEARCHERS, "parallel",
-            lambda q, l: called.append(1) or self._ok("parallel"),
-        )
+        monkeypatch.setitem(keyless_mcp._KEYLESS_SEARCHERS, "parallel", lambda q, l: self._ok("parallel"))
+        out = keyless_mcp.search_with_failover("exa", "q")
+        assert out["success"] is True
+        assert out["data"]["served_by"] == "parallel"
+
+    def test_search_fails_over_on_empty_answer(self, monkeypatch):
+        self._pin(monkeypatch, "exa")
+        monkeypatch.setitem(keyless_mcp._KEYLESS_SEARCHERS, "exa", lambda q, l: {"success": True, "data": {"web": []}})
+        monkeypatch.setitem(keyless_mcp._KEYLESS_SEARCHERS, "parallel", lambda q, l: self._ok("parallel"))
+        out = keyless_mcp.search_with_failover("exa", "q")
+        assert out["success"] is True
+        assert out["data"]["served_by"] == "parallel"
+
+    def test_search_all_empty_is_honest_not_found_with_attempts(self, monkeypatch):
+        self._pin(monkeypatch, "exa")
+        for vendor in keyless_mcp._KEYLESS_RING:
+            monkeypatch.setitem(
+                keyless_mcp._KEYLESS_SEARCHERS, vendor,
+                lambda q, l: {"success": True, "data": {"web": []}},
+            )
         out = keyless_mcp.search_with_failover("exa", "q")
         assert out["success"] is False
-        assert not called  # peer never tried
+        assert out["error"].startswith("Не нашёл")
+        assert "No results found" not in out["error"]
+        assert [a["provider"] for a in out["attempts"]] == list(keyless_mcp._KEYLESS_RING)
+        for vendor in keyless_mcp._KEYLESS_RING:
+            assert f"{vendor} — нет результатов" in out["error"]
 
     def test_search_all_throttled_reports_ring(self, monkeypatch):
         self._pin(monkeypatch, "exa")
@@ -473,7 +546,8 @@ class TestKeylessFailover:
             )
         out = keyless_mcp.search_with_failover("exa", "q")
         assert out["success"] is False
-        assert "all keyless vendors throttled" in out["error"]
+        assert out["error"].startswith("Поиск не сработал")
+        assert all(f"{v} — лимит запросов" in out["error"] for v in keyless_mcp._KEYLESS_RING)
 
     def test_search_walks_ring_past_multiple_throttles(self, monkeypatch):
         # exa -> parallel all throttled; firecrawl serves.

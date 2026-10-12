@@ -80,6 +80,7 @@ class TestBundledPluginsRegister:
             "exa",
             "firecrawl",
             "keenable",
+            "openai-native",
             "parallel",
             "searxng",
             "xai",
@@ -97,6 +98,8 @@ class TestBundledPluginsRegister:
             ("firecrawl", True, True),
             # xai: search-only via Grok's agentic web_search tool.
             ("xai", True, False),
+            # openai-native: Codex server-side search on the subscription, search-only.
+            ("openai-native", True, False),
         ],
     )
     def test_capability_flags_match_spec(
@@ -115,7 +118,7 @@ class TestBundledPluginsRegister:
 
     @pytest.mark.parametrize(
         "plugin_name",
-        ["brave-free", "ddgs", "searxng", "exa", "parallel", "firecrawl", "keenable", "xai"],
+        ["brave-free", "ddgs", "searxng", "exa", "parallel", "firecrawl", "keenable", "xai", "openai-native"],
     )
     def test_each_plugin_has_name_and_display_name(self, plugin_name: str) -> None:
         _ensure_plugins_loaded()
@@ -245,6 +248,26 @@ class TestIsAvailable:
         assert p.is_available() is False  # no XAI_API_KEY, no auth.json
         monkeypatch.setenv("XAI_API_KEY", "real")
         assert p.is_available() is True
+
+    def test_openai_native_needs_codex_login_and_never_searches_client_side(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        import json
+
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        _ensure_plugins_loaded()
+        from agent.web_search_registry import get_provider
+
+        p = get_provider("openai-native")
+        assert p is not None
+        assert p.is_available() is False
+        (tmp_path / "auth.json").write_text(
+            json.dumps({"providers": {"openai-codex": {"tokens": {"access_token": "tok"}}}}),
+            encoding="utf-8",
+        )
+        assert p.is_available() is True
+        result = p.search("q")
+        assert result["success"] is False and "openai-codex" in result["error"]
 
 
 # ---------------------------------------------------------------------------

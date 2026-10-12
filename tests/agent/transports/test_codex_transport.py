@@ -1543,3 +1543,71 @@ class TestPreflightSlashEnumStrip:
         assert params["properties"]["model_id"].get("enum") == [
             "Qwen/Qwen3.5-0.8B", "plain-id"
         ]
+
+
+class TestCodexNativeWebSearch:
+    """Codex profiles search on the ChatGPT/Codex subscription via the server-side built-in."""
+
+    _TOOLS = [
+        {"type": "function", "function": {
+            "name": "read_file", "description": "Read a file.",
+            "parameters": {"type": "object", "properties": {"path": {"type": "string"}}}}},
+        {"type": "function", "function": {
+            "name": "web_search", "description": "Search the web.",
+            "parameters": {"type": "object", "properties": {"query": {"type": "string"}}}}},
+    ]
+
+    def _build(self, transport, monkeypatch, web_cfg, *, codex=True):
+        import tools.web_tools as web_tools
+
+        monkeypatch.setattr(web_tools, "_load_web_config", lambda: web_cfg)
+        return transport.build_kwargs(
+            model="gpt-6.1-sol",
+            messages=[{"role": "user", "content": "Найди курс евро."}],
+            tools=self._TOOLS,
+            is_codex_backend=codex,
+        )
+
+    @staticmethod
+    def _client_names(kw):
+        return [t.get("name") for t in kw.get("tools", []) if t.get("type") == "function"]
+
+    @pytest.mark.parametrize(
+        "web_cfg",
+        [{}, {"backend": "ddgs"}, {"search_backend": "openai-native"}, {"backend": "", "search_backend": ""}],
+    )
+    def test_codex_swaps_client_web_search_for_builtin(self, transport, monkeypatch, web_cfg):
+        kw = self._build(transport, monkeypatch, web_cfg)
+        assert {"type": "web_search"} in kw["tools"]
+        names = self._client_names(kw)
+        assert "web_search" not in names
+        assert "read_file" in names
+
+    @pytest.mark.parametrize(
+        "web_cfg", [{"search_backend": "searxng"}, {"backend": "firecrawl"}, {"search_backend": "exa", "backend": "ddgs"}]
+    )
+    def test_explicit_other_backend_keeps_client_tool(self, transport, monkeypatch, web_cfg):
+        kw = self._build(transport, monkeypatch, web_cfg)
+        assert not any(t.get("type") == "web_search" for t in kw["tools"])
+        assert "web_search" in self._client_names(kw)
+
+    def test_non_codex_backend_never_gets_builtin(self, transport, monkeypatch):
+        kw = self._build(transport, monkeypatch, {}, codex=False)
+        assert not any(t.get("type") == "web_search" for t in kw["tools"])
+        assert "web_search" in self._client_names(kw)
+
+    def test_config_read_failure_keeps_client_tool(self, transport, monkeypatch):
+        import tools.web_tools as web_tools
+
+        def boom():
+            raise RuntimeError("config unreadable")
+
+        monkeypatch.setattr(web_tools, "_load_web_config", boom)
+        kw = transport.build_kwargs(
+            model="gpt-6.1-sol",
+            messages=[{"role": "user", "content": "q"}],
+            tools=self._TOOLS,
+            is_codex_backend=True,
+        )
+        assert not any(t.get("type") == "web_search" for t in kw["tools"])
+        assert "web_search" in self._client_names(kw)

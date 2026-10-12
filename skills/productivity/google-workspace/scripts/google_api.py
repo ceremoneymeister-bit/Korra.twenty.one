@@ -212,15 +212,61 @@ def _extract_message_body(msg: dict) -> str:
     return body
 
 
-def _extract_doc_text(doc: dict) -> str:
+def _extract_body_text(body: dict) -> str:
     text_parts = []
-    for element in doc.get("body", {}).get("content", []):
+    for element in body.get("content", []):
         paragraph = element.get("paragraph", {})
         for pe in paragraph.get("elements", []):
             text_run = pe.get("textRun", {})
             if text_run.get("content"):
                 text_parts.append(text_run["content"])
     return "".join(text_parts)
+
+
+def _extract_doc_text(doc: dict) -> str:
+    return _extract_body_text(doc.get("body", {}))
+
+
+def _flatten_doc_tabs(doc: dict) -> list[dict]:
+    """Flatten Google's recursive ``tabs``/``childTabs`` tree (preorder).
+
+    Every tab keeps its content in its own body with an independent index space;
+    the legacy top-level ``body`` only carries the first tab. Returns [] for the
+    legacy response shape (no ``tabs`` field).
+    """
+    flat: list[dict] = []
+
+    def visit(tabs, level):
+        for tab in tabs or []:
+            props = tab.get("tabProperties") or {}
+            flat.append({
+                "tabId": props.get("tabId", ""),
+                "title": props.get("title", ""),
+                "level": level,
+                "body": (tab.get("documentTab") or {}).get("body") or {},
+            })
+            visit(tab.get("childTabs"), level + 1)
+
+    visit(doc.get("tabs"), 0)
+    return flat
+
+
+def _tab_error(message: str, tabs: list[dict]) -> None:
+    print(
+        json.dumps({
+            "error": message,
+            "tabs": [{"tabId": t["tabId"], "title": t["title"]} for t in tabs],
+        }, indent=2, ensure_ascii=False),
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+
+def _find_doc_tab(tabs: list[dict], tab_id: str) -> dict:
+    for tab in tabs:
+        if tab["tabId"] == tab_id:
+            return tab
+    _tab_error(f"unknown tab ID {tab_id!r}", tabs)
 
 
 def _datetime_with_timezone(value: str) -> str:
@@ -362,7 +408,100 @@ def gmail_get(args):
 
 
 
+def _gmail_effect_allowed(*, target: str, subject: str, body: str) -> bool:
+    """Gate a Gmail send through the durable outbound-message ledger.
+
+    Runs without a decision when a person runs the script, when the owner's
+    automation does (no confirmation, even with approvals.mode off), or when
+    the gateway executes an already approved decision for exactly these
+    arguments. An agent's one-off send is recorded as a pending decision and
+    nothing is sent until the owner approves it.
+    """
+    from gateway.session_context import get_session_env
+    from korra_cli.send_cmd import _run_by_agent
+    from tools.effect_decisions import EXECUTING, create_pending, get_decision
+
+    argv = list(sys.argv[1:])
+    decision_id = os.environ.get("KORRA_EFFECT_DECISION_ID", "").strip()
+    if decision_id:
+        decision = get_decision(decision_id) or {}
+        payload = decision.get("payload") or {}
+        if (
+            decision.get("kind") == "outbound_message"
+            and decision.get("status") == EXECUTING
+            and payload.get("platform") == "gmail"
+            and (payload.get("tool_args") or {}).get("argv") == argv
+        ):
+            return True
+        print(json.dumps({"success": False, "error": "decision does not match this send"}), file=sys.stderr)
+        sys.exit(1)
+    if get_session_env("KORRA_CRON_SESSION", "") == "1" and get_session_env("KORRA_CRON_RUN_TOKEN", "").strip():
+        return True
+    if not _run_by_agent():
+        return True
+
+    from tools.send_message_tool import _decision_session_identity
+
+    session_id, session_key, profile, owner_id = _decision_session_identity()
+    decision, _ = create_pending(
+        kind="outbound_message",
+        owner_id=owner_id,
+        profile=profile,
+        source_session_id=session_id,
+        source_session_key=session_key,
+        payload={
+            "platform": "gmail",
+            "account": "gmail",
+            "chat_id": target,
+            "thread_id": None,
+            "target_label": f"Gmail: {target}",
+            "message": f"Тема: {subject}\n\n{body}",
+            "attachments": [],
+            "force_document": False,
+            "used_home_channel": False,
+            "tool_args": {"argv": argv},
+            "source_label": get_session_env("KORRA_SESSION_PLATFORM", "cli") or "cli",
+            "source_user_id": get_session_env("KORRA_SESSION_USER_ID", "") or None,
+            "validity": {"version": 1},
+        },
+    )
+    print(json.dumps({
+        "success": False,
+        "status": "pending_decision",
+        "decision_id": decision["id"],
+        "message": (
+            "Письмо не отправлено. Черновик сохранён и ждёт точного решения "
+            "владельца; не повторяйте вызов."
+        ),
+    }, indent=2, ensure_ascii=False))
+    sys.exit(1)
+
+
+def _gmail_reply_preview(message_id: str) -> tuple[str, str]:
+    """Recipient and subject a reply would use, for the owner's decision card."""
+    params = {
+        "userId": "me",
+        "id": message_id,
+        "format": "metadata",
+        "metadataHeaders": ["From", "Subject", "Message-ID"],
+    }
+    try:
+        if _gws_binary():
+            original = _run_gws(["gmail", "users", "messages", "get"], params=params)
+        else:
+            original = build_service("gmail", "v1").users().messages().get(**params).execute()
+        headers = _headers_dict(original)
+    except (Exception, SystemExit):
+        return f"ответ на письмо {message_id}", ""
+    subject = headers.get("subject", "")
+    return headers.get("from", "") or f"ответ на письмо {message_id}", (
+        subject if subject.startswith("Re:") else f"Re: {subject}"
+    )
+
+
 def gmail_send(args):
+    if not _gmail_effect_allowed(target=args.to, subject=args.subject, body=args.body):
+        return
     if _gws_binary():
         message = MIMEText(args.body, "html" if args.html else "plain")
         message["To"] = args.to
@@ -406,6 +545,9 @@ def gmail_send(args):
 
 
 def gmail_reply(args):
+    target, subject = _gmail_reply_preview(args.message_id)
+    if not _gmail_effect_allowed(target=target, subject=subject, body=args.body):
+        return
     if _gws_binary():
         original = _run_gws(
             ["gmail", "users", "messages", "get"],
@@ -999,24 +1141,42 @@ def sheets_create(args):
 # =========================================================================
 
 
-def docs_get(args):
+def _docs_fetch(doc_id: str) -> dict:
+    """Fetch a Doc with every tab's content (``includeTabsContent``)."""
     if _gws_binary():
-        doc = _run_gws(["docs", "documents", "get"], params={"documentId": args.doc_id})
-        result = {
-            "title": doc.get("title", ""),
-            "documentId": doc.get("documentId", ""),
-            "body": _extract_doc_text(doc),
-        }
-        print(json.dumps(result, indent=2, ensure_ascii=False))
-        return
-
+        return _run_gws(
+            ["docs", "documents", "get"],
+            params={"documentId": doc_id, "includeTabsContent": True},
+        )
     service = build_service("docs", "v1")
-    doc = service.documents().get(documentId=args.doc_id).execute()
+    return service.documents().get(documentId=doc_id, includeTabsContent=True).execute()
+
+
+def docs_get(args):
+    doc = _docs_fetch(args.doc_id)
     result = {
         "title": doc.get("title", ""),
         "documentId": doc.get("documentId", ""),
-        "body": _extract_doc_text(doc),
     }
+    tab_arg = getattr(args, "tab", None)
+    tabs = _flatten_doc_tabs(doc)
+    if not tabs:
+        result["body"] = _extract_doc_text(doc)
+    elif tab_arg:
+        result["tab"] = tab_arg
+        result["body"] = _extract_body_text(_find_doc_tab(tabs, tab_arg)["body"])
+    else:
+        result["tabs"] = [
+            {
+                "tabId": t["tabId"],
+                "title": t["title"],
+                "level": t["level"],
+                "body": _extract_body_text(t["body"]),
+            }
+            for t in tabs
+        ]
+        if len(tabs) == 1:
+            result["body"] = result["tabs"][0]["body"]
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
@@ -1044,40 +1204,54 @@ def docs_create(args):
 
 
 def docs_append(args):
-    """Append text to the end of an existing Doc."""
-    if _gws_binary():
-        doc = _run_gws(["docs", "documents", "get"], params={"documentId": args.doc_id})
-    else:
-        service = build_service("docs", "v1")
-        doc = service.documents().get(documentId=args.doc_id).execute()
+    """Append text to the end of one tab of a Doc and report which tab got it."""
+    doc = _docs_fetch(args.doc_id)
+
+    tabs = _flatten_doc_tabs(doc)
+    tab = None
+    if tabs:
+        tab_arg = getattr(args, "tab", None)
+        tab = _find_doc_tab(tabs, tab_arg) if tab_arg else tabs[0]
+    body = tab["body"] if tab else doc.get("body", {})
 
     # The end-of-body index is one less than the segment endIndex of the body
     # (trailing newline is always at length-1). Docs indexes are 1-based; use
-    # endIndex - 1 to insert before the final newline.
-    content = doc.get("body", {}).get("content", [])
+    # endIndex - 1 to insert before the final newline. Each tab has its own
+    # index space, so the write location must carry the tab ID.
     end_index = 1
-    for element in content:
+    for element in body.get("content", []):
         ei = element.get("endIndex")
         if isinstance(ei, int) and ei > end_index:
             end_index = ei
     insert_index = max(end_index - 1, 1)
 
     text = args.text if args.text.endswith("\n") else args.text + "\n"
-    _docs_insert_text(args.doc_id, text, index=insert_index)
+    _docs_insert_text(args.doc_id, text, index=insert_index, tab_id=tab["tabId"] if tab else None)
 
-    print(json.dumps({
+    result = {
         "status": "appended",
         "documentId": args.doc_id,
         "inserted_at": insert_index,
         "characters": len(text),
-    }, indent=2, ensure_ascii=False))
+    }
+    if tab:
+        result["tab"] = tab["tabId"]
+        result["tabTitle"] = tab["title"]
+        if len(tabs) > 1:
+            result["tabs"] = [{"tabId": t["tabId"], "title": t["title"]} for t in tabs]
+            if not getattr(args, "tab", None):
+                result["note"] = "no --tab given: appended to the first tab; pass --tab <tabId> to choose another"
+    print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
-def _docs_insert_text(doc_id: str, text: str, index: int) -> None:
+def _docs_insert_text(doc_id: str, text: str, index: int, tab_id: str | None = None) -> None:
     """Send a batchUpdate with a single insertText request."""
+    location: dict = {"index": index}
+    if tab_id:
+        location["tabId"] = tab_id
     requests = [{
         "insertText": {
-            "location": {"index": index},
+            "location": location,
             "text": text,
         }
     }]
@@ -1284,6 +1458,7 @@ def main():
 
     p = docs_sub.add_parser("get")
     p.add_argument("doc_id")
+    p.add_argument("--tab", default=None, help="Tab ID to read (tabbed Docs)")
     p.set_defaults(func=docs_get)
 
     p = docs_sub.add_parser("create")
@@ -1294,6 +1469,7 @@ def main():
     p = docs_sub.add_parser("append")
     p.add_argument("doc_id")
     p.add_argument("--text", required=True, help="Text to append to the end of the document")
+    p.add_argument("--tab", default=None, help="Tab ID to append to (tabbed Docs; default: the first tab, reported in the result)")
     p.set_defaults(func=docs_append)
 
     tasks = sub.add_parser("tasks")
