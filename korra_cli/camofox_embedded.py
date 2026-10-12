@@ -34,6 +34,7 @@ from __future__ import annotations
 import http.client
 import os
 import secrets
+import shutil
 import socket
 import subprocess
 import sys
@@ -224,9 +225,10 @@ def in_container() -> bool:
 def _s6_svc(flag: str) -> None:
     if not in_container():
         return
+    binary = shutil.which("s6-svc") or "/command/s6-svc"
     try:
         subprocess.run(
-            ["s6-svc", flag, S6_SERVICE_DIR],
+            [binary, flag, S6_SERVICE_DIR],
             check=False,
             timeout=10,
             stdout=subprocess.DEVNULL,

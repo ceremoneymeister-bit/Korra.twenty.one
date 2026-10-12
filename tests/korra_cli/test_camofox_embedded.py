@@ -194,10 +194,20 @@ def test_s6_is_nudged_only_inside_the_container_and_only_on_switch_off(install, 
     emb.enable()
     assert calls == []
     monkeypatch.setattr(emb, "in_container", lambda: True)
+    monkeypatch.setattr(emb.shutil, "which", lambda name: "/usr/bin/s6-svc")
     emb.enable()
     assert calls == []  # включение — снять файл: run-скрипт сам заметит это за 3 с
     emb.disable()
-    assert calls == [["s6-svc", "-t", "/run/service/camofox"]]
+    assert calls == [["/usr/bin/s6-svc", "-t", "/run/service/camofox"]]
+
+
+def test_switch_off_finds_s6_svc_outside_the_service_path(install, data, monkeypatch):
+    calls = []
+    monkeypatch.setattr(emb.subprocess, "run", lambda cmd, **kw: calls.append(cmd))
+    monkeypatch.setattr(emb, "in_container", lambda: True)
+    monkeypatch.setattr(emb.shutil, "which", lambda name: None)
+    emb.disable()
+    assert calls == [["/command/s6-svc", "-t", "/run/service/camofox"]]
 
 
 def test_the_switch_command_reports_every_state_in_russian(install, data, capsys):
