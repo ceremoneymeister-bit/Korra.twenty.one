@@ -75,10 +75,30 @@ const PREWARM_BLOCK =
 const PREWARM_SKIPPED = "    log('info', 'browser pre-warm skipped (Korra): the first request starts it');\n";
 const serverUrl = pathToFileURL(serverScript).href;
 
+// Виртуальный экран. camoufox-js запускает Xvfb с -ac -nolisten tcp: файловый сокет
+// в /tmp контейнера остаётся, но Xvfb ещё слушает абстрактный сокет
+// @/tmp/.X11-unix/X*, а он живёт в сетевом пространстве имён хоста и доступен всем
+// контейнерам без авторизации (можно снять экран и вводить события в браузер).
+// Аргументы собирает базовый VirtualDisplay.xvfb_args, на который опираются и
+// DefaultVirtualDisplay сервера, и плагин vnc, поэтому правится он один. Если
+// блок не найден, сервер не запускается: открытый экран хуже недоступного Camofox.
+const XVFB_NOLISTEN = /("-nolisten",\s*"tcp",)/;
+const XVFB_NOLISTEN_LOCAL = '$1 "-nolisten", "local",';
+const virtdisplayPattern = /[\\/]camoufox-js[\\/]dist[\\/]virtdisplay\.js$/;
+
 registerHooks({
   load(url, context, nextLoad) {
     const result = nextLoad(url, context);
-    if (url !== serverUrl || result.source == null) return result;
+    if (result.source == null) return result;
+    if (virtdisplayPattern.test(url)) {
+      const text = Buffer.from(result.source).toString('utf8');
+      if (!XVFB_NOLISTEN.test(text)) {
+        console.error('[camofox] в camoufox-js не найден блок аргументов Xvfb: без -nolisten local экран виден соседним контейнерам, запуск остановлен');
+        process.exit(1);
+      }
+      return { ...result, source: text.replace(XVFB_NOLISTEN, XVFB_NOLISTEN_LOCAL) };
+    }
+    if (url !== serverUrl) return result;
     const text = Buffer.from(result.source).toString('utf8');
     if (!text.includes(PREWARM_BLOCK)) {
       console.error('[camofox] блок прогрева в server.js не найден: браузер запустится при старте сервера');

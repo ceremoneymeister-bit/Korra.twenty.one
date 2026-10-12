@@ -256,3 +256,123 @@ def test_watchdog_kills_the_whole_browser_tree_including_stopped_children(run_di
         state = "Z"
     assert state in ("Z", "X"), "потомок Firefox пережил принудительное завершение"
     assert "(2 процессов)" in err
+
+
+# Виртуальный экран: Xvfb из camoufox-js не должен слушать абстрактный сокет, который
+# виден всем контейнерам в сети хоста. Каталог пакета повторяет раскладку
+# node_modules/camoufox-js/dist/virtdisplay.js, а аргументы Xvfb — дословно из camoufox-js 0.11.5.
+VIRTDISPLAY_FIXTURE = """
+import { spawn } from 'node:child_process';
+export class VirtualDisplay {
+    proc = null;
+    get xvfb_args() {
+        return [
+            "-screen",
+            "0",
+            "1x1x24",
+            "-ac",
+            "-nolisten",
+            "tcp",
+            "-extension",
+            "RENDER",
+            "-nocursor",
+            "-br",
+        ];
+    }
+    async get() {
+        this.proc = spawn('Xvfb', ['-displayfd', '3', ...this.xvfb_args], {
+            stdio: ['ignore', 'ignore', 'ignore', 'pipe'],
+            detached: true,
+        });
+        let buf = '';
+        for await (const chunk of this.proc.stdio[3]) {
+            buf += chunk;
+            if (buf.includes('\\n')) break;
+        }
+        return ':' + Number.parseInt(buf, 10);
+    }
+    kill() { try { process.kill(-this.proc.pid, 'SIGKILL'); } catch {} }
+}
+"""
+
+# Класс сервера (DefaultVirtualDisplay) наследует базовый и меняет только размер экрана.
+DISPLAY_SERVER = """
+import fs from 'node:fs';
+import { VirtualDisplay } from 'camoufox-js/dist/virtdisplay.js';
+class DefaultVirtualDisplay extends VirtualDisplay {
+  get xvfb_args() {
+    const patched = [...super.xvfb_args];
+    patched[patched.indexOf('0') + 1] = '1280x720x24';
+    return patched;
+  }
+}
+const display = new DefaultVirtualDisplay();
+console.log('args ' + JSON.stringify(display.xvfb_args));
+if (process.env.FAKE_START_XVFB === '1') {
+  const name = await display.get();
+  // Сокеты именно этого Xvfb: на хосте теста могут быть чужие экраны с тем же номером.
+  const inodes = new Set();
+  for (const fd of fs.readdirSync('/proc/' + display.proc.pid + '/fd')) {
+    try {
+      const match = /^socket:\\[(\\d+)\\]$/.exec(fs.readlinkSync('/proc/' + display.proc.pid + '/fd/' + fd));
+      if (match) inodes.add(match[1]);
+    } catch {}
+  }
+  const listening = fs.readFileSync('/proc/net/unix', 'utf8').split('\\n')
+    .map((line) => line.trim().split(/\\s+/))
+    .filter((cols) => inodes.has(cols[6]) && cols[7] && cols[7].includes('X11-unix'))
+    .map((cols) => cols[7]);
+  const abstract = listening.some((name) => name.startsWith('@'));
+  const file = listening.some((name) => name.startsWith('/'));
+  console.log('sockets abstract=' + abstract + ' file=' + file + ' ' + JSON.stringify(listening));
+  display.kill();
+}
+process.exit(0);
+"""
+
+
+def _run_display_server(run_dir: Path, fixture: str, *, start_xvfb: bool = False):
+    package = run_dir / "node_modules" / "camoufox-js"
+    (package / "dist").mkdir(parents=True)
+    (package / "package.json").write_text('{"name":"camoufox-js","type":"module","main":"dist/index.js"}')
+    (package / "dist" / "virtdisplay.js").write_text(fixture)
+    script = run_dir / "display-server.mjs"
+    script.write_text(DISPLAY_SERVER)
+    done = subprocess.run(
+        ["node", str(WRAPPER), str(script)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env={
+            **os.environ,
+            "CAMOFOX_UNIX_SOCKET": str(run_dir / "camofox" / "server.sock"),
+            "FAKE_START_XVFB": "1" if start_xvfb else "0",
+        },
+    )
+    return done
+
+
+def test_xvfb_arguments_of_the_server_display_class_stop_listening_on_the_abstract_socket(run_dir):
+    done = _run_display_server(run_dir, VIRTDISPLAY_FIXTURE)
+    assert done.returncode == 0, done.stderr
+    args = json.loads(next(l for l in done.stdout.splitlines() if l.startswith("args ")).removeprefix("args "))
+    pairs = [tuple(args[i : i + 2]) for i in range(len(args) - 1)]
+    assert ("-nolisten", "local") in pairs
+    assert ("-nolisten", "tcp") in pairs
+    assert "1280x720x24" in args
+
+
+@pytest.mark.skipif(shutil.which("Xvfb") is None, reason="нужен Xvfb")
+def test_real_xvfb_has_only_the_file_socket(run_dir):
+    done = _run_display_server(run_dir, VIRTDISPLAY_FIXTURE, start_xvfb=True)
+    assert done.returncode == 0, done.stderr
+    assert "sockets abstract=false file=true" in done.stdout
+
+
+def test_wrapper_refuses_to_start_when_the_xvfb_block_changed(run_dir):
+    changed = VIRTDISPLAY_FIXTURE.replace('"-nolisten",\n            "tcp",', '"-listen",\n            "inet",')
+    assert changed != VIRTDISPLAY_FIXTURE
+    done = _run_display_server(run_dir, changed)
+    assert done.returncode == 1
+    assert "не найден блок аргументов Xvfb" in done.stderr
+    assert "args " not in done.stdout
