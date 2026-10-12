@@ -130,3 +130,17 @@ def test_stage2_hands_the_camofox_state_dir_to_hermes_in_the_targeted_chown() ->
 def test_stage2_chown_loop_stays_targeted() -> None:
     hook = (ROOT / "docker" / "stage2-hook.sh").read_text()
     assert "chown -R hermes:hermes \"$HERMES_HOME\"\n" not in hook
+
+
+def test_s6_run_reconciles_the_marker_with_the_profiles_before_it_waits() -> None:
+    run = (S6 / "camofox" / "run").read_text()
+    sync = run.index("python -m korra_cli.camofox_embedded sync")
+    assert run.index("export HOME=/opt/data") < sync < run.index('while [ ! -f "$marker" ]')
+    assert "s6-setuidgid hermes python -m korra_cli.camofox_embedded sync" in run
+    assert "|| true" in run[sync : sync + 120]
+
+
+def test_wrapper_skips_the_browser_prewarm_without_touching_the_package() -> None:
+    wrapper = (ROOT / "docker" / "camofox" / "unix-socket.mjs").read_text()
+    assert "registerHooks" in wrapper and "browser pre-warmed" in wrapper
+    assert "sed -i" not in _block() and "patch " not in _block()

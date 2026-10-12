@@ -13,6 +13,7 @@ from tests.fakes.camofox_embedded import (  # noqa: F401  (фикстуры)
     TcpSpy,
     UnixServer,
     choose_browser,
+    chromium_root,
     data,
     in_profile,
     install,
@@ -21,10 +22,19 @@ from tests.fakes.camofox_embedded import (  # noqa: F401  (фикстуры)
 )
 
 
-def test_disabled_by_default_and_endpoint_is_the_unix_base_url(install, data):
+def test_endpoint_is_the_unix_base_url_and_nothing_runs_before_the_first_sync(install, data):
     assert not emb.is_enabled()
     assert emb.endpoint() == emb.BASE_URL
+    # Профиль не выбирал браузер: он потребитель по умолчанию, ждёт синхронизации.
+    assert emb.status()["state"] == "selected_off"
+    assert emb.sync() is True
+    assert emb.is_enabled()
+
+
+def test_server_stays_off_when_every_profile_chose_chromium(chromium_root, install, data):
+    assert not emb.is_enabled()
     assert emb.status()["state"] == "disabled"
+    assert emb.sync() is False
 
 
 def test_endpoint_is_empty_without_the_image(tmp_path, monkeypatch, data):
@@ -341,3 +351,75 @@ def test_files_made_by_root_are_handed_to_the_data_owner(install, data, monkeypa
     assert any(n.startswith("access.key.") and n.endswith(".tmp") for n in names)
     assert any(n.startswith("enabled.") and n.endswith(".tmp") for n in names)
     assert all((uid, gid) == (owner.st_uid, owner.st_gid) for _, uid, gid in chowned)
+
+
+# ── Умолчание: профиль без выбора браузера пользуется встроенным Camofox ───
+
+
+def _save(root, name, browser):
+    from korra_cli.config import save_config
+
+    with in_profile(root, name):
+        save_config({"browser": browser})
+
+
+def test_profiles_without_a_choice_are_consumers_and_explicit_choices_are_kept(install, data):
+    _save(data, "plain", {})
+    _save(data, "chromium", {"cloud_provider": "local"})
+    _save(data, "lightpanda", {"cloud_provider": "local", "engine": "lightpanda"})
+    _save(data, "cloud", {"cloud_provider": "browserbase"})
+    _save(data, "cdp", {"cdp_url": "http://127.0.0.1:9222"})
+    _save(data, "driver", {"backend": "browser-use"})
+    _save(data, "real", {"use_real_profile": True})
+    assert sorted(emb.consumers()) == ["default", "plain"]
+    assert emb.sync() is True
+
+
+def test_cloud_credentials_and_cdp_in_the_environment_keep_the_old_browser(install, data, monkeypatch):
+    assert emb.consumers() == ["default"]
+    monkeypatch.setenv("BROWSERBASE_API_KEY", "k")
+    monkeypatch.setenv("BROWSERBASE_PROJECT_ID", "p")
+    assert emb.consumers() == []
+    monkeypatch.delenv("BROWSERBASE_API_KEY")
+    monkeypatch.delenv("BROWSERBASE_PROJECT_ID")
+    monkeypatch.setenv("BROWSER_CDP_URL", "ws://127.0.0.1:9222/devtools/browser/x")
+    assert emb.consumers() == []
+
+
+def test_unreadable_config_is_not_treated_as_no_choice(install, data):
+    (data / "config.yaml").write_text("browser: [unclosed\n")
+    assert emb.consumers() == []
+
+
+def test_external_camofox_url_beats_the_default(install, data, monkeypatch):
+    monkeypatch.setenv("CAMOFOX_URL", "http://external.example:9377")
+    assert emb.consumers() == []
+    assert emb.sync() is False
+    assert not emb.is_enabled()
+
+
+def test_nothing_changes_outside_the_image(tmp_path, monkeypatch, data):
+    monkeypatch.setenv("KORRA_CAMOFOX_HOME", str(tmp_path / "missing"))
+    assert emb.uses_default_browser() is False
+    assert emb.sync() is False
+    assert not (data / "camofox").exists()
+
+
+def test_boot_sync_does_not_restart_the_service_that_runs_it(install, data, monkeypatch):
+    calls = []
+    monkeypatch.setattr(emb, "_s6_svc", lambda flag: calls.append(flag))
+    emb.enable()
+    _save(data, None, {"cloud_provider": "local"})
+    assert emb.main(["sync"]) == 0
+    assert not emb.is_enabled()
+    assert calls == []  # через `sync` из run-скрипта s6 сигнал не посылается
+    assert emb.sync() is False
+    emb.enable()
+    assert emb.sync() is False and calls == ["-t"]
+
+
+def test_boot_sync_enables_a_fleet_that_never_chose_a_browser(install, data, capsys):
+    assert not emb.is_enabled()
+    assert emb.main(["sync"]) == 0
+    assert capsys.readouterr().out.strip() == "нужен"
+    assert emb.is_enabled()

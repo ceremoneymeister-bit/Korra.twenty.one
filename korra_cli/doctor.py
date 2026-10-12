@@ -898,7 +898,7 @@ def check_embedded_camofox(issues: list[str], should_fix: bool = False) -> None:
     Показывается только в образе, где он установлен. Сервер принадлежит
     установке, а браузер выбирает профиль, поэтому сверяются настройки всех
     профилей и маркер включения: выключен без потребителей, работает, не
-    отвечает, выбран, но выключен, включён без потребителей. У каждого
+    отвечает, нужен профилям, но выключен, включён без потребителей. У каждого
     состояния понятный следующий шаг; `--fix` приводит маркер к настройкам.
     """
     try:
@@ -923,7 +923,7 @@ def check_embedded_camofox(issues: list[str], should_fix: bool = False) -> None:
         if state == "selected_off":
             check_ok(name, f'(включён заново по настройкам профилей: {users}; вход на сайтах сохранён)')
         else:
-            check_ok(name, '(выключен: ни один профиль его не выбрал)')
+            check_ok(name, '(выключен: все профили выбрали другой браузер)')
         return
 
     if state == "running":
@@ -935,16 +935,16 @@ def check_embedded_camofox(issues: list[str], should_fix: bool = False) -> None:
         issues.append('Встроенный Camofox не отвечает: ' + info["next"])
         return
     if state == "selected_off":
-        check_warn(name, f'(выбран в настройках профилей: {users}, но сервер выключен)')
-        check_info('Включить заново: korra doctor --fix (или korra tools → Браузер → Camofox)')
-        issues.append('Camofox выбран, но встроенный сервер выключен: korra doctor --fix')
+        check_warn(name, f'(нужен профилям: {users}, но сервер выключен; пока агенты работают через Chromium)')
+        check_info('Включить заново: korra doctor --fix')
+        issues.append('Встроенный Camofox нужен профилям, но сервер выключен: korra doctor --fix')
         return
     if state == "unused":
-        check_warn(name, '(сервер включён, но ни один профиль его не выбрал)')
+        check_warn(name, '(сервер включён, но ни одному профилю он не нужен)')
         check_info('Выключить лишний сервер: korra doctor --fix')
         issues.append('Встроенный Camofox включён без потребителей: korra doctor --fix')
         return
-    check_info(f'{name}: выключен. Включить: korra tools → Браузер → Camofox')
+    check_info(f'{name}: выключен, все профили выбрали другой браузер. Включить: korra tools → Браузер → Camofox')
 
 
 def check_web_search(issues: list[str]) -> None:

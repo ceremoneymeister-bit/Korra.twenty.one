@@ -8,6 +8,7 @@ from korra_cli import camofox_embedded as emb
 from tests.fakes.camofox_embedded import (  # noqa: F401  (фикстуры)
     UnixServer,
     choose_browser,
+    chromium_root,
     data,
     in_profile,
     install,
@@ -27,11 +28,22 @@ def test_silent_outside_the_image(tmp_path, monkeypatch, data):
     assert run() == ("", [])
 
 
-def test_disabled_is_a_note_with_how_to_enable(install, data):
+def test_disabled_because_every_profile_chose_chromium_is_a_note(chromium_root, install, data):
     out, issues = run()
-    assert "выключен" in out
+    assert "выключен" in out and "другой браузер" in out
     assert "korra tools" in out
     assert issues == []
+
+
+def test_profile_without_a_browser_choice_needs_the_server_and_fix_turns_it_on(install, data):
+    out, issues = run()
+    assert "нужен профилям: default" in out and "через Chromium" in out
+    assert len(issues) == 1 and "korra doctor --fix" in issues[0]
+
+    out, issues = run(should_fix=True)
+    assert issues == []
+    assert "включён заново" in out
+    assert emb.is_enabled()
 
 
 def test_selected_but_off_is_a_warning_and_fix_turns_it_back_on(install, data):
@@ -39,7 +51,7 @@ def test_selected_but_off_is_a_warning_and_fix_turns_it_back_on(install, data):
         choose_browser("Camofox")
     emb._enabled_marker().unlink()  # маркер потерян, настройки остались
     out, issues = run()
-    assert "выбран в настройках" in out and "сервер выключен" in out
+    assert "нужен профилям" in out and "сервер выключен" in out
     assert "korra doctor --fix" in out
     assert len(issues) == 1 and "korra doctor --fix" in issues[0]
 
@@ -49,10 +61,10 @@ def test_selected_but_off_is_a_warning_and_fix_turns_it_back_on(install, data):
     assert emb.is_enabled()
 
 
-def test_enabled_without_consumers_is_a_warning_and_fix_turns_it_off(install, data):
+def test_enabled_without_consumers_is_a_warning_and_fix_turns_it_off(chromium_root, install, data):
     emb.enable()
     out, issues = run()
-    assert "ни один профиль его не выбрал" in out
+    assert "ни одному профилю он не нужен" in out
     assert len(issues) == 1 and "korra doctor --fix" in issues[0]
 
     out, issues = run(should_fix=True)

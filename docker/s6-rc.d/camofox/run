@@ -2,29 +2,42 @@
 # shellcheck shell=sh
 # Встроенный Camofox («Браузер с защитой от блокировок», K21-336).
 #
-# Слот объявлен всегда, но сервер запускается только когда владелец включил
-# этот браузер (маркер <данные>/camofox/enabled пишет `korra tools` или
-# веб-панель). Пока маркера нет, процесс — это обычный sh с sleep: ни Python,
-# ни Node, ни браузера. Не используем exit 125 из finish, как у dashboard:
-# такой слот s6 больше не перезапускает, а включить его обратно без root нельзя.
-# Выключение останавливает слот командой `s6-svc -t` (при следующем запуске он
-# снова ждёт маркер); остановленную через -d службу поднимает `s6-svc -u`.
-# Маркер — кэш решения «нужен ли сервер хотя бы одному профилю»: источник
-# правды — настройки профилей, их сверяет camofox_embedded.sync().
+# Camofox — браузер по умолчанию: на старте сервиса маркер
+# <данные>/camofox/enabled пересчитывается по настройкам профилей (python -m
+# korra_cli.camofox_embedded sync): сервер нужен, пока хотя бы один профиль
+# пользуется Camofox — выбрал его или не выбирал браузер вовсе. Владельцу ничего
+# включать не нужно; явный выбор другого браузера во всех профилях оставляет
+# сервис выключенным. Пока маркера нет, процесс — это обычный sh с sleep: ни
+# Python, ни Node, ни браузера. Не используем exit 125 из finish, как у
+# dashboard: такой слот s6 больше не перезапускает, а включить его обратно без
+# root нельзя. Выключение останавливает слот командой `s6-svc -t` (при
+# следующем запуске он снова ждёт маркер); остановленную через -d службу
+# поднимает `s6-svc -u`. Маркер — кэш решения, источник правды — настройки
+# профилей, их сверяют korra tools, создание/удаление профиля и korra doctor.
 
 data_root="${KORRA_HOME:-${HERMES_HOME:-/opt/data}}"
 marker="$data_root/camofox/enabled"
 server="${KORRA_CAMOFOX_HOME:-/opt/camofox}/node_modules/@askjo/camofox-browser/server.js"
-
-while [ ! -f "$marker" ] || [ ! -f "$server" ]; do
-    sleep 3
-done
 
 # with-contenv возвращает HOME=/root; профили и кэши должны лежать в /opt/data.
 export HOME=/opt/data
 cd /opt/data
 # shellcheck disable=SC1091
 . /opt/hermes/.venv/bin/activate
+
+# Сверка маркера с профилями при каждом старте сервиса (в том числе после
+# обновления образа). Сбой сверки не должен ронять сервис: остаётся прежний маркер.
+if [ -f "$server" ]; then
+    if [ "$(id -u)" = 0 ]; then
+        timeout 120 s6-setuidgid hermes python -m korra_cli.camofox_embedded sync >/dev/null 2>&1 || true
+    else
+        timeout 120 python -m korra_cli.camofox_embedded sync >/dev/null 2>&1 || true
+    fi
+fi
+
+while [ ! -f "$marker" ] || [ ! -f "$server" ]; do
+    sleep 3
+done
 
 # Unix-сокет (<данные>/camofox/server.sock, 0600), ключ доступа, выключенная
 # телеметрия и белый список окружения задаёт сам модуль; TCP-порта у сервера

@@ -1621,6 +1621,20 @@ def _serialize_profile_creation(function):
 
 
 @_serialize_profile_creation
+def _sync_embedded_camofox_after_profile_change(action: str) -> None:
+    """Сервер Camofox принадлежит установке: потребители меняются вместе с набором профилей.
+
+    Новый профиль без выбранного браузера пользуется Camofox по умолчанию, а
+    удалённый мог быть последним потребителем. Вне образа ничего не делает.
+    """
+    try:
+        from korra_cli import camofox_embedded
+
+        camofox_embedded.sync()
+    except Exception:
+        logger.debug("camofox sync after profile %s failed", action, exc_info=True)
+
+
 def create_profile(
     name: str,
     clone_from: Optional[str] = None,
@@ -1874,6 +1888,9 @@ def create_profile(
     # целиком и позже мигрируется — поэтому пин ставим последним шагом
     # (ревью 03.09: путь панели «клонировать из default» ронял адаптеры).
     _pin_api_server_off_under_multiplex(profile_dir, source_dir or fresh_source_dir)
+
+    if _staging_dir is None:
+        _sync_embedded_camofox_after_profile_change("create")
 
     return profile_dir
 
@@ -2278,12 +2295,7 @@ def delete_profile(name: str, yes: bool = False) -> Path:
 
     # Профиль мог быть последним потребителем встроенного Camofox: сервер
     # принадлежит установке и выключается вместе с последним потребителем.
-    try:
-        from korra_cli import camofox_embedded
-
-        camofox_embedded.sync()
-    except Exception:
-        logger.debug("camofox sync after profile delete failed", exc_info=True)
+    _sync_embedded_camofox_after_profile_change("delete")
 
     # 2c. Release this process's holographic memory-store connections into
     # the profile. The Desktop's *main* serve process opens memory_store.db
@@ -2873,6 +2885,7 @@ def import_profile(archive_path: str, name: Optional[str] = None) -> Path:
 
         shutil.move(str(final_source), str(profile_dir))
 
+    _sync_embedded_camofox_after_profile_change("import")
     return profile_dir
 
 

@@ -45,6 +45,14 @@ def data(monkeypatch):
     shutil.rmtree(root, ignore_errors=True)
 
 
+@pytest.fixture
+def chromium_root(install, data):
+    """Корневой профиль явно выбрал обычный Chromium, поэтому не считается потребителем по умолчанию."""
+    with in_profile(data, None):
+        choose_browser("Local Browser")
+    return data
+
+
 def use_root(monkeypatch, path: Path) -> Path:
     """Переключиться на другую установку (другой корень данных)."""
     path.mkdir(parents=True, exist_ok=True)

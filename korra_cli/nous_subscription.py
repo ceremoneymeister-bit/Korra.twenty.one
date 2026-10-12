@@ -631,6 +631,16 @@ def get_nous_subscription_features(
             direct_camofox = camofox_embedded.is_enabled() and camofox_embedded.is_installed()
         except Exception:
             direct_camofox = False
+    elif browser_selected is None and not direct_camofox:
+        # Браузер не выбирали: в образе Korra его заменяет встроенный Camofox.
+        # Если сервер не отвечает, вызов уходит в Chromium, поэтому маркер
+        # включения здесь не проверяется.
+        try:
+            from korra_cli import camofox_embedded
+
+            direct_camofox = camofox_embedded.uses_default_browser()
+        except Exception:
+            direct_camofox = False
 
 
     web_managed = web_backend == "firecrawl" and managed_web_available and not direct_firecrawl
