@@ -2743,8 +2743,28 @@ print(json.dumps(changed))
                 or record.get("path") != str(stage) or displaced.parent != self.data.parent
                 or not owned.fullmatch(displaced.name) or os.path.lexists(self.data)
                 or any(p.is_symlink() or not p.is_dir() for p in (stage, displaced))):
-            raise UpdateError("DATA does not exist")
+            raise UpdateError(self.unfinished_legacy_swap(record, stage) or "DATA does not exist")
         return stage
+
+    def unfinished_legacy_swap(self, record, stage):
+        """Explain a rollback of 0.21.16/0.21.17 killed between its two renames, else None.
+
+        That code leaves phase `verified` without `displaced` and no DATA; this
+        updater does not resume it. Both trees are intact, the owner finishes by hand.
+        """
+        job_id = str(self.receipt.get("job_id"))
+        if (self.job is None or not self.data_missing or record.get("phase") != "verified"
+                or "displaced" in record or record.get("path") != str(stage)
+                or stage.is_symlink() or not stage.is_dir()):
+            return None
+        failed = sorted(self.data.parent.glob(self.data.name + ".after-" + job_id + "*"))
+        if not failed:
+            return None
+        return ("DATA does not exist: a rollback by an older updater (0.21.16/0.21.17) was interrupted "
+                f"between its two renames. The restored tree is {stage} (manifest "
+                f"{self.job / 'restore-stage.manifest.json'}); the failed release's DATA is "
+                + ", ".join(map(str, failed)) + ". Nothing is lost; finish by hand as described in "
+                "docs/client-deploy/README.md, 'Шаг 14. Откат выпуска', 'Откат старого updater, оборванный между переименованиями'")
 
     def finish_interrupted_swap(self):
         """Second rename of an interrupted restore. The caller holds the target lock."""

@@ -1363,6 +1363,72 @@ def test_sigkill_between_the_restore_renames_is_finished_by_a_fresh_process(upda
     assert fresh.receipt["displaced_data"] == str(displaced)
 
 
+def _killed_legacy_rollback(updater):
+    """What 0.21.16/17 leave when SIGKILL lands between the two renames of a rollback."""
+    updater.update("registry.example/korra:latest")
+    (updater.data / "new-message.txt").write_text("written on the new release")
+    data, displaced = updater.data, _displaced(updater)
+    stage = data.with_name("data.restore-fixture-job")
+    real_replace = os.replace
+    pid = os.fork()
+    if pid == 0:
+        def replace(src, dst, *args, **kwargs):
+            result = real_replace(src, dst, *args, **kwargs)
+            if Path(src) == data and Path(dst) == displaced:
+                os.kill(os.getpid(), signal.SIGKILL)
+            return result
+        u.os.replace = replace
+        updater.rollback()
+        os._exit(99)
+    _, status = os.waitpid(pid, 0)
+    assert os.WIFSIGNALED(status) and not data.exists()
+    # The older code records the stage as `verified` and names no `displaced`.
+    u.atomic_json(updater.job / "restore-stage.json",
+                  {"path": str(stage), "source": str(updater.job / "before"), "phase": "verified"})
+    updater.running = False
+    return stage, displaced
+
+
+@pytest.mark.skipif(os.geteuid() != 0, reason="the real canonical_data demands root-owned ancestors")
+@pytest.mark.parametrize("entry", ["--rollback", "--status"])
+def test_a_rollback_killed_by_older_code_is_refused_with_the_paths_and_the_manual_procedure(
+        updater, monkeypatch, entry):
+    stage, displaced = _killed_legacy_rollback(updater)
+    for name in ("update.sh", "updater.py", "up.sh", "dependencies.lock.json"):
+        (updater.home / name).write_text("# synthetic host kit\n")
+    monkeypatch.setattr(u, "HERE", updater.home)
+    monkeypatch.setattr(u, "canonical_data", REAL_CANONICAL_DATA)
+    monkeypatch.setattr(u, "Updater", lambda **options: FakeDockerUpdater(updater.home, **options))
+    with pytest.raises(u.UpdateError, match="DATA does not exist") as refusal:
+        u.main([entry, "fixture-job"])
+    message = str(refusal.value)
+    for needle in (str(stage), str(displaced), str(updater.job / "restore-stage.manifest.json"),
+                   "README.md", "0.21.16/0.21.17"):
+        assert needle in message
+    assert not updater.data.exists() and stage.is_dir() and displaced.is_dir()
+
+
+@pytest.mark.skipif(os.geteuid() != 0, reason="the real canonical_data demands root-owned ancestors")
+def test_the_manual_procedure_for_an_older_killed_rollback_finishes_it_without_losing_a_write(
+        updater, monkeypatch):
+    stage, displaced = _killed_legacy_rollback(updater)
+    monkeypatch.setattr(u, "canonical_data", REAL_CANONICAL_DATA)
+    fresh = FakeDockerUpdater(updater.home, data_missing_ok=True)
+    u.load_job(fresh, "fixture-job")
+    # README: the stage matches its manifest, is moved into place, the rollback is run again.
+    assert u.tree_manifest(stage) == json.loads((updater.job / "restore-stage.manifest.json").read_text())
+    os.replace(stage, updater.data)
+    fresh = FakeDockerUpdater(updater.home)
+    fresh.image, fresh.running, fresh.tags = NEW, False, dict(updater.tags)
+    u.load_job(fresh, "fixture-job")
+    fresh.rollback()
+    assert fresh.receipt["status"] == "rolled_back" and fresh.image == OLD and fresh.running
+    assert (displaced / "new-message.txt").read_text() == "written on the new release"
+    assert not (fresh.data / "new-message.txt").exists()
+    assert fresh.receipt["post_update_changes"] is None
+    assert not fresh.exports_reviewed(fresh.job, fresh.receipt)
+
+
 class Killed(BaseException):
     """A process that died: no `except Exception` and no cleanup runs for it."""
 
