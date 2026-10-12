@@ -1292,6 +1292,21 @@ def test_retried_legacy_rollback_never_lowers_the_recorded_changes_or_frees_the_
     assert (job / "after" / "unique-owner-record.txt").exists()
 
 
+def test_an_older_retry_that_overwrote_the_change_list_does_not_make_the_count_zero(updater, monkeypatch):
+    # 0.21.16/17 rewrites post-update-changes.json on every retry: after a second
+    # failed attempt it holds [] although the earlier attempt exported a record.
+    monkeypatch.delenv("UPDATE_HISTORY", raising=False)
+    job, displaced = _legacy_swapped_then_old_image_failed(updater)
+    u.atomic_json(job / "post-update-changes.json", [])
+    updater.rollback()
+    assert updater.receipt["status"] == "rolled_back"
+    assert updater.receipt["post_update_changes"] is None
+    assert not updater.exports_reviewed(job, updater.receipt)
+    updater.update(_second_update(updater, image=NEW))
+    assert (job / "after" / "unique-owner-record.txt").exists()
+    assert (displaced / "unique-owner-record.txt").exists()
+
+
 @pytest.mark.skipif(os.geteuid() != 0, reason="the real canonical_data demands root-owned ancestors")
 def test_sigkill_between_the_restore_renames_is_finished_by_a_fresh_process(updater, monkeypatch):
     updater.update("registry.example/korra:latest")

@@ -2848,18 +2848,21 @@ print(json.dumps(changed))
         self.finish_restore(dict(done, phase="swapped"))
 
     def retried_changes(self, changes):
-        """(paths, count) of a retry that finds an earlier export; count None = unknown."""
+        """(paths, count) of a retry that finds an earlier export; count None = unknown.
+
+        Only a whole `post_update_changes` in the receipt is evidence. The
+        list on disk is not: an older updater overwrites it on every retry,
+        so its length proves nothing about the writes of earlier attempts.
+        """
         try:
             listed = json.loads((self.job / "post-update-changes.json").read_text())
         except (OSError, ValueError):
             listed = None
         recorded = self.receipt.get("post_update_changes")
-        known = [n for n in (recorded if type(recorded) is int else None,
-                             len(listed) if isinstance(listed, list) else None) if n is not None]
-        if not known:
-            return None, None
         merged = sorted(set(listed if isinstance(listed, list) else []) | set(changes))
-        return merged, max(*known, len(merged))
+        if type(recorded) is not int:
+            return (merged if isinstance(listed, list) else None), None
+        return merged, max(recorded, len(merged))
 
     def finish_restore(self, record):
         """Report a completed swap; drop a `before` that now shares live DATA's inodes."""
