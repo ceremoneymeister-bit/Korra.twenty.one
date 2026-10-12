@@ -1,6 +1,7 @@
 """K21-336: встроенный Camofox — Unix-сокет, ключ, изоляция установок и состояние."""
 
 import os
+import shutil
 import stat
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -543,6 +544,23 @@ def test_the_running_server_is_told_to_close_the_session_before_the_files_go(ins
     assert [r["path"] for r in deletes] == [f"/sessions/{user_id}"]
     assert deletes[0]["auth"] == f"Bearer {emb.access_key()}"
     assert present_at_request == [True]
+    assert not folder.exists()
+
+
+def test_a_live_session_without_saved_files_is_closed_and_leaves_nothing_behind(install, data):
+    # Вход ещё не сохранён на диск: сервер запишет его при закрытии сессии (так было в живой проверке).
+    (data / "profiles" / "gone").mkdir(parents=True)
+    _, folder = _saved_login(data, "gone")
+    shutil.rmtree(folder)
+    emb.ensure_state()
+
+    def respond(method, path, body):
+        folder.mkdir(parents=True)
+        (folder / "storage-state.json").write_text('{"cookies": [{"name": "sid"}]}')
+
+    with UnixServer(emb.socket_path(), respond=respond) as server:
+        _delete("gone")
+    assert [r["method"] for r in server.seen] == ["DELETE"]
     assert not folder.exists()
 
 

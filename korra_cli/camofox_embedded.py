@@ -454,14 +454,10 @@ def forget_profile_login(profile_dir: Path) -> str:
         profile_dir, "CAMOFOX_USER_ID", ("browser", "camofox", "user_id")
     ):
         return ""
-    root = state_dir() / "profiles"
-    if not root.is_dir():
-        return ""
     user_id = camofox_user_id(profile_dir)
-    target = root / hashlib.sha256(user_id.encode()).hexdigest()[:32]
-    if not target.is_dir() or target.is_symlink():
-        return ""
-    # Сначала закрываем сессию: при закрытии сервер сохраняет состояние обратно в этот каталог.
+    target = state_dir() / "profiles" / hashlib.sha256(user_id.encode()).hexdigest()[:32]
+    # Сначала закрываем сессию, даже если каталога ещё нет: у живой сессии сервер сохранит
+    # состояние сам (при закрытии пустой сессии, через минуты) и воскресит вход удалённого профиля.
     if not socket_path_problem() and is_enabled():
         conn = _UnixHTTPConnection(str(socket_path()), 5.0)
         try:
@@ -471,6 +467,8 @@ def forget_profile_login(profile_dir: Path) -> str:
             pass
         finally:
             conn.close()
+    if not target.is_dir() or target.is_symlink():
+        return ""
     shutil.rmtree(target, ignore_errors=True)
     return "" if target.exists() else str(target)
 
