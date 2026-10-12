@@ -1544,6 +1544,49 @@ def test_a_package_migrated_after_the_gate_is_paid_for_before_the_container_stop
     assert not (updater.job / "before").exists()
 
 
+def test_the_update_copies_are_charged_to_the_file_system_of_updates(updater, monkeypatch):
+    # updates/ is its own mount, nearly full; deploy/ and DATA's parent are roomy.
+    real_stat = Path.stat
+    queried = []
+
+    def stat(path, **kwargs):
+        info = real_stat(path, **kwargs)
+        return types.SimpleNamespace(st_dev=987654, st_mode=info.st_mode) if path == updater.jobs else info
+
+    def usage(path):
+        queried.append(Path(path))
+        return types.SimpleNamespace(free=0 if Path(path) == updater.jobs else 1 << 60)
+
+    updater.free_space = u.Updater.free_space.__get__(updater)
+    monkeypatch.setattr(Path, "stat", stat)
+    monkeypatch.setattr(u.shutil, "disk_usage", usage)
+    with pytest.raises(u.UpdateError, match="Insufficient space at .*updates"):
+        updater.free_space()
+    required = updater.receipt["rollback_budget"]["required_by_location"]
+    assert required[str(updater.jobs)] == 2 * 1024**3 + updater.receipt["rollback_budget"]["update_copies_bytes"]
+    assert str(updater.home) not in required
+
+
+@pytest.mark.parametrize("topology", [(1, 1, 1), (1, 2, 3), (1, 2, 1), (1, 1, 2)])
+def test_budget_groups_locations_by_device(updater, monkeypatch, topology):
+    terms = dict(data_bytes=100, state_db_bytes=20, sqlite_peak_bytes=10, config_bytes=3, credential_bytes=7)
+    monkeypatch.setattr(u, "copy_budget", lambda _: terms)
+    monkeypatch.setattr(updater, "rollback_path", lambda: "link" if topology[0] == topology[1] else "copy")
+    updater.free_space = u.Updater.free_space.__get__(updater)
+    locations = [updater.jobs, updater.data.parent, Path("/var/lib/docker")]
+    devices = dict(zip(locations, topology))
+    real_stat, real_exists = Path.stat, Path.exists
+    monkeypatch.setattr(Path, "exists", lambda p: True if p in devices else real_exists(p))
+    monkeypatch.setattr(Path, "stat", lambda p, **kw: types.SimpleNamespace(st_dev=devices[p], st_mode=real_stat(Path("/"), **kw).st_mode)
+                        if p in devices else real_stat(p, **kw))
+    monkeypatch.setattr(u.shutil, "disk_usage", lambda _: types.SimpleNamespace(free=1 << 60))
+    updater.free_space(image_bytes=50)
+    restore = 10 if topology[0] == topology[1] else 117
+    copies = [130, restore, 50]
+    expected = {str(p): 2 * 1024**3 + sum(n for n, dev in zip(copies, topology) if dev == devices[p]) for p in locations}
+    assert updater.receipt["rollback_budget"]["required_by_location"] == expected
+
+
 # Every place updater.py writes a physical copy, and the budget term that pays for it.
 COPY_SITES = {
     ("snapshot", "copytree"): "data_bytes",

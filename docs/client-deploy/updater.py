@@ -1522,7 +1522,9 @@ class Updater:
         else:
             restore_bytes = terms["data_bytes"] + terms["sqlite_peak_bytes"] + terms["credential_bytes"]
         headroom = 2 * 1024**3
-        wanted = [(self.home, update_bytes), (self.data.parent, restore_bytes),
+        # `before` and the rehearsal copies are written under updates/, which may be its own mount.
+        updates = self.jobs if self.jobs.is_dir() else self.home
+        wanted = [(updates, update_bytes), (self.data.parent, restore_bytes),
                   (Path("/var/lib/docker"), image_bytes)]
         devices = {}
         for location, copies in wanted:
