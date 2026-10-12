@@ -1503,7 +1503,8 @@ def test_space_gate_counts_every_copy_and_names_the_rollback_path(updater, monke
 def test_a_disk_with_room_for_every_copy_updates_and_rolls_back(updater, monkeypatch):
     original = _blob(updater, 4).read_bytes()
     updater.free_space = u.Updater.free_space.__get__(updater)
-    free = _copies_needed(updater, "link") + 2 * 1024**3
+    # The second gate runs after the drain, which has written a few bytes into DATA.
+    free = _copies_needed(updater, "link") + 2 * 1024**3 + 4096
     monkeypatch.setattr(u.shutil, "disk_usage", lambda path: types.SimpleNamespace(free=free))
     updater.fail_smoke = True
     with pytest.raises(u.UpdateError, match="Injected model"):
