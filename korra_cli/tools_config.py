@@ -3502,6 +3502,7 @@ def _visible_providers(
     # stay because they're non-provider UX setup flows (subscription auth,
     # local fallback, and the REST-API anti-detection backend respectively).
     if cat.get("name") == "Browser Automation":
+        visible = _embedded_default_browser_rows(visible)
         visible.extend(_plugin_browser_providers())
 
     # Inject plugin-registered TTS backends (issue #30398). Plugin rows
@@ -3511,6 +3512,43 @@ def _visible_providers(
         visible.extend(_plugin_tts_providers())
 
     return visible
+
+
+def _embedded_default_browser_rows(rows: list[dict]) -> list[dict]:
+    """В образе Korra встроенный Camofox — браузер по умолчанию: он первый в списке.
+
+    Обычный Chromium остаётся одним выбором («Local Browser») и сохраняется как
+    явный выбор профиля. Строки копируются: общий каталог не меняется.
+    """
+    if not _embedded_camofox_present():
+        return rows
+    camofox = [dict(r, badge='★ по умолчанию · рекомендуется · бесплатно') for r in rows if r.get("browser_provider") == "camofox"]
+    others = []
+    for row in rows:
+        if row.get("browser_provider") == "camofox":
+            continue
+        if row.get("browser_provider") == "local" and row.get("browser_engine") == "auto":
+            row = dict(
+                row,
+                badge='обычный Chromium · бесплатно',
+                tag='Фоновый Chromium, ключ API не нужен; сайты с капчей открывает хуже, чем Camofox',
+            )
+        others.append(row)
+    return camofox + others
+
+
+def _embedded_default_active(config: dict) -> bool:
+    """Профиль не выбирал браузер, и в образе его заменяет встроенный Camofox."""
+    if cfg_get(config, "browser", "cloud_provider") not in (None, ""):
+        return False
+    if not _embedded_camofox_present():
+        return False
+    try:
+        from korra_cli import camofox_embedded
+
+        return bool(get_env_value("CAMOFOX_URL")) or camofox_embedded.uses_default_browser()
+    except Exception:
+        return False
 
 
 def _hidden_nous_gateway_message(
@@ -4130,6 +4168,8 @@ def _is_provider_active(
         # Browser Use mode composes with the provider (driver over the
         # provider's CDP endpoint) — don't deactivate the provider row.
         current = cfg_get(config, "browser", "cloud_provider")
+        if provider["browser_provider"] == "camofox" and _embedded_default_active(config):
+            return True
         if provider["browser_provider"] != current:
             return False
         # Two local rows differ only by engine ("Local Browser" vs

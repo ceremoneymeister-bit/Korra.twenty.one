@@ -10,6 +10,7 @@ from tests.fakes.camofox_embedded import (  # noqa: F401  (фикстуры)
     TcpSpy,
     UnixServer,
     choose_browser,
+    chromium_root,
     data,
     in_profile,
     install,
@@ -54,7 +55,7 @@ def test_other_browser_rows_do_not_leave_the_server_running(install, data, other
     assert not emb.is_enabled()
 
 
-def test_server_belongs_to_the_installation_not_to_one_profile(install, data):
+def test_server_belongs_to_the_installation_not_to_one_profile(chromium_root, install, data):
     with in_profile(data, "a"):
         choose_browser("Camofox")
     with in_profile(data, "b"):
@@ -87,7 +88,7 @@ def test_explicit_external_url_in_process_env_does_not_enable_the_embedded_serve
     assert not (data / "camofox").exists()
 
 
-def test_explicit_external_url_in_the_profile_env_does_not_enable_the_embedded_server(install, data):
+def test_explicit_external_url_in_the_profile_env_does_not_enable_the_embedded_server(chromium_root, install, data):
     with in_profile(data, "ext"):
         (data / "profiles" / "ext" / ".env").write_text("CAMOFOX_URL=http://external.example:9377\n")
         choose_browser("Camofox")
@@ -98,7 +99,7 @@ def test_explicit_external_url_in_the_profile_env_does_not_enable_the_embedded_s
     assert emb.consumers() == ["emb"]  # внешний адрес профиля ext не засчитывается
 
 
-def test_the_current_profiles_env_url_does_not_hide_other_profiles(install, data, monkeypatch):
+def test_the_current_profiles_env_url_does_not_hide_other_profiles(chromium_root, install, data, monkeypatch):
     # Загруженный .env текущего профиля лежит в окружении процесса и не должен
     # считаться явным адресом чужих профилей.
     with in_profile(data, "emb"):
@@ -111,7 +112,7 @@ def test_the_current_profiles_env_url_does_not_hide_other_profiles(install, data
     assert emb.is_enabled()
 
 
-def test_deleted_profile_stops_counting_and_the_server_goes_off_with_the_last_one(install, data):
+def test_deleted_profile_stops_counting_and_the_server_goes_off_with_the_last_one(chromium_root, install, data):
     from korra_constants import mark_named_profile_deleted
 
     with in_profile(data, "gone"):
@@ -123,7 +124,7 @@ def test_deleted_profile_stops_counting_and_the_server_goes_off_with_the_last_on
     assert not emb.is_enabled()
 
 
-def test_deleting_the_last_consumer_profile_switches_the_server_off(install, data, monkeypatch):
+def test_deleting_the_last_consumer_profile_switches_the_server_off(chromium_root, install, data, monkeypatch):
     from korra_cli import profiles
 
     with in_profile(data, "scratch"):
@@ -200,3 +201,65 @@ def test_browser_feature_is_available_when_bundled_server_is_selected_and_on(ins
     features = ns.get_nous_subscription_features(config)
     assert features.browser.current_provider == "Camofox"
     assert features.browser.available is True
+
+
+# ── Camofox — браузер по умолчанию в образе ────────────────────────────────
+
+
+def _rows(config=None):
+    cat = tc.TOOL_CATEGORIES["browser"]
+    with patch.object(tc, "_plugin_browser_providers", return_value=[]):
+        return tc._visible_providers(cat, config or {})
+
+
+def test_in_the_image_camofox_is_first_marked_default_and_recommended(install, data):
+    rows = _rows()
+    assert rows[0]["name"] == "Camofox"
+    assert "по умолчанию" in rows[0]["badge"] and "рекомендуется" in rows[0]["badge"]
+    assert "защитой от блокировок" in rows[0]["tag"]
+    local = next(r for r in rows if r["name"] == "Local Browser")
+    assert "★" not in local["badge"] and "Chromium" in local["badge"]
+    # общий каталог не изменён
+    assert tc.TOOL_CATEGORIES["browser"]["providers"][0]["name"] == "Local Browser"
+
+
+def test_outside_the_image_nothing_changes(tmp_path, monkeypatch):
+    monkeypatch.setenv("KORRA_CAMOFOX_HOME", str(tmp_path / "missing"))
+    rows = _rows()
+    assert rows[0]["name"] == "Local Browser"
+    assert "★" in rows[0]["badge"]
+    assert "по умолчанию" not in next(r for r in rows if r["name"] == "Camofox")["badge"]
+
+
+def test_unconfigured_profile_shows_camofox_as_active(install, data):
+    from korra_cli.config import load_config
+
+    rows = _rows()
+    config = load_config()
+    assert tc._detect_active_provider_index(rows, config) == 0
+    assert tc._is_provider_active(rows[0], config) is True
+    assert tc._is_provider_active(next(r for r in rows if r["name"] == "Local Browser"), config) is False
+
+
+def test_chromium_is_one_action_and_the_row_follows_it(install, data):
+    from korra_cli.config import load_config
+
+    choose_browser("Local Browser")
+    config = load_config()
+    assert config["browser"]["cloud_provider"] == "local"
+    rows = _rows(config)
+    active = [r["name"] for r in rows if tc._is_provider_active(r, config)]
+    assert active == ["Local Browser"]
+    assert not emb.is_enabled()
+    choose_browser("Camofox")
+    assert emb.is_enabled()
+
+
+def test_creating_a_profile_without_a_choice_brings_the_server_back(chromium_root, install, data):
+    from korra_cli import profiles
+
+    assert not emb.is_enabled()
+    profiles.create_profile("fresh", no_alias=True)
+    assert emb.is_enabled()
+    assert emb.consumers() == ["fresh"]
+
