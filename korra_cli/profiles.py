@@ -2276,6 +2276,15 @@ def delete_profile(name: str, yes: bool = False) -> Path:
     # this name as a live profile.
     mark_named_profile_deleted(profile_dir)
 
+    # Профиль мог быть последним потребителем встроенного Camofox: сервер
+    # принадлежит установке и выключается вместе с последним потребителем.
+    try:
+        from korra_cli import camofox_embedded
+
+        camofox_embedded.sync()
+    except Exception:
+        logger.debug("camofox sync after profile delete failed", exc_info=True)
+
     # 2c. Release this process's holographic memory-store connections into
     # the profile. The Desktop's *main* serve process opens memory_store.db
     # for every known profile and is deliberately not stopped above, so on

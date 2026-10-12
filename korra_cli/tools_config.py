@@ -3645,12 +3645,20 @@ def _embedded_camofox_present() -> bool:
 
 
 def _post_setup_embedded_camofox() -> None:
-    """Включить встроенный Camofox и дождаться, пока сервер ответит."""
+    """Проверить тот Camofox, которым профиль действительно будет пользоваться.
+
+    С явным внешним ``CAMOFOX_URL`` встроенный сервер не включается и
+    проверяется внешний адрес. Иначе включаем встроенный и ждём ответа.
+    """
     import time
 
     from korra_cli import camofox_embedded
 
-    camofox_embedded.enable()
+    external = camofox_embedded.current_explicit_url().rstrip("/")
+    if external:
+        _check_external_camofox(external)
+        return
+    camofox_embedded.sync(current_selected=True)
     _print_info('    Включаем встроенный браузер с защитой от блокировок…')
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
@@ -3660,6 +3668,21 @@ def _post_setup_embedded_camofox() -> None:
         time.sleep(1)
     _print_warning('    Сервер ещё запускается, это может занять до минуты')
     _print_info('    Проверить состояние: korra doctor')
+
+
+def _check_external_camofox(url: str) -> None:
+    import requests
+
+    _print_info(f'    Задан внешний сервер Camofox ({url}): встроенный не включаем')
+    try:
+        ok = requests.get(f"{url}/health", timeout=5).status_code == 200
+    except requests.RequestException:
+        ok = False
+    if ok:
+        _print_success('    Внешний сервер Camofox отвечает')
+    else:
+        _print_warning(f'    Внешний сервер Camofox не отвечает: {url}')
+        _print_info('    Проверьте адрес CAMOFOX_URL и запущен ли сервер')
 
 
 def _camofox_installed() -> bool:
@@ -4574,20 +4597,17 @@ def _select_plugin_video_gen_provider(plugin_name: str, config: dict, *, use_gat
 
 
 def _sync_embedded_camofox(selected: bool) -> None:
-    """Включить или выключить встроенный Camofox вслед за выбором браузера.
+    """Привести встроенный Camofox в соответствие с выбором браузера в профилях.
 
-    Вне образа Korra (сервера нет) ничего не делает. Сбой не мешает сохранить
-    выбор: владелец увидит его в `korra doctor`.
+    Сервер принадлежит установке: он включён, пока Camofox выбран хотя бы в
+    одном профиле без внешнего адреса. ``selected`` — выбор текущего профиля,
+    ещё не записанный на диск. Вне образа Korra (сервера нет) ничего не делает.
+    Сбой не мешает сохранить выбор: владелец увидит его в `korra doctor`.
     """
     try:
         from korra_cli import camofox_embedded
 
-        if not camofox_embedded.is_installed():
-            return
-        if selected:
-            camofox_embedded.enable()
-        else:
-            camofox_embedded.disable()
+        camofox_embedded.sync(current_selected=selected)
     except Exception as exc:
         logger.warning("не удалось переключить встроенный Camofox: %s", exc)
 
@@ -4637,7 +4657,7 @@ def _write_provider_config(provider: dict, config: dict, *, managed_feature) -> 
         else:
             browser_cfg.pop("use_gateway", None)
 
-        _sync_embedded_camofox(bp == "camofox")
+        _sync_embedded_camofox(bp == "camofox" and not managed_feature)
 
     if provider.get("browser_backend"):
         browser_cfg = config.setdefault("browser", {})
@@ -5377,6 +5397,8 @@ def _reconfigure_provider(
         # Browser Use mode (browser.backend) composes with the provider —
         # switching providers keeps the driver choice intact.
         browser_cfg.pop("use_gateway", None)
+
+        _sync_embedded_camofox(bp == "camofox" and not managed_feature)
 
     if provider.get("browser_backend"):
         browser_cfg = config.setdefault("browser", {})
