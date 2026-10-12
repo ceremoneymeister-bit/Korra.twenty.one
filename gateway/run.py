@@ -3078,6 +3078,28 @@ _OWN_POLICY_OPEN_ENV = {
 }
 
 
+_LOCAL_BOT_API_KEYS = ("base_url", "base_file_url", "local_mode")
+
+
+def _inherit_local_bot_api_transport(config: Any, root: Any) -> None:
+    """Second Telegram bot reaches the same Bot API server as the root bot.
+
+    Without this a secondary profile's bot talks to the cloud API while files
+    of the root bot live on the local server, and large media or voice of the
+    second bot silently break. A profile that names its own ``base_url`` keeps
+    its whole transport; nothing is changed for a bot with no local server.
+    """
+    own = getattr(config, "extra", None)
+    shared = getattr(root, "extra", None)
+    if config is root or not isinstance(own, dict) or not isinstance(shared, dict):
+        return
+    if own.get("base_url") or not shared.get("base_url"):
+        return
+    for key in _LOCAL_BOT_API_KEYS:
+        if key in shared and key not in own:
+            own[key] = shared[key]
+
+
 def _own_policy_open_startup_violation(config) -> Optional[str]:
     """Return a startup-abort reason when open policy lacks allow-all opt-in."""
     for platform, platform_config in getattr(config, "platforms", {}).items():
@@ -17376,6 +17398,10 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 "thread_sessions_per_user",
                 getattr(self.config, "thread_sessions_per_user", False),
             )
+        if platform is Platform.TELEGRAM:
+            _inherit_local_bot_api_transport(
+                config, self.config.platforms.get(Platform.TELEGRAM)
+            )
 
         # ── Plugin-registered platforms (checked first) ───────────────────
         try:
@@ -22257,12 +22283,22 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             if _is_gateway_hidden_reasoning_incomplete_turn(agent_result):
                 response = ""
             try:
-                from gateway.response_filters import is_intentional_silence_agent_result
+                from gateway.response_filters import (
+                    is_intentional_silence_agent_result,
+                    should_swallow_silence,
+                )
                 _intentional_silence = is_intentional_silence_agent_result(
                     agent_result, response,
                 )
+                _swallow_silence = _intentional_silence and should_swallow_silence(
+                    agent_result,
+                    response,
+                    display_kind=persist_user_display_kind,
+                    reply_expected=(getattr(event, "metadata", None) or {}).get("reply_expected"),
+                )
             except Exception:
                 _intentional_silence = False
+                _swallow_silence = False
 
             # Convert the agent's internal "(empty)" sentinel into a
             # user-friendly message.  "(empty)" means the model failed to
@@ -22761,12 +22797,22 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             # still persisted in session history so later turns keep normal
             # user/assistant alternation; only the outbound chat delivery is
             # suppressed.
-            if _intentional_silence:
+            if _intentional_silence and _swallow_silence:
                 logger.info(
                     "Suppressing intentional silence marker for session %s",
                     session_entry.session_id,
                 )
                 response = ""
+            elif _intentional_silence:
+                # A person wrote and the model answered with a bare silence
+                # marker: tell them, instead of leaving the chat without a reply.
+                from gateway.response_filters import UNEXPECTED_SILENCE_REPLY
+                logger.warning(
+                    "Silence marker for a human turn in session %s; sending a notice",
+                    session_entry.session_id,
+                )
+                response = UNEXPECTED_SILENCE_REPLY
+                agent_result["already_sent"] = False
 
             # Auto voice reply: send TTS audio before the text response
             _already_sent = bool(agent_result.get("already_sent"))
@@ -28770,7 +28816,20 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             else:
                 await adapter.interrupt_session_activity(session_key, source.chat_id)
         if adapter and hasattr(adapter, "get_pending_message"):
-            adapter.get_pending_message(session_key)  # consume and discard
+            # Discard a stale human follow-up, but keep a parked service event
+            # (e.g. the completion of a background delegation): it was settled
+            # when the adapter admitted it, so dropping it would lose the
+            # result for good and the session would idle until the next user
+            # message. The post-command drain starts the kept event.
+            parked = adapter.get_pending_message(session_key)
+            wake = parked if getattr(parked, "internal", False) else None
+            if wake is None:
+                overflow = _iac_state.conversation.queued_events if _iac_state else None
+                wake = next((e for e in overflow or [] if getattr(e, "internal", False)), None)
+                if wake is not None:
+                    overflow.remove(wake)
+            if wake is not None and isinstance(getattr(adapter, "_pending_messages", None), dict):
+                adapter._pending_messages[session_key] = wake
         if _iac_state is not None:
             _iac_state.persistent.pending_command_text = None
         if release_running_state:
@@ -31532,10 +31591,22 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     # This direct queued-send branch predates intentional-silence
                     # filtering, so without this check it leaks the literal marker.
                     try:
-                        from gateway.response_filters import is_intentional_silence_agent_result
+                        from gateway.response_filters import (
+                            UNEXPECTED_SILENCE_REPLY,
+                            is_intentional_silence_agent_result,
+                            should_swallow_silence,
+                        )
                         _intentional_silence = is_intentional_silence_agent_result(
                             _delivery_result, first_response,
                         )
+                        if _intentional_silence and not should_swallow_silence(
+                            _delivery_result,
+                            first_response,
+                            display_kind=persist_user_display_kind,
+                        ):
+                            first_response = UNEXPECTED_SILENCE_REPLY
+                            _already_streamed = False
+                            _intentional_silence = False
                     except Exception:
                         _intentional_silence = False
                     if _intentional_silence:

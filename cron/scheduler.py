@@ -26,7 +26,7 @@ import threading
 import time
 import tempfile
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 # fcntl is Unix-only; on Windows use msvcrt for file locking
 try:
@@ -465,19 +465,48 @@ def _summarize_cron_failure_for_delivery(job: dict, error: str | None) -> str:
     return message
 
 
+DEFAULT_FAILURE_REPEAT_ALERT_HOURS = 6.0
+
+
+def _failure_repeat_alert_hours() -> float:
+    """``cron.failure_repeat_alert_hours``: how long an already-reported failure stays quiet
+    before one reminder. ``0`` (or negative) reports every failing run, as before."""
+    try:
+        cron_cfg = (load_config() or {}).get("cron") or {}
+        return float(cron_cfg.get("failure_repeat_alert_hours", DEFAULT_FAILURE_REPEAT_ALERT_HOURS))
+    except Exception:
+        return DEFAULT_FAILURE_REPEAT_ALERT_HOURS
+
+
+def _repeat_alert_withheld(incident: dict) -> bool:
+    """True while the owner was already told about this failure less than the pause ago.
+    A missing/unreadable ``alerted_at`` (ledger from an older version) delivers instead of
+    swallowing the report."""
+    hours = _failure_repeat_alert_hours()
+    if hours <= 0 or not incident.get("alerted_at"):
+        return False
+    try:
+        from cron.jobs import _ensure_aware
+
+        last = _ensure_aware(datetime.fromisoformat(str(incident["alerted_at"])))
+    except (TypeError, ValueError):
+        return False
+    return _hermes_now() - last < timedelta(hours=hours)
+
+
 def _upsert_incident_for_failure(
     job: dict, error: str, *, output_file: Optional[Any] = None
 ) -> tuple[bool, Optional[str]]:
     """Record a durable failure incident for this run.
 
-    The incident store groups "same job + same error signature" across runs so
-    an operator-acked failure stops re-pinging every run. Returns
-    ``(acked, incident_id)``: ``acked`` is True when the incident for this
-    exact signature is already ``closed`` (acked) — the per-run failure ping
-    should be suppressed. ``incident_id`` lets the caller mark the incident
-    ``alerted`` after the ping actually goes out. The streak nudge and
-    ``_summarize_cron_failure_for_delivery`` text stay intact for un-acked
-    failures.
+    The incident store groups "same job + same error signature" across runs.
+    Returns ``(withheld, incident_id)``: ``withheld`` is True when the incident
+    is already ``closed`` (acked) or was reported (``alerted``) less than
+    ``cron.failure_repeat_alert_hours`` ago — the per-run failure ping is then
+    suppressed, and exactly one reminder goes out after the pause. A new error
+    text, or the same error after a green run, is reported at once.
+    ``incident_id`` lets the caller mark the incident ``alerted`` after the
+    ping actually goes out.
 
     Best-effort: an incident-store error must never break the cron run or the
     delivery path — failures are logged at debug and the caller delivers as if
@@ -493,14 +522,25 @@ def _upsert_incident_for_failure(
             output_file=output_file,
         )
         incident = get_incident(incident_id)
-        acked = bool(incident and incident.get("state") == "closed")
-        return acked, incident_id
+        state = incident.get("state") if incident else None
+        withheld = state == "closed" or (state == "alerted" and _repeat_alert_withheld(incident))
+        return withheld, incident_id
     except Exception as exc:
         logger.debug(
             "Incident store unavailable for job %s (delivery unaffected): %s",
             job["id"], exc,
         )
         return False, None
+
+
+def _resolve_incidents_for_recovered_job(job: dict) -> None:
+    """Best-effort: a successful run marks the job's open incidents ``resolved``."""
+    try:
+        from cron.incidents import close_incidents_for_recovered_job
+
+        close_incidents_for_recovered_job(job["id"])
+    except Exception as exc:
+        logger.debug("Incident store unavailable for job %s (delivery unaffected): %s", job["id"], exc)
 
 
 def _mark_incident_alerted(incident_id: Optional[str]) -> None:
@@ -719,6 +759,7 @@ from cron.jobs import (
     fire_claim_fence,
     clear_run_claim,
     get_due_jobs,
+    fire_fence_in_use,
     heartbeat_fire_claim,
     heartbeat_run_claim,
     mark_job_run,
@@ -2626,6 +2667,54 @@ def _get_bot_chat_delivery_timeout() -> int:
         return 600
 
 
+WEB_CHAT_PLATFORM = "api_server"
+
+
+def web_chat_unreachable_reason(chat_id) -> Optional[str]:
+    """Русская причина, по которой в этот веб-чат кабинета нечего доставлять, либо None."""
+    session_id = str(chat_id or "").strip()
+    if not session_id:
+        return "у задания нет чата кабинета"
+    db = None
+    try:
+        from korra_state import SessionDB
+
+        db = SessionDB()
+        if not db.get_session(session_id):
+            return "этот чат кабинета не найден (возможно, он удалён)"
+        return None
+    except Exception as exc:
+        return f"история чатов кабинета недоступна ({type(exc).__name__})"
+    finally:
+        if db is not None:
+            db.close()
+
+
+def _deliver_to_web_chat(chat_id, text: str) -> Optional[str]:
+    """Положить результат в историю веб-чата кабинета строкой ассистента.
+
+    У веб-чата нет канала отправки (HTTP запрос-ответ), поэтому результат
+    записывается в сессию тем же способом, что и сообщение «Учёл»: строка видна
+    после обновления страницы и входит в историю для следующих ходов.
+    """
+    reason = web_chat_unreachable_reason(chat_id)
+    if reason:
+        return f"Не удалось положить результат в чат кабинета: {reason}."
+    db = None
+    try:
+        from korra_state import SessionDB
+
+        db = SessionDB()
+        db.append_message(str(chat_id).strip(), "assistant", text, display_kind="cron_delivery")
+        return None
+    except Exception as exc:
+        logger.warning("Cron delivery to the web chat %s failed: %s", chat_id, exc, exc_info=True)
+        return f"Не удалось положить результат в чат кабинета: {type(exc).__name__}."
+    finally:
+        if db is not None:
+            db.close()
+
+
 def _deliver_to_bot_chat(job: dict, content: str, profile: str) -> Optional[str]:
     """Deliver job output into a profile's canonical Bot Chat as an inbound turn.
 
@@ -3122,8 +3211,15 @@ def _is_creator_private_chat(job: dict, platform_name: str, chat_id) -> bool:
     So a job anybody set up may answer its creator without a decision (Dmitry,
     28.09.2026: a user of their own agent automates for themselves).
     """
-    chat = _private_telegram_chat(platform_name, chat_id)
     origin = job.get("origin") if isinstance(job.get("origin"), dict) else {}
+    if str(platform_name or "").strip().lower() == WEB_CHAT_PLATFORM:
+        # Чат кабинета, из которого задание создано: тот же человек, тот же чат.
+        return (
+            str(origin.get("platform") or "").strip().lower() == WEB_CHAT_PLATFORM
+            and bool(str(chat_id or "").strip())
+            and str(origin.get("chat_id") or "").strip() == str(chat_id).strip()
+        )
+    chat = _private_telegram_chat(platform_name, chat_id)
     return bool(chat) and (
         str(origin.get("platform") or "").strip().lower() == "telegram"
         and str(origin.get("user_id") or "").strip() == chat
@@ -3345,10 +3441,11 @@ def _deliver_result(
     # the seed receive an empty string and return False, which is exactly the
     # live failure reproduced three times on Alice (job ef7bd2869d15).
     if job.get("reminder"):
-        mirror_text = content
+        raw_mirror_text = content
     else:
-        _, mirror_text = BasePlatformAdapter.extract_media(content)
-    mirror_text = (mirror_text or "").strip()
+        _, raw_mirror_text = BasePlatformAdapter.extract_media(content)
+    raw_mirror_text = (raw_mirror_text or "").strip()
+    mirror_text = raw_mirror_text
 
     try:
         config = load_gateway_config()
@@ -3381,11 +3478,14 @@ def _deliver_result(
         # Постороннему получателю результат уходит с замаскированными
         # секретами; свой канал владельца видит текст как есть (решение
         # Дмитрия 28.09; чистое ревью Astra, P1-3).
+        # То же для копии в историю чата: она живёт дольше сообщения.
         target_content = cleaned_delivery_content
+        mirror_text = raw_mirror_text
         if not _is_owner_side_chat(job, platform_name, chat_id):
             from cron.recipients import mask_outgoing_text
 
             target_content = mask_outgoing_text(cleaned_delivery_content)
+            mirror_text = mask_outgoing_text(raw_mirror_text)
 
         # Тот же текст этому адресату уже ушёл из этого выполнения через
         # `korra send` (или сервис мог его принять): вторая копия — дубль.
@@ -3443,6 +3543,12 @@ def _deliver_result(
                     f"{target_label(platform_name, chat_id, thread_id)}"
                 )
                 continue
+
+        if platform_name == WEB_CHAT_PLATFORM:
+            web_error = _deliver_to_web_chat(chat_id, target_content)
+            if web_error:
+                delivery_errors.append(web_error)
+            continue
 
         # Diagnostic: log thread_id for topic-aware delivery debugging
         origin = _resolve_origin(job) or {}
@@ -7210,6 +7316,13 @@ def _run_job_inner(
     except Exception as e:
         error_msg = f"{type(e).__name__}: {str(e)}"
         logger.exception("Job '%s' failed: %s", job_name, error_msg)
+        try:
+            from cron.unreachable_retry import is_model_unreachable_failure
+
+            if is_model_unreachable_failure(e, agent):
+                job["_model_unreachable"] = True
+        except Exception:  # classification must never mask the real failure
+            logger.debug("Job '%s': unreachable-failure classification failed", job_id)
         # Best-effort audit write on failure path. _audit_fire_id
         # may be unset if the exception fired before submit() — guard
         # with a None check so the audit write itself never raises.
@@ -7478,14 +7591,22 @@ def _run_with_fire_claim_heartbeat(job: dict, run) -> bool:
         last_confirmed = time.monotonic()
         while not stop.wait(_RUN_CLAIM_HEARTBEAT_SECONDS):
             try:
-                if not heartbeat_fire_claim(job_id, expected_owner=owner):
+                if heartbeat_fire_claim(job_id, expected_owner=owner):
+                    last_confirmed = time.monotonic()
+                    continue
+                if not fire_fence_in_use(job_id):
                     lost_ownership.set()
                     logger.warning(
                         "Job '%s': fire claim ownership lost; interrupting stale run",
                         job_id,
                     )
                     return
-                last_confirmed = time.monotonic()
+                # The run's own delivery holds the fence (a slow send): the
+                # heartbeat could not even look at the claim, which says
+                # nothing about who owns it. A delivered report must not be
+                # recorded as interrupted because of it; only the bounded
+                # grace below ends the wait.
+                raise TimeoutError("fire fence is held by this run's delivery")
             except Exception:
                 logger.debug(
                     "Job '%s': fire_claim heartbeat failed",
@@ -7844,6 +7965,7 @@ def _run_one_job_body(
             else:
                 if success:
                     deliver_content = final_response
+                    _resolve_incidents_for_recovered_job(job)
                 else:
                     # Durable failure incident: record this job+error
                     # signature once and, when the operator already acked it,
@@ -7884,6 +8006,14 @@ def _run_one_job_body(
             should_deliver = bool(deliver_content.strip())
             if blocked_config_silent or drift_skip_silent:
                 should_deliver = False
+            if should_deliver and not success and job.get("_model_unreachable"):
+                from cron.unreachable_retry import will_retry
+
+                if will_retry(job):
+                    should_deliver = False
+                    logger.info(
+                        "Job '%s': holding failure notice — automatic re-run pending", job["id"]
+                    )
             unresolved_origin = False
             # Cron silence suppression — see _is_cron_silence_response.  Replaces the
             # old `SILENT_MARKER in ...upper()` substring check, which both leaked
@@ -8016,6 +8146,8 @@ def _run_one_job_body(
             mark_kwargs["expected_fire_owner"] = fire_owner
         if blocked_config:
             mark_kwargs["status"] = "blocked_config"
+        if not success and job.pop("_model_unreachable", False):
+            mark_kwargs["model_unreachable"] = True
         marked = mark_job_run(job["id"], success, error, **mark_kwargs)
         if fire_owner is not None and not marked:
             finish_execution(
@@ -8347,6 +8479,21 @@ def _maybe_run_worktree_maintenance() -> None:
     ).start()
 
 
+def _notify_missed_oneshots(adapters, loop) -> None:
+    """One message to the owner per one-shot retired unrun by the due scan."""
+    from cron.jobs import pop_missed_oneshot_notices
+
+    for item in pop_missed_oneshot_notices():
+        job = dict(item["job"])
+        job.pop("delivery_ttl_seconds", None)
+        try:
+            error = _deliver_result(job, item["text"], adapters=adapters, loop=loop, failure_notice=True)
+        except Exception as e:
+            error = str(e)
+        if error:
+            logger.warning("Missed one-shot notice for job %s not delivered: %s", job.get("id"), error)
+
+
 def tick(
     verbose: bool = True,
     adapters=None,
@@ -8489,6 +8636,7 @@ def tick(
             logger.debug("Worktree maintenance dispatch failed: %s", _wt_exc)
 
         due_jobs = get_due_jobs()
+        _notify_missed_oneshots(adapters, loop)
 
         # Bound the in-flight set BEFORE the dedup guard is consulted, so a
         # leaked claim is force-released in-cycle rather than silently eating

@@ -882,3 +882,23 @@ def test_identity_freshness_does_not_depend_on_host_uptime(monkeypatch):
 
     adapter._note_bot_username("new_helper_bot")
     assert adapter._bot_identity_is_fresh() is True
+
+
+def test_unaddressed_free_response_group_message_is_marked_no_reply_expected():
+    adapter = _make_adapter(require_mention=True, free_response_chats=["-100"])
+
+    event = adapter._build_message_event(_group_message("просто болтовня"), MessageType.TEXT)
+
+    assert event.metadata.get("reply_expected") is False
+
+
+def test_addressed_group_message_and_dm_expect_a_reply():
+    adapter = _make_adapter(require_mention=True, free_response_chats=["-100"])
+
+    replied = adapter._build_message_event(
+        _group_message("ответ боту", reply_to_bot=True), MessageType.TEXT
+    )
+    direct = adapter._build_message_event(_dm_message("привет"), MessageType.TEXT)
+
+    assert "reply_expected" not in replied.metadata
+    assert "reply_expected" not in direct.metadata

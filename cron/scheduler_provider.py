@@ -587,15 +587,20 @@ class InProcessCronScheduler(CronScheduler):
             return
 
         # ── Single-profile (legacy) path ──────────────────────────────────
-        recovered = self.recover_interrupted()
-        if recovered:
-            logger.warning(
-                "Marked %d interrupted cron execution(s) unknown after restart",
-                recovered,
-            )
-        # Heartbeat once before the first sleep so `hermes cron status` sees a
-        # live ticker immediately after startup, not only after the first tick.
-        record_ticker_heartbeat()
+        # An unreadable executions.db must not end the ticker thread before its
+        # first tick: jobs still have to fire, the loop below reports the state.
+        try:
+            recovered = self.recover_interrupted()
+            if recovered:
+                logger.warning(
+                    "Marked %d interrupted cron execution(s) unknown after restart",
+                    recovered,
+                )
+            # Heartbeat once before the first sleep so `hermes cron status` sees a
+            # live ticker immediately after startup, not only after the first tick.
+            record_ticker_heartbeat()
+        except Exception as e:
+            logger.error("Cron startup recovery error: %s", e, exc_info=True)
         # Exponential backoff for consecutive tick failures — most importantly
         # fd exhaustion (EMFILE/ENFILE, #87644).  While FDs stay exhausted the
         # ticker must NOT hammer the store every 60s; once they free (leak
@@ -674,7 +679,7 @@ class InProcessCronScheduler(CronScheduler):
         """
         import logging
         from cron.scheduler import tick as cron_tick
-        from cron.scheduler import CronTickYielded
+        from cron.scheduler import CronTickYielded, _is_fd_exhaustion
         from cron.jobs import (
             clear_ticker_error,
             record_ticker_error,
@@ -692,6 +697,7 @@ class InProcessCronScheduler(CronScheduler):
             ok = False
             _tick_error = None
             _profile_errors: dict[str, str] = {}
+            _cycle_exc = None
             cycle_homes = []
             try:
                 cycle_homes = _existing_profile_homes(profile_homes)
@@ -717,6 +723,14 @@ class InProcessCronScheduler(CronScheduler):
                                 )
                             record_ticker_heartbeat()
                         initialized.add(identity)
+                    except Exception as e:
+                        # One profile's unreadable store must not stop the
+                        # others; recovery is retried on the next cycle.
+                        logger.error(
+                            "Cron startup recovery error for profile at %s: %s",
+                            home, e, exc_info=True,
+                        )
+                        _profile_errors[str(home)] = f"{type(e).__name__}: {e}"
                     finally:
                         reset_hermes_home_override(home_token)
                 initialized.intersection_update(current_identities)
@@ -758,9 +772,21 @@ class InProcessCronScheduler(CronScheduler):
                             # only ticker in the same cycle.
                             logger.info("Cron tick yielded for profile at %s: %s", home, e)
                             _profile_errors[str(home)] = f"{type(e).__name__}: {e}"
+                        except BaseException as e:
+                            # Any other failure is THIS profile's: record it
+                            # against this profile and keep ticking the rest.
+                            logger.error(
+                                "Cron tick error for profile at %s: %s",
+                                home, e, exc_info=True,
+                            )
+                            _profile_errors[str(home)] = f"{type(e).__name__}: {e}"
+                            if _cycle_exc is None or _is_fd_exhaustion(e):
+                                _cycle_exc = e
                         finally:
                             reset_hermes_home_override(home_token)
                     ok = not _profile_errors
+                    if _cycle_exc is not None:
+                        consecutive_failures = _note_tick_failure(_cycle_exc, consecutive_failures)
             except BaseException as e:
                 logger.error("Cron tick error: %s", e, exc_info=True)
                 _tick_error = f"{type(e).__name__}: {e}"

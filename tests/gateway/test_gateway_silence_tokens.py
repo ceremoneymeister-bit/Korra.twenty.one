@@ -24,12 +24,27 @@ def _source():
     )
 
 
-def _event():
+def _event(**kwargs):
     return MessageEvent(
         text="side chatter",
         source=_source(),
         message_id="msg-42",
+        **kwargs,
     )
+
+
+_SILENT_RESULT = {
+    "final_response": "[SILENT]",
+    "messages": [
+        {"role": "user", "content": "side chatter"},
+        {"role": "assistant", "content": "[SILENT]"},
+    ],
+    "tools": [],
+    "history_offset": 0,
+    "last_prompt_tokens": 0,
+    "api_calls": 1,
+    "failed": False,
+}
 
 
 def _runner(monkeypatch, tmp_path):
@@ -95,27 +110,54 @@ def test_failed_agent_result_never_counts_as_intentional_silence():
 @pytest.mark.asyncio
 async def test_silence_token_suppresses_delivery_but_preserves_transcript(monkeypatch, tmp_path):
     runner = _runner(monkeypatch, tmp_path)
-    runner._run_agent = AsyncMock(return_value={
-        "final_response": "[SILENT]",
-        "messages": [
-            {"role": "user", "content": "side chatter"},
-            {"role": "assistant", "content": "[SILENT]"},
-        ],
-        "tools": [],
-        "history_offset": 0,
-        "last_prompt_tokens": 0,
-        "api_calls": 1,
-        "failed": False,
-    })
+    runner._run_agent = AsyncMock(return_value=dict(_SILENT_RESULT))
 
     response = await runner._handle_message_with_agent(
-        _event(), _source(), "agent:main:telegram:group:-1001:12345", 1
+        _event(metadata={"reply_expected": False}), _source(), "agent:main:telegram:group:-1001:12345", 1
     )
 
     assert response == ""
     appended = [call.args[1] for call in runner.session_store.append_to_transcript.call_args_list]
     assert {"role": "assistant", "content": "[SILENT]"}.items() <= appended[-1].items()
     assert [msg["role"] for msg in appended if msg.get("role") in {"user", "assistant"}] == ["user", "assistant"]
+
+
+@pytest.mark.asyncio
+async def test_silence_token_for_service_event_stays_silent(monkeypatch, tmp_path):
+    runner = _runner(monkeypatch, tmp_path)
+    runner._run_agent = AsyncMock(return_value=dict(_SILENT_RESULT))
+
+    response = await runner._handle_message_with_agent(
+        _event(internal=True), _source(), "agent:main:telegram:group:-1001:12345", 1
+    )
+
+    assert response == ""
+
+
+@pytest.mark.asyncio
+async def test_silence_token_for_human_message_gets_short_notice(monkeypatch, tmp_path):
+    runner = _runner(monkeypatch, tmp_path)
+    runner._run_agent = AsyncMock(return_value=dict(_SILENT_RESULT))
+
+    response = await runner._handle_message_with_agent(
+        _event(), _source(), "agent:main:telegram:group:-1001:12345", 1
+    )
+
+    assert response and "[SILENT]" not in response
+    assert "Не получилось ответить" in response
+    appended = [call.args[1] for call in runner.session_store.append_to_transcript.call_args_list]
+    assert {"role": "assistant", "content": "[SILENT]"}.items() <= appended[-1].items()
+
+
+def test_should_swallow_silence_only_for_service_turns_or_unaddressed_chatter():
+    from gateway.response_filters import should_swallow_silence
+
+    ok = {"failed": False}
+    assert should_swallow_silence(ok, "NO_REPLY", display_kind="internal_notification")
+    assert should_swallow_silence(ok, "NO_REPLY", reply_expected=False)
+    assert not should_swallow_silence(ok, "NO_REPLY")
+    assert not should_swallow_silence(ok, "NO_REPLY", display_kind=None, reply_expected=True)
+    assert not should_swallow_silence(ok, "Привет")
 
 
 @pytest.mark.asyncio

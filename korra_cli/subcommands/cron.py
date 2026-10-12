@@ -256,7 +256,7 @@ def build_cron_parser(subparsers, *, cmd_cron: Callable) -> None:
     )
     cron_incidents.add_argument(
         "--state",
-        choices=["detected", "alerted", "closed"],
+        choices=["detected", "alerted", "resolved", "closed"],
         help='Отфильтровать сбои по состоянию',
     )
     cron_incidents.add_argument(

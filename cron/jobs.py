@@ -39,6 +39,7 @@ from typing import Optional, Dict, List, Any, Set, Tuple, Union, Collection
 logger = logging.getLogger(__name__)
 
 from korra_time import now as _hermes_now
+from cron import unreachable_retry
 from utils import atomic_replace, atomic_write_text
 
 # ``croniter`` compiles ~15 ms of regexes at import and only matters for
@@ -105,6 +106,7 @@ _jobs_file_lock = threading.RLock()
 _jobs_lock_state = threading.local()
 _fire_fence_locks: Dict[str, threading.RLock] = {}
 _fire_fence_locks_guard = threading.Lock()
+_fire_fence_active: Set[str] = set()
 _fire_fence_lock_state = threading.local()
 
 # Upper bound on waiting for the cross-process .jobs.lock flock (#60703).
@@ -449,10 +451,16 @@ def _fire_job_lock(job_id: str):
             logger.error("Cron fire fence unavailable for %s: %s", job_id, exc)
 
         held_locks[lock_key] = acquired
+        if acquired:
+            with _fire_fence_locks_guard:
+                _fire_fence_active.add(lock_key)
         try:
             yield acquired
         finally:
             held_locks.pop(lock_key, None)
+            if acquired:
+                with _fire_fence_locks_guard:
+                    _fire_fence_active.discard(lock_key)
             if lock_fd is not None:
                 try:
                     if acquired and fcntl is not None:
@@ -467,6 +475,17 @@ def _fire_job_lock(job_id: str):
                     lock_fd.close()
     finally:
         local_lock.release()
+
+
+def fire_fence_in_use(job_id: str) -> bool:
+    """True while some thread of this process holds the job's side-effect fence.
+
+    Lets the claim heartbeat tell "the run's own delivery holds the fence" from
+    "someone else owns the claim": the first is not a verdict on ownership.
+    """
+    lock_key = f"{_current_cron_store().cron_dir.resolve()}::{job_id}"
+    with _fire_fence_locks_guard:
+        return lock_key in _fire_fence_active
 
 
 @contextlib.contextmanager
@@ -1716,14 +1735,34 @@ def load_jobs() -> List[Dict[str, Any]]:
                 if isinstance(v, dict)
             ]
             needs_shape_repair = True
-        if jobs and (_strict_retry or needs_shape_repair):
+        elif not isinstance(jobs, list):
+            logger.warning(
+                "Replacing invalid jobs.json 'jobs' field (%s) with an empty list",
+                type(jobs).__name__,
+            )
+            jobs = []
+            needs_shape_repair = True
+        if any(not isinstance(j, dict) for j in jobs):
+            # One junk entry would crash the due scan on every tick and freeze
+            # every healthy job; drop it (types only: raw values are arbitrary
+            # file content and must not reach the logs).
+            junk = [j for j in jobs if not isinstance(j, dict)]
+            logger.warning(
+                "Skipping %d non-object entr%s in jobs.json (types: %s)",
+                len(junk),
+                "y" if len(junk) == 1 else "ies",
+                ", ".join(sorted({type(j).__name__ for j in junk})),
+            )
+            jobs = [j for j in jobs if isinstance(j, dict)]
+            needs_shape_repair = True
+        if needs_shape_repair or (jobs and _strict_retry):
             # Rewrite into the canonical {"jobs": [...]} form: either the parse
             # hit control-character corruption (_strict_retry) or the store was
             # an id-keyed map. save_jobs() re-emits the list shape every reader
             # expects.
             save_jobs(jobs)
             if needs_shape_repair:
-                logger.warning("Auto-repaired jobs.json (id-keyed jobs map flattened to list)")
+                logger.warning("Auto-repaired jobs.json (non-list or junk entries replaced by a clean list)")
             else:
                 logger.warning("Auto-repaired jobs.json (had invalid control characters)")
         _record_load_stamp(pre_read_stamp)
@@ -1731,6 +1770,9 @@ def load_jobs() -> List[Dict[str, Any]]:
     if isinstance(data, list):
         # Bare array — likely saved/edited outside save_jobs(). Wrap it back
         # into the expected {"jobs": [...]} structure.
+        data = [j for j in data if isinstance(j, dict)] if any(
+            not isinstance(j, dict) for j in data
+        ) else data
         if data:
             save_jobs(data)
             logger.warning("Auto-repaired jobs.json (bare list wrapped as dict)")
@@ -3006,6 +3048,7 @@ def mark_job_run(
     status: Optional[str] = None,
     *,
     expected_fire_owner: Optional[str] = None,
+    model_unreachable: bool = False,
 ) -> bool:
     with _fire_job_lock(job_id) as acquired:
         if not acquired:
@@ -3017,6 +3060,7 @@ def mark_job_run(
             delivery_error,
             status=status,
             expected_fire_owner=expected_fire_owner,
+            model_unreachable=model_unreachable,
         )
 
 
@@ -3111,6 +3155,7 @@ def _mark_job_run_locked(
     *,
     status: Optional[str] = None,
     expected_fire_owner: Optional[str] = None,
+    model_unreachable: bool = False,
 ) -> bool:
     """
     Mark a job as having been run.
@@ -3140,6 +3185,14 @@ def _mark_job_run_locked(
                             job_id,
                         )
                         return False
+                # Failed before any model call (network down): a recurring job gets a
+                # bounded automatic re-run instead of waiting a full period, and this
+                # attempt consumes neither a repeat slot nor the failure streak.
+                retry_dt = None
+                if model_unreachable and not success:
+                    retry_dt = unreachable_retry.retry_instant(job, _hermes_now())
+                if retry_dt is None:
+                    unreachable_retry.clear_state(job)
                 now = _hermes_now().isoformat()
                 job["last_run_at"] = now
                 job.pop("manual_run_at", None)
@@ -3167,7 +3220,7 @@ def _mark_job_run_locked(
                 # (Poke-inspired; see cron/scheduler._failure_streak_nudge).
                 if success:
                     job["failure_streak"] = 0
-                else:
+                elif retry_dt is None:
                     job["failure_streak"] = int(job.get("failure_streak") or 0) + 1
                 # Track delivery failures separately — cleared on successful delivery
                 job["last_delivery_error"] = delivery_error
@@ -3185,7 +3238,7 @@ def _mark_job_run_locked(
                 # (issue #38758), which already incremented completed — do not
                 # double-count them here.  Recurring jobs and direct callers
                 # with no pre-run claim still get the legacy increment.
-                if job.get("repeat"):
+                if job.get("repeat") and retry_dt is None:
                     repeat = job["repeat"]
                     times = repeat.get("times")
                     completed = repeat.get("completed", 0)
@@ -3249,6 +3302,16 @@ def _mark_job_run_locked(
                         job["state"] = "completed"
                 elif job.get("state") != "paused":
                     job["state"] = "scheduled"
+                    if retry_dt is not None:
+                        unreachable_retry.park(job, retry_dt)
+                        logger.info(
+                            "Job '%s': model unreachable with zero API calls — automatic "
+                            "re-run %d/%d at %s",
+                            job.get("name", job.get("id", "?")),
+                            job[unreachable_retry.STATE_KEY]["attempt"],
+                            len(unreachable_retry.RETRY_DELAYS_SECONDS),
+                            job["next_run_at"],
+                        )
 
                 save_jobs(jobs)
                 return True
@@ -3331,6 +3394,55 @@ def _write_missed_oneshot_diagnostic(job: Dict[str, Any], next_run: str) -> None
             "Failed to write missed-oneshot diagnostic for job %r: %s",
             job.get("id"), e,
         )
+
+
+_missed_oneshot_notices: List[Dict[str, Any]] = []
+_missed_oneshot_notices_lock = threading.Lock()
+
+
+def _queue_missed_oneshot_notice(job: Dict[str, Any], next_run: str) -> None:
+    """Remember a retired one-shot so the tick can tell its owner once.
+
+    The due scan runs under the jobs lock and has no delivery channel; the tick
+    drains this queue right after the scan. A crash in between loses only the
+    message, never the "skipped" record written by the scan itself.
+    """
+    when = str(next_run)
+    try:
+        when = datetime.fromisoformat(str(next_run)).strftime("%d.%m в %H:%M")
+    except (TypeError, ValueError):
+        pass
+    label = "Напоминание" if job.get("reminder") else "Разовое задание"
+    name = str(job.get("name") or "").strip()
+    text = (
+        f"{label}{' «' + name + '»' if name else ''} не сработало вовремя: "
+        f"Korra не работала в назначенное время ({when}). "
+        "Само по себе оно не запустится — создайте его заново, если оно ещё нужно."
+    )
+    with _missed_oneshot_notices_lock:
+        _missed_oneshot_notices.append({"job": copy.deepcopy(job), "text": text})
+
+
+def pop_missed_oneshot_notices() -> List[Dict[str, Any]]:
+    with _missed_oneshot_notices_lock:
+        items = list(_missed_oneshot_notices)
+        _missed_oneshot_notices.clear()
+    return items
+
+
+def _record_skipped_oneshot(job: Dict[str, Any]) -> None:
+    """Keep a ledger trace for a one-shot that is removed without running."""
+    try:
+        from cron.executions import create_execution, finish_execution
+
+        reason = "Разовое задание пропущено: Korra не работала в назначенное время."
+        attempt = create_execution(job["id"], source="missed")
+        finish_execution(
+            attempt["id"], success=False, error=reason,
+            delivery_outcome="skipped", delivery_error=reason,
+        )
+    except Exception as e:
+        logger.warning("Failed to record skipped one-shot %r: %s", job.get("id"), e)
 
 
 def claim_dispatch(job_id: str) -> bool:
@@ -4115,8 +4227,11 @@ def _get_due_jobs_locked() -> List[Dict[str, Any]]:
                 # so re-anchor before either can fire. Recomputation uses the
                 # current expression, so this converges — it cannot defer
                 # forever.
-                if not manual_run and kind == "cron" and not _cron_next_run_matches_expr(
-                    schedule, next_run_dt
+                if (
+                    not manual_run
+                    and kind == "cron"
+                    and not unreachable_retry.is_retry_fire(job, next_run)
+                    and not _cron_next_run_matches_expr(schedule, next_run_dt)
                 ):
                     new_next = compute_next_run(schedule, now.isoformat())
                     logger.info(
@@ -4188,6 +4303,7 @@ def _get_due_jobs_locked() -> List[Dict[str, Any]]:
                         # a diagnostic so it stops being scanned and the miss
                         # is operator-visible (retire-not-silently-delete).
                         _write_missed_oneshot_diagnostic(job, next_run)
+                        _queue_missed_oneshot_notice(job, next_run)
                         for rj in raw_jobs:
                             if rj["id"] == job["id"]:
                                 if rj.get("reminder"):
@@ -4195,13 +4311,17 @@ def _get_due_jobs_locked() -> List[Dict[str, Any]]:
                                     # owner, never an invitation to send it hours late.
                                     reason = "Напоминание пропущено: Korra не работала в назначенное время. Перенесите его, если оно ещё нужно."
                                     from cron.executions import create_execution, finish_execution
-                                    attempt = create_execution(job["id"], source="missed")
-                                    finish_execution(attempt["id"], success=False, error=reason,
-                                                     delivery_outcome="expired", delivery_error=reason, result_text=rj["reminder"])
+                                    try:
+                                        attempt = create_execution(job["id"], source="missed")
+                                        finish_execution(attempt["id"], success=False, error=reason,
+                                                         delivery_outcome="expired", delivery_error=reason, result_text=rj["reminder"])
+                                    except Exception as e:
+                                        logger.warning("Failed to record missed reminder %r: %s", job.get("id"), e)
                                     rj.update(enabled=False, state="error", next_run_at=None,
                                               last_status="missed", last_error=reason,
                                               last_delivery_error=reason)
                                 else:
+                                    _record_skipped_oneshot(job)
                                     raw_jobs.remove(rj)
                                     intentionally_removed.add(str(job["id"]))
                                 needs_save = True

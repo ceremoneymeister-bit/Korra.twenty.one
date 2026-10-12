@@ -337,3 +337,114 @@ def test_cli_list_and_ack(monkeypatch, tmp_path, capsys):
         incident_action="ack", state=None, incident_id=None
     )
     assert cron_incidents(missing_args) == 1
+
+
+# ── Repeat failure: tell once, remind after a pause (K21-287 б) ────────────
+
+
+def _age_alert(tmp_path, inc_id, hours):
+    import sqlite3
+    from datetime import timedelta
+
+    from korra_time import now
+
+    stamp = (now() - timedelta(hours=hours)).isoformat()
+    with sqlite3.connect(tmp_path / "cron" / "executions.db") as conn:
+        conn.execute("UPDATE cron_incidents SET alerted_at=? WHERE id=?", (stamp, inc_id))
+
+
+def test_repeat_failure_alerts_once_then_reminds_after_pause(monkeypatch, tmp_path):
+    inc = _point_db(monkeypatch, tmp_path)
+    monkeypatch.setattr(sched, "_preflight_check_delivery", lambda job: None)
+    deliveries = []
+    job = _job(deliver="telegram:123")
+    with cron_jobs.use_cron_store(tmp_path):
+        cron_jobs.save_jobs([job])
+        _tick_failing(job, tmp_path, deliveries, error="tunnel down")
+        inc_id = inc.list_incidents()[0]["id"]
+        assert inc.get_incident(inc_id)["state"] == "alerted"
+        assert inc.get_incident(inc_id)["alerted_at"]
+
+        # Same failure on the next ticks: silence.
+        _tick_failing(job, tmp_path, deliveries, error="tunnel down")
+        _tick_failing(job, tmp_path, deliveries, error="tunnel down")
+        assert len(deliveries) == 1
+
+        # After the pause exactly one reminder goes out, and the pause restarts.
+        _age_alert(tmp_path, inc_id, hours=7)
+        _tick_failing(job, tmp_path, deliveries, error="tunnel down")
+        assert len(deliveries) == 2
+        _tick_failing(job, tmp_path, deliveries, error="tunnel down")
+        assert len(deliveries) == 2
+
+        # A different error is reported at once.
+        _tick_failing(job, tmp_path, deliveries, error="another failure")
+        assert len(deliveries) == 3
+
+
+def test_pause_zero_reports_every_failure(monkeypatch, tmp_path):
+    inc = _point_db(monkeypatch, tmp_path)
+    monkeypatch.setattr(sched, "_failure_repeat_alert_hours", lambda: 0.0)
+    monkeypatch.setattr(sched, "_preflight_check_delivery", lambda job: None)
+    deliveries = []
+    job = _job(deliver="telegram:123")
+    with cron_jobs.use_cron_store(tmp_path):
+        cron_jobs.save_jobs([job])
+        _tick_failing(job, tmp_path, deliveries, error="tunnel down")
+        _tick_failing(job, tmp_path, deliveries, error="tunnel down")
+    assert len(deliveries) == 2
+
+
+def test_legacy_alerted_row_without_stamp_still_alerts(monkeypatch, tmp_path):
+    inc = _point_db(monkeypatch, tmp_path)
+    inc_id, _ = inc.upsert_incident("job-1", "boom")
+    inc.set_incident_state(inc_id, "alerted")
+    _age_alert(tmp_path, inc_id, hours=0)
+    import sqlite3
+
+    with sqlite3.connect(tmp_path / "cron" / "executions.db") as conn:
+        conn.execute("UPDATE cron_incidents SET alerted_at=NULL")
+    assert sched._upsert_incident_for_failure(_job(id="job-1"), "boom")[0] is False
+
+
+def test_recovery_resolves_and_same_error_alerts_again(monkeypatch, tmp_path):
+    inc = _point_db(monkeypatch, tmp_path)
+    inc_id, _ = inc.upsert_incident("job-1", "boom")
+    inc.set_incident_state(inc_id, "alerted")
+    assert sched._upsert_incident_for_failure(_job(id="job-1"), "boom")[0] is True
+
+    sched._resolve_incidents_for_recovered_job({"id": "job-1"})
+    assert inc.get_incident(inc_id)["state"] == "resolved"
+
+    withheld, same_id = sched._upsert_incident_for_failure(_job(id="job-1"), "boom")
+    assert withheld is False and same_id == inc_id
+    row = inc.get_incident(inc_id)
+    assert row["state"] == "detected" and row["alerted_at"] is None
+
+
+def test_recovery_never_reopens_owner_ack(monkeypatch, tmp_path):
+    inc = _point_db(monkeypatch, tmp_path)
+    inc_id, _ = inc.upsert_incident("job-1", "boom")
+    inc.ack_incident(inc_id)
+    sched._resolve_incidents_for_recovered_job({"id": "job-1"})
+    assert inc.get_incident(inc_id)["state"] == "closed"
+
+
+def test_old_ledger_gets_alerted_at_in_place(monkeypatch, tmp_path):
+    import sqlite3
+
+    inc = _point_db(monkeypatch, tmp_path)
+    path = tmp_path / "cron" / "executions.db"
+    path.parent.mkdir(parents=True)
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            """CREATE TABLE cron_incidents (id TEXT PRIMARY KEY, job_id TEXT NOT NULL,
+               error_sig TEXT NOT NULL, state TEXT NOT NULL, failure_type TEXT NOT NULL DEFAULT 'unknown',
+               first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL, acked_at TEXT,
+               closed_at TEXT, error TEXT NOT NULL, output_file TEXT)"""
+        )
+        conn.execute(
+            "INSERT INTO cron_incidents VALUES ('j_1','j','1','alerted','unknown','t','t',NULL,NULL,'e',NULL)"
+        )
+    row = inc.get_incident("j_1")
+    assert row["state"] == "alerted" and row["alerted_at"] is None
