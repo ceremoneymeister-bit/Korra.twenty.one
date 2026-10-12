@@ -104,3 +104,29 @@ def test_marker_path_in_run_matches_the_python_state_dir() -> None:
     assert emb._enabled_marker().name == "enabled"
     run = (S6 / "camofox" / "run").read_text()
     assert f'marker="$data_root/{emb.STATE_DIR_NAME}/{emb._enabled_marker().name}"' in run
+
+
+def test_unix_socket_wrapper_is_copied_after_the_heavy_layer_and_inside_the_block() -> None:
+    block = _block()
+    copy = "COPY docker/camofox/unix-socket.mjs /opt/camofox/unix-socket.mjs"
+    assert copy in block
+    assert block.index(copy) > block.index("test -x /opt/camofox/browser/camoufox-bin")
+    assert (ROOT / "docker" / "camofox" / "unix-socket.mjs").is_file()
+
+
+def test_s6_run_has_no_tcp_port_or_bind_host() -> None:
+    run = (S6 / "camofox" / "run").read_text()
+    assert "PORT" not in run and "9377" not in run
+    assert "s6-svc -u" in run  # подсказка для службы, остановленной через -d
+
+
+def test_stage2_hands_the_camofox_state_dir_to_hermes_in_the_targeted_chown() -> None:
+    hook = (ROOT / "docker" / "stage2-hook.sh").read_text()
+    loop = next(ln for ln in hook.splitlines() if ln.strip().startswith("for sub in cron sessions"))
+    assert re.search(r"\bcamofox\b", loop)
+    assert "chown_hermes_tree" in hook
+
+
+def test_stage2_chown_loop_stays_targeted() -> None:
+    hook = (ROOT / "docker" / "stage2-hook.sh").read_text()
+    assert "chown -R hermes:hermes \"$HERMES_HOME\"\n" not in hook

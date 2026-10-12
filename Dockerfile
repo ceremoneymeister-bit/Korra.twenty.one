@@ -423,6 +423,10 @@ RUN set -eu; \
     test -f /opt/camofox/browser/addons/UBO/manifest.json; \
     chmod -R 0755 /opt/camofox/browser; \
     test -x /opt/camofox/browser/camoufox-bin
+# Обёртка переводит единственный listen сервера на Unix-сокет установки: порт на
+# loopback при --network host виден всему хосту. Лежит отдельным слоем после
+# тяжёлого RUN, правка обёртки не заставляет скачивать браузер заново.
+COPY docker/camofox/unix-socket.mjs /opt/camofox/unix-socket.mjs
 
 # ---------- Frontend build (cached independently from Python source) ----------
 # Copy only the frontend source trees first so that Python-only changes don't

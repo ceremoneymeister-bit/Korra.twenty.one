@@ -88,9 +88,11 @@ def _explicit_camofox_url() -> str:
 def _embedded_camofox_endpoint() -> str:
     """Address of the Camofox server bundled in the Korra image, or ``""``.
 
-    Only used when Camofox is explicitly selected and the owner enabled the
-    bundled server, so merely having it installed never turns it into the
-    default browser. An explicit ``CAMOFOX_URL`` always wins over it.
+    The bundled server is used when this profile selected Camofox and no
+    explicit ``CAMOFOX_URL`` is set; merely having it installed never turns it
+    into the default browser. The answer does not depend on whether the server
+    is running right now: the browser choice and the profile's saved logins
+    must not change with server availability.
     """
     try:
         from korra_cli import camofox_embedded
@@ -105,6 +107,21 @@ def _embedded_camofox_endpoint() -> str:
 
 def _using_embedded_camofox() -> bool:
     return not _explicit_camofox_url() and bool(_embedded_camofox_endpoint())
+
+
+_unix_session: Optional[requests.Session] = None
+_unix_session_lock = threading.Lock()
+
+
+def _embedded_session() -> requests.Session:
+    """Shared session that reaches the bundled server over its Unix socket."""
+    global _unix_session
+    with _unix_session_lock:
+        if _unix_session is None:
+            from korra_cli import camofox_embedded
+
+            _unix_session = camofox_embedded.unix_session()
+        return _unix_session
 
 
 def _auth_headers() -> Dict[str, str]:
@@ -191,12 +208,12 @@ def check_camofox_available() -> bool:
     if not url:
         return False
     try:
-        resp = requests.get(f"{url}/health", timeout=5)
+        resp = _request("get", f"{url}/health", timeout=5)
         if resp.status_code == 200 and not _vnc_url_checked:
             try:
                 data = resp.json()
                 vnc_port = data.get("vncPort")
-                if isinstance(vnc_port, int) and 1 <= vnc_port <= 65535:
+                if isinstance(vnc_port, int) and 1 <= vnc_port <= 65535 and not _using_embedded_camofox():
                     from urllib.parse import urlparse
                     parsed = urlparse(url)
                     host = parsed.hostname or "localhost"
@@ -426,6 +443,7 @@ def _get_session(task_id: Optional[str]) -> Dict[str, Any]:
         if task_id in _sessions:
             return _adopt_existing_tab(_sessions[task_id])
 
+        _require_embedded_ready()
         camofox_cfg = _get_camofox_config()
         identity_override = _camofox_identity_override(task_id, camofox_cfg)
         if identity_override:
@@ -512,11 +530,29 @@ class CamofoxUnreachable(requests.ConnectionError):
     """Bundled Camofox did not answer; the message is meant for the agent."""
 
 
+def _require_embedded_ready() -> None:
+    """Bundled Camofox selected but not answering: stop before any session exists.
+
+    The profile's login is tied to its identity, which the server keeps. If the
+    server is down the agent gets a plain explanation and a next step instead of
+    a session that would later fail or lose the saved login.
+    """
+    if not _using_embedded_camofox():
+        return
+    from korra_cli import camofox_embedded
+
+    if not camofox_embedded.health():
+        raise CamofoxUnreachable(_connection_error_text())
+
+
 def _request(method: str, *args: Any, **kwargs: Any) -> requests.Response:
+    embedded = _using_embedded_camofox()
     try:
+        if embedded:
+            return _embedded_session().request(method.upper(), *args, **kwargs)
         return getattr(requests, method)(*args, **kwargs)
     except requests.ConnectionError:
-        if _using_embedded_camofox():
+        if embedded:
             raise CamofoxUnreachable(_connection_error_text()) from None
         raise
 
@@ -568,6 +604,14 @@ def _delete(path: str, body: dict = None, timeout: Optional[int] = None) -> dict
 def _connection_error_text() -> str:
     """Plain-words explanation for an unreachable Camofox server (no stack, no secrets)."""
     if _using_embedded_camofox():
+        from korra_cli import camofox_embedded
+
+        if not camofox_embedded.is_enabled():
+            return (
+                "Браузер с защитой от блокировок выбран, но его встроенный сервер выключен. "
+                "Попросите владельца выполнить `korra doctor --fix` (он включит сервер заново, "
+                "вход на сайтах сохранится) или временно выбрать обычный браузер в `korra tools`."
+            )
         return (
             "Браузер с защитой от блокировок не отвечает: встроенный сервер включён, "
             "но не принимает соединения. Он мог ещё запускаться или упасть. "

@@ -1,113 +1,137 @@
-"""K21-336: встроенный Camofox — адрес, ключ, изоляция двух установок и состояние."""
+"""K21-336: встроенный Camofox — Unix-сокет, ключ, изоляция установок и состояние."""
 
 import os
 import stat
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
 
 from korra_cli import camofox_embedded as emb
+from tests.fakes.camofox_embedded import (  # noqa: F401  (фикстуры)
+    TcpSpy,
+    UnixServer,
+    choose_browser,
+    data,
+    in_profile,
+    install,
+    short_dir,
+    use_root,
+)
 
 
-@pytest.fixture
-def install(tmp_path, monkeypatch):
-    """Образ с Camofox: сервер и бинарник на месте, данные во временном каталоге."""
-    home = tmp_path / "opt-camofox"
-    server = home.joinpath(*emb._SERVER_RELPATH)
-    server.parent.mkdir(parents=True)
-    server.write_text("// stub")
-    (home / "browser").mkdir()
-    (home / "browser" / "camoufox-bin").write_text("")
-    monkeypatch.setenv("KORRA_CAMOFOX_HOME", str(home))
-    return home
-
-
-def use_data(monkeypatch, path: Path):
-    path.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setenv("HERMES_HOME", str(path))
-    return path
-
-
-def test_disabled_by_default_and_has_no_endpoint(install, tmp_path, monkeypatch):
-    use_data(monkeypatch, tmp_path / "a")
+def test_disabled_by_default_and_endpoint_is_the_unix_base_url(install, data):
     assert not emb.is_enabled()
-    assert emb.endpoint() == ""
+    assert emb.endpoint() == emb.BASE_URL
     assert emb.status()["state"] == "disabled"
 
 
-def test_enable_creates_loopback_endpoint_and_private_key(install, tmp_path, monkeypatch):
-    data = use_data(monkeypatch, tmp_path / "a")
+def test_endpoint_is_empty_without_the_image(tmp_path, monkeypatch, data):
+    monkeypatch.setenv("KORRA_CAMOFOX_HOME", str(tmp_path / "nothing"))
+    assert emb.endpoint() == ""
+    assert emb.status()["state"] == "not_installed"
+
+
+def test_port_mechanism_is_gone(install, data):
+    for name in ("PORT_RANGE", "BIND_HOST", "saved_port", "resolve_port_for_serve", "_pick_free_port", "_port_file"):
+        assert not hasattr(emb, name), name
     emb.enable()
-    url = emb.endpoint()
-    assert url.startswith("http://127.0.0.1:")
-    port = int(url.rsplit(":", 1)[1])
-    assert emb.PORT_RANGE[0] <= port <= emb.PORT_RANGE[1]
-    key = emb.access_key()
-    assert len(key) >= 32
-    key_file = data / "camofox" / "access.key"
-    assert stat.S_IMODE(key_file.stat().st_mode) == 0o600
+    assert not (data / "camofox" / "port").exists()
+    assert "CAMOFOX_PORT" not in emb.server_env()
+
+
+def test_enable_creates_private_state_and_key(install, data):
+    emb.enable()
+    assert emb.is_enabled()
+    assert len(emb.access_key()) >= 32
+    assert stat.S_IMODE((data / "camofox" / "access.key").stat().st_mode) == 0o600
     assert stat.S_IMODE((data / "camofox").stat().st_mode) == 0o700
+    assert emb.socket_path() == data / "camofox" / "server.sock"
 
 
-def test_port_and_key_are_stable_across_calls(install, tmp_path, monkeypatch):
-    use_data(monkeypatch, tmp_path / "a")
+def test_key_is_stable_across_calls(install, data):
     emb.enable()
-    first = (emb.endpoint(), emb.access_key())
+    key = emb.access_key()
     emb.enable()
     emb.ensure_state()
-    assert (emb.endpoint(), emb.access_key()) == first
+    assert emb.access_key() == key
 
 
-def test_two_installs_get_different_key_and_do_not_share_state(install, tmp_path, monkeypatch):
-    use_data(monkeypatch, tmp_path / "a")
+def test_two_installs_get_different_keys_and_sockets(install, data, monkeypatch):
     emb.enable()
-    key_a, port_a = emb.access_key(), emb.saved_port()
-
-    use_data(monkeypatch, tmp_path / "b")
-    assert not emb.is_enabled()
-    emb.enable()
-    key_b, port_b = emb.access_key(), emb.saved_port()
-
-    assert key_a != key_b
-    assert (tmp_path / "a" / "camofox" / "access.key").read_text().strip() == key_a
-    assert (tmp_path / "b" / "camofox" / "access.key").read_text().strip() == key_b
-    assert port_a and port_b
-
-
-def test_pick_free_port_skips_a_port_already_taken_on_the_host(monkeypatch):
-    import socket
-
-    busy = socket.socket()
-    busy.bind(("127.0.0.1", 0))
-    taken = busy.getsockname()[1]
+    key_a, sock_a = emb.access_key(), emb.socket_path()
+    other = use_root(monkeypatch, short_dir())
     try:
-        monkeypatch.setattr(emb, "PORT_RANGE", (taken, taken + 1))
-        assert emb._pick_free_port() == taken + 1
+        assert not emb.is_enabled()
+        emb.enable()
+        assert emb.access_key() != key_a
+        assert emb.socket_path() != sock_a
+        assert (other / "camofox" / "access.key").read_text().strip() == emb.access_key()
+        assert (data / "camofox" / "access.key").read_text().strip() == key_a
     finally:
-        busy.close()
+        import shutil
+
+        shutil.rmtree(other, ignore_errors=True)
 
 
-def test_serve_picks_new_port_when_saved_one_is_taken(install, tmp_path, monkeypatch):
-    import socket
-
-    use_data(monkeypatch, tmp_path / "a")
+def test_concurrent_enable_never_fails_and_keeps_the_key(install, data):
+    # Воспроизведение race.py из ревью: общий «.tmp» ронял параллельные записи.
     emb.enable()
-    saved = emb.saved_port()
-    busy = socket.socket()
-    busy.bind((emb.BIND_HOST, saved))
-    try:
-        port = emb.resolve_port_for_serve()
-    finally:
-        busy.close()
-    assert port != saved
-    assert emb.saved_port() == port
-    assert emb.endpoint().endswith(f":{port}")
+    key = emb.access_key()
+    barrier = threading.Barrier(2)
+
+    def call(_):
+        barrier.wait()
+        try:
+            emb.enable()
+            return "ok"
+        except Exception as exc:  # pragma: no cover — именно это и ловим
+            return type(exc).__name__
+
+    failures = []
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        for _ in range(30):
+            failures.extend(x for x in pool.map(call, range(2)) if x != "ok")
+    assert failures == []
+    assert emb.access_key() == key
+    assert sorted(p.name for p in (data / "camofox").iterdir()) == ["access.key", "enabled"]
 
 
-def test_server_env_is_loopback_only_without_telemetry_and_has_no_foreign_secrets(
-    install, tmp_path, monkeypatch
-):
-    data = use_data(monkeypatch, tmp_path / "a")
+def test_first_key_is_created_atomically_and_seen_identically_by_everyone(install, data):
+    # Одновременные включение и старт сервиса: все видят один ключ, читатель
+    # не застаёт неполный файл.
+    workers = 12
+    barrier = threading.Barrier(workers + 1)
+    seen = set()
+    stop = threading.Event()
+
+    def reader():
+        barrier.wait()
+        while not stop.is_set():
+            key = emb.access_key()
+            if key:
+                seen.add(key)
+
+    def writer(_):
+        barrier.wait()
+        emb.ensure_state()
+        return emb.access_key()
+
+    thread = threading.Thread(target=reader)
+    thread.start()
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        keys = list(pool.map(writer, range(workers)))
+    stop.set()
+    thread.join()
+
+    assert len(set(keys)) == 1 and keys[0]
+    assert seen <= set(keys)
+    assert len(keys[0]) >= 32
+    assert not [p for p in (data / "camofox").iterdir() if p.suffix == ".tmp"]
+
+
+def test_server_env_has_socket_no_telemetry_and_no_foreign_secrets(install, data, monkeypatch):
     emb.enable()
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "tg-secret")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-secret")
@@ -115,10 +139,10 @@ def test_server_env_is_loopback_only_without_telemetry_and_has_no_foreign_secret
     monkeypatch.setenv("SENTRY_DSN", "https://x@y/1")
     env = emb.server_env()
 
+    assert env["CAMOFOX_UNIX_SOCKET"] == str(data / "camofox" / "server.sock")
     assert env["CAMOFOX_BIND_HOST"] == "127.0.0.1"
     assert env["CAMOFOX_CRASH_REPORT_ENABLED"] == "false"
     assert env["CAMOFOX_ACCESS_KEY"] == emb.access_key()
-    assert env["CAMOFOX_PORT"] == str(emb.saved_port())
     assert env["CAMOUFOX_INSTALL_DIR"] == str(install / "browser")
     assert env["CAMOFOX_PROFILE_DIR"] == str(data / "camofox" / "profiles")
     joined = "\n".join(env.values())
@@ -127,8 +151,7 @@ def test_server_env_is_loopback_only_without_telemetry_and_has_no_foreign_secret
     assert "PROXY_HOST" not in env and "ENABLE_VNC" not in env
 
 
-def test_idle_timeout_override_is_passed_only_when_numeric(install, tmp_path, monkeypatch):
-    use_data(monkeypatch, tmp_path / "a")
+def test_idle_timeout_override_is_passed_only_when_numeric(install, data, monkeypatch):
     emb.enable()
     assert "BROWSER_IDLE_TIMEOUT_MS" not in emb.server_env()
     monkeypatch.setenv("KORRA_CAMOFOX_IDLE_TIMEOUT_MS", "15000")
@@ -137,73 +160,132 @@ def test_idle_timeout_override_is_passed_only_when_numeric(install, tmp_path, mo
     assert "BROWSER_IDLE_TIMEOUT_MS" not in emb.server_env()
 
 
-def test_disable_removes_marker_but_keeps_key_port_and_profiles(install, tmp_path, monkeypatch):
-    data = use_data(monkeypatch, tmp_path / "a")
+def test_disable_removes_marker_but_keeps_key_and_profiles(install, data):
     emb.enable()
     (data / "camofox" / "profiles").mkdir()
-    key, port = emb.access_key(), emb.saved_port()
+    key = emb.access_key()
     emb.disable()
     assert not emb.is_enabled()
-    assert emb.endpoint() == ""
-    assert (emb.access_key(), emb.saved_port()) == (key, port)
+    assert emb.endpoint() == emb.BASE_URL  # идентичность не зависит от того, запущен ли сервер
+    assert emb.access_key() == key
     assert (data / "camofox" / "profiles").is_dir()
 
 
-def test_status_not_installed_without_image(tmp_path, monkeypatch):
-    monkeypatch.setenv("KORRA_CAMOFOX_HOME", str(tmp_path / "nothing"))
-    use_data(monkeypatch, tmp_path / "a")
-    info = emb.status()
-    assert info["state"] == "not_installed"
-    assert not emb.is_installed()
-
-
-def test_status_running_and_not_responding(install, tmp_path, monkeypatch):
-    use_data(monkeypatch, tmp_path / "a")
+def test_s6_is_nudged_only_inside_the_container(install, data, monkeypatch):
+    calls = []
+    monkeypatch.setattr(emb.subprocess, "run", lambda cmd, **kw: calls.append(cmd))
     emb.enable()
-    monkeypatch.setattr(emb, "health", lambda timeout=2.0: True)
-    assert emb.status()["state"] == "running"
-    monkeypatch.setattr(emb, "health", lambda timeout=2.0: False)
+    emb.disable()
+    assert calls == []
+    monkeypatch.setattr(emb, "in_container", lambda: True)
+    emb.enable()
+    assert calls == []  # включение — только маркер: run-скрипт сам заметит его за 3 с
+    emb.disable()
+    assert calls == [["s6-svc", "-t", "/run/service/camofox"]]
+
+
+# ── Транспорт ───────────────────────────────────────────────────────────────
+
+
+def test_health_over_the_socket(install, data):
+    emb.enable()
+    assert emb.health(timeout=0.5) is False
+    with UnixServer(emb.socket_path()) as server:
+        assert emb.health(timeout=2) is True
+    assert server.seen[0]["path"] == "/health"
+
+
+def test_health_ignores_a_tcp_listener_squatting_on_loopback(install, data):
+    # Подмена адреса из ревью: чужой процесс на loopback-порту не может быть
+    # принят за сервер установки и не получает ничего.
+    emb.enable()
+    with TcpSpy() as spy:
+        assert emb.health(timeout=0.5) is False
+        assert emb.status()["state"] != "running"
+    assert spy.seen == []
+
+
+def test_unix_session_sends_the_key_only_to_the_socket(install, data):
+    emb.enable()
+    with UnixServer(emb.socket_path()) as server, TcpSpy() as spy:
+        session = emb.unix_session()
+        resp = session.get(
+            f"{emb.BASE_URL}/tabs", headers={"Authorization": f"Bearer {emb.access_key()}"}, timeout=3
+        )
+        assert resp.status_code == 200
+        # Любой другой адрес, в том числе редирект наружу, не отправляется.
+        import requests
+
+        with pytest.raises(requests.ConnectionError):
+            session.get(f"http://127.0.0.1:{spy.port}/tabs", headers={"Authorization": "Bearer k"}, timeout=3)
+    assert server.seen[0]["auth"] == f"Bearer {emb.access_key()}"
+    assert server.seen[0]["host"] == emb.UNIX_HOST
+    assert spy.seen == []
+
+
+def test_unix_session_ignores_proxy_environment(install, data, monkeypatch):
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:9")
+    monkeypatch.setenv("http_proxy", "http://127.0.0.1:9")
+    emb.enable()
+    with UnixServer(emb.socket_path()):
+        assert emb.unix_session().get(f"{emb.BASE_URL}/health", timeout=3).status_code == 200
+
+
+def test_too_long_socket_path_is_reported_and_never_served(install, tmp_path, monkeypatch):
+    deep = tmp_path.joinpath(*["d" * 20] * 6)
+    use_root(monkeypatch, deep)
+    assert len(os.fsencode(str(emb.socket_path()))) > emb.MAX_SOCKET_PATH
+    assert "путь к сокету" in emb.socket_path_problem()
+    emb.enable()
+    assert emb.health() is False
     info = emb.status()
     assert info["state"] == "not_responding"
+    assert "путь к сокету" in info["next"]
+    with pytest.raises(SystemExit):
+        emb.serve()
+
+
+# ── Состояния ───────────────────────────────────────────────────────────────
+
+
+def test_status_running_and_not_responding(install, data, monkeypatch):
+    with in_profile(data, None):
+        choose_browser("Camofox")
+    assert emb.is_enabled()
+    with UnixServer(emb.socket_path()):
+        info = emb.status()
+        assert info["state"] == "running"
+        assert info["consumers"] == ["default"]
+    info = emb.status()
+    assert info["state"] == "not_responding"
+    assert "s6-svc -u /run/service/camofox" in info["next"]
     assert "s6-svc -t /run/service/camofox" in info["next"]
     assert emb.access_key() not in str(info)
 
 
-def test_health_is_false_when_nothing_listens(install, tmp_path, monkeypatch):
-    use_data(monkeypatch, tmp_path / "a")
-    emb.enable()
-    assert emb.health(timeout=0.5) is False
+def test_status_selected_off_unused_and_disabled(install, data):
+    with in_profile(data, None):
+        choose_browser("Camofox")
+    emb._enabled_marker().unlink()  # маркер рассинхронизировался с настройками
+    info = emb.status()
+    assert info["state"] == "selected_off"
+    assert "korra doctor --fix" in info["next"]
+
+    assert emb.sync() is True
+    assert emb.status()["state"] != "selected_off"
+
+    with in_profile(data, None):
+        choose_browser("Local Browser")
+    assert not emb.is_enabled()
+    assert emb.status()["state"] == "disabled"
+
+    emb.enable()  # сервер включён вручную, потребителей нет
+    assert emb.status()["state"] == "unused"
+    assert emb.sync() is False
+    assert emb.status()["state"] == "disabled"
 
 
-def test_health_true_for_a_real_local_server(install, tmp_path, monkeypatch):
-    import threading
-    from http.server import BaseHTTPRequestHandler, HTTPServer
-
-    class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            self.send_response(200 if self.path == "/health" else 404)
-            self.end_headers()
-            self.wfile.write(b"{}")
-
-        def log_message(self, *args):
-            pass
-
-    server = HTTPServer((emb.BIND_HOST, 0), Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        use_data(monkeypatch, tmp_path / "a")
-        emb.enable()
-        emb._write_private(emb._port_file(), f"{server.server_address[1]}\n")
-        assert emb.health(timeout=2) is True
-        assert emb.status()["state"] == "running"
-    finally:
-        server.shutdown()
-        server.server_close()
-
-
-def test_serve_execs_node_with_clean_environment(install, tmp_path, monkeypatch):
-    use_data(monkeypatch, tmp_path / "a")
+def test_serve_execs_node_through_the_launcher_with_clean_environment(install, data, monkeypatch):
     emb.enable()
     monkeypatch.setenv("OPENAI_API_KEY", "sk-secret")
     calls = {}
@@ -217,27 +299,45 @@ def test_serve_execs_node_with_clean_environment(install, tmp_path, monkeypatch)
     with pytest.raises(SystemExit):
         emb.serve()
     assert calls["file"] == "node"
-    assert calls["args"][1].endswith("camofox-browser/server.js")
+    assert calls["args"][1] == str(install / "unix-socket.mjs")
+    assert calls["args"][2].endswith("camofox-browser/server.js")
     assert "OPENAI_API_KEY" not in calls["env"]
-    assert (tmp_path / "a" / "camofox" / "profiles").is_dir()
+    assert (data / "camofox" / "profiles").is_dir()
 
 
-def test_cli_status_never_prints_the_key(install, tmp_path, monkeypatch, capsys):
-    use_data(monkeypatch, tmp_path / "a")
+def test_serve_removes_a_stale_socket_before_start(install, data, monkeypatch):
     emb.enable()
-    monkeypatch.setattr(emb, "health", lambda timeout=2.0: False)
+    emb.socket_path().write_text("stale")
+    monkeypatch.setattr(os, "execvpe", lambda *a: (_ for _ in ()).throw(SystemExit(0)))
+    monkeypatch.setattr(os, "chdir", lambda path: None)
+    with pytest.raises(SystemExit):
+        emb.serve()
+    assert not emb.socket_path().exists()
+
+
+def test_serve_refuses_when_the_launcher_is_missing(install, data):
+    (install / "unix-socket.mjs").unlink()
+    with pytest.raises(SystemExit) as exc:
+        emb.serve()
+    assert exc.value.code == 1
+
+
+def test_cli_status_never_prints_the_key(install, data, capsys):
+    emb.enable()
     assert emb.main(["status"]) == 1
     out = capsys.readouterr()
     assert emb.access_key() not in out.out + out.err
 
 
-def test_files_made_by_root_are_handed_to_the_data_owner(install, tmp_path, monkeypatch):
-    data = use_data(monkeypatch, tmp_path / "a")
+def test_files_made_by_root_are_handed_to_the_data_owner(install, data, monkeypatch):
     owner = data.stat()
     chowned = []
     monkeypatch.setattr(os, "geteuid", lambda: 0)
     monkeypatch.setattr(os, "chown", lambda path, uid, gid: chowned.append((Path(path).name, uid, gid)))
     emb.enable()
     names = {name for name, _, _ in chowned}
-    assert {"camofox", "access.key.tmp", "port.tmp", "enabled.tmp"} <= names
+    assert "camofox" in names
+    # Временные файлы с уникальными именами тоже передаются владельцу до публикации.
+    assert any(n.startswith("access.key.") and n.endswith(".tmp") for n in names)
+    assert any(n.startswith("enabled.") and n.endswith(".tmp") for n in names)
     assert all((uid, gid) == (owner.st_uid, owner.st_gid) for _, uid, gid in chowned)
