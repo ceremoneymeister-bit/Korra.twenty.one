@@ -675,6 +675,18 @@ def _dispatch_resolved_send(
     return result
 
 
+def _gmail_script_refused_before_send(stderr: str) -> bool:
+    """True when the Google script stopped at its decision gate: nothing was sent."""
+    for line in (stderr or "").splitlines():
+        try:
+            reply = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(reply, dict) and reply.get("refused_before_send") is True:
+            return True
+    return False
+
+
 def _execute_gmail_decision(decision_id: str, payload: dict) -> dict:
     """Send an approved Gmail message by re-running the Google skill script.
 
@@ -685,7 +697,9 @@ def _execute_gmail_decision(decision_id: str, payload: dict) -> dict:
     import subprocess
     import sys
 
+    from korra_constants import get_hermes_home, korra_env_expand
     from tools import effect_decisions as decisions
+    from tools.environments.local import build_subprocess_env
 
     try:
         from korra_cli.google_workspace import workspace_skill_status
@@ -707,7 +721,13 @@ def _execute_gmail_decision(decision_id: str, payload: dict) -> dict:
     try:
         run = subprocess.run(
             [sys.executable, str(script), *argv],
-            env={**os.environ, "KORRA_EFFECT_DECISION_ID": decision_id},
+            env=build_subprocess_env(
+                scrub_secrets=False,
+                extra=korra_env_expand({
+                    "KORRA_HOME": str(get_hermes_home()),
+                    "KORRA_EFFECT_DECISION_ID": decision_id,
+                }),
+            ),
             capture_output=True,
             text=True,
             timeout=120,
@@ -727,6 +747,16 @@ def _execute_gmail_decision(decision_id: str, payload: dict) -> dict:
             decision_id,
             status=decisions.SUCCEEDED,
             outcome={"transport": {"success": True, "output": _sanitize_error_text(run.stdout)[:500]}},
+        )
+    if _gmail_script_refused_before_send(run.stderr):
+        return decisions.finish_execution(
+            decision_id,
+            status=decisions.FAILED,
+            outcome={
+                "reason": "refused_before_send",
+                "detail": _sanitize_error_text(run.stderr)[:500],
+                "retry": False,
+            },
         )
     return decisions.finish_execution(
         decision_id,

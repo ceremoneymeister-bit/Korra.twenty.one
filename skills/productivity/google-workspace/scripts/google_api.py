@@ -433,7 +433,8 @@ def _gmail_effect_allowed(*, target: str, subject: str, body: str) -> bool:
             and (payload.get("tool_args") or {}).get("argv") == argv
         ):
             return True
-        print(json.dumps({"success": False, "error": "decision does not match this send"}), file=sys.stderr)
+        print(json.dumps({"success": False, "refused_before_send": True,
+                          "error": "decision does not match this send"}), file=sys.stderr)
         sys.exit(1)
     if get_session_env("KORRA_CRON_SESSION", "") == "1" and get_session_env("KORRA_CRON_RUN_TOKEN", "").strip():
         return True
