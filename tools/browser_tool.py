@@ -1027,8 +1027,19 @@ def _is_local_backend() -> bool:
     if _get_cdp_override_raw():
         return False
     if _is_camofox_mode():
-        return True
-    if _get_cloud_provider() is not None:
+        # Встроенный Camofox работает в том же контейнере, что и локальный
+        # Chromium, поэтому проверяется так же: терминал в другом контейнере
+        # не видит сетей, до которых дотянется браузер. Внешний сервер
+        # Camofox по-прежнему считается локальным.
+        try:
+            from tools.browser_camofox import _using_embedded_camofox
+
+            bundled = _using_embedded_camofox()
+        except Exception:
+            bundled = False
+        if not bundled:
+            return True
+    elif _get_cloud_provider() is not None:
         return False
     # When terminal runs in a container, browser on host can access
     # internal networks the terminal can't → treat as non-local.

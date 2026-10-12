@@ -1,0 +1,29 @@
+#!/command/with-contenv sh
+# shellcheck shell=sh
+# Встроенный Camofox («Браузер с защитой от блокировок», K21-336).
+#
+# Слот объявлен всегда, но сервер запускается только когда владелец включил
+# этот браузер (маркер <данные>/camofox/enabled пишет `korra tools` или
+# веб-панель). Пока маркера нет, процесс — это обычный sh с sleep: ни Python,
+# ни Node, ни браузера. Не используем exit 125 из finish, как у dashboard:
+# такой слот s6 больше не перезапускает, а включить его обратно без root нельзя.
+# Выключение/включение будит слот командой `s6-svc -t` (см. camofox_embedded.py).
+
+data_root="${KORRA_HOME:-${HERMES_HOME:-/opt/data}}"
+marker="$data_root/camofox/enabled"
+server="${KORRA_CAMOFOX_HOME:-/opt/camofox}/node_modules/@askjo/camofox-browser/server.js"
+
+while [ ! -f "$marker" ] || [ ! -f "$server" ]; do
+    sleep 3
+done
+
+# with-contenv возвращает HOME=/root; профили и кэши должны лежать в /opt/data.
+export HOME=/opt/data
+cd /opt/data
+# shellcheck disable=SC1091
+. /opt/hermes/.venv/bin/activate
+
+# Адрес (127.0.0.1), порт, ключ доступа, выключенная телеметрия и белый
+# список окружения задаёт сам модуль; ключ в лог не попадает.
+[ "$(id -u)" = 0 ] || exec python -m korra_cli.camofox_embedded serve
+exec s6-setuidgid hermes python -m korra_cli.camofox_embedded serve
