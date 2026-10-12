@@ -115,6 +115,57 @@ def test_step_waiting_for_a_parent_says_so(env):
     assert ex["state"] == "waiting_for_parents" and ex["started"] is False
 
 
+def test_exact_mode_keeps_the_request_of_a_waiting_card_and_starts_it_after_an_unrequested_parent(env):
+    _config(env, general=False, exact=True)
+    with kb.connect_closing() as conn:
+        parent = kb.create_task(conn, title="old task", assignee="pm")
+        kb.claim_task(conn, parent)
+    out = _create(parents=[parent])
+    child, ex = out["task_id"], out["execution"]
+    assert ex["state"] == "waiting_for_parents" and ex["will_start"] is True
+    assert len(_requests(child)) == 1
+    with kb.connect_closing() as conn:
+        assert kb.pending_exact_dispatch_ids(conn) == []
+        kb.complete_task(conn, parent, result="done")
+        assert kb.get_task(conn, child).status == "ready"
+        assert kb.pending_exact_dispatch_ids(conn) == [child]
+
+
+def test_exact_mode_waiting_card_does_not_lift_other_old_cards(env):
+    _config(env, general=False, exact=True)
+    with kb.connect_closing() as conn:
+        old = kb.create_task(conn, title="old ready", assignee="pm")
+        parent = kb.create_task(conn, title="old running", assignee="pm")
+        kb.claim_task(conn, parent)
+    child = _create(parents=[parent])["task_id"]
+    with kb.connect_closing() as conn:
+        kb.complete_task(conn, parent, result="done")
+        assert kb.pending_exact_dispatch_ids(conn) == [child]
+        assert old not in kb.pending_exact_dispatch_ids(conn)
+
+
+def test_waiting_card_without_any_start_path_does_not_promise_a_start(env):
+    _config(env, general=False, exact=False)
+    with kb.connect_closing() as conn:
+        parent = kb.create_task(conn, title="p", assignee="pm")
+    out = _create(parents=[parent])
+    assert out["execution"]["state"] == "waiting_for_parents"
+    assert out["execution"]["will_start"] is False
+    assert _requests(out["task_id"]) == []
+
+
+def test_waiting_card_in_general_mode_follows_the_dispatcher(env, monkeypatch):
+    from tools import kanban_tools as kt
+
+    _config(env, general=True, exact=False)
+    with kb.connect_closing() as conn:
+        parent = kb.create_task(conn, title="p", assignee="pm")
+    assert _create(parents=[parent])["execution"]["will_start"] is True
+    monkeypatch.setattr(kt, "_dispatcher_presence", lambda: (False, "No dispatcher is running."))
+    ex = _create(parents=[parent])["execution"]
+    assert ex["state"] == "waiting_for_parents" and ex["will_start"] is False
+
+
 def test_missing_subscription_is_reported(env, monkeypatch):
     from tools import kanban_tools as kt
 

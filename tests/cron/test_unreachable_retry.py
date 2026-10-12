@@ -180,3 +180,29 @@ def test_agent_with_completed_calls_is_not_classified_unreachable():
     agent = MagicMock()
     agent.session_api_calls = 2
     assert ur.is_model_unreachable_failure(RuntimeError("Connection error."), agent) is False
+
+
+def test_job_with_script_is_not_retried_and_owner_is_told(store):
+    import httpx
+
+    marker = store / "side_effect.txt"
+    (store / "scripts").mkdir()
+    script = store / "scripts" / "action.sh"
+    script.write_text(f"#!/bin/sh\nprintf 'action\\n' >> '{marker}'\nprintf 'report this action\\n'\n")
+    job = _daily(script=str(script), deliver="telegram:1")
+
+    notices = _fire(job, store, resolve_error=httpx.ConnectError("Connection error."))
+
+    assert len(notices) == 1, "the script already ran: the failure is reported, not held for a re-run"
+    got = cron_jobs.get_job(job["id"])
+    assert "unreachable_retry" not in got
+    assert got["next_run_at"] == job["next_run_at"]
+    assert marker.read_text().splitlines() == ["action"]
+
+
+@pytest.mark.parametrize("key,value", [("monitor_script", "m.sh"), ("monitor_url", "https://example.invalid/x")])
+def test_job_with_monitor_source_is_not_retried(store, key, value):
+    job = _daily()
+    cron_jobs.update_job(job["id"], {key: value})
+    cron_jobs.mark_job_run(job["id"], False, "net", model_unreachable=True)
+    assert "unreachable_retry" not in cron_jobs.get_job(job["id"])

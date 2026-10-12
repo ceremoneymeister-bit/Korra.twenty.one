@@ -797,3 +797,90 @@ def test_denied_gmail_decision_never_runs_the_script(api_module, monkeypatch, ca
     result = send_message_tool.resolve_outbound_message_decision(
         decision_id, "deny", source_session_key="agent:main:telegram:dm:1")
     assert result["status"] == decisions.DENIED
+
+
+def _gate_probe(tmp_path, monkeypatch, argv_tail=None):
+    """Real Google-script decision gate in a fresh process; Gmail is never called."""
+    repo = Path(__file__).resolve().parents[2]
+    monkeypatch.setenv("PYTHONPATH", str(repo))
+    probe = tmp_path / "probe.py"
+    probe.write_text(
+        "import os, runpy, sys\n"
+        + (f"sys.argv = ['probe', *{argv_tail!r}]\n" if argv_tail is not None else "")
+        + f"m = runpy.run_path({str(API_PATH)!r})\n"
+        "m['_gmail_effect_allowed'](target='test@example.invalid', subject='test', body='test')\n"
+        "print('gate passed; home=' + os.environ['KORRA_HOME'] + ' legacy=' + os.environ['HERMES_HOME'])\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("korra_cli.google_workspace.workspace_skill_status",
+                        lambda *a, **k: {"execution_path": str(probe)})
+
+
+def _pending_gmail_decision(profile):
+    from tools import effect_decisions as decisions
+
+    decision, _ = decisions.create_pending(
+        kind="outbound_message", owner_id="owner", profile=profile,
+        source_session_id="chat", source_session_key="session:chat",
+        payload={"platform": "gmail", "chat_id": "test@example.invalid", "message": "test",
+                 "attachments": [], "tool_args": {"argv": ["gmail", "send"]}},
+    )
+    return decision
+
+
+def test_approved_gmail_decision_runs_in_the_profile_of_the_decision(tmp_path, monkeypatch):
+    from korra_constants import reset_hermes_home_override, set_hermes_home_override
+    from tools import effect_decisions as decisions
+    from tools import send_message_tool
+
+    root = tmp_path / "root"
+    writer = root / "profiles" / "writer"
+    writer.mkdir(parents=True)
+    monkeypatch.setenv("KORRA_HOME", str(root))
+    monkeypatch.setenv("HERMES_HOME", str(root))
+    _gate_probe(tmp_path, monkeypatch)
+
+    token = set_hermes_home_override(str(writer))
+    try:
+        decision = _pending_gmail_decision("writer")
+        result = send_message_tool.resolve_outbound_message_decision(decision["id"], "once", source_session_id="chat")
+    finally:
+        reset_hermes_home_override(token)
+
+    assert result["status"] == decisions.SUCCEEDED, result
+    assert f"home={writer} legacy={writer}" in result["outcome"]["transport"]["output"]
+
+
+def test_approved_gmail_decision_in_the_process_profile_keeps_its_home(tmp_path, monkeypatch):
+    from tools import effect_decisions as decisions
+    from tools import send_message_tool
+
+    root = tmp_path / "root"
+    root.mkdir()
+    monkeypatch.setenv("KORRA_HOME", str(root))
+    monkeypatch.setenv("HERMES_HOME", str(root))
+    _gate_probe(tmp_path, monkeypatch)
+
+    decision = _pending_gmail_decision("default")
+    result = send_message_tool.resolve_outbound_message_decision(decision["id"], "once", source_session_id="chat")
+
+    assert result["status"] == decisions.SUCCEEDED, result
+    assert f"home={root} legacy={root}" in result["outcome"]["transport"]["output"]
+
+
+def test_gmail_gate_refusal_before_send_is_a_known_failure_not_an_unknown_outcome(tmp_path, monkeypatch):
+    from tools import effect_decisions as decisions
+    from tools import send_message_tool
+
+    root = tmp_path / "root"
+    root.mkdir()
+    monkeypatch.setenv("KORRA_HOME", str(root))
+    monkeypatch.setenv("HERMES_HOME", str(root))
+    _gate_probe(tmp_path, monkeypatch, argv_tail=["gmail", "send", "--to", "someone-else@example.invalid"])
+
+    decision = _pending_gmail_decision("default")
+    result = send_message_tool.resolve_outbound_message_decision(decision["id"], "once", source_session_id="chat")
+
+    assert result["status"] == decisions.FAILED, result
+    assert result["outcome"]["reason"] == "refused_before_send"
+    assert result["outcome"]["retry"] is False
