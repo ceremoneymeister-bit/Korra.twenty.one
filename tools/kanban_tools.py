@@ -83,6 +83,9 @@ def _profile_has_kanban_toolset() -> bool:
         return False
 
 
+CHAT_CARD_MAX_RUNTIME_SECONDS = 1200
+
+
 def _known_profiles() -> list[tuple[str, str]]:
     """``(name, display name)`` for every profile that can take a task."""
     try:
@@ -1005,11 +1008,19 @@ def _handle_block(args: dict, **kw) -> str:
             # Tell the worker where the task actually landed so it doesn't
             # assume it's sitting in 'blocked' when routing sent it elsewhere.
             landed = kb.get_task(conn, tid)
+            extra: dict = {}
+            if kind == "dependency" and landed and landed.block_kind != "dependency":
+                extra["note"] = (
+                    "kind='dependency' needs an unfinished parent card and none "
+                    "is open, so this was recorded as needs_input and waits for "
+                    "the owner instead of restarting."
+                )
             return _ok(
                 task_id=tid,
                 run_id=run.id if run else None,
                 status=landed.status if landed else "blocked",
-                block_kind=kind,
+                block_kind=landed.block_kind if landed and landed.block_kind else kind,
+                **extra,
             )
         finally:
             conn.close()
@@ -1554,6 +1565,14 @@ def _handle_create(args: dict, **kw) -> str:
         return tool_error(bool_error)
     idempotency_key = args.get("idempotency_key")
     max_runtime_seconds = args.get("max_runtime_seconds")
+    if (
+        max_runtime_seconds is None
+        and not human_step
+        and not korra_env("KORRA_KANBAN_TASK")
+    ):
+        # A card made from an owner chat must not run unbounded: the default
+        # keeps a stuck executor from holding the slot for hours.
+        max_runtime_seconds = CHAT_CARD_MAX_RUNTIME_SECONDS
     initial_status = args.get("initial_status") or "running"
     skills = args.get("skills")
     if isinstance(skills, str):
@@ -1563,6 +1582,16 @@ def _handle_create(args: dict, **kw) -> str:
         return tool_error(
             f"skills must be a list of skill names, got {type(skills).__name__}"
         )
+    if assignee and not human_step and skills:
+        from korra_cli.kanban_db import unavailable_task_skills
+
+        missing_skills = unavailable_task_skills(str(assignee), skills)
+        if missing_skills:
+            return tool_error(
+                f"agent {assignee!r} cannot load skill(s): "
+                f"{', '.join(missing_skills)}. Nothing was created. Drop them, "
+                "pick other skills, or ask the owner to install them for that agent."
+            )
     goal_mode, goal_bool_error = _parse_bool_arg(args, "goal_mode")
     if goal_bool_error:
         return tool_error(goal_bool_error)
@@ -1626,12 +1655,17 @@ def _handle_create(args: dict, **kw) -> str:
             )
             new_task = kb.get_task(conn, new_tid)
             subscribed = _maybe_auto_subscribe(conn, new_tid)
+            execution = _created_card_execution(
+                kb, conn, new_task, subscribed=bool(subscribed),
+            )
             return _ok(
                 task_id=new_tid,
+                execution=execution,
                 status=new_task.status if new_task else None,
                 workspace_kind=new_task.workspace_kind if new_task else None,
                 workspace_path=new_task.workspace_path if new_task else None,
                 project_id=new_task.project_id if new_task else None,
+                max_runtime_seconds=new_task.max_runtime_seconds if new_task else None,
                 subscribed=subscribed,
             )
         finally:
@@ -1641,6 +1675,91 @@ def _handle_create(args: dict, **kw) -> str:
     except Exception as e:
         logger.exception("kanban_create failed")
         return tool_error(f"kanban_create: {e}")
+
+
+def _created_card_execution(kb: Any, conn: Any, task: Any, *, subscribed: bool) -> dict:
+    """What actually happened to a card right after it was created.
+
+    ``started`` is true only when the card is claimed with a live run; creating
+    a card never starts it. In exact-request mode this is also where the
+    request to start it is recorded; the dispatcher does the starting.
+    """
+    notify = "subscribed" if subscribed else "not_subscribed"
+    out: dict[str, Any] = {
+        "state": "unknown", "started": False, "will_start": False,
+        "run_id": None, "notify": notify, "reason": "",
+    }
+    if task is None:
+        out["reason"] = "The card could not be read back."
+        return out
+    status = task.status
+    if (getattr(task, "actor_kind", None) or "") == "human":
+        out.update(state="human_step", reason="A step for the owner: nothing is started.")
+    elif status == "running":
+        alive = bool(task.current_run_id and task.claim_lock and kb._pid_alive(task.worker_pid))
+        out.update(
+            state="running" if alive else "claimed", started=alive,
+            run_id=task.current_run_id,
+            reason="" if alive else "Claimed, but no live worker process is linked to the run yet.",
+        )
+    elif status == "todo":
+        out.update(state="waiting_for_parents", will_start=True,
+                   reason="Starts after its parent steps are done.")
+    elif status == "blocked":
+        out.update(state="blocked", reason=task.block_reason or "The card is blocked.")
+    elif status == "triage":
+        out.update(state="triage", reason="Waiting to be specified before it can start.")
+    elif status != "ready":
+        out.update(state=status, reason=f"Card status is {status}; nothing is started.")
+    else:
+        settings = kb.owner_kanban_settings()
+        general = settings.get("dispatch_in_gateway", True) is not False
+        exact = kb.exact_dispatch_requests_enabled()
+        refused = ""
+        if not general and exact:
+            outcome = kb.request_exact_dispatch(conn, task.id, source="kanban_create")
+            if outcome not in ("requested", "already"):
+                refused = f"The request to start was not recorded ({outcome})."
+        try:
+            from agent.estop import is_engaged
+            paused = bool(is_engaged())
+        except Exception:
+            paused = False
+        if refused:
+            out.update(state="start_refused", reason=refused)
+        elif general:
+            running, note = _dispatcher_presence()
+            out.update(
+                state="queued" if running else "no_dispatcher", will_start=running,
+                reason=("The dispatcher picks it up on its next check (about a minute)."
+                        if running else note or "No dispatcher is running."),
+            )
+        elif exact:
+            out.update(state="queued", will_start=True,
+                       reason="Start requested; the dispatcher picks it up on its next check.")
+        else:
+            out.update(
+                state="no_dispatcher",
+                reason=("The general queue and exact start requests are both off: nothing "
+                        f"starts this card. The owner can run `korra kanban dispatch --task-id {task.id}`."),
+            )
+        if paused and out["will_start"]:
+            out.update(state="paused", will_start=False,
+                       reason="The global emergency stop is on; the card starts after it is lifted.")
+    if not subscribed:
+        out["reason"] = (out["reason"] + " " if out["reason"] else "") + (
+            "This chat is not subscribed to the card: results will not arrive here; "
+            "check with `kanban_show`."
+        )
+    return out
+
+
+def _dispatcher_presence() -> tuple[bool, str]:
+    try:
+        from korra_cli.kanban import _check_dispatcher_presence
+        return _check_dispatcher_presence()
+    except Exception:
+        return True, ""
 
 
 def _maybe_auto_subscribe(conn: Any, task_id: str) -> bool:
@@ -2399,8 +2518,11 @@ KANBAN_CREATE_SCHEMA = {
         "one (pass the current task id in ``parents``). Used by "
         "orchestrator workers to fan out — decompose work into child "
         "tasks with specific assignees, link them into a pipeline, "
-        "then complete your own task. The dispatcher picks up the new "
-        "tasks on its next tick and spawns the assigned profiles."
+        "then complete your own task. In an owner chat call it only when "
+        "the owner explicitly asked for a board card or background work by "
+        "another agent, or agreed to your offer; otherwise do the work "
+        "yourself. The result's ``execution`` block says whether the "
+        "executor actually started."
     ),
     "parameters": {
         "type": "object",
@@ -2534,7 +2656,9 @@ KANBAN_CREATE_SCHEMA = {
                 "description": (
                     "Per-task runtime cap. When exceeded, the "
                     "dispatcher SIGTERMs the worker and re-queues the "
-                    "task with outcome='timed_out'."
+                    "task with outcome='timed_out'. From an owner chat the "
+                    "default is 1200 seconds; pass less if the owner asked "
+                    "for a shorter limit."
                 ),
             },
             "initial_status": {

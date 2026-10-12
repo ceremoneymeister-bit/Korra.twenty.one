@@ -269,7 +269,8 @@ def test_rate_limit_exit_requeues_without_counting_failure(
 ):
     """A rate-limit sentinel exit releases the task to ``ready`` and leaves
     ``consecutive_failures`` untouched — the breaker must never trip on a
-    transient throttle, even across many quota-wall hits."""
+    transient throttle. After the original try and two automatic retries
+    (three runs in a row) the card stops and waits for a person (K21-290)."""
     import korra_cli.kanban_db as _kb
 
     monkeypatch.setattr(_kb, "_pid_alive", lambda _pid: False)
@@ -279,9 +280,7 @@ def test_rate_limit_exit_requeues_without_counting_failure(
         host = _kb._claimer_id().split(":", 1)[0]
         tid = kb.create_task(conn, title="rl", assignee="a")
 
-        # Simulate FAR more quota-wall hits than DEFAULT_FAILURE_LIMIT (2).
-        # If any of these counted as a failure the task would be blocked.
-        for i in range(6):
+        for i in range(_kb.KANBAN_AUTO_RETRY_LIMIT + 1):
             pid = 70000 + i
             # Claim to open a real run (so detect_crashed_workers can close
             # it with a rate_limited outcome), then point the claim at this
@@ -304,16 +303,17 @@ def test_rate_limit_exit_requeues_without_counting_failure(
             assert tid in rl
 
             task = kb.get_task(conn, tid)
-            assert task.status == "ready", (
-                f"hit {i}: should requeue ready, got {task.status}"
+            last = i == _kb.KANBAN_AUTO_RETRY_LIMIT
+            assert task.status == ("blocked" if last else "ready"), (
+                f"hit {i}: unexpected status {task.status}"
             )
             assert task.consecutive_failures == 0, (
                 f"hit {i}: rate-limit must not count a failure, "
                 f"got {task.consecutive_failures}"
             )
 
-        # Last failure error stamped so the respawn guard recognizes the
-        # quota wall.
+        assert task.block_kind == "transient"
+        assert "automatic" in (task.block_reason or "").lower()
         assert task.last_failure_error and "rate-limited" in task.last_failure_error
 
         # A ``rate_limited`` run outcome was recorded (not ``crashed``).
@@ -324,8 +324,6 @@ def test_rate_limit_exit_requeues_without_counting_failure(
         ]
         assert "rate_limited" in outcomes
         assert "crashed" not in outcomes
-
-
 
 
 def test_respawn_guard_defers_rate_limited_within_cooldown(

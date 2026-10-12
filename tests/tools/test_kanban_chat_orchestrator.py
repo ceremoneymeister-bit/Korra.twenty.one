@@ -74,9 +74,9 @@ def test_agent_cannot_mark_the_owners_step_done(chat_env):
 
 def test_chat_agent_gets_chat_guidance_not_worker_protocol(monkeypatch):
     from agent.prompt_builder import KANBAN_CHAT_GUIDANCE, KANBAN_GUIDANCE
-    assert "Plan in one pass" in KANBAN_CHAT_GUIDANCE
+    assert "Plan only what can start now" in KANBAN_CHAT_GUIDANCE
     assert "ONE task" not in KANBAN_CHAT_GUIDANCE
-    assert len(KANBAN_CHAT_GUIDANCE) < 3000
+    assert len(KANBAN_CHAT_GUIDANCE) < 3500
     assert "full deliverable text in `result`" in KANBAN_GUIDANCE
 
 

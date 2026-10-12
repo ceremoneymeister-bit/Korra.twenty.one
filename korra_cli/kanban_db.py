@@ -440,6 +440,19 @@ DEFAULT_CRASH_GRACE_SECONDS = 30
 # conventional "temporary failure, retry later" code, and well clear of the
 # 0/1/2 codes the worker uses for success / generic failure / usage error.
 KANBAN_RATE_LIMIT_EXIT_CODE = 75
+# 78 == ``EX_CONFIG``: the provider refused the worker's credentials or model
+# (auth, unknown model, TLS trust). A retry cannot fix it, so the dispatcher
+# blocks the card at once instead of burning attempts.
+KANBAN_TERMINAL_PROVIDER_EXIT_CODE = 78
+# 128 + SIGHUP/SIGINT/SIGTERM: the worker was asked to stop by whoever owns
+# the process tree (container stop, gateway restart), not by its own failure.
+KANBAN_INTERRUPTED_EXIT_CODES = frozenset({129, 130, 143})
+# Continuous provider wait / interruption: how many automatic retries come
+# before the card stops and waits for a person.
+KANBAN_AUTO_RETRY_LIMIT = 2
+# Workers that were running when this dispatcher process started belong to a
+# previous process: a restart or drain took them, they did not crash.
+_DISPATCHER_PROCESS_STARTED_AT = time.time()
 
 
 def _resolve_crash_grace_seconds() -> int:
@@ -4601,7 +4614,7 @@ def _resume_status_from_events(conn: sqlite3.Connection, task_id: str) -> str:
         "WHERE task_id = ? AND kind IN ("
         "'blocked', 'block_loop_detected', 'dependency_wait', 'gave_up', "
         "'unblocked', 'changes_requested', 'review_reopened', 'status', 'reclaimed', "
-        "'stale', 'timed_out', 'crashed', 'spawn_failed', 'rate_limited'"
+        "'stale', 'timed_out', 'crashed', 'spawn_failed', 'rate_limited', 'interrupted'"
         ") ORDER BY id DESC LIMIT 1",
         (task_id,),
     ).fetchone()
@@ -4708,6 +4721,8 @@ def recompute_ready(
                     conn, task_id, "promoted",
                     {"status": resume_status} if resume_status != "ready" else None,
                 )
+                if resume_status == "ready":
+                    _continue_exact_request(conn, task_id)
                 promoted += 1
     return promoted
 
@@ -6549,6 +6564,14 @@ def block_task(
             else 0
         )
 
+        # A dependency wait needs an open parent to wait for. With none,
+        # ``recompute_ready`` would promote the card on the next tick and spawn
+        # a fresh worker with no memory of why it stopped, round and round.
+        # Record it as a question for the owner instead: it stays put.
+        requested_kind = None
+        if kind == "dependency" and _parents_satisfied(conn, task_id):
+            requested_kind, kind = kind, "needs_input"
+
         # Dependency blocks never enter the human ``blocked`` bucket — they
         # wait in ``todo`` and let ``recompute_ready`` gate on parents. Routing
         # here (rather than ``blocked``) is what keeps a cron from ever seeing
@@ -6737,6 +6760,7 @@ def block_task(
                     "kind": kind,
                     "recurrences": recurrences,
                     "source_status": source_status,
+                    **({"requested_kind": requested_kind} if requested_kind else {}),
                 },
                 run_id=run_id,
             )
@@ -8905,6 +8929,11 @@ def _classify_worker_exit(pid: int) -> "tuple[str, Optional[int]]":
       provider rate-limited / exhausted quota, NOT because the task failed.
       ``detect_crashed_workers`` releases the task back to ``ready`` without
       counting a failure, so a long quota window can't trip the breaker.
+    * ``"terminal_provider"`` — ``WIFEXITED`` with status
+      ``KANBAN_TERMINAL_PROVIDER_EXIT_CODE``: credentials/model refused, a
+      retry cannot help.
+    * ``"interrupted"`` — ``WIFEXITED`` with 128+SIGHUP/SIGINT/SIGTERM: the
+      worker was stopped from outside (restart, container stop).
     * ``"nonzero_exit"`` — ``WIFEXITED`` with non-zero status. Real error.
     * ``"signaled"`` — ``WIFSIGNALED`` (OOM killer, SIGKILL, etc). Real crash.
     * ``"unknown"`` — pid was not in the reap registry (either reaped by
@@ -8926,6 +8955,10 @@ def _classify_worker_exit(pid: int) -> "tuple[str, Optional[int]]":
                 return ("clean_exit", 0)
             if code == KANBAN_RATE_LIMIT_EXIT_CODE:
                 return ("rate_limited", code)
+            if code == KANBAN_TERMINAL_PROVIDER_EXIT_CODE:
+                return ("terminal_provider", code)
+            if code in KANBAN_INTERRUPTED_EXIT_CODES:
+                return ("interrupted", code)
             return ("nonzero_exit", code)
         if os.WIFSIGNALED(raw):
             return ("signaled", os.WTERMSIG(raw))
@@ -9620,6 +9653,29 @@ def _protocol_violation_streak(conn: sqlite3.Connection, task_id: str) -> int:
     return streak
 
 
+_STREAK_RESET_KINDS = (
+    "rate_limited", "interrupted", "crashed", "timed_out", "gave_up",
+    "completed", "blocked", "unblocked", "spawn_failed", "stale", "reclaimed",
+)
+
+
+def _trailing_event_streak(conn: sqlite3.Connection, task_id: str, kind: str) -> int:
+    """How many ``kind`` events end the task's history without anything else
+    that decides the outcome of a run in between."""
+    rows = conn.execute(
+        "SELECT kind FROM task_events WHERE task_id = ? AND kind IN ("
+        + ",".join("?" * len(_STREAK_RESET_KINDS)) + ") "
+        "ORDER BY id DESC LIMIT 10",
+        (task_id, *_STREAK_RESET_KINDS),
+    ).fetchall()
+    streak = 0
+    for row in rows:
+        if row["kind"] != kind:
+            break
+        streak += 1
+    return streak
+
+
 def detect_crashed_workers(conn: sqlite3.Connection) -> list[str]:
     """Reclaim ``running`` tasks whose worker PID is no longer alive.
 
@@ -9657,6 +9713,9 @@ def detect_crashed_workers(conn: sqlite3.Connection) -> list[str]:
     # own bounded violation streak instead of the unified failure
     # counter (see the post-txn loop below).
     crash_details: list[tuple[str, int, str, bool, str]] = []
+    # Cards that must stop and wait for a person instead of another try:
+    # (task_id, kind, reason). Blocked after the txn, like crash accounting.
+    explicit_blocks: list[tuple[str, str, str]] = []
     # (task_id, pid, claimer, protocol_violation, error_text)
     # Worker-exit observer payloads (RFC #58548), collected inside the main
     # txn and fired only after every reclaim/accounting txn has committed.
@@ -9686,7 +9745,24 @@ def detect_crashed_workers(conn: sqlite3.Connection) -> list[str]:
 
             pid = int(row["worker_pid"])
             kind, code = _classify_worker_exit(pid)
+            if (
+                kind == "unknown"
+                and started_at is not None
+                and started_at < _DISPATCHER_PROCESS_STARTED_AT
+            ):
+                # The worker belongs to a previous dispatcher process: the
+                # restart/drain took it with it. Not the card's fault.
+                kind = "interrupted"
+            if (
+                kind == "interrupted"
+                and _trailing_event_streak(conn, row["id"], "interrupted")
+                >= KANBAN_AUTO_RETRY_LIMIT
+            ):
+                # Interrupted again and again is no longer a planned restart.
+                kind = "nonzero_exit" if code else "unknown"
             rate_limited_exit = False
+            interrupted_exit = False
+            terminal_exit = False
             if kind == "clean_exit":
                 # Worker subprocess returned 0 but its task is still
                 # ``running`` in the DB — it exited without calling
@@ -9734,6 +9810,32 @@ def detect_crashed_workers(conn: sqlite3.Connection) -> list[str]:
                     "claimer": row["claim_lock"],
                     "exit_code": code,
                 }
+            elif kind == "interrupted":
+                protocol_violation = False
+                interrupted_exit = True
+                error_text = (
+                    f"pid {pid} was interrupted by a restart or shutdown — "
+                    f"requeued without counting a failure"
+                )
+                event_kind = "interrupted"
+                event_payload = {
+                    "pid": pid,
+                    "claimer": row["claim_lock"],
+                    "exit_code": code,
+                }
+            elif kind == "terminal_provider":
+                protocol_violation = False
+                terminal_exit = True
+                error_text = (
+                    f"pid {pid} stopped: the model provider refused the "
+                    f"agent's access (credentials, model or certificate)"
+                )
+                event_kind = "worker_access_error"
+                event_payload = {
+                    "pid": pid,
+                    "claimer": row["claim_lock"],
+                    "exit_code": code,
+                }
             else:
                 protocol_violation = False
                 if kind == "nonzero_exit":
@@ -9761,7 +9863,12 @@ def detect_crashed_workers(conn: sqlite3.Connection) -> list[str]:
                 # Rate-limited requeues are a clean release, not a crash —
                 # record the run outcome as ``rate_limited`` so the board
                 # history doesn't show a phantom crash for a quota wall.
-                _run_outcome = "rate_limited" if rate_limited_exit else "crashed"
+                _run_outcome = (
+                    "rate_limited" if rate_limited_exit
+                    else "interrupted" if interrupted_exit
+                    else "blocked" if terminal_exit
+                    else "crashed"
+                )
                 run_id = _end_run(
                     conn, row["id"],
                     outcome=_run_outcome, status=_run_outcome,
@@ -9794,6 +9901,27 @@ def detect_crashed_workers(conn: sqlite3.Connection) -> list[str]:
                         (error_text[:500], row["id"]),
                     )
                     rate_limited.append(row["id"])
+                    if (
+                        _trailing_event_streak(conn, row["id"], "rate_limited")
+                        > KANBAN_AUTO_RETRY_LIMIT
+                    ):
+                        explicit_blocks.append((
+                            row["id"], "transient",
+                            "The model provider kept refusing or timing out "
+                            f"({KANBAN_AUTO_RETRY_LIMIT + 1} runs in a row: "
+                            "subscription limit, 429 or timeout). Automatic "
+                            "retries stopped; unblock the card when the "
+                            "provider is available again.",
+                        ))
+                elif interrupted_exit:
+                    pass
+                elif terminal_exit:
+                    explicit_blocks.append((
+                        row["id"], "capability",
+                        "The model provider refused this agent's access "
+                        "(credentials, model or certificate). Fix the agent's "
+                        "provider settings, then unblock the card.",
+                    ))
                 else:
                     if protocol_violation:
                         # Stamp the failure error now: a below-budget
@@ -9829,6 +9957,9 @@ def detect_crashed_workers(conn: sqlite3.Connection) -> list[str]:
     # top precedence it has for every other failure kind. Systemic same-error
     # crashes still trip immediately.
     auto_blocked: list[str] = []
+    for tid, block_kind, reason in explicit_blocks:
+        if block_task(conn, tid, reason=reason, kind=block_kind):
+            auto_blocked.append(tid)
     if crash_details:
         # Fingerprint errors to detect systemic failures.
         _fp_counts: dict[str, int] = {}
@@ -10623,6 +10754,166 @@ def _memory_pressure_level(sample: Optional[Mapping[str, Any]] = None) -> str:
         return "unknown"
 
 
+# ---------------------------------------------------------------------------
+# Exact dispatch requests
+#
+# A board owner can turn the general ready queue off (``dispatch_in_gateway:
+# false``) and still want cards they just asked for to run
+# (``dispatch_exact_requests: true``). A request is a ``dispatch_requested``
+# event on the card: permission to start THIS piece of work. It stays valid
+# through retries, blocks and answers, and ends when the work is finished,
+# archived or handed to another agent. No schema change.
+# ---------------------------------------------------------------------------
+
+EXACT_REQUEST_EVENT = "dispatch_requested"
+EXACT_LAPSED_EVENT = "dispatch_request_lapsed"
+_EXACT_BOUNDARY_KINDS = ("completed", "archived", "assigned")
+_EXACT_CONFIG_CACHE: dict[str, Any] = {}
+
+
+def owner_kanban_settings() -> dict[str, Any]:
+    """The ``kanban:`` section of the BOARD OWNER's ``config.yaml``.
+
+    Read from ``<kanban_home>/config.yaml`` rather than the active profile's
+    config: an executor profile never sets these flags, and a card it creates
+    must follow the owner's choice. Empty when the file is missing or unreadable.
+    """
+    try:
+        path = kanban_home() / "config.yaml"
+        st = path.stat()
+    except Exception:
+        return {}
+    key = (str(path), st.st_mtime_ns, st.st_size)
+    cached = _EXACT_CONFIG_CACHE.get("v")
+    if cached is not None and cached[0] == key:
+        return cached[1]
+    section: dict[str, Any] = {}
+    try:
+        import yaml
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        raw = data.get("kanban") if isinstance(data, dict) else None
+        section = dict(raw) if isinstance(raw, dict) else {}
+    except Exception:
+        section = {}
+    _EXACT_CONFIG_CACHE["v"] = (key, section)
+    return section
+
+
+def exact_dispatch_requests_enabled() -> bool:
+    """``kanban.dispatch_exact_requests`` of the board owner; off by default."""
+    return owner_kanban_settings().get("dispatch_exact_requests") is True
+
+
+_EXACT_SCAN_SQL = (
+    "SELECT t.id, t.assignee, "
+    "(SELECT MAX(e.id) FROM task_events e WHERE e.task_id = t.id AND e.kind = ?) AS req, "
+    "(SELECT MAX(e.id) FROM task_events e WHERE e.task_id = t.id "
+    f"AND e.kind IN ({', '.join('?' for _ in _EXACT_BOUNDARY_KINDS)})) AS bnd, "
+    "(SELECT MAX(e.id) FROM task_events e WHERE e.task_id = t.id AND e.kind = ?) AS lapsed "
+    "FROM tasks t WHERE t.status = 'ready' AND t.claim_lock IS NULL "
+    "AND COALESCE(t.assignee, '') != '' AND COALESCE(t.actor_kind, '') != 'human' "
+    "AND EXISTS (SELECT 1 FROM task_events e WHERE e.task_id = t.id AND e.kind = ?) "
+    "ORDER BY t.priority DESC, t.created_at ASC"
+)
+_EXACT_SCAN_ARGS = (EXACT_REQUEST_EVENT, *_EXACT_BOUNDARY_KINDS, EXACT_LAPSED_EVENT, EXACT_REQUEST_EVENT)
+
+
+def _request_exact_in_txn(
+    conn: sqlite3.Connection, task_id: str, *, source: str, parent_id: Optional[str] = None,
+) -> str:
+    """Record a request inside an open transaction; returns the outcome."""
+    row = conn.execute(
+        "SELECT status, assignee, actor_kind FROM tasks WHERE id = ?", (task_id,),
+    ).fetchone()
+    if row is None:
+        return "missing"
+    if (row["actor_kind"] or "") == "human":
+        return "human"
+    if row["status"] != "ready":
+        return "not_ready"
+    if not (row["assignee"] or "").strip():
+        return "unassigned"
+    st = conn.execute(
+        "SELECT (SELECT MAX(id) FROM task_events WHERE task_id = ? AND kind = ?) AS req, "
+        f"(SELECT MAX(id) FROM task_events WHERE task_id = ? AND kind IN ({', '.join('?' for _ in _EXACT_BOUNDARY_KINDS)})) AS bnd",
+        (task_id, EXACT_REQUEST_EVENT, task_id, *_EXACT_BOUNDARY_KINDS),
+    ).fetchone()
+    if st["req"] is not None and st["req"] > (st["bnd"] or 0):
+        return "already"
+    payload: dict[str, Any] = {"source": source}
+    if parent_id:
+        payload["parent_id"] = parent_id
+    _append_event(conn, task_id, EXACT_REQUEST_EVENT, payload)
+    return "requested"
+
+
+def request_exact_dispatch(
+    conn: sqlite3.Connection, task_id: str, *, source: str = "request",
+) -> str:
+    """Ask the dispatcher to start one ready card. Must run OUTSIDE a write txn.
+
+    Returns ``requested`` / ``already`` (a valid request exists) or the reason
+    nothing was written: ``missing``, ``human``, ``not_ready``, ``unassigned``.
+    """
+    with write_txn(conn):
+        return _request_exact_in_txn(conn, task_id, source=source)
+
+
+def _continue_exact_request(conn: sqlite3.Connection, task_id: str) -> None:
+    """A step that became ready after a requested parent keeps the request."""
+    parent = conn.execute(
+        "SELECT l.parent_id FROM task_links l JOIN task_events e "
+        "ON e.task_id = l.parent_id AND e.kind = ? "
+        "WHERE l.child_id = ? LIMIT 1",
+        (EXACT_REQUEST_EVENT, task_id),
+    ).fetchone()
+    if parent is not None and exact_dispatch_requests_enabled():
+        _request_exact_in_txn(
+            conn, task_id, source="continuation", parent_id=parent["parent_id"],
+        )
+
+
+def pending_exact_dispatch_ids(
+    conn: sqlite3.Connection, *, record_lapsed: bool = False, spawnable_only: bool = False,
+) -> list[str]:
+    """Ready cards with a valid request, in dispatch order.
+
+    A request older than the card's last completion/archive/reassignment is
+    not honoured. With ``record_lapsed`` such a card gets one visible
+    ``dispatch_request_lapsed`` event so it does not sit in ``ready`` unexplained.
+    """
+    rows = conn.execute(_EXACT_SCAN_SQL, _EXACT_SCAN_ARGS).fetchall()
+    valid: list[Any] = []
+    stale: list[Any] = []
+    for r in rows:
+        if r["req"] is None:
+            continue
+        if r["req"] > (r["bnd"] or 0):
+            valid.append(r)
+        elif (r["lapsed"] or 0) < r["req"]:
+            stale.append(r)
+    if record_lapsed and stale:
+        with write_txn(conn):
+            for r in stale:
+                _append_event(conn, r["id"], EXACT_LAPSED_EVENT, {
+                    "request_event": r["req"],
+                    "after_event": r["bnd"],
+                    "message": (
+                        "The earlier request to start this card was for work that has "
+                        "since finished or moved on, so it is not started again. "
+                        "Ask again to run it."
+                    ),
+                })
+    ids = [r["id"] for r in valid]
+    if spawnable_only and ids:
+        try:
+            from korra_cli.profiles import profile_exists
+            ids = [r["id"] for r in valid if profile_exists(r["assignee"])]
+        except Exception:
+            pass
+    return ids
+
+
 def dispatch_once(
     conn: sqlite3.Connection,
     *,
@@ -10637,6 +10928,7 @@ def dispatch_once(
     default_assignee: Optional[str] = None,
     max_in_progress_per_profile: Optional[int] = None,
     reconcile_orphans: bool = True,
+    only_task_ids: Optional[Iterable[str]] = None,
 ) -> DispatchResult:
     """Run one dispatcher tick under the board's single-writer lock.
 
@@ -10672,6 +10964,7 @@ def dispatch_once(
             default_assignee=default_assignee,
             max_in_progress_per_profile=max_in_progress_per_profile,
             reconcile_orphans=reconcile_orphans,
+            only_task_ids=only_task_ids,
         )
         _fire_dispatch_tick_hook(result, board=board, dry_run=dry_run)
         return result
@@ -10692,6 +10985,7 @@ def dispatch_once(
                 default_assignee=default_assignee,
                 max_in_progress_per_profile=max_in_progress_per_profile,
                 reconcile_orphans=reconcile_orphans,
+                only_task_ids=only_task_ids,
             )
             # Still under the dispatch lock: run the periodic PASSIVE WAL
             # checkpoint (see _maybe_checkpoint_wal; the -wal file size is
@@ -10703,6 +10997,41 @@ def dispatch_once(
     # the lock hold and stall a sibling dispatcher's tick.
     _fire_dispatch_tick_hook(result, board=board, dry_run=dry_run)
     return result
+
+
+def unavailable_task_skills(assignee: Optional[str], skills: Optional[Iterable[str]]) -> list[str]:
+    """Skills of ``skills`` the ``assignee`` profile cannot load.
+
+    Uses the same resolver the worker uses at start-up (``-s``/``--skills``),
+    scoped to the assignee's own home. A worker whose requested skills are all
+    unknown exits at once, so catching them here turns an endless respawn into
+    one readable block. An unresolvable profile or a resolver error returns
+    ``[]``: other checks own those failures, and a guess must not stop a card.
+    """
+    names = [str(s).strip() for s in (skills or []) if s and str(s).strip()]
+    if not names or not assignee:
+        return []
+    try:
+        from korra_cli.profiles import normalize_profile_name, resolve_profile_env
+        from korra_constants import reset_hermes_home_override, set_hermes_home_override
+        from agent.skill_commands import build_preloaded_skills_prompt
+
+        home = resolve_profile_env(normalize_profile_name(assignee))
+        token = set_hermes_home_override(home)
+        try:
+            return list(build_preloaded_skills_prompt(names)[2])
+        finally:
+            reset_hermes_home_override(token)
+    except Exception:
+        _log.debug("kanban: skill preflight for %r failed", assignee, exc_info=True)
+        return []
+
+
+def skills_block_reason(assignee: str, missing: list[str]) -> str:
+    return (
+        f"Agent {assignee} cannot load skill(s): {', '.join(missing)}. "
+        "Install or enable them for that agent, or recreate the card without them."
+    )
 
 
 def _dispatch_once_locked(
@@ -10719,6 +11048,7 @@ def _dispatch_once_locked(
     default_assignee: Optional[str] = None,
     max_in_progress_per_profile: Optional[int] = None,
     reconcile_orphans: bool = True,
+    only_task_ids: Optional[Iterable[str]] = None,
 ) -> DispatchResult:
     """Run one dispatcher tick.
 
@@ -10851,6 +11181,9 @@ def _dispatch_once_locked(
             )
             spawn_budget = 1
 
+    # Restricted mode (exact requests): only the named cards may start; the
+    # housekeeping above has already run for the whole board.
+    _only_ids = None if only_task_ids is None else frozenset(only_task_ids)
     # Human steps are done by the owner: never spawned or auto-assigned.
     ready_rows = conn.execute(
         "SELECT id, assignee FROM tasks "
@@ -10858,6 +11191,8 @@ def _dispatch_once_locked(
         "AND COALESCE(actor_kind, '') != 'human' "
         "ORDER BY priority DESC, created_at ASC"
     ).fetchall()
+    if _only_ids is not None:
+        ready_rows = [r for r in ready_rows if r["id"] in _only_ids]
     # Review rows are enumerated up front (not after the ready loop) so the
     # budget split below can see whether review work exists at all.
     review_rows = []
@@ -10871,6 +11206,8 @@ def _dispatch_once_locked(
             "AND COALESCE(actor_kind, '') != 'human' "
             "ORDER BY priority DESC, created_at ASC"
         ).fetchall()
+        if _only_ids is not None:
+            review_rows = [r for r in review_rows if r["id"] in _only_ids]
     # Review-lane reservation (OOF-30 review finding): the ready loop runs
     # first and used to consume the ENTIRE shared budget, so a sustained
     # ready backlog permanently starved autonomous reviews — completed work
@@ -11038,6 +11375,22 @@ def _dispatch_once_locked(
                         conn, row["id"], "respawn_guarded",
                         {"reason": guard_reason},
                     )
+            continue
+        # Skills may have been removed or disabled since the card was made:
+        # a worker that cannot load any of them exits at once and would be
+        # respawned for nothing. Stop the card here with a readable reason.
+        _card = get_task(conn, row["id"])
+        _missing = unavailable_task_skills(
+            row_assignee, _card.skills if _card else None,
+        )
+        if _missing:
+            if not dry_run:
+                block_task(
+                    conn, row["id"],
+                    reason=skills_block_reason(row_assignee, _missing),
+                    kind="capability",
+                )
+            result.auto_blocked.append(row["id"])
             continue
         if dry_run:
             result.spawned.append((row["id"], row_assignee, ""))

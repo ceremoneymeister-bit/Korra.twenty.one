@@ -104,6 +104,33 @@ def test_dependency_then_parent_done_promotes(kanban_home: Path) -> None:
         assert kb.get_task(conn, child).status == "ready"
 
 
+def test_dependency_block_without_open_parent_waits_for_the_owner(kanban_home: Path) -> None:
+    """No unfinished parent: the card stays blocked instead of restarting."""
+    with kb.connect_closing() as conn:
+        tid = _running_task(conn)
+        assert kb.block_task(conn, tid, reason="wait for data", kind="dependency")
+        task = kb.get_task(conn, tid)
+        assert (task.status, task.block_kind) == ("blocked", "needs_input")
+        assert [e.payload.get("requested_kind") for e in kb.list_events(conn, tid)
+                if e.kind == "blocked"] == ["dependency"]
+        kb.recompute_ready(conn)
+        assert kb.get_task(conn, tid).status == "blocked"
+
+
+def test_dependency_block_with_finished_parent_does_not_loop(kanban_home: Path) -> None:
+    with kb.connect_closing() as conn:
+        parent = kb.create_task(conn, title="parent", assignee="worker")
+        child = _running_task(conn, title="child")
+        kb.link_tasks(conn, parent_id=parent, child_id=child)
+        with kb.write_txn(conn):
+            conn.execute("UPDATE tasks SET status='done' WHERE id=?", (parent,))
+        kb.block_task(conn, child, reason="wait", kind="dependency")
+        for _ in range(3):
+            res = kb.dispatch_once(conn, spawn_fn=lambda *a, **k: 1)
+        assert res.spawned == []
+        assert kb.get_task(conn, child).status == "blocked"
+
+
 # ---------------------------------------------------------------------------
 # Completion resets loop memory
 # ---------------------------------------------------------------------------

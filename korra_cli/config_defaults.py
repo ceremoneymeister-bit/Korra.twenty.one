@@ -2908,6 +2908,10 @@ DEFAULT_CONFIG = {
         # only if you run the dispatcher as a separate systemd unit or
         # don't want the gateway to spawn workers.
         "dispatch_in_gateway": True,
+        # With ``dispatch_in_gateway: false``, still start cards that were
+        # explicitly requested (kanban_create from chat). Read from the board
+        # owner's config. The general ready queue stays untouched.
+        "dispatch_exact_requests": False,
         # Automatically claim tasks in the first-class review column and spawn
         # the assigned profile with the bundled sdlc-review skill. Disable for
         # boards where every review is performed manually from the dashboard.

@@ -1415,17 +1415,29 @@ class GatewayKanbanWatchersMixin:
             logger.warning("kanban dispatcher: cannot load config (%s); disabled", exc)
             return
         kanban_cfg = cfg.get("kanban", {}) if isinstance(cfg, dict) else {}
-        if not kanban_cfg.get("dispatch_in_gateway", True):
-            logger.info(
-                "kanban dispatcher: disabled via config kanban.dispatch_in_gateway=false"
-            )
-            return
-
         try:
             from korra_cli import kanban_db as _kb
         except Exception:
             logger.warning("kanban dispatcher: kanban_db not importable; dispatcher disabled")
             return
+
+        # Exact-only mode: the general ready queue is off but the board owner
+        # asked for requested cards to start (kanban.dispatch_exact_requests,
+        # read from the owner's config). The same dispatcher, lock, pause and
+        # resource rules apply; only WHICH ready cards may start is narrowed,
+        # and housekeeping (stale / crashed / max runtime) covers the board.
+        exact_only = False
+        if not kanban_cfg.get("dispatch_in_gateway", True):
+            if not _kb.exact_dispatch_requests_enabled():
+                logger.info(
+                    "kanban dispatcher: disabled via config kanban.dispatch_in_gateway=false"
+                )
+                return
+            exact_only = True
+            logger.info(
+                "kanban dispatcher: general queue off; starting only requested cards "
+                "(kanban.dispatch_exact_requests=true)"
+            )
 
         # Single-dispatcher backstop. dispatch_in_gateway defaults to true, so a
         # new profile gateway (or a same-profile restart race) can silently
@@ -1669,9 +1681,16 @@ class GatewayKanbanWatchersMixin:
                 # re-ran the migration on a second connection, racing
                 # the first. See the matching comment in
                 # `_kanban_notifier_watcher` and issue #21378.
+                only_ids = None
+                if exact_only:
+                    only_ids = (
+                        _kb.pending_exact_dispatch_ids(conn, record_lapsed=True)
+                        if _kb.exact_dispatch_requests_enabled() else []
+                    )
                 return _kb.dispatch_once(
                     conn,
                     board=slug,
+                    only_task_ids=only_ids,
                     max_spawn=max_spawn,
                     max_in_progress=max_in_progress,
                     failure_limit=failure_limit,
@@ -1762,6 +1781,10 @@ class GatewayKanbanWatchersMixin:
                 conn = None
                 try:
                     conn = _kb.connect(board=slug)
+                    if exact_only:
+                        if _kb.pending_exact_dispatch_ids(conn, spawnable_only=True):
+                            return True
+                        continue
                     if _kb.has_spawnable_ready(conn):
                         return True
                     if _review_probe and _kb.has_spawnable_review(conn):
@@ -1901,7 +1924,7 @@ class GatewayKanbanWatchersMixin:
                     # flipping kanban.auto_decompose=false to STOP runaway fan-out
                     # takes effect on the next tick, not on gateway restart (#49638).
                     _ad_enabled, _ad_per_tick = _read_auto_decompose_settings()
-                    if _ad_enabled:
+                    if _ad_enabled and not exact_only:
                         await _to_thread_process_service(_auto_decompose_tick, _ad_per_tick)
                     results = await _to_thread_process_service(_tick_once)
                     any_spawned = False
