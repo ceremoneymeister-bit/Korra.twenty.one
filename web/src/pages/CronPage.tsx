@@ -43,6 +43,7 @@ import {
 import { useToast } from "@nous-research/ui/hooks/use-toast";
 import { useConfirmDelete } from "@nous-research/ui/hooks/use-confirm-delete";
 import { useModalBehavior } from "@/hooks/useModalBehavior";
+import { useCabinetSession } from "@/hooks/useCabinetSession";
 import { Toast } from "@nous-research/ui/ui/components/toast";
 import { Card, CardContent } from "@nous-research/ui/ui/components/card";
 import { Input } from "@nous-research/ui/ui/components/input";
@@ -377,6 +378,7 @@ function CronJobFormFields({
   resources,
   onChange,
 }: CronJobFormFieldsProps) {
+  const { clientMode: cabinetClient } = useCabinetSession();
   const { t, tr } = useI18n();
   const { availableSkills, availableToolsets, deliveryTargets, modelOptions } = resources;
   const update = <K extends keyof CronJobEditorState,>(
@@ -457,7 +459,9 @@ function CronJobFormFields({
         {onlyLocalAvailable && (
           <p className="text-xs text-muted-foreground">
             {ownerMode
-              ? "Результат сохранится в Korra. Чтобы получать его в мессенджере, подключите канал в настройках агента."
+              ? cabinetClient
+                ? "Результат сохранится в Korra. Чтобы получать его в Telegram, попросите команду Korra подключить бота."
+                : "Результат сохранится в Korra. Чтобы получать его в мессенджере, подключите канал в настройках агента."
               : t.cron.delivery.noneConfigured ??
               tr("No messaging platforms configured. Set one up under Channels to deliver reports.")}
           </p>

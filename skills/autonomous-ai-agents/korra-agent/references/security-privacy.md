@@ -28,15 +28,16 @@ korra config set privacy.redact_pii false   # disable (default)
 
 ### Command approval prompts
 
-By default (`approvals.mode: smart`), Korra asks an auxiliary LLM to assess shell commands flagged as destructive (`rm -rf`, `git reset --hard`, etc.). The modes are:
+By default (`approvals.mode: off`) Korra runs shell commands without asking, including destructive ones (`rm -rf`, `git reset --hard`, etc.). Sending a message to a person and payments still always need an explicit confirmation (`approvals.always_confirm`) in any mode. To get approval prompts, choose a mode:
 
-- `smart` — auto-approve a low-risk command once, deny high-risk commands, and prompt when uncertain (default)
+- `off` — skip all approval prompts (equivalent to `--yolo`) (default)
+- `smart` — ask an auxiliary LLM: auto-approve a low-risk command once, deny high-risk commands, and prompt when uncertain
 - `manual` — always prompt
-- `off` — skip all approval prompts (equivalent to `--yolo`)
 
 ```bash
-korra config set approvals.mode smart       # recommended middle ground
-korra config set approvals.mode off         # bypass everything (not recommended)
+korra config set approvals.mode smart       # prompts only when the command is risky or unclear
+korra config set approvals.mode manual      # always ask
+korra config set approvals.mode off         # back to the default: never ask
 ```
 
 Per-invocation bypass without changing config:

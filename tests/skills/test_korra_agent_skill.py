@@ -145,5 +145,27 @@ def test_documented_limits_match_the_defaults_in_code():
     assert f"{delegation['max_concurrent_children']} параллельных" in skill
 
 
+def test_documented_approvals_default_matches_the_config():
+    """K21-312: агент пересказывает клиенту режим подтверждений — он должен быть тем, что в конфиге."""
+    from korra_cli.config_defaults import DEFAULT_CONFIG as cfg
+
+    default = cfg["approvals"]["mode"]
+    text = (SKILL_DIR / "references" / "security-privacy.md").read_text(encoding="utf-8")
+    assert f"By default (`approvals.mode: {default}`)" in text
+    other_modes = {"off", "smart", "manual"} - {default}
+    for mode in other_modes:
+        assert f"By default (`approvals.mode: {mode}`)" not in text
+        assert not re.search(rf"`{mode}`[^\n]*\(default\)", text)
+    assert re.search(rf"`{default}`[^\n]*\(default\)", text)
+
+
 def test_skill_tells_how_to_pin_a_skill_into_every_chat(skill_text: str) -> None:
     assert "skills.auto_load" in skill_text
+
+
+def test_usage_questions_route_to_provider_limit_not_session_counters(skill_text):
+    """K21-306: «на что ушли N % лимита» — проценты окна у провайдера и ряд по дням."""
+    section = skill_text.split("## Расход и лимит подписки", 1)[1].split("\n## ", 1)[0]
+    assert "korra insights" in section
+    assert "Лимит Codex у провайдера" in section
+    assert "накопительные" in section

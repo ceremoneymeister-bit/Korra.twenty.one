@@ -64,10 +64,10 @@ const TOOLS: Record<string, ToolMeta> = {
   browser_vision: { label: "Взгляд на страницу", kind: "browser" },
   browser_get_images: { label: "Картинки со страницы", kind: "browser" },
 
-  // Скиллы и планирование
-  skill_view: { label: "Чтение скилла", kind: "skill" },
-  skills_list: { label: "Список скиллов", kind: "skill" },
-  skill_manage: { label: "Правка скилла", kind: "skill" },
+  // Навыки и планирование
+  skill_view: { label: "Чтение навыка", kind: "skill" },
+  skills_list: { label: "Список навыков", kind: "skill" },
+  skill_manage: { label: "Правка навыка", kind: "skill" },
   todo: { label: "План работы", kind: "plan" },
   kanban_show: { label: "Доска задач", kind: "plan" },
   kanban_complete: { label: "Закрытие задачи", kind: "plan" },

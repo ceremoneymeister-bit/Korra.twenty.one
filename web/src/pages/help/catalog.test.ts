@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { CLIENT_SETTINGS_PATHS, SERVICE_PATHS } from '@/lib/product-nav';
+import { CLIENT_CABINET_HIDDEN_PATHS, CLIENT_SETTINGS_PATHS, SERVICE_PATHS } from '@/lib/product-nav';
 import { HELP_ARTICLES, HELP_GROUPS, QUICK_HELP } from './articles';
-import { helpPath, searchHelp } from './catalog';
+import { forClientCabinet, helpPath, searchHelp } from './catalog';
 
 function checkHelpLink(to: string) {
   const url = new URL(to, 'https://panel.test');
@@ -58,5 +58,46 @@ describe('Оглавление помощи', () => {
     expect(searchHelp(HELP_ARTICLES, 'тёмную')).toEqual(searchHelp(HELP_ARTICLES, 'темную'));
     expect(searchHelp(HELP_ARTICLES, 'доступ истечь').map(article => article.id)).toContain('keys');
     expect(searchHelp(HELP_ARTICLES, 'несуществующееслово')).toEqual([]);
+  });
+});
+
+describe('Помощь клиентского кабинета (K21-312)', () => {
+  const client = forClientCabinet(HELP_ARTICLES, CLIENT_CABINET_HIDDEN_PATHS);
+  const hidden = (to: string) => CLIENT_CABINET_HIDDEN_PATHS.includes(to.split(/[?#]/)[0]);
+
+  it('не ведёт в разделы, которых нет в клиентском меню', () => {
+    const ids = new Set(client.map(article => article.id));
+    for (const article of client) {
+      const links = [article.action, ...article.sections.flatMap(section => section.links ?? []),
+        ...article.problems.flatMap(problem => problem.link ? [problem.link] : [])];
+      for (const item of links) {
+        expect(hidden(item.to), `${article.id}: ${item.to}`).toBe(false);
+        if (item.to.startsWith('/help/')) expect(ids.has(item.to.split(/[?#]/)[0].split('/')[2]), `${article.id}: ${item.to}`).toBe(true);
+      }
+      for (const id of article.related) expect(ids.has(id), `${article.id}: ${id}`).toBe(true);
+    }
+    expect(client.map(article => article.id)).not.toContain('channels');
+  });
+
+  it('Telegram для клиента подключает команда Korra, а не раздел «Каналы»', () => {
+    const telegram = client.find(article => article.id === 'telegram')!;
+    expect(telegram).toBeDefined();
+    const text = JSON.stringify(telegram);
+    expect(text).not.toContain('Каналы');
+    expect(text).not.toContain('Служебное');
+    expect(text).toContain('команда Korra');
+    const owner = HELP_ARTICLES.find(article => article.id === 'telegram')!;
+    expect(owner.action.to).toBe('/channels');
+  });
+
+  it('оставляет рабочие ссылки на оставшиеся инструкции и шаги', () => {
+    for (const article of client) {
+      for (const item of article.sections.flatMap(section => section.links ?? [])) {
+        if (!item.to.startsWith('/help/')) continue;
+        const url = new URL(item.to, 'https://panel.test');
+        const target = client.find(candidate => candidate.id === url.pathname.split('/')[2])!;
+        if (url.hash) expect(target.sections.some(section => section.id === url.hash.slice(1)), item.to).toBe(true);
+      }
+    }
   });
 });

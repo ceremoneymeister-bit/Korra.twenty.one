@@ -3156,6 +3156,8 @@ _LEGACY_UNIT_EXECSTART_MARKERS: tuple[str, ...] = (
     "gateway/run.py",
     " hermes gateway ",
     "/hermes gateway ",
+    " korra gateway ",
+    "/korra gateway ",
 )
 
 

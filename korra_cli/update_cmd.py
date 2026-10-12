@@ -4985,7 +4985,7 @@ def _detect_venv_python_processes(
 
         if not is_holder and not (
             name_low.startswith(("python", "pypy"))
-            or name_low in {"uv.exe", "uvx.exe", "hermes.exe"}
+            or name_low in {"uv.exe", "uvx.exe", "hermes.exe", "korra.exe"}
         ):
             continue
 
@@ -5267,7 +5267,7 @@ def _hermes_holder_subcommand(cmdline: str) -> str | None:
             entry_idx = i
             break
         base = low.rsplit("\\", 1)[-1].rsplit("/", 1)[-1]
-        if base in ("hermes", "hermes.exe"):
+        if base in ("korra", "korra.exe", "hermes", "hermes.exe"):
             entry_idx = i
             break
     if entry_idx is None:
