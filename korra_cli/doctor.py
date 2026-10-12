@@ -892,6 +892,46 @@ def check_speech_recognition(issues: list[str]) -> None:
                f'(вместо {selected}: {reason})')
 
 
+def check_embedded_camofox(issues: list[str]) -> None:
+    """Состояние встроенного Camofox («Браузер с защитой от блокировок»).
+
+    Показывается только в образе, где он установлен. Три состояния:
+    выключен, работает, не отвечает — у каждого понятный следующий шаг.
+    """
+    try:
+        from korra_cli import camofox_embedded
+    except Exception:
+        return
+    if not camofox_embedded.is_installed():
+        return
+
+    info = camofox_embedded.status()
+    state = info["state"]
+    name = 'Браузер с защитой от блокировок (встроенный Camofox)'
+    if state == "running":
+        check_ok(name, '(работает)')
+        return
+    if state == "not_responding":
+        check_fail(name, '(включён, но не отвечает)')
+        check_info(info["next"])
+        issues.append('Встроенный Camofox не отвечает: ' + info["next"])
+        return
+
+    selected = None
+    try:
+        from tools.tool_backend_helpers import read_selection
+
+        selected = read_selection("browser")
+    except Exception:
+        pass
+    if selected == "camofox":
+        check_warn(name, '(выбран в настройках, но сервер выключен)')
+        check_info('Включить заново: korra tools → Браузер → Camofox')
+        issues.append('Camofox выбран, но встроенный сервер выключен: korra tools → Браузер → Camofox')
+        return
+    check_info(f'{name}: выключен. Включить: korra tools → Браузер → Camofox')
+
+
 def check_web_search(issues: list[str]) -> None:
     """Какой бэкенд поиска выберет ``web_search`` и готов ли он.
 
@@ -2982,6 +3022,8 @@ def run_doctor(args):
                     '(браузерные инструменты не заработают до установки)',
                 )
                 check_info(LIGHTPANDA_INSTALL_HINT)
+
+    check_embedded_camofox(issues)
 
     # npm audit for all Node.js packages
     _npm_bin = _safe_which("npm")

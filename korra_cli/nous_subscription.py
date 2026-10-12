@@ -622,6 +622,15 @@ def get_nous_subscription_features(
         # CAMOFOX_URL is the server address, not a selection: an explicit
         # different browser choice wins over the env var.
         direct_camofox = False
+    elif browser_selected == "camofox" and not direct_camofox:
+        # Встроенный сервер из образа Korra: адрес не лежит в CAMOFOX_URL,
+        # о том, что он включён, говорит маркер рядом с данными.
+        try:
+            from korra_cli import camofox_embedded
+
+            direct_camofox = camofox_embedded.is_enabled() and camofox_embedded.is_installed()
+        except Exception:
+            direct_camofox = False
 
 
     web_managed = web_backend == "firecrawl" and managed_web_available and not direct_firecrawl

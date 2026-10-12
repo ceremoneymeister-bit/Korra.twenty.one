@@ -309,6 +309,21 @@ PLATFORMS = {
 # we use this to show provider selection and prompt for the right API keys.
 # Toolsets not in this map either need no config or use the simple fallback.
 
+def _camofox_env_vars() -> list:
+    """Запрос адреса Camofox: нужен только когда сервера нет в самом образе."""
+    try:
+        from korra_cli import camofox_embedded
+
+        if camofox_embedded.is_installed():
+            return []
+    except Exception:
+        pass
+    return [
+        {"key": "CAMOFOX_URL", "prompt": 'Адрес сервера Camofox', "default": "http://localhost:9377",
+         "url": "https://github.com/jo-inc/camofox-browser"},
+    ]
+
+
 TOOL_CATEGORIES = {
     "tts": {
         "name": "Text-to-Speech",
@@ -629,11 +644,10 @@ TOOL_CATEGORIES = {
             {
                 "name": "Camofox",
                 "badge": 'бесплатно · локально',
-                "tag": 'Браузер с защитой от отслеживания на Firefox/Camoufox',
-                "env_vars": [
-                    {"key": "CAMOFOX_URL", "prompt": 'Адрес сервера Camofox', "default": "http://localhost:9377",
-                     "url": "https://github.com/jo-inc/camofox-browser"},
-                ],
+                "tag": 'Браузер с защитой от блокировок: открывает сайты, где обычный Chromium получает капчу',
+                # В образе Korra сервер встроен: адрес и ключ определяются сами,
+                # владельцу ничего вводить не нужно. Вне образа остаётся запрос адреса.
+                "env_vars": _camofox_env_vars(),
                 "browser_provider": "camofox",
                 "post_setup": "camofox",
             },
@@ -2073,6 +2087,9 @@ def _run_post_setup(post_setup_key: str):
 
     elif post_setup_key == "browser_use_cli":
         _ensure_browser_use_cli(verbose_hints=True)
+
+    elif post_setup_key == "camofox" and _embedded_camofox_present():
+        _post_setup_embedded_camofox()
 
     elif post_setup_key == "camofox":
         camofox_dir = PROJECT_ROOT / "node_modules" / "@askjo" / "camofox-browser"
@@ -3617,9 +3634,39 @@ def _agent_browser_installed() -> bool:
     return _local_browser_runnable()
 
 
+def _embedded_camofox_present() -> bool:
+    """True в образе Korra: Camofox уже установлен внутри (/opt/camofox)."""
+    try:
+        from korra_cli import camofox_embedded
+
+        return camofox_embedded.is_installed()
+    except Exception:
+        return False
+
+
+def _post_setup_embedded_camofox() -> None:
+    """Включить встроенный Camofox и дождаться, пока сервер ответит."""
+    import time
+
+    from korra_cli import camofox_embedded
+
+    camofox_embedded.enable()
+    _print_info('    Включаем встроенный браузер с защитой от блокировок…')
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        if camofox_embedded.health():
+            _print_success('    Браузер с защитой от блокировок работает')
+            return
+        time.sleep(1)
+    _print_warning('    Сервер ещё запускается, это может занять до минуты')
+    _print_info('    Проверить состояние: korra doctor')
+
+
 def _camofox_installed() -> bool:
-    """True when the Camofox npm package ``_run_post_setup("camofox")``
-    installs is already in node_modules."""
+    """В образе Korra — встроенный сервер на месте; иначе npm-пакет, который
+    ставит ``_run_post_setup("camofox")``, уже лежит в node_modules."""
+    if _embedded_camofox_present():
+        return True
     return (PROJECT_ROOT / "node_modules" / "@askjo" / "camofox-browser").exists()
 
 
@@ -4526,6 +4573,25 @@ def _select_plugin_video_gen_provider(plugin_name: str, config: dict, *, use_gat
         _configure_xai_imagine_storage("video_gen", config)
 
 
+def _sync_embedded_camofox(selected: bool) -> None:
+    """Включить или выключить встроенный Camofox вслед за выбором браузера.
+
+    Вне образа Korra (сервера нет) ничего не делает. Сбой не мешает сохранить
+    выбор: владелец увидит его в `korra doctor`.
+    """
+    try:
+        from korra_cli import camofox_embedded
+
+        if not camofox_embedded.is_installed():
+            return
+        if selected:
+            camofox_embedded.enable()
+        else:
+            camofox_embedded.disable()
+    except Exception as exc:
+        logger.warning("не удалось переключить встроенный Camofox: %s", exc)
+
+
 def _write_provider_config(provider: dict, config: dict, *, managed_feature) -> None:
     """Persist the provider/backend config keys for a selected provider.
 
@@ -4570,6 +4636,8 @@ def _write_provider_config(provider: dict, config: dict, *, managed_feature) -> 
             _set_selection("browser", "cloud_provider", bp)
         else:
             browser_cfg.pop("use_gateway", None)
+
+        _sync_embedded_camofox(bp == "camofox")
 
     if provider.get("browser_backend"):
         browser_cfg = config.setdefault("browser", {})
