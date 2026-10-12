@@ -258,6 +258,80 @@ def test_watchdog_kills_the_whole_browser_tree_including_stopped_children(run_di
     assert "(2 процессов)" in err
 
 
+# Зависшее закрытие сессии переживает убийство Firefox: апстрим уходит в перезапуск и /health
+# остаётся «recovering» (так было на живом стенде). Здесь /health после убийства либо зависает
+# в этом состоянии, либо восстанавливается.
+HUNG_RESTART_SERVER = """
+import http from 'node:http';
+import { spawn } from 'node:child_process';
+const child = spawn(process.env.FAKE_BROWSER, ['30'], { stdio: 'ignore' });
+const display = spawn(process.env.FAKE_DISPLAY, ['30'], { stdio: 'ignore' });
+console.log('display-pid ' + display.pid);
+let killed = false;
+child.on('exit', () => { killed = true; });
+const server = http.createServer((req, res) => {
+  if (killed && process.env.FAKE_RECOVERS !== '1') {
+    res.statusCode = 503;
+    return res.end(JSON.stringify({ ok: false, engine: 'camoufox', recovering: true }));
+  }
+  res.end(JSON.stringify({ ok: true, browserRunning: !killed, activeTabs: 0, activeSessions: 1 }));
+});
+server.listen(9377, '127.0.0.1');
+setTimeout(() => process.exit(0), 6000);
+"""
+
+
+def _run_hung_restart(run_dir: Path, *, recovers: bool):
+    sock = run_dir / "camofox" / "server.sock"
+    script = run_dir / "hung-server.mjs"
+    script.write_text(HUNG_RESTART_SERVER)
+    browser = run_dir / "camoufox-bin"
+    shutil.copy(shutil.which("sleep"), browser)
+    display = run_dir / "Xvfb"
+    shutil.copy(shutil.which("sleep"), display)
+    proc = subprocess.Popen(
+        ["node", str(WRAPPER), str(script)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env={
+            **os.environ,
+            "CAMOFOX_UNIX_SOCKET": str(sock),
+            "FAKE_BROWSER": str(browser),
+            "FAKE_DISPLAY": str(display),
+            "FAKE_RECOVERS": "1" if recovers else "0",
+            "KORRA_CAMOFOX_STUCK_LIMIT_MS": "500",
+            "KORRA_CAMOFOX_STUCK_RECOVERY_MS": "800",
+        },
+    )
+    out, err = proc.communicate(timeout=15)
+    display_pid = int(out.split("display-pid ")[1].split()[0])
+    return proc.returncode, err, display_pid
+
+
+def _is_dead(pid: int) -> bool:
+    try:
+        state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
+    except FileNotFoundError:
+        return True
+    return state in ("Z", "X")
+
+
+def test_watchdog_restarts_the_whole_process_when_the_server_stays_in_recovery(run_dir):
+    code, err, display_pid = _run_hung_restart(run_dir, recovers=False)
+    assert code == 1
+    assert "принудительное завершение Firefox" in err
+    assert "перезапуск процесса" in err
+    assert _is_dead(display_pid), "Xvfb пережил перезапуск и занял бы дисплей"
+
+
+def test_watchdog_keeps_the_process_when_the_server_recovers_after_the_kill(run_dir):
+    code, err, display_pid = _run_hung_restart(run_dir, recovers=True)
+    assert code == 0
+    assert "принудительное завершение Firefox" in err
+    assert "перезапуск процесса" not in err
+
+
 # Виртуальный экран: Xvfb из camoufox-js не должен слушать абстрактный сокет, который
 # виден всем контейнерам в сети хоста. Каталог пакета повторяет раскладку
 # node_modules/camoufox-js/dist/virtdisplay.js, а аргументы Xvfb — дословно из camoufox-js 0.11.5.

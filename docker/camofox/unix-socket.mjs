@@ -116,7 +116,9 @@ registerHooks({
 // запущен, а вкладок нет дольше, чем апстриму нужно на штатную выгрузку
 // (таймаут сессии + таймаут простоя + две минуты запаса), она убивает дочерние
 // процессы Firefox. Это рвёт зависший вызов, сессия закрывается, следующий
-// запрос запускает браузер заново.
+// запрос запускает браузер заново. Если и после этого /health остаётся нездоровым
+// (апстрим вошёл в перезапуск и ждёт то же зависшее закрытие сессии), процесс
+// завершается целиком вместе с Xvfb, и s6 поднимает сервер заново.
 function envMs(name, fallback) {
   const value = parseInt(process.env[name], 10);
   return Number.isNaN(value) ? fallback : value;
@@ -146,7 +148,7 @@ function readHealth() {
   });
 }
 
-function killBrowserChildren() {
+function killBrowserChildren(includeDisplay = false) {
   const parents = new Map();
   const roots = [];
   for (const entry of fs.readdirSync('/proc')) {
@@ -156,7 +158,7 @@ function killBrowserChildren() {
       const comm = stat.slice(stat.indexOf('(') + 1, stat.lastIndexOf(')'));
       const parent = Number(stat.slice(stat.lastIndexOf(')') + 1).trim().split(' ')[1]);
       parents.set(Number(entry), parent);
-      if (parent === process.pid && /^(camoufox|firefox)/.test(comm)) roots.push(Number(entry));
+      if (parent === process.pid && (/^(camoufox|firefox)/.test(comm) || (includeDisplay && comm === 'Xvfb'))) roots.push(Number(entry));
     } catch { /* процесс уже завершился */ }
   }
   // Остановленные или зависшие процессы содержимого не умирают вместе с родителем.
@@ -183,19 +185,37 @@ function killBrowserChildren() {
 const stuckLimit = stuckLimitMs();
 if (stuckLimit > 0) {
   const tickMs = Math.max(100, Math.min(60000, Math.floor(stuckLimit / 5)));
+  const recoveryMs = envMs('KORRA_CAMOFOX_STUCK_RECOVERY_MS', 120000);
   let emptySince = null;
+  let killedAt = null;
   setInterval(async () => {
     const health = await readHealth();
+    const now = Date.now();
+    if (killedAt !== null) {
+      if (health && health.ok === true) {
+        killedAt = null;
+        emptySince = null;
+        return;
+      }
+      // Закрытие сессии зависло не в Firefox: после убийства браузера апстрим входит в
+      // перезапуск (/health: recovering) и ждёт то же закрытие. Единственный выход —
+      // завершить процесс, s6 поднимет сервер заново (сохранённые входы остаются на диске).
+      if (now - killedAt >= recoveryMs) {
+        console.error(`[camofox] после принудительного завершения Firefox сервер не восстановился за ${Math.round(recoveryMs / 1000)} с: перезапуск процесса (${killBrowserChildren(true)} процессов)`);
+        process.exit(1);
+      }
+      return;
+    }
     if (!health) return;
     if (!health.browserRunning || health.activeTabs > 0) {
       emptySince = null;
       return;
     }
-    const now = Date.now();
     if (emptySince === null) emptySince = now;
     if (now - emptySince < stuckLimit) return;
     emptySince = null;
     console.error(`[camofox] браузер без вкладок дольше ${Math.round(stuckLimit / 1000)} с и не выгружен: принудительное завершение Firefox (${killBrowserChildren()} процессов)`);
+    killedAt = now;
   }, tickMs).unref();
 }
 
