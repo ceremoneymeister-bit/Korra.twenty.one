@@ -2806,7 +2806,8 @@ DEFAULT_CONFIG = {
         # о каждом неудачном запуске.
         "failure_repeat_alert_hours": 6,
         # Регулярное задание, которое не смогло дойти до модели из-за сети (до первого
-        # ответа), повторяется через 5, 15 и 30 минут. false — не повторять.
+        # ответа), повторяется через 5, 15 и 30 минут. Задания со скриптом или источником
+        # монитора не повторяются (скрипт уже выполнен). false — не повторять.
         "retry_unreachable": True,
         # Pre-dispatch configuration validation (T1-26): before constructing
         # any agent machinery for a job, verify the provider API key resolves

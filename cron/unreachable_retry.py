@@ -5,9 +5,11 @@ completed (tunnel or VPN down, sleep/wake) used to sit out a whole period: a dai
 was simply lost. Now ``mark_job_run`` pulls ``next_run_at`` earlier along a 5/15/30-minute
 ladder, and the scheduler holds the failure notice while a re-run is pending.
 
-Deliberately narrow: zero completed API calls means nothing was executed and nothing was
-spent, so a re-run cannot duplicate a side effect or an already-delivered report. Recurring
-jobs only (finite one-shots are pre-claimed by ``claim_dispatch``), never for manual runs,
+Deliberately narrow: zero completed API calls means the MODEL did nothing and cost nothing,
+but a job's own script (``script``) and monitor source (``monitor_script``/``monitor_url``,
+whose new hash is committed before the agent starts) already ran, so such jobs are never
+re-run automatically: the owner gets the ordinary failure notice. Recurring jobs only
+(finite one-shots are pre-claimed by ``claim_dispatch``), never for manual runs,
 and never later than the schedule's own next occurrence. A run that reaches the model
 (either outcome) resets the ladder. ``cron.retry_unreachable: false`` disables.
 
@@ -22,6 +24,7 @@ from typing import Any, Dict, Optional
 
 RETRY_DELAYS_SECONDS: tuple[int, ...] = (300, 900, 1800)
 STATE_KEY = "unreachable_retry"
+_PRE_MODEL_ACTION_KEYS = ("script", "monitor_script", "monitor_url")
 
 # A failure that surfaced as plain text (the agent loop reports "Connection error." without
 # an exception chain) is matched by these phrases; transport exceptions go through
@@ -62,14 +65,17 @@ def is_model_unreachable_failure(exc: BaseException, agent: Any = None) -> bool:
 
 def retry_instant(job: Dict[str, Any], now: datetime) -> Optional[datetime]:
     """The instant the next ladder re-run of this failed, flagged run is parked at, or None
-    when none is: not recurring, paused, manual run, disabled, ladder exhausted, or the
-    schedule's own next occurrence is not later than the rung."""
+    when none is: not recurring, paused, manual run, disabled, a script or monitor source
+    already ran before the model, ladder exhausted, or the schedule's own next occurrence
+    is not later than the rung."""
     from cron.jobs import _ensure_aware, compute_next_run
 
     schedule = job.get("schedule") or {}
     if schedule.get("kind") not in ("cron", "interval") or job.get("state") == "paused":
         return None
     if job.get("manual_run_at") or not retry_enabled():
+        return None
+    if any(str(job.get(key) or "").strip() for key in _PRE_MODEL_ACTION_KEYS):
         return None
     attempt = int((job.get(STATE_KEY) or {}).get("attempt") or 0)
     if attempt >= len(RETRY_DELAYS_SECONDS):
