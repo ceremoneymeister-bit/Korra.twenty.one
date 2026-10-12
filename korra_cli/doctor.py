@@ -892,11 +892,14 @@ def check_speech_recognition(issues: list[str]) -> None:
                f'(вместо {selected}: {reason})')
 
 
-def check_embedded_camofox(issues: list[str]) -> None:
+def check_embedded_camofox(issues: list[str], should_fix: bool = False) -> None:
     """Состояние встроенного Camofox («Браузер с защитой от блокировок»).
 
-    Показывается только в образе, где он установлен. Три состояния:
-    выключен, работает, не отвечает — у каждого понятный следующий шаг.
+    Показывается только в образе, где он установлен. Сервер принадлежит
+    установке, а браузер выбирает профиль, поэтому сверяются настройки всех
+    профилей и маркер включения: выключен без потребителей, работает, не
+    отвечает, выбран, но выключен, включён без потребителей. У каждого
+    состояния понятный следующий шаг; `--fix` приводит маркер к настройкам.
     """
     try:
         from korra_cli import camofox_embedded
@@ -907,27 +910,39 @@ def check_embedded_camofox(issues: list[str]) -> None:
 
     info = camofox_embedded.status()
     state = info["state"]
+    users = ", ".join(info.get("consumers") or [])
     name = 'Браузер с защитой от блокировок (встроенный Camofox)'
+
+    if state in ("selected_off", "unused") and should_fix:
+        try:
+            camofox_embedded.sync()
+        except Exception as exc:
+            check_fail(name, f'(не удалось привести в соответствие с настройками: {exc})')
+            issues.append(f'Встроенный Camofox: не удалось применить настройки профилей: {exc}')
+            return
+        if state == "selected_off":
+            check_ok(name, f'(включён заново по настройкам профилей: {users}; вход на сайтах сохранён)')
+        else:
+            check_ok(name, '(выключен: ни один профиль его не выбрал)')
+        return
+
     if state == "running":
-        check_ok(name, '(работает)')
+        check_ok(name, f'(работает; профили: {users})')
         return
     if state == "not_responding":
         check_fail(name, '(включён, но не отвечает)')
         check_info(info["next"])
         issues.append('Встроенный Camofox не отвечает: ' + info["next"])
         return
-
-    selected = None
-    try:
-        from tools.tool_backend_helpers import read_selection
-
-        selected = read_selection("browser")
-    except Exception:
-        pass
-    if selected == "camofox":
-        check_warn(name, '(выбран в настройках, но сервер выключен)')
-        check_info('Включить заново: korra tools → Браузер → Camofox')
-        issues.append('Camofox выбран, но встроенный сервер выключен: korra tools → Браузер → Camofox')
+    if state == "selected_off":
+        check_warn(name, f'(выбран в настройках профилей: {users}, но сервер выключен)')
+        check_info('Включить заново: korra doctor --fix (или korra tools → Браузер → Camofox)')
+        issues.append('Camofox выбран, но встроенный сервер выключен: korra doctor --fix')
+        return
+    if state == "unused":
+        check_warn(name, '(сервер включён, но ни один профиль его не выбрал)')
+        check_info('Выключить лишний сервер: korra doctor --fix')
+        issues.append('Встроенный Camofox включён без потребителей: korra doctor --fix')
         return
     check_info(f'{name}: выключен. Включить: korra tools → Браузер → Camofox')
 
@@ -3023,7 +3038,7 @@ def run_doctor(args):
                 )
                 check_info(LIGHTPANDA_INSTALL_HINT)
 
-    check_embedded_camofox(issues)
+    check_embedded_camofox(issues, should_fix=should_fix)
 
     # npm audit for all Node.js packages
     _npm_bin = _safe_which("npm")

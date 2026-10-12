@@ -3,69 +3,85 @@
 import contextlib
 import io
 
-import pytest
-
 import korra_cli.doctor as doctor
 from korra_cli import camofox_embedded as emb
+from tests.fakes.camofox_embedded import (  # noqa: F401  (фикстуры)
+    UnixServer,
+    choose_browser,
+    data,
+    in_profile,
+    install,
+)
 
 
-@pytest.fixture
-def image(tmp_path, monkeypatch):
-    home = tmp_path / "opt-camofox"
-    server = home.joinpath(*emb._SERVER_RELPATH)
-    server.parent.mkdir(parents=True)
-    server.write_text("")
-    (home / "browser").mkdir()
-    (home / "browser" / "camoufox-bin").write_text("")
-    monkeypatch.setenv("KORRA_CAMOFOX_HOME", str(home))
-    data = tmp_path / "data"
-    data.mkdir()
-    monkeypatch.setenv("HERMES_HOME", str(data))
-    monkeypatch.setattr("tools.tool_backend_helpers.read_selection", lambda section: None)
-    return data
-
-
-def run():
+def run(should_fix=False):
     issues = []
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
-        doctor.check_embedded_camofox(issues)
+        doctor.check_embedded_camofox(issues, should_fix=should_fix)
     return out.getvalue(), issues
 
 
-def test_silent_outside_the_image(tmp_path, monkeypatch):
+def test_silent_outside_the_image(tmp_path, monkeypatch, data):
     monkeypatch.setenv("KORRA_CAMOFOX_HOME", str(tmp_path / "missing"))
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "data"))
     assert run() == ("", [])
 
 
-def test_disabled_is_a_note_with_how_to_enable(image):
+def test_disabled_is_a_note_with_how_to_enable(install, data):
     out, issues = run()
     assert "выключен" in out
     assert "korra tools" in out
     assert issues == []
 
 
-def test_selected_but_off_is_a_warning_with_a_fix(image, monkeypatch):
-    monkeypatch.setattr("tools.tool_backend_helpers.read_selection", lambda section: "camofox")
+def test_selected_but_off_is_a_warning_and_fix_turns_it_back_on(install, data):
+    with in_profile(data, None):
+        choose_browser("Camofox")
+    emb._enabled_marker().unlink()  # маркер потерян, настройки остались
     out, issues = run()
-    assert "выбран в настройках, но сервер выключен" in out
-    assert len(issues) == 1 and "korra tools" in issues[0]
+    assert "выбран в настройках" in out and "сервер выключен" in out
+    assert "korra doctor --fix" in out
+    assert len(issues) == 1 and "korra doctor --fix" in issues[0]
+
+    out, issues = run(should_fix=True)
+    assert issues == []
+    assert "включён заново" in out and "вход на сайтах сохранён" in out
+    assert emb.is_enabled()
 
 
-def test_running(image, monkeypatch):
+def test_enabled_without_consumers_is_a_warning_and_fix_turns_it_off(install, data):
     emb.enable()
-    monkeypatch.setattr(emb, "health", lambda timeout=2.0: True)
     out, issues = run()
-    assert "работает" in out
+    assert "ни один профиль его не выбрал" in out
+    assert len(issues) == 1 and "korra doctor --fix" in issues[0]
+
+    out, issues = run(should_fix=True)
+    assert issues == []
+    assert not emb.is_enabled()
+
+
+def test_running_lists_the_profiles_that_use_it(install, data):
+    with in_profile(data, "work"):
+        choose_browser("Camofox")
+    with UnixServer(emb.socket_path()):
+        out, issues = run()
+    assert "работает" in out and "work" in out
     assert issues == []
 
 
-def test_not_responding_gives_next_step_and_never_the_key(image, monkeypatch):
-    emb.enable()
-    monkeypatch.setattr(emb, "health", lambda timeout=2.0: False)
+def test_not_responding_gives_next_step_and_never_the_key(install, data):
+    with in_profile(data, None):
+        choose_browser("Camofox")
     out, issues = run()
     assert "не отвечает" in out
-    assert "s6-svc -t /run/service/camofox" in out
+    assert "s6-svc -u /run/service/camofox" in out
     assert len(issues) == 1 and "не отвечает" in issues[0]
     assert emb.access_key() not in out + "".join(issues)
+
+
+def test_fix_does_not_pretend_to_repair_a_silent_server(install, data):
+    with in_profile(data, None):
+        choose_browser("Camofox")
+    out, issues = run(should_fix=True)
+    assert "не отвечает" in out
+    assert len(issues) == 1
