@@ -30,6 +30,7 @@ import json
 import logging
 import os
 import threading
+import time
 import uuid
 from typing import Any, Dict, Optional
 from urllib.parse import SplitResult, urlsplit, urlunsplit
@@ -88,25 +89,79 @@ def _explicit_camofox_url() -> str:
 def _embedded_camofox_endpoint() -> str:
     """Address of the Camofox server bundled in the Korra image, or ``""``.
 
-    The bundled server is used when this profile selected Camofox and no
-    explicit ``CAMOFOX_URL`` is set; merely having it installed never turns it
-    into the default browser. The answer does not depend on whether the server
-    is running right now: the browser choice and the profile's saved logins
-    must not change with server availability.
+    The bundled server is the default browser of the image: it is used when
+    this profile selected Camofox, or never selected a browser at all, and no
+    explicit ``CAMOFOX_URL`` is set. Any other explicit choice (Chromium, a
+    cloud provider, a CDP address) keeps it out. Outside the image there is
+    nothing to use. The answer does not depend on whether the server is
+    running right now: the browser choice and the profile's saved logins must
+    not change with server availability (see :func:`_embedded_unavailable`
+    for the one place that reacts to a dead server).
     """
     try:
         from korra_cli import camofox_embedded
         from tools.tool_backend_helpers import read_selection
 
-        if read_selection("browser") != "camofox":
+        endpoint = camofox_embedded.endpoint()
+        if not endpoint:
             return ""
-        return camofox_embedded.endpoint()
+        selected = read_selection("browser")
+        if selected == "camofox" or (selected is None and camofox_embedded.uses_default_browser()):
+            return endpoint
+        return ""
     except Exception:  # pragma: no cover — helpers are in-repo
         return ""
 
 
 def _using_embedded_camofox() -> bool:
     return not _explicit_camofox_url() and bool(_embedded_camofox_endpoint())
+
+
+_FALLBACK_NOTE = (
+    "Встроенный браузер с защитой от блокировок сейчас не отвечает, поэтому страница открыта обычным "
+    "Chromium (без сохранённых входов этого профиля). Если нужен именно он, подождите полминуты и повторите."
+)
+_HEALTH_TTL = 5.0
+_health_cache: tuple = (0.0, "", True)
+_health_lock = threading.Lock()
+
+
+def _embedded_unavailable() -> bool:
+    """The bundled server is the active browser, but it does not answer.
+
+    Then the browser tools run through ordinary Chromium instead of failing:
+    a crash or a slow start of the bundled server must not leave agents
+    without a browser. The probe is the cheap ``/health`` over the socket
+    (it answers without launching Firefox) and its result is reused for a few
+    seconds. An explicit external ``CAMOFOX_URL`` is never replaced.
+    """
+    global _health_cache
+    if _explicit_camofox_url():
+        return False
+    try:
+        from korra_cli import camofox_embedded
+
+        key = str(camofox_embedded.socket_path())
+        now = time.monotonic()
+        with _health_lock:
+            stamp, cached_key, cached_ok = _health_cache
+            if cached_key == key and now - stamp < _HEALTH_TTL:
+                return not cached_ok
+        ok = camofox_embedded.health()
+        with _health_lock:
+            _health_cache = (time.monotonic(), key, ok)
+        return not ok
+    except Exception:  # pragma: no cover — helpers are in-repo
+        return False
+
+
+def embedded_fallback_note() -> str:
+    """Short note for the agent when this call went to Chromium for lack of the bundled server."""
+    if os.getenv("BROWSER_CDP_URL", "").strip() or _config_cdp_url():
+        return ""
+    if _using_embedded_camofox() and _embedded_unavailable():
+        return _FALLBACK_NOTE
+    return ""
 
 
 _unix_session: Optional[requests.Session] = None
@@ -167,6 +222,10 @@ def _config_cdp_url() -> str:
 def is_camofox_mode() -> bool:
     """True when the Camofox backend is selected and no CDP override is active.
 
+    In the Korra image the bundled Camofox is also the default: a profile that
+    never selected a browser uses it. If the bundled server does not answer,
+    this is False for the call and the browser tools use Chromium instead.
+
     Camofox is a selection: ``browser.cloud_provider: camofox`` (set via
     ``hermes tools``). ``CAMOFOX_URL`` is the server ADDRESS only — its
     presence no longer selects the backend when a different
@@ -192,13 +251,14 @@ def is_camofox_mode() -> bool:
         selected = read_selection("browser")
     except Exception:  # pragma: no cover — helpers are in-repo
         selected = None
-    if selected == "camofox":
-        return True
-    if selected is not None:
+    if selected is not None and selected != "camofox":
         # An explicit different browser selection wins: CAMOFOX_URL is just
         # an address, not a choice.
         return False
-    return bool(get_camofox_url())
+    if selected is None and not get_camofox_url():
+        return False
+    # Bundled server that does not answer: ordinary Chromium takes the call.
+    return not (_using_embedded_camofox() and _embedded_unavailable())
 
 
 def check_camofox_available() -> bool:

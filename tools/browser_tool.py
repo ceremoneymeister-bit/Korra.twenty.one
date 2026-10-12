@@ -4183,7 +4183,33 @@ def evaluate_url_safety(url: str) -> Optional[dict]:
     return None
 
 
+def _camofox_fallback_note() -> str:
+    """Пометка агенту: встроенный Camofox не ответил, вызов идёт через Chromium."""
+    try:
+        from tools.browser_camofox import embedded_fallback_note
+
+        return embedded_fallback_note()
+    except Exception:  # pragma: no cover — модуль в репозитории
+        return ""
+
+
 def browser_navigate(url: str, task_id: Optional[str] = None) -> str:
+    """Navigate to a URL; add a short note when Chromium replaced a silent bundled Camofox."""
+    note = _camofox_fallback_note()
+    result = _browser_navigate(url, task_id)
+    if not note:
+        return result
+    try:
+        payload = json.loads(result)
+    except (TypeError, ValueError):
+        return result
+    if isinstance(payload, dict):
+        payload["note"] = note
+        return json.dumps(payload, ensure_ascii=False)
+    return result
+
+
+def _browser_navigate(url: str, task_id: Optional[str] = None) -> str:
     """
     Navigate to a URL in the browser.
 

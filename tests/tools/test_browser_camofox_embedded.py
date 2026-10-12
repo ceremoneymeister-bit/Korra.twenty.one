@@ -12,6 +12,7 @@ from tests.fakes.camofox_embedded import (  # noqa: F401  (фикстуры)
     TcpSpy,
     UnixServer,
     choose_browser,
+    chromium_root,
     data,
     in_profile,
     install,
@@ -38,10 +39,11 @@ def embedded(install, data):
 
 
 def test_url_and_key_come_from_the_bundled_server_without_any_env(embedded):
-    assert bc.get_camofox_url() == emb.BASE_URL
-    assert bc._auth_headers() == {"Authorization": f"Bearer {emb.access_key()}"}
-    assert bc.is_camofox_mode() is True
-    assert bc._using_embedded_camofox() is True
+    with UnixServer(emb.socket_path(), reply=REPLY):
+        assert bc.get_camofox_url() == emb.BASE_URL
+        assert bc._auth_headers() == {"Authorization": f"Bearer {emb.access_key()}"}
+        assert bc.is_camofox_mode() is True
+        assert bc._using_embedded_camofox() is True
 
 
 def test_explicit_camofox_url_and_api_key_win_over_the_bundled_server(embedded, monkeypatch):
@@ -59,15 +61,52 @@ def test_bundled_server_is_not_used_when_another_browser_is_selected(embedded):
     assert bc.is_camofox_mode() is False
 
 
-def test_bundled_server_never_becomes_the_default_browser(install, data):
+def test_profile_without_a_browser_choice_uses_the_bundled_server(install, data):
+    emb.sync()
+    with UnixServer(emb.socket_path(), reply=REPLY):
+        assert bc.get_camofox_url() == emb.BASE_URL
+        assert bc.is_camofox_mode() is True
+        assert bc._using_embedded_camofox() is True
+        assert bc._auth_headers() == {"Authorization": f"Bearer {emb.access_key()}"}
+        assert bc._managed_persistence_enabled() is True
+
+
+@pytest.mark.parametrize(
+    "browser",
+    [
+        {"cloud_provider": "local"},
+        {"cloud_provider": "browserbase"},
+        {"cdp_url": "http://127.0.0.1:9222"},
+        {"backend": "browser-use"},
+    ],
+)
+def test_explicit_choices_keep_the_default_out(install, data, browser):
+    from korra_cli.config import save_config
+
+    save_config({"browser": browser})
+    with UnixServer(emb.socket_path(), reply=REPLY):
+        assert bc.get_camofox_url() == ""
+        assert bc.is_camofox_mode() is False
+
+
+def test_external_server_beats_the_default(install, data, monkeypatch):
+    monkeypatch.setenv("CAMOFOX_URL", "http://other-host:9377")
+    assert bc.get_camofox_url() == "http://other-host:9377"
+    assert bc.is_camofox_mode() is True
+    assert bc._using_embedded_camofox() is False
+    assert bc.embedded_fallback_note() == ""
+
+
+def test_nothing_changes_outside_the_image(tmp_path, monkeypatch, data):
+    monkeypatch.setenv("KORRA_CAMOFOX_HOME", str(tmp_path / "missing"))
     assert bc.get_camofox_url() == ""
     assert bc.is_camofox_mode() is False
+    assert bc.embedded_fallback_note() == ""
 
 
-def test_selection_and_identity_do_not_depend_on_the_server_running(embedded):
+def test_identity_does_not_depend_on_the_server_running(embedded):
     emb.disable()
     assert bc.get_camofox_url() == emb.BASE_URL
-    assert bc.is_camofox_mode() is True
     assert bc._auth_headers() == {"Authorization": f"Bearer {emb.access_key()}"}
     assert bc._managed_persistence_enabled() is True
 
@@ -217,7 +256,7 @@ def test_external_server_keeps_the_original_connection_error(embedded, monkeypat
 # ── Два профиля одной установки ────────────────────────────────────────────
 
 
-def test_two_profiles_with_different_browsers_do_not_disturb_each_other(install, data):
+def test_two_profiles_with_different_browsers_do_not_disturb_each_other(chromium_root, install, data):
     with in_profile(data, "a"):
         choose_browser("Camofox")
         id_a = get_camofox_identity("a")
@@ -228,13 +267,12 @@ def test_two_profiles_with_different_browsers_do_not_disturb_each_other(install,
         assert bc.get_camofox_url() == ""
         assert bc.is_camofox_mode() is False
     assert emb.is_enabled()  # профиль A всё ещё пользуется сервером
-    with in_profile(data, "a"):
+    with in_profile(data, "a"), UnixServer(emb.socket_path(), reply=REPLY):
         assert bc.is_camofox_mode() is True
         assert bc.get_camofox_url() == emb.BASE_URL
         assert bc._managed_persistence_enabled() is True
-        with UnixServer(emb.socket_path(), reply=REPLY):
-            assert json.loads(bc.camofox_navigate("https://example.com", "a"))["success"] is True
-            assert bc._get_session("a")["user_id"] == id_a["user_id"]
+        assert json.loads(bc.camofox_navigate("https://example.com", "a"))["success"] is True
+        assert bc._get_session("a")["user_id"] == id_a["user_id"]
     assert id_a["user_id"] != id_b["user_id"]
     with in_profile(data, "a"):
         choose_browser("Local Browser")
@@ -248,7 +286,9 @@ def _navigate(url, monkeypatch, terminal_env="local"):
     import tools.browser_tool as bt
 
     monkeypatch.setenv("TERMINAL_ENV", terminal_env)
-    with patch("tools.browser_camofox.camofox_navigate", return_value='{"success": true}') as nav:
+    with UnixServer(emb.socket_path(), reply=REPLY), patch(
+        "tools.browser_camofox.camofox_navigate", return_value='{"success": true}'
+    ) as nav:
         result = json.loads(bt.browser_navigate(url, task_id="ssrf"))
     return result, nav
 
@@ -272,3 +312,76 @@ def test_public_page_reaches_the_bundled_server(embedded, monkeypatch):
         result, nav = _navigate("https://example.com/", monkeypatch)
     assert result.get("success") is True
     nav.assert_called_once()
+
+
+# ── Сервер не отвечает: вызов уходит в Chromium с пометкой ─────────────────
+
+
+@pytest.fixture(autouse=True)
+def _fresh_health():
+    bc._health_cache = (0.0, "", True)
+    yield
+    bc._health_cache = (0.0, "", True)
+
+
+def _navigate_through_dispatch(url="https://example.com/"):
+    import tools.browser_tool as bt
+
+    chromium = {"success": True, "data": {"title": "t", "url": url}}
+    with patch("tools.browser_tool._run_browser_command", return_value=chromium) as run, patch(
+        "tools.browser_camofox.camofox_navigate", return_value='{"success": true, "via": "camofox"}'
+    ) as camofox:
+        result = json.loads(bt.browser_navigate(url, task_id="fallback"))
+    return result, run, camofox
+
+
+@pytest.mark.parametrize("how", ["default", "selected"])
+def test_silent_server_sends_the_call_to_chromium_with_a_short_note(install, data, how):
+    if how == "selected":
+        choose_browser("Camofox")
+    assert bc.is_camofox_mode() is False
+    result, run, camofox = _navigate_through_dispatch()
+    camofox.assert_not_called()
+    run.assert_called()
+    assert result["success"] is True
+    assert "Chromium" in result["note"] and "не отвечает" in result["note"]
+    assert bc._sessions == {}
+
+
+def test_running_server_takes_the_call_without_a_note(install, data):
+    with UnixServer(emb.socket_path(), reply=REPLY):
+        result, run, camofox = _navigate_through_dispatch()
+    camofox.assert_called_once()
+    run.assert_not_called()
+    assert "note" not in result
+
+
+def test_server_switched_off_by_an_explicit_chromium_choice_is_not_a_failure(chromium_root, install, data):
+    result, run, camofox = _navigate_through_dispatch()
+    camofox.assert_not_called()
+    assert result["success"] is True and "note" not in result
+
+
+def test_external_server_failure_is_not_replaced_by_chromium(install, data, monkeypatch):
+    monkeypatch.setenv("CAMOFOX_URL", "http://127.0.0.1:1")
+    assert bc.is_camofox_mode() is True
+    assert bc.embedded_fallback_note() == ""
+
+
+def test_cdp_override_is_not_annotated(install, data, monkeypatch):
+    monkeypatch.setenv("BROWSER_CDP_URL", "ws://127.0.0.1:9222/devtools/browser/x")
+    assert bc.embedded_fallback_note() == ""
+
+
+def test_the_server_coming_back_returns_calls_to_camofox(install, data, monkeypatch):
+    assert bc.is_camofox_mode() is False
+    with UnixServer(emb.socket_path(), reply=REPLY):
+        monkeypatch.setattr(bc, "_HEALTH_TTL", 0.0)
+        assert bc.is_camofox_mode() is True
+
+
+def test_health_probe_is_reused_for_a_few_seconds(install, data):
+    with patch.object(emb, "health", return_value=False) as probe:
+        for _ in range(5):
+            assert bc.is_camofox_mode() is False
+    assert probe.call_count == 1
