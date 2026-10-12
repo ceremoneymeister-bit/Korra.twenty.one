@@ -12851,6 +12851,10 @@ def cmd_tools(args):
         from korra_cli.tools_config import run_post_setup_command
 
         sys.exit(run_post_setup_command(args))
+    elif action == "camofox":
+        from korra_cli.camofox_embedded import tools_command as camofox_switch
+
+        sys.exit(camofox_switch(args.camofox_action))
     else:
         _require_tty("tools")
         from korra_cli.tools_config import tools_command

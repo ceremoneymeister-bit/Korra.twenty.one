@@ -1,11 +1,14 @@
 """Встроенный Camofox («Браузер с защитой от блокировок») в коробке Korra.
 
 Образ содержит Camofox в ``/opt/camofox`` (см. Dockerfile), а s6-сервис
-``camofox`` запускает его только когда он нужен хотя бы одному профилю.
+``camofox`` принадлежит установке и работает всегда, когда Camofox есть в
+образе. Браузер внутри ленивый: Firefox запускается первым запросом и
+закрывается после простоя, так что без запросов сервер держит только Node.
 Состояние живёт в ``<корень данных>/camofox`` и переживает пересоздание
 контейнера:
 
-* ``enabled`` — маркер: сервис должен работать (кэш для run-скрипта s6);
+* ``disabled`` — единственный выключатель установки: файл есть — сервер не
+  запускается (слабый сервер, поддержка). По умолчанию файла нет;
 * ``server.sock`` — Unix-сокет сервера (0600) в каталоге 0700;
 * ``access.key`` — ключ доступа этой установки (0600);
 * ``profiles/`` — профили браузера (вход на сайты).
@@ -19,16 +22,11 @@
 Camofox — браузер по умолчанию в образе: профиль, который не выбирал браузер
 явно, работает через него (:func:`uses_default_browser`). Явный выбор (обычный
 Chromium, облачный провайдер, ``browser.cdp_url``, внешний ``CAMOFOX_URL``)
-сохраняется.
-
-Источник правды о том, нужен ли сервер, — настройки профилей (корень и
-``profiles/*``): сервер включён, пока хотя бы один профиль пользуется Camofox
-(выбрал его или ничего не выбирал) без явного внешнего ``CAMOFOX_URL``. Маркер
-``enabled`` — только кэш этого решения для s6 (:func:`sync` пересчитывает его,
-в том числе при каждом старте сервиса).
+сохраняется. Выбор браузера профильный и влияет только на маршрутизацию
+вызовов профиля; сервер от него не зависит.
 
 Модуль не импортирует ничего тяжёлого на верхнем уровне: он нужен и клиенту
-браузера, и run-скрипту s6, и ``korra doctor``. Ключ нигде не печатается.
+браузера, и ``korra doctor``. Ключ нигде не печатается.
 """
 
 from __future__ import annotations
@@ -108,16 +106,22 @@ def socket_path_problem() -> str:
     return ""
 
 
-def _enabled_marker() -> Path:
-    return state_dir() / "enabled"
+def _disabled_marker() -> Path:
+    return state_dir() / "disabled"
 
 
 def _key_file() -> Path:
     return state_dir() / "access.key"
 
 
+def is_disabled() -> bool:
+    """Владелец или поддержка выключили сервер этой установки."""
+    return _disabled_marker().is_file()
+
+
 def is_enabled() -> bool:
-    return _enabled_marker().is_file()
+    """Сервер есть в образе и не выключен выключателем установки."""
+    return is_installed() and not is_disabled()
 
 
 def _ensure_dir() -> Path:
@@ -233,91 +237,44 @@ def _s6_svc(flag: str) -> None:
 
 
 def enable() -> None:
-    """Поставить маркер: s6 заметит его за несколько секунд и запустит сервер."""
-    ensure_state()
-    if not is_enabled():
-        _write_private(_enabled_marker(), "1\n")
+    """Снять выключатель: s6 заметит это за несколько секунд и запустит сервер."""
+    _disabled_marker().unlink(missing_ok=True)
 
 
 def disable(signal: bool = True) -> None:
-    """Убрать маркер и остановить сервер (выбор профилей не меняется).
+    """Поставить выключатель и остановить сервер (выбор браузера в профилях не меняется).
 
-    ``signal=False`` — только маркер: так делает сам сервис s6 при старте,
-    он не должен перезапускать сам себя.
+    Пока файл ``disabled`` лежит, s6 держит сервис в ожидании без Node и
+    браузера. Контейнер пересоздавать не нужно.
     """
-    try:
-        _enabled_marker().unlink()
-    except OSError:
-        return
+    _ensure_dir()
+    marker = _disabled_marker()
+    if not marker.is_file():
+        _write_private(marker, "1\n")
     if signal:
         _s6_svc("-t")
 
 
-# ── Какие профили нуждаются в сервере ──────────────────────────────────────
+def _dotenv_url() -> str:
+    from korra_cli.config import load_env
+
+    return (load_env().get("CAMOFOX_URL") or "").strip()
 
 
-def _profile_homes() -> List[Path]:
-    """Корень данных и живые ``profiles/*``."""
-    from korra_constants import named_profile_is_deleted
-
-    root = state_dir().parent
-    homes = [root]
-    profiles = root / "profiles"
+def explicit_url() -> str:
+    """Явный внешний ``CAMOFOX_URL`` текущего профиля (пустая строка, если не задан)."""
+    own = _dotenv_url()
+    if own:
+        return own
     try:
-        entries = sorted(profiles.iterdir())
-    except OSError:
-        entries = []
-    for entry in entries:
-        if entry.name.startswith(".") or not entry.is_dir():
-            continue
-        if named_profile_is_deleted(entry):
-            continue
-        homes.append(entry)
-    return homes
+        from agent.secret_scope import get_secret
+
+        return (get_secret("CAMOFOX_URL", "") or "").strip()
+    except Exception:
+        return (os.environ.get("CAMOFOX_URL") or "").strip()
 
 
-def _current_home() -> Path:
-    from korra_constants import get_hermes_home
-
-    return get_hermes_home()
-
-
-def _is_deleted(home: Path) -> bool:
-    from korra_constants import named_profile_is_deleted
-
-    return named_profile_is_deleted(home)
-
-
-def _same_dir(a: Path, b: Path) -> bool:
-    try:
-        return a.resolve() == b.resolve()
-    except OSError:
-        return a == b
-
-
-class _InHome:
-    """Контекст: читать настройки профиля ``home`` через обычные функции движка."""
-
-    def __init__(self, home: Path) -> None:
-        self.home = home
-
-    def __enter__(self) -> "_InHome":
-        from korra_constants import set_hermes_home_override
-
-        self.token = set_hermes_home_override(str(self.home))
-        return self
-
-    def __exit__(self, *exc) -> None:
-        from korra_constants import reset_hermes_home_override
-
-        reset_hermes_home_override(self.token)
-
-
-def _selection(home: Path) -> Optional[str]:
-    from tools.tool_backend_helpers import read_selection
-
-    with _InHome(home):
-        return read_selection("browser")
+# ── Выбор браузера текущим профилем ────────────────────────────────────────
 
 
 def _chose_other_browser() -> bool:
@@ -370,94 +327,6 @@ def uses_default_browser() -> bool:
     if read_selection("browser") is not None:
         return False
     return not _chose_other_browser()
-
-
-def _uses_default_browser_in(home: Path) -> bool:
-    with _InHome(home):
-        return uses_default_browser()
-
-
-def _dotenv_url(home: Path) -> str:
-    from korra_cli.config import load_env
-
-    with _InHome(home):
-        return (load_env().get("CAMOFOX_URL") or "").strip()
-
-
-def explicit_url(home: Path, current: Optional[Path] = None) -> str:
-    """Явный внешний ``CAMOFOX_URL`` профиля ``home`` (пустая строка, если не задан).
-
-    Берётся из ``.env`` профиля. Значение из окружения процесса относится к
-    профилю, в котором процесс запущен, и к контейнеру в целом; для чужого
-    профиля оно засчитывается, только если не совпадает с ``.env`` текущего
-    (иначе это просто загруженный ``.env`` текущего профиля).
-    """
-    current = current or _current_home()
-    own = _dotenv_url(home)
-    if own:
-        return own
-    from_process = ""
-    try:
-        from agent.secret_scope import get_secret
-
-        from_process = (get_secret("CAMOFOX_URL", "") or "").strip()
-    except Exception:
-        from_process = (os.environ.get("CAMOFOX_URL") or "").strip()
-    if not from_process:
-        return ""
-    if _same_dir(home, current):
-        return from_process
-    return "" if from_process == _dotenv_url(current) else from_process
-
-
-def current_explicit_url() -> str:
-    """Явный внешний ``CAMOFOX_URL`` текущего профиля (пустая строка, если не задан)."""
-    return explicit_url(_current_home())
-
-
-def wants_embedded(home: Path, current: Optional[Path] = None) -> bool:
-    """Профиль пользуется Camofox (выбрал или не выбирал ничего) и не указал внешний сервер."""
-    if explicit_url(home, current):
-        return False
-    return _selection(home) == "camofox" or _uses_default_browser_in(home)
-
-
-def consumers(current_selected: Optional[bool] = None) -> List[str]:
-    """Профили, которым нужен встроенный сервер (имена: ``default`` и из ``profiles/``).
-
-    ``current_selected`` — выбор текущего профиля, который ещё не записан на
-    диск (его передаёт код, меняющий настройку): он заменяет прочитанное.
-    """
-    current = _current_home()
-    homes = _profile_homes()
-    if not any(_same_dir(h, current) for h in homes) and not _is_deleted(current):
-        homes.append(current)
-    root = state_dir().parent
-    names: List[str] = []
-    for home in homes:
-        if current_selected is not None and _same_dir(home, current):
-            wanted = bool(current_selected) and not explicit_url(home, current)
-        else:
-            wanted = wants_embedded(home, current)
-        if wanted:
-            names.append("default" if _same_dir(home, root) else home.name)
-    return names
-
-
-def sync(current_selected: Optional[bool] = None, signal: bool = True) -> bool:
-    """Привести сервер в соответствие с настройками профилей; True, если он нужен.
-
-    Включён, пока хотя бы один профиль пользуется Camofox без внешнего адреса;
-    выключается, когда потребителей не осталось.
-    """
-    if not is_installed():
-        return False
-    wanted = bool(consumers(current_selected))
-    if wanted:
-        enable()
-    else:
-        disable(signal=signal)
-    return wanted
 
 
 # ── Состояние ──────────────────────────────────────────────────────────────
@@ -542,58 +411,61 @@ def health(timeout: float = 2.0) -> bool:
 
 
 def status() -> Dict[str, object]:
-    """Состояние для doctor и панели: ``state``, пояснение и следующий шаг.
+    """Состояние для doctor: ``state``, пояснение и следующий шаг.
 
-    state: ``not_installed`` (нет в образе), ``disabled`` (все профили выбрали
-    другой браузер), ``selected_off`` (нужен профилям, но сервер выключен),
-    ``unused`` (сервер включён, но профилей-потребителей нет), ``running``,
-    ``not_responding``.
+    state: ``not_installed`` (нет в образе), ``switched_off`` (выключатель
+    установки), ``running``, ``not_responding``.
     """
     if not is_installed():
         return {
             "state": "not_installed",
             "detail": "в этой сборке нет встроенного Camofox",
             "next": "используйте образ Korra с Camofox или внешний сервер (CAMOFOX_URL)",
-            "consumers": [],
         }
-    users = consumers()
-    base: Dict[str, object] = {"consumers": users}
-    if not is_enabled():
-        if users:
-            return {
-                **base,
-                "state": "selected_off",
-                "detail": "нужен профилям (по умолчанию или по выбору), но сервер выключен",
-                "next": "вернуть сервер: korra doctor --fix",
-            }
+    if is_disabled():
         return {
-            **base,
-            "state": "disabled",
-            "detail": "выключен: все профили выбрали другой браузер",
-            "next": "включить: korra tools → Браузер → «Браузер с защитой от блокировок»",
+            "state": "switched_off",
+            "detail": "выключен на этой установке",
+            "next": "включить: korra tools camofox on",
         }
     problem = socket_path_problem()
     if problem:
-        return {**base, "state": "not_responding", "detail": "включён, но не может запуститься", "next": problem}
-    if not users:
-        return {
-            **base,
-            "state": "unused",
-            "detail": "включён, но ни одному профилю он не нужен",
-            "next": "выключить лишний сервер: korra doctor --fix",
-        }
+        return {"state": "not_responding", "detail": "не может запуститься", "next": problem}
     if health():
-        return {**base, "state": "running", "detail": "работает", "next": ""}
+        return {"state": "running", "detail": "работает", "next": ""}
     return {
-        **base,
         "state": "not_responding",
         "detail": "включён, но не отвечает",
         "next": (
-            "подождите полминуты после включения; если не проходит — запустите службу: "
+            "подождите полминуты после запуска контейнера; если не проходит — запустите службу: "
             "s6-svc -u /run/service/camofox (если она уже работала, перезапустите: "
             "s6-svc -t /run/service/camofox), затем посмотрите лог контейнера (docker logs)"
         ),
     }
+
+
+def tools_command(action: str) -> int:
+    """``korra tools camofox {on|off|status}``: выключатель сервера этой установки."""
+    if not is_installed():
+        print("В этой сборке нет встроенного Camofox: переключать нечего.")
+        return 1
+    if action == "on":
+        enable()
+        print("Встроенный Camofox включён: сервер запустится в течение нескольких секунд.")
+        print("Проверить: korra doctor")
+        return 0
+    if action == "off":
+        disable()
+        print("Встроенный Camofox выключен на этой установке: Node и браузер остановлены.")
+        print("Профили без явного выбора браузера работают через Chromium без ошибок;")
+        print("профили, которые явно выбрали Camofox, получат понятную ошибку.")
+        print("Включить обратно: korra tools camofox on")
+        return 0
+    info = status()
+    print(f"Встроенный Camofox: {info['detail']}")
+    if info["next"]:
+        print(info["next"])
+    return 0 if info["state"] in ("running", "switched_off") else 1
 
 
 def server_env() -> Dict[str, str]:
@@ -660,17 +532,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     if command == "disable":
         disable()
         return 0
-    if command == "sync":
-        # Вызывается из run-скрипта s6: сам себя сервис перезапускать не должен.
-        print("нужен" if sync(signal=False) else "не нужен")
-        return 0
     if command == "status":
         info = status()
         print(f"{info['state']}: {info['detail']}")
         if info["next"]:
             print(info["next"])
-        return 0 if info["state"] in ("running", "disabled") else 1
-    print("usage: python -m korra_cli.camofox_embedded {serve|enable|disable|sync|status}", file=sys.stderr)
+        return 0 if info["state"] == "running" else 1
+    print("usage: python -m korra_cli.camofox_embedded {serve|enable|disable|status}", file=sys.stderr)
     return 2
 
 

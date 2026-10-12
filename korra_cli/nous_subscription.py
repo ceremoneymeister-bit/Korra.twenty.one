@@ -624,21 +624,21 @@ def get_nous_subscription_features(
         direct_camofox = False
     elif browser_selected == "camofox" and not direct_camofox:
         # Встроенный сервер из образа Korra: адрес не лежит в CAMOFOX_URL,
-        # о том, что он включён, говорит маркер рядом с данными.
+        # о том, что он не выключен, говорит выключатель установки.
         try:
             from korra_cli import camofox_embedded
 
-            direct_camofox = camofox_embedded.is_enabled() and camofox_embedded.is_installed()
+            direct_camofox = camofox_embedded.is_enabled()
         except Exception:
             direct_camofox = False
     elif browser_selected is None and not direct_camofox:
         # Браузер не выбирали: в образе Korra его заменяет встроенный Camofox.
-        # Если сервер не отвечает, вызов уходит в Chromium, поэтому маркер
-        # включения здесь не проверяется.
+        # Если сервер не отвечает, вызов уходит в Chromium, поэтому живость
+        # сервера здесь не проверяется; выключатель установки — проверяется.
         try:
             from korra_cli import camofox_embedded
 
-            direct_camofox = camofox_embedded.uses_default_browser()
+            direct_camofox = camofox_embedded.is_enabled() and camofox_embedded.uses_default_browser()
         except Exception:
             direct_camofox = False
 
