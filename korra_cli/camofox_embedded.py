@@ -89,7 +89,23 @@ def _ensure_dir() -> Path:
         path.chmod(0o700)
     except OSError:
         pass
+    _match_data_owner(path)
     return path
+
+
+def _match_data_owner(path: Path) -> None:
+    """Файлы, созданные root (docker exec), отдать владельцу каталога данных.
+
+    Сервис работает от hermes: ключ и порт, принадлежащие root с правами 0600,
+    он бы не прочитал.
+    """
+    if not hasattr(os, "geteuid") or os.geteuid() != 0:
+        return
+    try:
+        owner = state_dir().parent.stat()
+        os.chown(path, owner.st_uid, owner.st_gid)
+    except OSError:
+        pass
 
 
 def _write_private(path: Path, text: str) -> None:
@@ -97,6 +113,7 @@ def _write_private(path: Path, text: str) -> None:
     fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
         handle.write(text)
+    _match_data_owner(tmp)
     os.replace(tmp, path)
 
 

@@ -229,3 +229,15 @@ def test_cli_status_never_prints_the_key(install, tmp_path, monkeypatch, capsys)
     assert emb.main(["status"]) == 1
     out = capsys.readouterr()
     assert emb.access_key() not in out.out + out.err
+
+
+def test_files_made_by_root_are_handed_to_the_data_owner(install, tmp_path, monkeypatch):
+    data = use_data(monkeypatch, tmp_path / "a")
+    owner = data.stat()
+    chowned = []
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
+    monkeypatch.setattr(os, "chown", lambda path, uid, gid: chowned.append((Path(path).name, uid, gid)))
+    emb.enable()
+    names = {name for name, _, _ in chowned}
+    assert {"camofox", "access.key.tmp", "port.tmp", "enabled.tmp"} <= names
+    assert all((uid, gid) == (owner.st_uid, owner.st_gid) for _, uid, gid in chowned)
