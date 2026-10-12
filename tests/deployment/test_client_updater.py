@@ -1522,6 +1522,28 @@ def test_a_disk_without_room_for_every_copy_never_drains(updater, monkeypatch):
     assert not any(call[0] in {"native", "stop", "pull"} for call in updater.calls)
 
 
+def test_a_package_migrated_after_the_gate_is_paid_for_before_the_container_stops(updater, monkeypatch):
+    # The package lands in DATA, then `before` and the restore stage copy it
+    # again: the gate that ran before the migration did not count it.
+    _blob(updater, 4)
+    updater.free_space = u.Updater.free_space.__get__(updater)
+    disk = {"free": _copies_needed(updater, "link") + 2 * 1024**3}
+    monkeypatch.setattr(u.shutil, "disk_usage", lambda path: types.SimpleNamespace(free=disk["free"]))
+
+    def migrate():
+        (updater.data / "lazy-packages").mkdir()
+        (updater.data / "lazy-packages/blob.bin").write_bytes(os.urandom(2 << 20))
+        disk["free"] -= 2 << 20
+
+    monkeypatch.setattr(updater, "migrate_writable_packages", migrate)
+    with pytest.raises(u.UpdateError, match="Insufficient space"):
+        updater.update("registry.example/korra:latest")
+    assert not any(call[0] == "stop" for call in updater.calls)
+    assert updater.running and updater.image == OLD and not updater.is_draining
+    assert updater.receipt["status"] == "failed" and "Insufficient space" in updater.receipt["error"]
+    assert not (updater.job / "before").exists()
+
+
 # Every place updater.py writes a physical copy, and the budget term that pays for it.
 COPY_SITES = {
     ("snapshot", "copytree"): "data_bytes",
@@ -1529,9 +1551,9 @@ COPY_SITES = {
     ("link_tree", "copy2"): "config_bytes",
     ("overlay_credentials", "copy2"): "credential_bytes",
     ("Updater.rehearse_schema", "copy2"): "state_db_bytes",
-    # Runs in the container, once, sized by the old container's diff: unknown
-    # when the gate runs and absorbed by its headroom.
-    ("MIGRATE_PACKAGES_CODE", "copy2"): "headroom_bytes",
+    # Runs in the container, sized by the old container's diff: unknown at the
+    # first gate. Its bytes land in DATA, so the gate runs again after it.
+    ("MIGRATE_PACKAGES_CODE", "copy2"): "data_bytes",
 }
 
 

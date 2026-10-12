@@ -2955,6 +2955,9 @@ print(json.dumps(changed))
             self.drain()
             self.inspect_target(old)
             self.migrate_writable_packages()
+            # Migrated packages now sit in DATA and are copied again by `before`
+            # and the restore stage: ask the gate once more, still before stop.
+            self.free_space()
             self.phase("stopping")
             self.docker("stop", "--time", "60", self.name, timeout=90)
             stopped = True
