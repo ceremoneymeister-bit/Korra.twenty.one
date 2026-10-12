@@ -121,3 +121,62 @@ def test_wrapper_refuses_to_start_without_a_socket_path(run_dir):
     done = subprocess.run(["node", str(WRAPPER), str(script)], capture_output=True, text=True, env=env, timeout=10)
     assert done.returncode == 1
     assert "should not run" not in done.stdout
+
+
+PREWARM_SERVER = """
+import http from 'node:http';
+let launched = 0;
+async function ensureBrowser() { launched += 1; }
+function log(level, message) { console.log(message); }
+function scheduleBrowserIdleShutdown() {}
+const server = http.createServer((req, res) => res.end('launched=' + launched));
+server.listen(9377, '127.0.0.1', async () => {
+  try {
+    const start = Date.now();
+    await ensureBrowser();
+    log('info', 'browser pre-warmed', { ms: Date.now() - start });
+    scheduleBrowserIdleShutdown();
+  } catch (err) {
+    log('error', 'pre-warm failed');
+  }
+  console.log('ready');
+});
+setTimeout(() => process.exit(0), 1500);
+"""
+
+
+def _run_prewarm_server(run_dir: Path, source: str):
+    sock = run_dir / "camofox" / "server.sock"
+    script = run_dir / "prewarm-server.mjs"
+    script.write_text(source)
+    proc = subprocess.Popen(
+        ["node", str(WRAPPER), str(script)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env={**os.environ, "CAMOFOX_UNIX_SOCKET": str(sock)},
+    )
+    try:
+        _wait_for(sock)
+        time.sleep(0.3)
+        body = _get(sock).decode()
+        out, err = proc.communicate(timeout=10)
+    finally:
+        proc.kill()
+    return body, out, err
+
+
+def test_browser_prewarm_at_start_is_skipped_without_touching_the_package(run_dir):
+    body, out, err = _run_prewarm_server(run_dir, PREWARM_SERVER)
+    assert body.endswith("launched=0")
+    assert "ready" in out
+    assert "pre-warm skipped" in out and "browser pre-warmed" not in out
+    assert "не найден" not in err
+    assert (run_dir / "prewarm-server.mjs").read_text() == PREWARM_SERVER
+
+
+def test_changed_package_keeps_working_with_prewarm_and_says_so(run_dir):
+    changed = PREWARM_SERVER.replace("await ensureBrowser();", "await ensureBrowser(); /* новая версия */")
+    body, out, err = _run_prewarm_server(run_dir, changed)
+    assert body.endswith("launched=1")
+    assert "блок прогрева в server.js не найден" in err

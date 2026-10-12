@@ -6,10 +6,18 @@
 // мы перенаправляем именно его на сокет из CAMOFOX_UNIX_SOCKET до импорта
 // сервера. Любой другой TCP listen в этом процессе запрещён.
 //
+// Прогрев браузера при старте отключён: апстрим сразу запускает Firefox
+// (около 0,5 ГиБ) и держит его пять минут, а Camofox теперь работает у всех
+// установок. Файлы пакета не правятся: при загрузке server.js в памяти
+// подменяется ровно один блок, браузер запускается первым запросом. Если
+// блок в новой версии пакета изменился, сервер стартует с прогревом и пишет
+// об этом в лог.
+//
 // Использование: node unix-socket.mjs /путь/к/server.js
 import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
+import { registerHooks } from 'node:module';
 import { pathToFileURL } from 'node:url';
 
 const socketPath = process.env.CAMOFOX_UNIX_SOCKET || '';
@@ -59,4 +67,24 @@ net.Server.prototype.listen = function listen(...args) {
   return originalListen.call(this, socketPath, callback);
 };
 
-await import(pathToFileURL(serverScript).href);
+const PREWARM_BLOCK =
+  "    await ensureBrowser();\n" +
+  "    log('info', 'browser pre-warmed', { ms: Date.now() - start });\n" +
+  "    scheduleBrowserIdleShutdown();\n";
+const PREWARM_SKIPPED = "    log('info', 'browser pre-warm skipped (Korra): the first request starts it');\n";
+const serverUrl = pathToFileURL(serverScript).href;
+
+registerHooks({
+  load(url, context, nextLoad) {
+    const result = nextLoad(url, context);
+    if (url !== serverUrl || result.source == null) return result;
+    const text = Buffer.from(result.source).toString('utf8');
+    if (!text.includes(PREWARM_BLOCK)) {
+      console.error('[camofox] блок прогрева в server.js не найден: браузер запустится при старте сервера');
+      return result;
+    }
+    return { ...result, source: text.replace(PREWARM_BLOCK, () => PREWARM_SKIPPED) };
+  },
+});
+
+await import(serverUrl);
