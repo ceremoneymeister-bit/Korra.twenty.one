@@ -492,3 +492,98 @@ def test_korra_tools_camofox_command_reaches_the_switch(install, data):
     assert "выключен" in status.stdout
     assert tools("on").returncode == 0
     assert not (data / "camofox" / "disabled").exists()
+
+
+# ── Удаление профиля убирает его вход во встроенном Camofox ────────────────
+
+
+def _saved_login(data, profile):
+    """Как клиент и сервер: userId из профиля, каталог сервера — sha256 от него."""
+    import hashlib
+
+    from tools.browser_camofox_state import get_camofox_identity
+
+    with in_profile(data, profile):
+        user_id = get_camofox_identity("t")["user_id"]
+    folder = data / "camofox" / "profiles" / hashlib.sha256(user_id.encode()).hexdigest()[:32]
+    folder.mkdir(parents=True)
+    (folder / "storage-state.json").write_text('{"cookies": [{"name": "sid"}]}')
+    return user_id, folder
+
+
+def _delete(name):
+    from korra_cli import profiles
+
+    profiles.delete_profile(name, yes=True)
+
+
+def test_deleting_a_profile_removes_its_saved_login_and_only_its_own(install, data):
+    (data / "profiles" / "gone").mkdir(parents=True)
+    (data / "profiles" / "stays").mkdir(parents=True)
+    _, gone = _saved_login(data, "gone")
+    _, stays = _saved_login(data, "stays")
+    _delete("gone")
+    assert not gone.exists()
+    assert (stays / "storage-state.json").is_file()
+    assert (data / "camofox" / "profiles").is_dir()
+
+
+def test_the_running_server_is_told_to_close_the_session_before_the_files_go(install, data):
+    (data / "profiles" / "gone").mkdir(parents=True)
+    user_id, folder = _saved_login(data, "gone")
+    emb.ensure_state()
+    present_at_request = []
+
+    def respond(method, path, body):
+        present_at_request.append(folder.exists())
+
+    with UnixServer(emb.socket_path(), respond=respond) as server:
+        _delete("gone")
+    deletes = [r for r in server.seen if r["method"] == "DELETE"]
+    assert [r["path"] for r in deletes] == [f"/sessions/{user_id}"]
+    assert deletes[0]["auth"] == f"Bearer {emb.access_key()}"
+    assert present_at_request == [True]
+    assert not folder.exists()
+
+
+def test_a_dead_server_does_not_stop_the_deletion(install, data):
+    (data / "profiles" / "gone").mkdir(parents=True)
+    _, folder = _saved_login(data, "gone")
+    emb.ensure_state()
+    _delete("gone")
+    assert not folder.exists()
+    assert not (data / "profiles" / "gone").exists()
+
+
+def test_an_external_server_and_a_shared_identity_are_left_alone(install, data, monkeypatch):
+    (data / "profiles" / "ext").mkdir(parents=True)
+    (data / "profiles" / "ext" / ".env").write_text('CAMOFOX_URL="http://camofox.example:9377"\n')
+    (data / "profiles" / "shared").mkdir(parents=True)
+    (data / "profiles" / "shared" / "config.yaml").write_text("browser:\n  camofox:\n    user_id: team-browser\n")
+    _, ext = _saved_login(data, "ext")
+    _, shared = _saved_login(data, "shared")
+    _delete("ext")
+    _delete("shared")
+    assert ext.is_dir() and shared.is_dir()
+    (data / "profiles" / "late").mkdir(parents=True)
+    _, late = _saved_login(data, "late")
+    monkeypatch.setenv("CAMOFOX_URL", "http://camofox.example:9377")
+    _delete("late")
+    assert late.is_dir()
+
+
+def test_deleting_a_profile_without_a_saved_login_or_without_the_server_works(tmp_path, monkeypatch, data):
+    monkeypatch.setenv("KORRA_CAMOFOX_HOME", str(tmp_path / "missing"))
+    (data / "profiles" / "plain").mkdir(parents=True)
+    _delete("plain")
+    assert not (data / "profiles" / "plain").exists()
+    assert not (data / "camofox").exists()
+
+
+def test_the_login_folder_is_removed_even_when_the_switch_is_off(install, data):
+    (data / "profiles" / "gone").mkdir(parents=True)
+    _, folder = _saved_login(data, "gone")
+    emb.disable(signal=False)
+    _delete("gone")
+    assert not folder.exists()
+    assert emb.is_disabled()

@@ -2297,6 +2297,16 @@ def delete_profile(name: str, yes: bool = False) -> Path:
         if remove_wrapper_script(canon):
             print(f'✓ Удалено: {wrapper_path}')
 
+    # 3b. Вход профиля во встроенном Camofox (cookie лежат вне папки профиля).
+    try:
+        from korra_cli import camofox_embedded
+
+        forgotten = camofox_embedded.forget_profile_login(profile_dir)
+        if forgotten:
+            print(f'✓ Удалён сохранённый вход встроенного браузера: {forgotten}')
+    except Exception as e:
+        print(f'⚠ Не удалось убрать вход встроенного браузера: {e}')
+
     # 4. Remove profile directory
     remove_error: Exception | None = None
     try:

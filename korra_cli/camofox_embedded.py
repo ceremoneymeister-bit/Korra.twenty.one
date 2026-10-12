@@ -31,6 +31,7 @@ Chromium, облачный провайдер, ``browser.cdp_url``, внешни
 
 from __future__ import annotations
 
+import hashlib
 import http.client
 import os
 import secrets
@@ -410,6 +411,68 @@ def health(timeout: float = 2.0) -> bool:
         return False
     finally:
         conn.close()
+
+
+def _profile_setting(profile_dir: Path, env_name: str, config_keys: tuple) -> str:
+    """Значение из .env или config.yaml другого профиля (удаляемого), без переключения HERMES_HOME."""
+    from korra_cli.config import _parse_env_value
+
+    try:
+        for line in (profile_dir / ".env").read_text(encoding="utf-8-sig").splitlines():
+            key, sep, value = line.strip().partition("=")
+            if sep and key.strip() == env_name and _parse_env_value(value):
+                return _parse_env_value(value)
+    except OSError:
+        pass
+    if not config_keys:
+        return ""
+    try:
+        import yaml
+
+        node = yaml.safe_load((profile_dir / "config.yaml").read_text(encoding="utf-8")) or {}
+        for key in config_keys:
+            node = node.get(key) if isinstance(node, dict) else None
+        return str(node or "").strip()
+    except Exception:
+        return ""
+
+
+def forget_profile_login(profile_dir: Path) -> str:
+    """Удалить сохранённый вход удаляемого профиля (cookie и состояние) во встроенном сервере.
+
+    Идентичность строится тем же способом, что в клиенте
+    (``tools.browser_camofox_state.camofox_user_id``). Внешний сервер
+    (``CAMOFOX_URL`` у профиля или установки) и общую идентичность,
+    заданную владельцем (``CAMOFOX_USER_ID``), не трогаем. Возвращает
+    удалённый каталог или пустую строку.
+    """
+    from tools.browser_camofox_state import camofox_user_id
+
+    if os.environ.get("CAMOFOX_URL", "").strip() or _profile_setting(profile_dir, "CAMOFOX_URL", ()):
+        return ""
+    if os.environ.get("CAMOFOX_USER_ID", "").strip() or _profile_setting(
+        profile_dir, "CAMOFOX_USER_ID", ("browser", "camofox", "user_id")
+    ):
+        return ""
+    root = state_dir() / "profiles"
+    if not root.is_dir():
+        return ""
+    user_id = camofox_user_id(profile_dir)
+    target = root / hashlib.sha256(user_id.encode()).hexdigest()[:32]
+    if not target.is_dir() or target.is_symlink():
+        return ""
+    # Сначала закрываем сессию: при закрытии сервер сохраняет состояние обратно в этот каталог.
+    if not socket_path_problem() and is_enabled():
+        conn = _UnixHTTPConnection(str(socket_path()), 5.0)
+        try:
+            conn.request("DELETE", f"/sessions/{user_id}", headers={"Authorization": f"Bearer {access_key()}"})
+            conn.getresponse().read()
+        except (OSError, http.client.HTTPException, ValueError):
+            pass
+        finally:
+            conn.close()
+    shutil.rmtree(target, ignore_errors=True)
+    return "" if target.exists() else str(target)
 
 
 def status() -> Dict[str, object]:
