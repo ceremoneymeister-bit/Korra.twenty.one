@@ -1,6 +1,7 @@
 """K21-336: обёртка Node переводит единственный listen сервера на Unix-сокет (настоящий node)."""
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import socket
@@ -180,3 +181,78 @@ def test_changed_package_keeps_working_with_prewarm_and_says_so(run_dir):
     body, out, err = _run_prewarm_server(run_dir, changed)
     assert body.endswith("launched=1")
     assert "блок прогрева в server.js не найден" in err
+
+
+WATCHDOG_SERVER = """
+import http from 'node:http';
+import { spawn } from 'node:child_process';
+const child = spawn(process.env.FAKE_BROWSER, JSON.parse(process.env.FAKE_ARGS || '["30"]'), { stdio: 'ignore' });
+const health = { ok: true, browserRunning: true, activeTabs: Number(process.env.FAKE_TABS), activeSessions: 1 };
+const server = http.createServer((req, res) => res.end(JSON.stringify(health)));
+server.listen(9377, '127.0.0.1');
+setTimeout(() => {
+  console.log('browser-alive ' + (child.exitCode === null && child.signalCode === null));
+  child.kill('SIGKILL');
+  process.exit(0);
+}, 2500);
+"""
+
+
+def _run_watchdog_server(run_dir: Path, *, tabs: int, limit_ms: str, program: str = "sleep", args: str = '["30"]'):
+    sock = run_dir / "camofox" / "server.sock"
+    script = run_dir / "watchdog-server.mjs"
+    script.write_text(WATCHDOG_SERVER)
+    browser = run_dir / "camoufox-bin"
+    shutil.copy(shutil.which(program), browser)
+    proc = subprocess.Popen(
+        ["node", str(WRAPPER), str(script)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env={
+            **os.environ,
+            "CAMOFOX_UNIX_SOCKET": str(sock),
+            "FAKE_BROWSER": str(browser),
+            "FAKE_TABS": str(tabs),
+            "FAKE_ARGS": args,
+            "KORRA_CAMOFOX_STUCK_LIMIT_MS": limit_ms,
+        },
+    )
+    out, err = proc.communicate(timeout=15)
+    alive = "browser-alive true" in out
+    assert "browser-alive" in out
+    return alive, err
+
+
+def test_watchdog_kills_a_browser_that_stays_loaded_without_tabs(run_dir):
+    alive, err = _run_watchdog_server(run_dir, tabs=0, limit_ms="500")
+    assert not alive
+    assert "принудительное завершение Firefox (1 процессов)" in err
+
+
+def test_watchdog_leaves_a_browser_with_open_tabs_alone(run_dir):
+    alive, err = _run_watchdog_server(run_dir, tabs=1, limit_ms="500")
+    assert alive
+    assert "принудительное завершение" not in err
+
+
+def test_watchdog_can_be_disabled_with_zero_limit(run_dir):
+    alive, err = _run_watchdog_server(run_dir, tabs=0, limit_ms="0")
+    assert alive
+    assert "принудительное завершение" not in err
+
+
+def test_watchdog_kills_the_whole_browser_tree_including_stopped_children(run_dir):
+    pidfile = run_dir / "child.pid"
+    script = f"sleep 6 & echo $! > {pidfile}; wait"
+    alive, err = _run_watchdog_server(
+        run_dir, tabs=0, limit_ms="500", program="sh", args=json.dumps(["-c", script])
+    )
+    assert not alive
+    child = int(pidfile.read_text())
+    try:
+        state = Path(f"/proc/{child}/stat").read_text().rsplit(")", 1)[1].split()[0]
+    except FileNotFoundError:
+        state = "Z"
+    assert state in ("Z", "X"), "потомок Firefox пережил принудительное завершение"
+    assert "(2 процессов)" in err
