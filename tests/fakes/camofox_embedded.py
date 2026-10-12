@@ -93,26 +93,33 @@ def choose_browser(provider_name: str) -> None:
 class UnixServer:
     """Маленький HTTP-сервер на Unix-сокете: отмечает заголовки пришедших запросов."""
 
-    def __init__(self, path: Path, *, reply: bytes = b'{"ok": true}'):
+    def __init__(self, path: Path, *, reply: bytes = b'{"ok": true}', respond=None):
+        """``respond(method, path, body) -> (status, bytes)`` подменяет ответ на отдельные запросы."""
         self.path = Path(path)
         self.seen: list[dict] = []
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
             def _handle(self):
+                length = int(self.headers.get("Content-Length") or 0)
+                body = self.rfile.read(length).decode() if length else ""
                 outer.seen.append(
                     {
                         "method": self.command,
                         "path": self.path,
                         "auth": self.headers.get("Authorization"),
                         "host": self.headers.get("Host"),
+                        "body": body,
                     }
                 )
-                self.send_response(200)
+                status, payload = (200, reply)
+                if respond is not None:
+                    status, payload = respond(self.command, self.path, body) or (200, reply)
+                self.send_response(status)
                 self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(reply)))
+                self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
-                self.wfile.write(reply)
+                self.wfile.write(payload)
 
             do_GET = do_POST = do_DELETE = _handle
 

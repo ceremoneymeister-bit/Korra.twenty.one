@@ -34,104 +34,46 @@ def test_row_text_is_russian_and_about_blocks():
     assert "защитой от блокировок" in _row("Camofox")["tag"]
 
 
-def test_choosing_camofox_enables_the_bundled_server(install, data):
+def test_choosing_camofox_does_not_touch_the_installation_switch(install, data):
     choose_browser("Camofox")
     assert emb.is_enabled()
     assert emb.endpoint() == emb.BASE_URL
-    assert emb.consumers() == ["default"]
+    assert not (data / "camofox").exists()  # выбор профиля ничего не пишет рядом с данными установки
 
 
-def test_choosing_another_browser_in_the_only_profile_switches_the_server_off(install, data):
-    choose_browser("Camofox")
-    choose_browser("Local Browser")
-    assert not emb.is_enabled()
-    assert (data / "camofox" / "access.key").exists()
-
-
-@pytest.mark.parametrize("other", ["Local Browser", "Lightpanda"])
-def test_other_browser_rows_do_not_leave_the_server_running(install, data, other):
+@pytest.mark.parametrize("other", ["Local Browser", "Lightpanda", "Camofox"])
+def test_any_browser_row_leaves_the_server_running(install, data, other):
     choose_browser("Camofox")
     choose_browser(other)
-    assert not emb.is_enabled()
-
-
-def test_server_belongs_to_the_installation_not_to_one_profile(chromium_root, install, data):
-    with in_profile(data, "a"):
-        choose_browser("Camofox")
-    with in_profile(data, "b"):
-        choose_browser("Camofox")
-    assert sorted(emb.consumers()) == ["a", "b"]
-    with in_profile(data, "b"):
-        choose_browser("Local Browser")
-    assert emb.is_enabled()  # профиль A ещё пользуется сервером
-    with in_profile(data, "a"):
-        choose_browser("Lightpanda")
-    assert not emb.is_enabled()
-
-
-def test_root_and_named_profile_both_count(install, data):
-    with in_profile(data, None):
-        choose_browser("Camofox")
-    with in_profile(data, "work"):
-        choose_browser("Camofox")
-    assert sorted(emb.consumers()) == ["default", "work"]
-    with in_profile(data, "work"):
-        choose_browser("Local Browser")
     assert emb.is_enabled()
 
 
-def test_explicit_external_url_in_process_env_does_not_enable_the_embedded_server(install, data, monkeypatch):
-    monkeypatch.setenv("CAMOFOX_URL", "http://external.example:9377")
-    choose_browser("Camofox")
-    assert not emb.is_enabled()
-    assert emb.consumers() == []
+def test_the_choice_belongs_to_the_profile_and_the_server_to_the_installation(install, data):
+    with in_profile(data, "a"):
+        choose_browser("Camofox")
+    with in_profile(data, "b"):
+        choose_browser("Local Browser")
+    with in_profile(data, "a"):
+        choose_browser("Lightpanda")
+    with in_profile(data, "b"):
+        choose_browser("Camofox")
+    assert emb.is_enabled()
     assert not (data / "camofox").exists()
 
 
-def test_explicit_external_url_in_the_profile_env_does_not_enable_the_embedded_server(chromium_root, install, data):
-    with in_profile(data, "ext"):
-        (data / "profiles" / "ext" / ".env").write_text("CAMOFOX_URL=http://external.example:9377\n")
-        choose_browser("Camofox")
-    assert not emb.is_enabled()
-    with in_profile(data, "emb"):
-        choose_browser("Camofox")
-    assert emb.is_enabled()
-    assert emb.consumers() == ["emb"]  # внешний адрес профиля ext не засчитывается
+def test_there_is_no_server_sync_left_in_tools_config():
+    assert not hasattr(tc, "_sync_embedded_camofox")
 
 
-def test_the_current_profiles_env_url_does_not_hide_other_profiles(chromium_root, install, data, monkeypatch):
-    # Загруженный .env текущего профиля лежит в окружении процесса и не должен
-    # считаться явным адресом чужих профилей.
-    with in_profile(data, "emb"):
-        choose_browser("Camofox")
-    with in_profile(data, "ext"):
-        (data / "profiles" / "ext" / ".env").write_text("CAMOFOX_URL=http://external.example:9377\n")
-        monkeypatch.setenv("CAMOFOX_URL", "http://external.example:9377")
-        choose_browser("Camofox")
-        assert emb.consumers() == ["emb"]
-    assert emb.is_enabled()
-
-
-def test_deleted_profile_stops_counting_and_the_server_goes_off_with_the_last_one(chromium_root, install, data):
-    from korra_constants import mark_named_profile_deleted
-
-    with in_profile(data, "gone"):
-        choose_browser("Camofox")
-    assert emb.is_enabled()
-    mark_named_profile_deleted(data / "profiles" / "gone")
-    assert emb.consumers() == []
-    assert emb.sync() is False
-    assert not emb.is_enabled()
-
-
-def test_deleting_the_last_consumer_profile_switches_the_server_off(chromium_root, install, data, monkeypatch):
+def test_deleting_a_profile_does_not_touch_the_server(install, data, monkeypatch):
     from korra_cli import profiles
 
     with in_profile(data, "scratch"):
         choose_browser("Camofox")
-    assert emb.is_enabled()
+    emb.disable(signal=False)
     profiles.delete_profile("scratch", yes=True)
-    assert not emb.is_enabled()
+    assert emb.is_disabled()  # решение владельца профилями не меняется
+    assert not (data / "profiles" / "scratch").exists()
 
 
 def test_write_does_nothing_without_the_bundled_server(tmp_path, monkeypatch):
@@ -154,6 +96,16 @@ def test_post_setup_in_the_image_does_not_run_npm_and_waits_for_health(install, 
     assert "работает" in capsys.readouterr().out
 
 
+def test_post_setup_does_not_switch_on_a_server_the_owner_switched_off(install, data, capsys):
+    emb.disable(signal=False)
+    with patch("subprocess.run") as run, UnixServer(emb.socket_path()):
+        tc._run_post_setup("camofox")
+    run.assert_not_called()
+    assert emb.is_disabled()
+    out = capsys.readouterr().out
+    assert "выключен" in out and "korra tools camofox on" in out
+
+
 def test_post_setup_reports_a_slow_start_without_failing(install, data, capsys):
     ticks = iter([0, 1, 100])
     with patch("time.monotonic", side_effect=lambda: next(ticks)), patch("time.sleep"):
@@ -162,7 +114,7 @@ def test_post_setup_reports_a_slow_start_without_failing(install, data, capsys):
     assert "ещё запускается" in out and "korra doctor" in out
 
 
-def test_post_setup_with_an_external_url_checks_that_server_and_leaves_embedded_off(
+def test_post_setup_with_an_external_url_checks_that_server(
     install, data, monkeypatch, capsys
 ):
     with TcpSpy() as spy:
@@ -171,7 +123,6 @@ def test_post_setup_with_an_external_url_checks_that_server_and_leaves_embedded_
         assert spy.seen == [None]  # опрошен именно внешний сервер
     out = capsys.readouterr().out
     assert "внешний сервер" in out.lower() and "отвечает" in out
-    assert not emb.is_enabled()
 
 
 def test_post_setup_with_a_dead_external_url_names_it(install, data, monkeypatch, capsys):
@@ -179,7 +130,6 @@ def test_post_setup_with_a_dead_external_url_names_it(install, data, monkeypatch
     tc._run_post_setup("camofox")
     out = capsys.readouterr().out
     assert "не отвечает" in out and "http://127.0.0.1:1" in out
-    assert not emb.is_enabled()
 
 
 def test_post_setup_outside_the_image_still_uses_npm_path(tmp_path, monkeypatch):
@@ -196,11 +146,12 @@ def test_readiness_is_ready_in_the_image_without_any_env(install, data):
 def test_browser_feature_is_available_when_bundled_server_is_selected_and_on(install, data):
     from korra_cli import nous_subscription as ns
 
-    emb.enable()
     config = {"browser": {"cloud_provider": "camofox"}}
     features = ns.get_nous_subscription_features(config)
     assert features.browser.current_provider == "Camofox"
     assert features.browser.available is True
+    emb.disable(signal=False)
+    assert ns.get_nous_subscription_features(config).browser.available is False
 
 
 # ── Camofox — браузер по умолчанию в образе ────────────────────────────────
@@ -250,16 +201,120 @@ def test_chromium_is_one_action_and_the_row_follows_it(install, data):
     rows = _rows(config)
     active = [r["name"] for r in rows if tc._is_provider_active(r, config)]
     assert active == ["Local Browser"]
-    assert not emb.is_enabled()
+    assert emb.is_enabled()  # сервер остаётся: он принадлежит установке
     choose_browser("Camofox")
     assert emb.is_enabled()
 
 
-def test_creating_a_profile_without_a_choice_brings_the_server_back(chromium_root, install, data):
+def test_a_switched_off_server_is_not_shown_as_the_active_default(install, data):
+    from korra_cli.config import load_config
+
+    emb.disable(signal=False)
+    rows = _rows()
+    config = load_config()
+    assert tc._is_provider_active(rows[0], config) is False
+
+
+# ── Сценарии находок повторного ревью (review2): после упрощения невозможны ──
+
+
+def _no_foreign_env(monkeypatch):
+    for key in ("BROWSER_USE_API_KEY", "BROWSERBASE_API_KEY", "BROWSERBASE_PROJECT_ID", "AGENT_BROWSER_ENGINE"):
+        monkeypatch.delenv(key, raising=False)
+
+
+def test_a_new_profile_created_the_usual_way_uses_the_embedded_browser_at_once(install, data, monkeypatch):
+    from tools import browser_camofox as bc
     from korra_cli import profiles
 
-    assert not emb.is_enabled()
-    profiles.create_profile("fresh", no_alias=True)
+    _no_foreign_env(monkeypatch)
+    with patch.object(profiles, "create_wrapper_script"):
+        profiles.create_profile("fresh", no_alias=True, no_skills=True)
     assert emb.is_enabled()
-    assert emb.consumers() == ["fresh"]
+    assert not (data / "camofox").exists()  # профиль ничего не включал: сервер и так принадлежит установке
+    with in_profile(data, "fresh"):
+        assert emb.uses_default_browser() is True
+        assert bc.get_camofox_url() == emb.BASE_URL
 
+
+def test_review2_finding_1_cloud_key_of_another_profile_changes_nothing(install, data, monkeypatch):
+    # Профиль с ключом облака не лишает чужой профиль умолчания и не выключает сервер:
+    # ничьих секретов сервер не читает, выключателя профили не трогают.
+    from tools import browser_camofox as bc
+
+    _no_foreign_env(monkeypatch)
+    (data / "profiles" / "cloudy").mkdir(parents=True)
+    (data / "profiles" / "cloudy" / ".env").write_text("BROWSER_USE_API_KEY=fake-key-of-cloudy\n")
+    with in_profile(data, "cloudy"):
+        choose_browser("Local Browser")
+    with in_profile(data, "plain"):
+        assert bc.get_camofox_url() == emb.BASE_URL
+        assert emb.uses_default_browser() is True
+    assert emb.is_enabled()
+    assert not (data / "camofox").exists()
+
+
+def test_review2_finding_2_publishing_a_prepared_profile_needs_no_server_switching(install, data, monkeypatch):
+    # Профиль, собранный в staging и опубликованный через publish_profile(), сразу
+    # пользуется встроенным Camofox, не вызывая никаких включений.
+    from korra_cli import profiles
+    from korra_cli.profile_creation import publish_profile
+
+    _no_foreign_env(monkeypatch)
+    with in_profile(data, None):
+        choose_browser("Local Browser")
+
+    def populate(stage):
+        profiles.create_profile("from-template", no_alias=True, no_skills=True, _staging_dir=stage)
+        return {"ok": True}, {}
+
+    with patch.object(profiles, "create_wrapper_script"):
+        publish_profile("review-template-0001", "from-template", {}, populate)
+    assert (data / "profiles" / "from-template").is_dir()
+    with in_profile(data, "from-template"):
+        assert emb.uses_default_browser() is True
+    assert emb.is_enabled()
+    assert not (data / "camofox").exists()
+
+
+def test_review2_finding_3_create_profile_waits_for_the_creation_lock(install, data, monkeypatch):
+    # create_profile() снова стоит под profile_creation_lock(): читатель, держащий
+    # блокировку, не видит неполный профиль, а создание ждёт его.
+    import threading
+
+    from korra_cli import profiles
+
+    _no_foreign_env(monkeypatch)
+    entered_seed = threading.Event()
+    release_seed = threading.Event()
+    original_seed = profiles._seed_model_config
+    errors: list = []
+
+    def paused_seed(*args, **kwargs):
+        entered_seed.set()
+        if not release_seed.wait(5):
+            raise RuntimeError("seed timeout")
+        return original_seed(*args, **kwargs)
+
+    def create():
+        try:
+            profiles.create_profile("incomplete", no_alias=True, no_skills=True, soul="expected identity")
+        except Exception as exc:  # pragma: no cover
+            errors.append(repr(exc))
+
+    with patch.object(profiles, "create_wrapper_script"), patch.object(
+        profiles, "_seed_model_config", side_effect=paused_seed
+    ):
+        with profiles.profile_creation_lock():
+            worker = threading.Thread(target=create)
+            worker.start()
+            try:
+                bypassed = entered_seed.wait(1.5)
+                visible = dict(profiles.profiles_to_serve(multiplex=True))
+            finally:
+                release_seed.set()
+        worker.join(10)
+    assert bypassed is False  # создание не прошло мимо блокировки читателя
+    assert "incomplete" not in visible
+    assert not worker.is_alive() and errors == []
+    assert (data / "profiles" / "incomplete" / "SOUL.md").exists()

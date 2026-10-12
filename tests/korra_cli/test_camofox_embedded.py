@@ -22,19 +22,16 @@ from tests.fakes.camofox_embedded import (  # noqa: F401  (фикстуры)
 )
 
 
-def test_endpoint_is_the_unix_base_url_and_nothing_runs_before_the_first_sync(install, data):
-    assert not emb.is_enabled()
-    assert emb.endpoint() == emb.BASE_URL
-    # Профиль не выбирал браузер: он потребитель по умолчанию, ждёт синхронизации.
-    assert emb.status()["state"] == "selected_off"
-    assert emb.sync() is True
+def test_server_belongs_to_the_installation_and_is_on_by_default(install, data):
     assert emb.is_enabled()
+    assert not emb.is_disabled()
+    assert emb.endpoint() == emb.BASE_URL
+    assert not (data / "camofox").exists()  # включать ничего не нужно, файлов не требуется
 
 
-def test_server_stays_off_when_every_profile_chose_chromium(chromium_root, install, data):
-    assert not emb.is_enabled()
-    assert emb.status()["state"] == "disabled"
-    assert emb.sync() is False
+def test_choosing_chromium_everywhere_does_not_switch_the_server_off(chromium_root, install, data):
+    assert emb.is_enabled()
+    assert emb.status()["state"] == "not_responding"  # сервис запущен s6, пока нет ответа
 
 
 def test_endpoint_is_empty_without_the_image(tmp_path, monkeypatch, data):
@@ -46,14 +43,13 @@ def test_endpoint_is_empty_without_the_image(tmp_path, monkeypatch, data):
 def test_port_mechanism_is_gone(install, data):
     for name in ("PORT_RANGE", "BIND_HOST", "saved_port", "resolve_port_for_serve", "_pick_free_port", "_port_file"):
         assert not hasattr(emb, name), name
-    emb.enable()
+    emb.ensure_state()
     assert not (data / "camofox" / "port").exists()
     assert "CAMOFOX_PORT" not in emb.server_env()
 
 
-def test_enable_creates_private_state_and_key(install, data):
-    emb.enable()
-    assert emb.is_enabled()
+def test_ensure_state_creates_private_state_and_key(install, data):
+    emb.ensure_state()
     assert len(emb.access_key()) >= 32
     assert stat.S_IMODE((data / "camofox" / "access.key").stat().st_mode) == 0o600
     assert stat.S_IMODE((data / "camofox").stat().st_mode) == 0o700
@@ -61,7 +57,7 @@ def test_enable_creates_private_state_and_key(install, data):
 
 
 def test_key_is_stable_across_calls(install, data):
-    emb.enable()
+    emb.ensure_state()
     key = emb.access_key()
     emb.enable()
     emb.ensure_state()
@@ -69,12 +65,11 @@ def test_key_is_stable_across_calls(install, data):
 
 
 def test_two_installs_get_different_keys_and_sockets(install, data, monkeypatch):
-    emb.enable()
+    emb.ensure_state()
     key_a, sock_a = emb.access_key(), emb.socket_path()
     other = use_root(monkeypatch, short_dir())
     try:
-        assert not emb.is_enabled()
-        emb.enable()
+        emb.ensure_state()
         assert emb.access_key() != key_a
         assert emb.socket_path() != sock_a
         assert (other / "camofox" / "access.key").read_text().strip() == emb.access_key()
@@ -85,16 +80,16 @@ def test_two_installs_get_different_keys_and_sockets(install, data, monkeypatch)
         shutil.rmtree(other, ignore_errors=True)
 
 
-def test_concurrent_enable_never_fails_and_keeps_the_key(install, data):
+def test_concurrent_switching_never_fails_and_keeps_the_key(install, data):
     # Воспроизведение race.py из ревью: общий «.tmp» ронял параллельные записи.
-    emb.enable()
+    emb.ensure_state()
     key = emb.access_key()
     barrier = threading.Barrier(2)
 
-    def call(_):
+    def call(index):
         barrier.wait()
         try:
-            emb.enable()
+            emb.disable(signal=False) if index == 0 else emb.enable()
             return "ok"
         except Exception as exc:  # pragma: no cover — именно это и ловим
             return type(exc).__name__
@@ -105,7 +100,7 @@ def test_concurrent_enable_never_fails_and_keeps_the_key(install, data):
             failures.extend(x for x in pool.map(call, range(2)) if x != "ok")
     assert failures == []
     assert emb.access_key() == key
-    assert sorted(p.name for p in (data / "camofox").iterdir()) == ["access.key", "enabled"]
+    assert not [p for p in (data / "camofox").iterdir() if p.suffix == ".tmp"]
 
 
 def test_first_key_is_created_atomically_and_seen_identically_by_everyone(install, data):
@@ -142,7 +137,7 @@ def test_first_key_is_created_atomically_and_seen_identically_by_everyone(instal
 
 
 def test_server_env_has_socket_no_telemetry_and_no_foreign_secrets(install, data, monkeypatch):
-    emb.enable()
+    emb.ensure_state()
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "tg-secret")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-secret")
     monkeypatch.setenv("CAMOFOX_API_KEY", "external-key")
@@ -162,7 +157,7 @@ def test_server_env_has_socket_no_telemetry_and_no_foreign_secrets(install, data
 
 
 def test_idle_timeout_override_is_passed_only_when_numeric(install, data, monkeypatch):
-    emb.enable()
+    emb.ensure_state()
     assert "BROWSER_IDLE_TIMEOUT_MS" not in emb.server_env()
     monkeypatch.setenv("KORRA_CAMOFOX_IDLE_TIMEOUT_MS", "15000")
     assert emb.server_env()["BROWSER_IDLE_TIMEOUT_MS"] == "15000"
@@ -170,35 +165,66 @@ def test_idle_timeout_override_is_passed_only_when_numeric(install, data, monkey
     assert "BROWSER_IDLE_TIMEOUT_MS" not in emb.server_env()
 
 
-def test_disable_removes_marker_but_keeps_key_and_profiles(install, data):
-    emb.enable()
+def test_the_switch_is_one_named_file_and_keeps_key_and_profiles(install, data):
+    emb.ensure_state()
     (data / "camofox" / "profiles").mkdir()
     key = emb.access_key()
     emb.disable()
-    assert not emb.is_enabled()
+    assert emb.is_disabled() and not emb.is_enabled()
+    assert (data / "camofox" / "disabled").is_file()
     assert emb.endpoint() == emb.BASE_URL  # идентичность не зависит от того, запущен ли сервер
     assert emb.access_key() == key
     assert (data / "camofox" / "profiles").is_dir()
+    emb.enable()
+    assert emb.is_enabled() and not (data / "camofox" / "disabled").exists()
+    emb.enable()  # повторное включение безвредно
+    assert emb.access_key() == key
 
 
-def test_s6_is_nudged_only_inside_the_container(install, data, monkeypatch):
+def test_switching_off_works_on_a_clean_data_dir(install, data):
+    emb.disable()
+    assert emb.status()["state"] == "switched_off"
+    assert emb.status()["next"] == "включить: korra tools camofox on"
+
+
+def test_s6_is_nudged_only_inside_the_container_and_only_on_switch_off(install, data, monkeypatch):
     calls = []
     monkeypatch.setattr(emb.subprocess, "run", lambda cmd, **kw: calls.append(cmd))
-    emb.enable()
     emb.disable()
+    emb.enable()
     assert calls == []
     monkeypatch.setattr(emb, "in_container", lambda: True)
     emb.enable()
-    assert calls == []  # включение — только маркер: run-скрипт сам заметит его за 3 с
+    assert calls == []  # включение — снять файл: run-скрипт сам заметит это за 3 с
     emb.disable()
     assert calls == [["s6-svc", "-t", "/run/service/camofox"]]
+
+
+def test_the_switch_command_reports_every_state_in_russian(install, data, capsys):
+    assert emb.main(["status"]) == 1  # включён, но процесса нет
+    assert emb.tools_command("off") == 0
+    out = capsys.readouterr().out
+    assert "выключен" in out and "korra tools camofox on" in out and "Chromium" in out
+    assert emb.is_disabled()
+    assert emb.tools_command("status") == 0
+    assert emb.tools_command("on") == 0
+    assert emb.is_enabled()
+    emb.ensure_state()
+    assert emb.access_key() not in capsys.readouterr().out
+
+
+def test_the_switch_command_does_nothing_outside_the_image(tmp_path, monkeypatch, data, capsys):
+    monkeypatch.setenv("KORRA_CAMOFOX_HOME", str(tmp_path / "nothing"))
+    assert emb.tools_command("off") == 1
+    assert not (data / "camofox").exists()
+    assert "нет встроенного Camofox" in capsys.readouterr().out
 
 
 # ── Транспорт ───────────────────────────────────────────────────────────────
 
 
 def test_health_over_the_socket(install, data):
-    emb.enable()
+    emb.ensure_state()
     assert emb.health(timeout=0.5) is False
     with UnixServer(emb.socket_path()) as server:
         assert emb.health(timeout=2) is True
@@ -208,7 +234,7 @@ def test_health_over_the_socket(install, data):
 def test_health_ignores_a_tcp_listener_squatting_on_loopback(install, data):
     # Подмена адреса из ревью: чужой процесс на loopback-порту не может быть
     # принят за сервер установки и не получает ничего.
-    emb.enable()
+    emb.ensure_state()
     with TcpSpy() as spy:
         assert emb.health(timeout=0.5) is False
         assert emb.status()["state"] != "running"
@@ -216,7 +242,7 @@ def test_health_ignores_a_tcp_listener_squatting_on_loopback(install, data):
 
 
 def test_unix_session_sends_the_key_only_to_the_socket(install, data):
-    emb.enable()
+    emb.ensure_state()
     with UnixServer(emb.socket_path()) as server, TcpSpy() as spy:
         session = emb.unix_session()
         resp = session.get(
@@ -236,7 +262,7 @@ def test_unix_session_sends_the_key_only_to_the_socket(install, data):
 def test_unix_session_ignores_proxy_environment(install, data, monkeypatch):
     monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:9")
     monkeypatch.setenv("http_proxy", "http://127.0.0.1:9")
-    emb.enable()
+    emb.ensure_state()
     with UnixServer(emb.socket_path()):
         assert emb.unix_session().get(f"{emb.BASE_URL}/health", timeout=3).status_code == 200
 
@@ -246,7 +272,7 @@ def test_too_long_socket_path_is_reported_and_never_served(install, tmp_path, mo
     use_root(monkeypatch, deep)
     assert len(os.fsencode(str(emb.socket_path()))) > emb.MAX_SOCKET_PATH
     assert "путь к сокету" in emb.socket_path_problem()
-    emb.enable()
+    emb.ensure_state()
     assert emb.health() is False
     info = emb.status()
     assert info["state"] == "not_responding"
@@ -258,14 +284,11 @@ def test_too_long_socket_path_is_reported_and_never_served(install, tmp_path, mo
 # ── Состояния ───────────────────────────────────────────────────────────────
 
 
-def test_status_running_and_not_responding(install, data, monkeypatch):
-    with in_profile(data, None):
-        choose_browser("Camofox")
-    assert emb.is_enabled()
+def test_status_running_and_not_responding(install, data):
+    emb.ensure_state()
     with UnixServer(emb.socket_path()):
         info = emb.status()
         assert info["state"] == "running"
-        assert info["consumers"] == ["default"]
     info = emb.status()
     assert info["state"] == "not_responding"
     assert "s6-svc -u /run/service/camofox" in info["next"]
@@ -273,30 +296,8 @@ def test_status_running_and_not_responding(install, data, monkeypatch):
     assert emb.access_key() not in str(info)
 
 
-def test_status_selected_off_unused_and_disabled(install, data):
-    with in_profile(data, None):
-        choose_browser("Camofox")
-    emb._enabled_marker().unlink()  # маркер рассинхронизировался с настройками
-    info = emb.status()
-    assert info["state"] == "selected_off"
-    assert "korra doctor --fix" in info["next"]
-
-    assert emb.sync() is True
-    assert emb.status()["state"] != "selected_off"
-
-    with in_profile(data, None):
-        choose_browser("Local Browser")
-    assert not emb.is_enabled()
-    assert emb.status()["state"] == "disabled"
-
-    emb.enable()  # сервер включён вручную, потребителей нет
-    assert emb.status()["state"] == "unused"
-    assert emb.sync() is False
-    assert emb.status()["state"] == "disabled"
-
-
 def test_serve_execs_node_through_the_launcher_with_clean_environment(install, data, monkeypatch):
-    emb.enable()
+    emb.ensure_state()
     monkeypatch.setenv("OPENAI_API_KEY", "sk-secret")
     calls = {}
 
@@ -316,7 +317,7 @@ def test_serve_execs_node_through_the_launcher_with_clean_environment(install, d
 
 
 def test_serve_removes_a_stale_socket_before_start(install, data, monkeypatch):
-    emb.enable()
+    emb.ensure_state()
     emb.socket_path().write_text("stale")
     monkeypatch.setattr(os, "execvpe", lambda *a: (_ for _ in ()).throw(SystemExit(0)))
     monkeypatch.setattr(os, "chdir", lambda path: None)
@@ -333,7 +334,7 @@ def test_serve_refuses_when_the_launcher_is_missing(install, data):
 
 
 def test_cli_status_never_prints_the_key(install, data, capsys):
-    emb.enable()
+    emb.ensure_state()
     assert emb.main(["status"]) == 1
     out = capsys.readouterr()
     assert emb.access_key() not in out.out + out.err
@@ -344,12 +345,11 @@ def test_files_made_by_root_are_handed_to_the_data_owner(install, data, monkeypa
     chowned = []
     monkeypatch.setattr(os, "geteuid", lambda: 0)
     monkeypatch.setattr(os, "chown", lambda path, uid, gid: chowned.append((Path(path).name, uid, gid)))
-    emb.enable()
+    emb.disable(signal=False)
     names = {name for name, _, _ in chowned}
     assert "camofox" in names
     # Временные файлы с уникальными именами тоже передаются владельцу до публикации.
-    assert any(n.startswith("access.key.") and n.endswith(".tmp") for n in names)
-    assert any(n.startswith("enabled.") and n.endswith(".tmp") for n in names)
+    assert any(n.startswith("disabled.") and n.endswith(".tmp") for n in names)
     assert all((uid, gid) == (owner.st_uid, owner.st_gid) for _, uid, gid in chowned)
 
 
@@ -363,7 +363,12 @@ def _save(root, name, browser):
         save_config({"browser": browser})
 
 
-def test_profiles_without_a_choice_are_consumers_and_explicit_choices_are_kept(install, data):
+def _uses_default(root, name):
+    with in_profile(root, name):
+        return emb.uses_default_browser()
+
+
+def test_a_profile_without_a_choice_uses_the_default_and_explicit_choices_are_kept(install, data):
     _save(data, "plain", {})
     _save(data, "chromium", {"cloud_provider": "local"})
     _save(data, "lightpanda", {"cloud_provider": "local", "engine": "lightpanda"})
@@ -371,55 +376,109 @@ def test_profiles_without_a_choice_are_consumers_and_explicit_choices_are_kept(i
     _save(data, "cdp", {"cdp_url": "http://127.0.0.1:9222"})
     _save(data, "driver", {"backend": "browser-use"})
     _save(data, "real", {"use_real_profile": True})
-    assert sorted(emb.consumers()) == ["default", "plain"]
-    assert emb.sync() is True
+    names = ["plain", "chromium", "lightpanda", "cloud", "cdp", "driver", "real"]
+    assert {n: _uses_default(data, n) for n in names} == {
+        "plain": True,
+        "chromium": False,
+        "lightpanda": False,
+        "cloud": False,
+        "cdp": False,
+        "driver": False,
+        "real": False,
+    }
 
 
 def test_cloud_credentials_and_cdp_in_the_environment_keep_the_old_browser(install, data, monkeypatch):
-    assert emb.consumers() == ["default"]
+    assert _uses_default(data, None) is True
     monkeypatch.setenv("BROWSERBASE_API_KEY", "k")
     monkeypatch.setenv("BROWSERBASE_PROJECT_ID", "p")
-    assert emb.consumers() == []
+    assert _uses_default(data, None) is False
     monkeypatch.delenv("BROWSERBASE_API_KEY")
     monkeypatch.delenv("BROWSERBASE_PROJECT_ID")
     monkeypatch.setenv("BROWSER_CDP_URL", "ws://127.0.0.1:9222/devtools/browser/x")
-    assert emb.consumers() == []
+    assert _uses_default(data, None) is False
 
 
 def test_unreadable_config_is_not_treated_as_no_choice(install, data):
     (data / "config.yaml").write_text("browser: [unclosed\n")
-    assert emb.consumers() == []
+    assert _uses_default(data, None) is False
 
 
-def test_external_camofox_url_beats_the_default(install, data, monkeypatch):
+def test_external_camofox_url_is_read_from_the_current_profile_only(install, data, monkeypatch):
+    assert emb.explicit_url() == ""
     monkeypatch.setenv("CAMOFOX_URL", "http://external.example:9377")
-    assert emb.consumers() == []
-    assert emb.sync() is False
-    assert not emb.is_enabled()
+    assert emb.explicit_url() == "http://external.example:9377"
 
 
 def test_nothing_changes_outside_the_image(tmp_path, monkeypatch, data):
     monkeypatch.setenv("KORRA_CAMOFOX_HOME", str(tmp_path / "missing"))
     assert emb.uses_default_browser() is False
-    assert emb.sync() is False
+    assert emb.is_enabled() is False
     assert not (data / "camofox").exists()
 
 
-def test_boot_sync_does_not_restart_the_service_that_runs_it(install, data, monkeypatch):
+# ── Учёта потребителей больше нет ───────────────────────────────────────────
+
+
+def test_consumer_accounting_is_gone(install, data):
+    for name in ("consumers", "sync", "wants_embedded", "current_explicit_url", "_profile_homes", "_InHome", "_enabled_marker"):
+        assert not hasattr(emb, name), name
+    assert emb.main(["sync"]) == 2
+
+
+def test_cloud_key_of_one_profile_cannot_switch_the_server_for_another(install, data, monkeypatch):
+    # Находка 1 ревью: ключ облака профиля A лишал профиль B встроенного
+    # браузера и останавливал сервер. Выбор профиля A больше не трогает сервер,
+    # а профиль B читает только свои настройки.
+    _save(data, "a", {"cloud_provider": "local"})
+    _save(data, "fresh", {})
+    (data / "profiles" / "a" / ".env").write_text("BROWSER_USE_API_KEY=fake-key-of-a\n")
+    emb.ensure_state()
+    with in_profile(data, "a"):
+        choose_browser("Local Browser")
+    assert emb.is_enabled()
+    assert _uses_default(data, "fresh") is True
+
+
+def test_choosing_browsers_never_changes_the_server_switch(install, data, monkeypatch):
     calls = []
     monkeypatch.setattr(emb, "_s6_svc", lambda flag: calls.append(flag))
-    emb.enable()
-    _save(data, None, {"cloud_provider": "local"})
-    assert emb.main(["sync"]) == 0
-    assert not emb.is_enabled()
-    assert calls == []  # через `sync` из run-скрипта s6 сигнал не посылается
-    assert emb.sync() is False
-    emb.enable()
-    assert emb.sync() is False and calls == ["-t"]
+    monkeypatch.setattr(emb, "in_container", lambda: True)
+    for profile in ("a", "b", None):
+        with in_profile(data, profile):
+            choose_browser("Local Browser")
+            choose_browser("Camofox")
+            choose_browser("Local Browser")
+    assert emb.is_enabled() and calls == []
+    assert not (data / "camofox").exists()
 
 
-def test_boot_sync_enables_a_fleet_that_never_chose_a_browser(install, data, capsys):
-    assert not emb.is_enabled()
-    assert emb.main(["sync"]) == 0
-    assert capsys.readouterr().out.strip() == "нужен"
+def test_owner_switch_survives_any_browser_choice(install, data):
+    emb.disable(signal=False)
+    with in_profile(data, "a"):
+        choose_browser("Camofox")
+    assert emb.is_disabled()
+    emb.enable()
+    with in_profile(data, "a"):
+        choose_browser("Local Browser")
     assert emb.is_enabled()
+
+
+def test_korra_tools_camofox_command_reaches_the_switch(install, data):
+    import subprocess
+    import sys
+
+    env = {**os.environ, "HOME": str(data), "KORRA_HOME": str(data), "HERMES_HOME": str(data), "KORRA_CAMOFOX_HOME": str(install)}
+
+    def tools(action):
+        return subprocess.run(
+            [sys.executable, "-m", "korra_cli.main", "tools", "camofox", action],
+            env=env, capture_output=True, text=True, timeout=60,
+        )
+
+    assert tools("off").returncode == 0
+    assert (data / "camofox" / "disabled").is_file()
+    status = tools("status")
+    assert "выключен" in status.stdout
+    assert tools("on").returncode == 0
+    assert not (data / "camofox" / "disabled").exists()

@@ -1,6 +1,7 @@
 """K21-336: клиент Camofox находит встроенный сервер сам и ходит к нему по Unix-сокету."""
 
 import json
+import time
 from unittest.mock import patch
 
 import pytest
@@ -28,6 +29,12 @@ def _clean():
     with bc._sessions_lock:
         bc._sessions.clear()
     bc._unix_session = None
+
+
+@pytest.fixture(autouse=True)
+def _server_state(install, data):
+    """Сервер при старте сам создаёт ключ и каталог; клиент их не создаёт."""
+    emb.ensure_state()
 
 
 @pytest.fixture
@@ -62,7 +69,6 @@ def test_bundled_server_is_not_used_when_another_browser_is_selected(embedded):
 
 
 def test_profile_without_a_browser_choice_uses_the_bundled_server(install, data):
-    emb.sync()
     with UnixServer(emb.socket_path(), reply=REPLY):
         assert bc.get_camofox_url() == emb.BASE_URL
         assert bc.is_camofox_mode() is True
@@ -105,7 +111,7 @@ def test_nothing_changes_outside_the_image(tmp_path, monkeypatch, data):
 
 
 def test_identity_does_not_depend_on_the_server_running(embedded):
-    emb.disable()
+    emb.disable(signal=False)
     assert bc.get_camofox_url() == emb.BASE_URL
     assert bc._auth_headers() == {"Authorization": f"Bearer {emb.access_key()}"}
     assert bc._managed_persistence_enabled() is True
@@ -154,12 +160,12 @@ def test_navigation_goes_over_the_socket_with_the_key(embedded):
     assert "/tabs" in [entry["path"] for entry in keyed]
 
 
-def test_a_tcp_listener_on_loopback_never_receives_the_installation_key(embedded):
+def test_a_tcp_listener_on_loopback_never_receives_the_installation_key(embedded, chromium_navigate):
     # Подмена из ревью: порт установки больше не существует, а чужой слушатель
     # не получает ни запроса, ни ключа, даже когда настоящий сервер молчит.
     with TcpSpy() as spy:
-        result = json.loads(bc.camofox_navigate("https://example.com/", "spoof"))
-        assert result["success"] is False
+        json.loads(bc.camofox_navigate("https://example.com/", "spoof"))
+        chromium_navigate.assert_called_once()  # молчащий сервер: страница в Chromium, не на чужой порт
         with UnixServer(emb.socket_path(), reply=REPLY):
             assert json.loads(bc.camofox_navigate("https://example.com/", "spoof2"))["success"] is True
         bc.check_camofox_available()
@@ -181,33 +187,61 @@ def test_external_server_still_uses_plain_tcp(embedded, monkeypatch):
     assert spy.seen == ["Bearer external-key"]
 
 
-# ── Сервер выключен или молчит: понятная ошибка до создания сессии ─────────
+# ── Сервер молчит или выключен владельцем ──────────────────────────────────
 
 
-def test_silent_server_gives_a_russian_error_before_any_session_exists(embedded):
-    result = json.loads(bc.camofox_navigate("https://example.com", "silent"))
-    assert result["success"] is False
-    assert "не отвечает" in result["error"]
-    assert "korra doctor" in result["error"]
-    assert emb.access_key() not in result["error"]
-    assert "Traceback" not in result["error"] and "Errno" not in result["error"]
+@pytest.fixture
+def chromium_navigate():
+    """Обычный Chromium вместо настоящего: возвращает признак, что страницу открыл он."""
+    with patch("tools.browser_tool._browser_navigate", return_value='{"success": true, "via": "chromium"}') as nav:
+        yield nav
+
+
+def test_silent_server_gives_a_russian_error_to_tools_that_need_a_page(embedded):
+    snapshot = json.loads(bc.camofox_snapshot(task_id="silent"))
+    assert snapshot["success"] is False
+    assert "не отвечает" in snapshot["error"] and "korra doctor" in snapshot["error"]
+    assert emb.access_key() not in snapshot["error"]
+    assert "Traceback" not in snapshot["error"] and "Errno" not in snapshot["error"]
     assert bc._sessions == {}
 
 
-def test_disabled_server_with_embedded_selected_says_how_to_turn_it_on(embedded):
-    emb.disable()
+def test_silent_server_turns_the_same_navigate_call_into_chromium(embedded, chromium_navigate):
+    result = json.loads(bc.camofox_navigate("https://example.com", "silent"))
+    assert result == {"success": True, "via": "chromium"}
+    chromium_navigate.assert_called_once_with("https://example.com", "silent")
+    assert bc._sessions == {}
+
+
+def test_server_switched_off_with_camofox_selected_explains_the_next_step(embedded, chromium_navigate):
+    emb.disable(signal=False)
     result = json.loads(bc.camofox_navigate("https://example.com", "off"))
+    chromium_navigate.assert_not_called()
     assert result["success"] is False
     assert "выключен" in result["error"]
-    assert "korra doctor --fix" in result["error"]
+    assert "korra tools camofox on" in result["error"]
     assert bc._sessions == {}
     snapshot = json.loads(bc.camofox_snapshot(task_id="off"))
-    assert snapshot["success"] is False and "выключен" in snapshot["error"]
+    assert snapshot["success"] is False and "korra tools camofox on" in snapshot["error"]
     assert bc._sessions == {}
+
+
+def test_server_switched_off_profile_without_a_choice_goes_to_chromium_without_an_error(install, data):
+    emb.disable(signal=False)
+    assert bc.is_camofox_mode() is False
+    assert bc.get_camofox_url() == ""
+    assert bc.embedded_fallback_note() == ""
+    result, run, camofox = _navigate_through_dispatch()
+    camofox.assert_not_called()
+    assert result["success"] is True and "note" not in result
+    emb.enable()
+    with UnixServer(emb.socket_path(), reply=REPLY):
+        bc._health_cache = (0.0, "", True)
+        assert bc.is_camofox_mode() is True
 
 
 def test_no_anonymous_session_is_ever_created_or_cached(embedded):
-    emb.disable()
+    emb.disable(signal=False)
     for tool in (
         lambda: bc.camofox_navigate("https://example.com", "anon"),
         lambda: bc.camofox_click("e1", "anon"),
@@ -223,11 +257,11 @@ def test_after_reenabling_the_same_profile_keeps_its_identity(embedded):
         before = bc._get_session("keep")
     bc._drop_session("keep")
 
-    emb.disable()
+    emb.disable(signal=False)
     json.loads(bc.camofox_navigate("https://example.com", "keep"))
     assert bc._sessions == {}
 
-    assert emb.sync() is True  # владелец включил заново
+    emb.enable()  # владелец включил заново
     with UnixServer(emb.socket_path(), reply=REPLY):
         result = json.loads(bc.camofox_navigate("https://example.com", "keep"))
         after = bc._get_session("keep")
@@ -256,17 +290,16 @@ def test_external_server_keeps_the_original_connection_error(embedded, monkeypat
 # ── Два профиля одной установки ────────────────────────────────────────────
 
 
-def test_two_profiles_with_different_browsers_do_not_disturb_each_other(chromium_root, install, data):
+def test_two_profiles_with_different_browsers_do_not_disturb_each_other(install, data):
     with in_profile(data, "a"):
         choose_browser("Camofox")
         id_a = get_camofox_identity("a")
-    assert emb.is_enabled()
     with in_profile(data, "b"):
         choose_browser("Local Browser")
         id_b = get_camofox_identity("b")
         assert bc.get_camofox_url() == ""
         assert bc.is_camofox_mode() is False
-    assert emb.is_enabled()  # профиль A всё ещё пользуется сервером
+    assert emb.is_enabled()
     with in_profile(data, "a"), UnixServer(emb.socket_path(), reply=REPLY):
         assert bc.is_camofox_mode() is True
         assert bc.get_camofox_url() == emb.BASE_URL
@@ -276,7 +309,7 @@ def test_two_profiles_with_different_browsers_do_not_disturb_each_other(chromium
     assert id_a["user_id"] != id_b["user_id"]
     with in_profile(data, "a"):
         choose_browser("Local Browser")
-    assert not emb.is_enabled()  # последний потребитель ушёл
+    assert emb.is_enabled()  # профили сервер не выключают
 
 
 # ── SSRF и приватные адреса: Camofox не слабее Chromium ───────────────────
@@ -356,10 +389,123 @@ def test_running_server_takes_the_call_without_a_note(install, data):
     assert "note" not in result
 
 
-def test_server_switched_off_by_an_explicit_chromium_choice_is_not_a_failure(chromium_root, install, data):
+def test_explicit_chromium_choice_is_not_a_failure(chromium_root, install, data):
     result, run, camofox = _navigate_through_dispatch()
     camofox.assert_not_called()
     assert result["success"] is True and "note" not in result
+
+
+# ── Сервер сломался посреди работы: тот же вызов уходит в Chromium ──────────
+
+
+def _navigate_for_real(url="https://example.com/", task_id="live"):
+    """Диспетчер как у агента: настоящий Camofox-клиент, Chromium подменён."""
+    import tools.browser_tool as bt
+
+    chromium = {"success": True, "data": {"title": "t", "url": url}}
+    with patch("tools.browser_tool._run_browser_command", return_value=chromium) as run:
+        result = json.loads(bt.browser_navigate(url, task_id=task_id))
+    return result, run
+
+
+def test_connection_lost_after_a_good_probe_resets_the_cache_and_the_same_call_uses_chromium(install, data):
+    # Сервер ответил на /health, кэш «жив», но к вкладке соединение рвётся.
+    server = UnixServer(emb.socket_path(), reply=REPLY)
+    with server:
+        first, run_first = _navigate_for_real(task_id="first")
+        assert "note" not in first and first.get("success") is True
+        run_first.assert_not_called()
+        assert bc._health_cache[2] is True
+    # Сервер пропал, кэш ещё «жив» (TTL не вышел).
+    assert bc._health_cache[2] is True and bc._health_cache[0] > 0
+    result, run = _navigate_for_real(task_id="second")
+    run.assert_called()
+    assert result["success"] is True
+    assert "Chromium" in result["note"]
+    assert bc._health_cache[2] is False  # кэш сброшен: следующие вызовы сразу в Chromium
+    assert bc.is_camofox_mode() is False
+    assert bc._sessions == {} or "second" not in bc._sessions
+
+
+def test_server_answering_5xx_on_tab_creation_sends_the_call_to_chromium(install, data):
+    def respond(method, path, body):
+        if method == "POST" and path == "/tabs":
+            return 500, b'{"error": "browser failed to launch"}'
+
+    with UnixServer(emb.socket_path(), reply=REPLY, respond=respond) as server:
+        result, run = _navigate_for_real(task_id="five")
+    run.assert_called()
+    assert result["success"] is True
+    assert "Chromium" in result["note"]
+    posts = [e for e in server.seen if e["method"] == "POST" and e["path"] == "/tabs"]
+    assert len(posts) == 2  # сам вызов и проба пустой вкладки
+    assert "about:blank" in posts[1]["body"]
+    assert bc._health_cache[2] is False
+    assert bc.is_camofox_mode() is False
+
+
+def test_tab_creation_timeout_sends_the_call_to_chromium(install, data, monkeypatch):
+    def respond(method, path, body):
+        if method == "POST" and path == "/tabs":
+            time.sleep(1.5)
+            return 500, b"{}"
+
+    monkeypatch.setattr(bc, "_get_command_timeout", lambda: 1)
+    with UnixServer(emb.socket_path(), reply=REPLY, respond=respond):
+        result, run = _navigate_for_real(task_id="slow")
+    run.assert_called()
+    assert "Chromium" in result["note"]
+    assert bc.is_camofox_mode() is False
+
+
+def test_a_dead_site_does_not_mark_a_healthy_server_as_down(install, data):
+    # POST /tabs навигирует на адрес, поэтому недоступный сайт тоже даёт 500;
+    # пустая вкладка при этом открывается, сервер исправен, ошибка остаётся ошибкой.
+    def respond(method, path, body):
+        if method == "POST" and path == "/tabs" and "dead.example" in body:
+            return 500, b'{"error": "net::ERR_NAME_NOT_RESOLVED"}'
+
+    with UnixServer(emb.socket_path(), reply=REPLY, respond=respond) as server:
+        result, run = _navigate_for_real("https://dead.example/", task_id="dead")
+        assert bc.is_camofox_mode() is True
+    run.assert_not_called()
+    assert result["success"] is False
+    assert "note" not in result
+    assert bc._health_cache[2] is True
+    assert any(e["method"] == "DELETE" for e in server.seen)  # проба убрала за собой вкладку
+
+
+def test_a_client_error_from_the_server_is_not_a_broken_server(install, data):
+    def respond(method, path, body):
+        if method == "POST" and path == "/tabs":
+            return 400, b'{"error": "bad url"}'
+
+    with UnixServer(emb.socket_path(), reply=REPLY, respond=respond) as server:
+        result, run = _navigate_for_real(task_id="four")
+        assert bc.is_camofox_mode() is True
+    run.assert_not_called()
+    assert result["success"] is False
+    assert len([e for e in server.seen if e["method"] == "POST"]) == 1  # пробы не было
+
+
+def test_other_tools_after_a_lost_connection_get_a_russian_error_and_later_calls_use_chromium(install, data):
+    with UnixServer(emb.socket_path(), reply=REPLY):
+        assert bc.is_camofox_mode() is True
+        bc._get_session("mid")["tab_id"] = "t1"
+    snapshot = json.loads(bc.camofox_snapshot(task_id="mid"))
+    assert snapshot["success"] is False and "не отвечает" in snapshot["error"]
+    assert bc.is_camofox_mode() is False  # дальше навигация уходит в Chromium
+
+
+def test_an_external_server_failure_still_fails_as_before(install, data, monkeypatch):
+    monkeypatch.setenv("CAMOFOX_URL", "http://127.0.0.1:1")
+    with patch("tools.browser_camofox.requests.post", side_effect=requests.ConnectionError("boom")), patch(
+        "tools.browser_tool._browser_navigate"
+    ) as chromium:
+        result = json.loads(bc.camofox_navigate("https://example.com", "ext"))
+    chromium.assert_not_called()
+    assert result["success"] is False and "Cannot connect to Camofox" in result["error"]
+    assert bc.is_camofox_mode() is True
 
 
 def test_external_server_failure_is_not_replaced_by_chromium(install, data, monkeypatch):
@@ -376,7 +522,7 @@ def test_cdp_override_is_not_annotated(install, data, monkeypatch):
 def test_the_server_coming_back_returns_calls_to_camofox(install, data, monkeypatch):
     assert bc.is_camofox_mode() is False
     with UnixServer(emb.socket_path(), reply=REPLY):
-        monkeypatch.setattr(bc, "_HEALTH_TTL", 0.0)
+        bc._health_cache = (0.0, "", True)  # срок пробы вышел
         assert bc.is_camofox_mode() is True
 
 

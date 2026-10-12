@@ -1,4 +1,4 @@
-"""K21-336: образ содержит закреплённый Camofox, а s6-сервис стартует только по включению."""
+"""K21-336: образ содержит закреплённый Camofox, а s6-сервис работает всегда, пока его не выключили выключателем установки."""
 from __future__ import annotations
 
 import json
@@ -80,11 +80,11 @@ def test_s6_service_is_declared_and_user_bundle_contains_it() -> None:
     assert (S6 / "camofox" / "run").stat().st_mode & 0o111
 
 
-def test_s6_run_starts_only_when_enabled_as_hermes_with_home_in_data() -> None:
+def test_s6_run_starts_unless_switched_off_as_hermes_with_home_in_data() -> None:
     run = (S6 / "camofox" / "run").read_text()
     assert run.startswith("#!/command/with-contenv sh")
-    assert "camofox/enabled" in run
-    assert re.search(r"while \[ ! -f \"\$marker\" \]", run)
+    assert 'switch="$data_root/camofox/disabled"' in run
+    assert re.search(r"while \[ -f \"\$switch\" \]", run)  # ждёт, пока лежит выключатель
     assert "export HOME=/opt/data" in run
     assert "s6-setuidgid hermes python -m korra_cli.camofox_embedded serve" in run
     # 125 из finish делает слот навсегда «упавшим»: включить обратно нельзя
@@ -97,13 +97,13 @@ def test_s6_run_never_exposes_the_key_or_a_public_bind() -> None:
     assert "set -x" not in run and "xtrace" not in run
 
 
-def test_marker_path_in_run_matches_the_python_state_dir() -> None:
+def test_switch_path_in_run_matches_the_python_state_dir() -> None:
     from korra_cli import camofox_embedded as emb
 
     assert emb.STATE_DIR_NAME == "camofox"
-    assert emb._enabled_marker().name == "enabled"
+    assert emb._disabled_marker().name == "disabled"
     run = (S6 / "camofox" / "run").read_text()
-    assert f'marker="$data_root/{emb.STATE_DIR_NAME}/{emb._enabled_marker().name}"' in run
+    assert f'switch="$data_root/{emb.STATE_DIR_NAME}/{emb._disabled_marker().name}"' in run
 
 
 def test_unix_socket_wrapper_is_copied_after_the_heavy_layer_and_inside_the_block() -> None:
@@ -132,12 +132,24 @@ def test_stage2_chown_loop_stays_targeted() -> None:
     assert "chown -R hermes:hermes \"$HERMES_HOME\"\n" not in hook
 
 
-def test_s6_run_reconciles_the_marker_with_the_profiles_before_it_waits() -> None:
+def test_s6_run_has_no_profile_accounting_and_does_not_wait_for_a_marker_of_use() -> None:
     run = (S6 / "camofox" / "run").read_text()
-    sync = run.index("python -m korra_cli.camofox_embedded sync")
-    assert run.index("export HOME=/opt/data") < sync < run.index('while [ ! -f "$marker" ]')
-    assert "s6-setuidgid hermes python -m korra_cli.camofox_embedded sync" in run
-    assert "|| true" in run[sync : sync + 120]
+    assert "camofox_embedded sync" not in run and "enabled" not in run
+    assert "s6-svc -t" in run  # подсказка: выключение останавливает слот, он вернётся в ожидание
+
+
+def test_s6_run_executes_cleanly_when_the_server_is_missing_or_switched_off(tmp_path) -> None:
+    import subprocess
+
+    run = (S6 / "camofox" / "run").read_text().replace("#!/command/with-contenv sh", "#!/bin/sh", 1)
+    script = tmp_path / "run"
+    script.write_text(run.replace("sleep 3", "exit 7"))
+    script.chmod(0o755)
+    data = tmp_path / "data"
+    (data / "camofox").mkdir(parents=True)
+    (data / "camofox" / "disabled").write_text("1\n")
+    env = {"PATH": "/usr/bin:/bin", "KORRA_HOME": str(data), "KORRA_CAMOFOX_HOME": str(tmp_path / "none")}
+    assert subprocess.run(["sh", str(script)], env=env, timeout=10).returncode == 7  # в цикле ожидания
 
 
 def test_wrapper_skips_the_browser_prewarm_without_touching_the_package() -> None:
