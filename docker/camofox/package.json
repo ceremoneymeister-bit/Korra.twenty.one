@@ -1,0 +1,9 @@
+{
+  "name": "korra-camofox-box",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Встроенный сервер браузера Camofox. Живёт отдельно от корневого package.json: контракт tests-js/package-json-lazy-deps.test.ts.",
+  "dependencies": {
+    "@askjo/camofox-browser": "1.18.1"
+  }
+}

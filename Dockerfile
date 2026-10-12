@@ -369,6 +369,61 @@ WhisperModel(path, device="cpu", compute_type="int8", cpu_threads=2); \
 print("whisper loaded offline from " + path)'; \
     du -sh /opt/hermes/models/whisper
 
+# ---------- Camofox: встроенный браузер с защитой от блокировок (K21-336) ----------
+# Сервер @askjo/camofox-browser и закреплённый бинарник Camoufox кладутся в
+# образ на сборке: /opt/hermes в контейнере закрыт на запись, а корневой
+# package.json намеренно не содержит этот пакет (tests-js/package-json-lazy-deps
+# .test.ts), поэтому свой каталог /opt/camofox со своим lock-файлом. Во время
+# работы контейнеру ничего не скачивается; GeoIP нужен только с прокси, его нет.
+# Слой стоит до исходников и фронтенда: правка кода его не инвалидирует, а
+# 660 МБ архива не качаются заново между выпусками.
+#
+# Сам сервис выключен, пока владелец не выбрал Camofox (docker/s6-rc.d/camofox).
+ARG CAMOUFOX_RELEASE=152.0.4-beta.30
+ARG CAMOUFOX_X86_64_SHA256=5720d45b894ce1770543de024c6f10d514b38be560fa2dc3226b3d8586caf672
+ARG UBLOCK_XPI_URL=https://addons.mozilla.org/firefox/downloads/file/5034826/ublock_origin-1.75.0.xpi
+ARG UBLOCK_XPI_SHA256=5b74415860456370644bd80f16125e865b0e6c356bb5dfcfb84069967eaa5287
+# 1 — убрать из образа шрифты macOS и Windows (~930 МБ). Сервер запускается с
+# os=linux, нужны только fonts/linux. Чтобы оставить их, соберите образ с
+# --build-arg CAMOFOX_STRIP_FOREIGN_FONTS=0. Удаление идёт в том же RUN, что
+# и распаковка: отдельным слоем оно не уменьшило бы образ.
+ARG CAMOFOX_STRIP_FOREIGN_FONTS=1
+ENV KORRA_CAMOFOX_HOME=/opt/camofox
+COPY docker/camofox/package.json docker/camofox/package-lock.json /opt/camofox/
+RUN set -eu; \
+    apt-get -o Acquire::Retries=3 update; \
+    apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
+        unzip xvfb libasound2t64 libatk1.0-0t64 libcairo-gobject2 libcairo2 libdbus-1-3 \
+        libdbus-glib-1-2 libfontconfig1 libfreetype6 libgdk-pixbuf-2.0-0 libglib2.0-0t64 \
+        libgtk-3-0t64 libharfbuzz0b libpango-1.0-0 libpangocairo-1.0-0 libx11-6 libx11-xcb1 \
+        libxcb-shm0 libxcb1 libxcomposite1 libxcursor1 libxdamage1 libxext6 libxfixes3 \
+        libxi6 libxrandr2 libxrender1 libxtst6 libxt6t64; \
+    rm -rf /var/lib/apt/lists/*; \
+    cd /opt/camofox; \
+    CAMOFOX_SKIP_DOWNLOAD=1 npm ci --omit=dev --no-audit --no-fund --fetch-retries=5; \
+    npm cache clean --force; \
+    test -f node_modules/@askjo/camofox-browser/server.js
+RUN set -eu; \
+    case "$(uname -m)" in x86_64) ;; *) echo "Camofox: сборка под $(uname -m) не поддерживается" >&2; exit 1 ;; esac; \
+    zip="camoufox-${CAMOUFOX_RELEASE}-lin.x86_64.zip"; \
+    curl -fsSL --retry 5 --retry-all-errors --connect-timeout 20 -o "/tmp/${zip}" \
+        "https://github.com/daijro/camoufox/releases/download/v${CAMOUFOX_RELEASE}/${zip}"; \
+    printf '%s  %s\n' "${CAMOUFOX_X86_64_SHA256}" "/tmp/${zip}" | sha256sum -c -; \
+    mkdir -p /opt/camofox/browser; \
+    unzip -q "/tmp/${zip}" -d /opt/camofox/browser; \
+    rm -f "/tmp/${zip}"; \
+    if [ "${CAMOFOX_STRIP_FOREIGN_FONTS}" = "1" ]; then rm -rf /opt/camofox/browser/fonts/macos /opt/camofox/browser/fonts/windows; fi; \
+    printf '{"version": "%s", "release": "%s"}' "${CAMOUFOX_RELEASE%%-*}" "${CAMOUFOX_RELEASE#*-}" \
+        > /opt/camofox/browser/version.json; \
+    curl -fsSL --retry 5 --retry-all-errors --connect-timeout 20 -o /tmp/ublock.xpi "${UBLOCK_XPI_URL}"; \
+    printf '%s  %s\n' "${UBLOCK_XPI_SHA256}" /tmp/ublock.xpi | sha256sum -c -; \
+    mkdir -p /opt/camofox/browser/addons/UBO; \
+    unzip -q /tmp/ublock.xpi -d /opt/camofox/browser/addons/UBO; \
+    rm -f /tmp/ublock.xpi; \
+    test -f /opt/camofox/browser/addons/UBO/manifest.json; \
+    chmod -R 0755 /opt/camofox/browser; \
+    test -x /opt/camofox/browser/camoufox-bin
+
 # ---------- Frontend build (cached independently from Python source) ----------
 # Copy only the frontend source trees first so that Python-only changes don't
 # invalidate the (relatively slow) web + ui-tui build layer.
