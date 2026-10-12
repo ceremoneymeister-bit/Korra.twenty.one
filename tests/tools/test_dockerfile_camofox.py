@@ -29,6 +29,10 @@ def test_npm_package_is_pinned_with_lock_outside_the_root_package_json() -> None
     assert package["dependencies"] == {"@askjo/camofox-browser": "1.18.1"}
     lock = json.loads((ROOT / "docker/camofox/package-lock.json").read_text())
     assert lock["packages"]["node_modules/@askjo/camofox-browser"]["version"] == "1.18.1"
+    # playwright-core 1.64 не восстанавливает сохранённый вход в Camoufox 152.0.4-beta.30
+    # (Network.setRequestInterception: bypassServiceWorker); 1.63 работает.
+    assert package["overrides"] == {"playwright-core": "1.63.0"}
+    assert lock["packages"]["node_modules/playwright-core"]["version"] == "1.63.0"
     block = _block()
     assert "COPY docker/camofox/package.json docker/camofox/package-lock.json /opt/camofox/" in block
     assert "npm ci --omit=dev" in block
