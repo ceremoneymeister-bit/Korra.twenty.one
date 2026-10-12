@@ -4197,6 +4197,8 @@ def browser_navigate(url: str, task_id: Optional[str] = None) -> str:
     """Navigate to a URL; add a short note when Chromium replaced a silent bundled Camofox."""
     note = _camofox_fallback_note()
     result = _browser_navigate(url, task_id)
+    # Сервер мог отказать прямо в этом вызове: тогда страницу уже открыл Chromium.
+    note = note or _camofox_fallback_note()
     if not note:
         return result
     try:
