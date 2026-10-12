@@ -1,5 +1,6 @@
 """Updater transactions on real filesystem/SQLite with fake Docker boundaries."""
 import errno
+import fcntl
 import importlib.metadata
 import importlib.util
 import hashlib
@@ -8,6 +9,8 @@ import json
 import os
 from pathlib import Path
 import shlex
+import shutil
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -20,6 +23,7 @@ SOURCE = Path(__file__).resolve().parents[2] / "docs/client-deploy/updater.py"
 spec = importlib.util.spec_from_file_location("client_updater", SOURCE)
 u = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(u)
+REAL_CANONICAL_DATA = u.canonical_data
 OLD = "sha256:" + "1" * 64
 NEW = "sha256:" + "2" * 64
 
@@ -50,8 +54,8 @@ def run_packages_isolated(core, root, pinned_json, migrated_json):
 
 
 class FakeDockerUpdater(u.Updater):
-    def __init__(self, home):
-        super().__init__(home)
+    def __init__(self, home, **options):
+        super().__init__(home, **options)
         self.image = OLD
         self.running = True
         self.calls = []
@@ -215,7 +219,7 @@ def updater(tmp_path, monkeypatch):
     # The real Docker integration covers privileged host ownership. Unit fake
     # boundaries must also run under an unprivileged CI account; DATA is this
     # test's freshly created directory and locks remain inside its temp root.
-    monkeypatch.setattr(u, "canonical_data", lambda value: Path(value))
+    monkeypatch.setattr(u, "canonical_data", lambda value, **_: Path(value))
     lock_root = tmp_path / "locks"
     lock_root.mkdir()
     monkeypatch.setattr(u, "LOCK_ROOT", lock_root)
@@ -1072,6 +1076,35 @@ def test_new_credential_ancestors_preserve_latest_owner_mode_under_private_umask
         parent = parent.parent
 
 
+def test_rollback_carries_credential_sqlite_with_its_wal(updater):
+    path = updater.data / "telegram.session"
+    with sqlite3.connect(path) as db:
+        db.execute("CREATE TABLE credentials(value TEXT)")
+        db.execute("INSERT INTO credentials VALUES ('old')")
+    updater.update("registry.example/korra:latest")
+    # A crashed writer leaves committed WAL frames and no process remains open.
+    script = """import os, sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+db.execute('PRAGMA journal_mode=WAL')
+db.execute('PRAGMA wal_autocheckpoint=0')
+db.execute("UPDATE credentials SET value='rotated'")
+db.commit()
+os._exit(0)
+"""
+    subprocess.run([sys.executable, "-I", "-B", "-c", script, str(path)], check=True)
+    wal = path.with_name(path.name + "-wal")
+    assert wal.stat().st_size > 0
+    failed_tree = u.tree_manifest(updater.data)
+    assert u.credential_path("telegram.session-wal")
+    updater.rollback()
+    assert updater.receipt["status"] == "rolled_back"
+    with sqlite3.connect(path) as db:
+        assert db.execute("SELECT value FROM credentials").fetchone() == ("rotated",)
+    # The failed DATA stays exactly as the crashed writer left it.
+    displaced = updater.data.with_name("data.after-fixture-job")
+    assert {k: v for k, v in u.tree_manifest(displaced).items() if k != ".drain_request.json"} == failed_tree
+
+
 def test_rollback_resumes_verified_export_after_two_credential_failures(updater):
     updater.update("registry.example/korra:latest")
     (updater.data / "auth.json").write_text('{"refresh_token": "latest"}')
@@ -1217,6 +1250,185 @@ def test_rollback_retry_after_old_image_start_failure_preserves_all_exports(upda
     assert sorted(p.name for p in updater.data.parent.glob("data.after-*")) == ["data.after-fixture-job"]
 
 
+def _legacy_swapped_then_old_image_failed(updater, **recorded):
+    """State left by a 0.21.16/17 rollback: DATA swapped, the old image then failed to start."""
+    updater.update("registry.example/korra:latest")
+    job = updater.job
+    (updater.data / "unique-owner-record.txt").write_text("only created on failed release")
+    u.snapshot(updater.data, job / "after")
+    displaced = updater.data.with_name("data.after-fixture-job")
+    os.replace(updater.data, displaced)
+    u.snapshot(job / "before", updater.data)
+    stage = updater.data.with_name("data.restore-fixture-job")
+    u.atomic_json(job / "restore-stage.json",
+                  {"path": str(stage), "source": str(job / "before"), "phase": "verified"})
+    updater.receipt.update(displaced_data=str(displaced), displaced_data_history=[str(displaced)],
+                           post_update_exports=[str(job / "after")], **recorded)
+    updater.phase("rollback", status="rollback_failed")
+    updater.running = False
+    return job, displaced
+
+
+@pytest.mark.parametrize("recorded, expected", [({"post_update_changes": 1}, 1), ({}, None)])
+def test_retried_legacy_rollback_never_lowers_the_recorded_changes_or_frees_the_export(
+        updater, monkeypatch, recorded, expected):
+    monkeypatch.delenv("UPDATE_HISTORY", raising=False)
+    job, displaced = _legacy_swapped_then_old_image_failed(updater, **recorded)
+    real_overlay = u.overlay_credentials
+    monkeypatch.setattr(u, "overlay_credentials", lambda *a: (_ for _ in ()).throw(u.UpdateError("injected")))
+    with pytest.raises(u.UpdateError, match="injected"):
+        updater.rollback()
+    # The failed attempt wrote a zero-change comparison; the next one must not trust it.
+    monkeypatch.setattr(u, "overlay_credentials", real_overlay)
+    updater.rollback()
+    assert updater.receipt["status"] == "rolled_back"
+    assert updater.receipt["post_update_changes"] == expected
+    assert (displaced / "unique-owner-record.txt").exists()
+    assert not (job / u.EXPORTS_REVIEWED).exists()
+    assert not updater.exports_reviewed(job, updater.receipt)
+    updater.update(_second_update(updater, image=NEW))
+    assert job.is_dir() and (displaced / "unique-owner-record.txt").exists()
+    assert "fixture-job" in updater.receipt["history_retention"]["review"]
+    assert (job / "after" / "unique-owner-record.txt").exists()
+
+
+def test_an_older_retry_that_overwrote_the_change_list_does_not_make_the_count_zero(updater, monkeypatch):
+    # 0.21.16/17 rewrites post-update-changes.json on every retry: after a second
+    # failed attempt it holds [] although the earlier attempt exported a record.
+    monkeypatch.delenv("UPDATE_HISTORY", raising=False)
+    job, displaced = _legacy_swapped_then_old_image_failed(updater)
+    u.atomic_json(job / "post-update-changes.json", [])
+    updater.rollback()
+    assert updater.receipt["status"] == "rolled_back"
+    assert updater.receipt["post_update_changes"] is None
+    assert not updater.exports_reviewed(job, updater.receipt)
+    updater.update(_second_update(updater, image=NEW))
+    assert (job / "after" / "unique-owner-record.txt").exists()
+    assert (displaced / "unique-owner-record.txt").exists()
+
+
+@pytest.mark.skipif(os.geteuid() != 0, reason="the real canonical_data demands root-owned ancestors")
+def test_sigkill_between_the_restore_renames_is_finished_by_a_fresh_process(updater, monkeypatch):
+    updater.update("registry.example/korra:latest")
+    (updater.data / "new-message.txt").write_text("written on the new release")
+    data = updater.data
+    displaced = _displaced(updater)
+    real_replace = os.replace
+    pid = os.fork()
+    if pid == 0:
+        def replace(src, dst, *args, **kwargs):
+            result = real_replace(src, dst, *args, **kwargs)
+            if Path(src) == data and Path(dst) == displaced:
+                os.kill(os.getpid(), signal.SIGKILL)
+            return result
+        u.os.replace = replace
+        updater.rollback()
+        os._exit(99)
+    _, status = os.waitpid(pid, 0)
+    assert os.WIFSIGNALED(status) and os.WTERMSIG(status) == signal.SIGKILL
+    assert not data.exists() and displaced.is_dir()
+    stage = data.with_name("data.restore-fixture-job")
+    assert json.loads((updater.job / "restore-stage.json").read_text())["phase"] == "swapping"
+
+    # A new process, with the real DATA check. Every operation but the targeted
+    # recovery still refuses a missing DATA.
+    monkeypatch.setattr(u, "canonical_data", REAL_CANONICAL_DATA)
+    with pytest.raises(u.UpdateError, match="DATA does not exist"):
+        FakeDockerUpdater(updater.home)
+    fresh = FakeDockerUpdater(updater.home, data_missing_ok=True)
+    assert fresh.data_missing
+    with pytest.raises(u.UpdateError, match="DATA does not exist"):
+        fresh.require_data()
+    u.load_job(fresh, "fixture-job")
+    assert fresh.pending_swap() == stage
+    record = json.loads((updater.job / "restore-stage.json").read_text())
+    for forged in (dict(record, phase="verified"), dict(record, path=str(stage) + "x"),
+                   dict(record, displaced=str(data.with_name("data.after-other-job")))):
+        u.atomic_json(updater.job / "restore-stage.json", forged)
+        with pytest.raises(u.UpdateError, match="DATA does not exist"):
+            fresh.pending_swap()
+    u.atomic_json(updater.job / "restore-stage.json", record)
+
+    fresh.image, fresh.running, fresh.tags = NEW, False, dict(updater.tags)
+    with u.target_lock_path(fresh.data).open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fresh.finish_interrupted_swap()
+    assert not fresh.data_missing and not stage.exists()
+    fresh.rollback()
+    assert fresh.receipt["status"] == "rolled_back" and fresh.image == OLD
+    assert not (data / "new-message.txt").exists()
+    assert (displaced / "new-message.txt").read_text() == "written on the new release"
+    with sqlite3.connect(data / "state.db") as database:
+        assert database.execute("SELECT * FROM messages").fetchall() == [("before",)]
+    assert fresh.receipt["displaced_data"] == str(displaced)
+
+
+def _killed_legacy_rollback(updater):
+    """What 0.21.16/17 leave when SIGKILL lands between the two renames of a rollback."""
+    updater.update("registry.example/korra:latest")
+    (updater.data / "new-message.txt").write_text("written on the new release")
+    data, displaced = updater.data, _displaced(updater)
+    stage = data.with_name("data.restore-fixture-job")
+    real_replace = os.replace
+    pid = os.fork()
+    if pid == 0:
+        def replace(src, dst, *args, **kwargs):
+            result = real_replace(src, dst, *args, **kwargs)
+            if Path(src) == data and Path(dst) == displaced:
+                os.kill(os.getpid(), signal.SIGKILL)
+            return result
+        u.os.replace = replace
+        updater.rollback()
+        os._exit(99)
+    _, status = os.waitpid(pid, 0)
+    assert os.WIFSIGNALED(status) and not data.exists()
+    # The older code records the stage as `verified` and names no `displaced`.
+    u.atomic_json(updater.job / "restore-stage.json",
+                  {"path": str(stage), "source": str(updater.job / "before"), "phase": "verified"})
+    updater.running = False
+    return stage, displaced
+
+
+@pytest.mark.skipif(os.geteuid() != 0, reason="the real canonical_data demands root-owned ancestors")
+@pytest.mark.parametrize("entry", ["--rollback", "--status"])
+def test_a_rollback_killed_by_older_code_is_refused_with_the_paths_and_the_manual_procedure(
+        updater, monkeypatch, entry):
+    stage, displaced = _killed_legacy_rollback(updater)
+    for name in ("update.sh", "updater.py", "up.sh", "dependencies.lock.json"):
+        (updater.home / name).write_text("# synthetic host kit\n")
+    monkeypatch.setattr(u, "HERE", updater.home)
+    monkeypatch.setattr(u, "canonical_data", REAL_CANONICAL_DATA)
+    monkeypatch.setattr(u, "Updater", lambda **options: FakeDockerUpdater(updater.home, **options))
+    with pytest.raises(u.UpdateError, match="DATA does not exist") as refusal:
+        u.main([entry, "fixture-job"])
+    message = str(refusal.value)
+    for needle in (str(stage), str(displaced), str(updater.job / "restore-stage.manifest.json"),
+                   "README.md", "0.21.16/0.21.17"):
+        assert needle in message
+    assert not updater.data.exists() and stage.is_dir() and displaced.is_dir()
+
+
+@pytest.mark.skipif(os.geteuid() != 0, reason="the real canonical_data demands root-owned ancestors")
+def test_the_manual_procedure_for_an_older_killed_rollback_finishes_it_without_losing_a_write(
+        updater, monkeypatch):
+    stage, displaced = _killed_legacy_rollback(updater)
+    monkeypatch.setattr(u, "canonical_data", REAL_CANONICAL_DATA)
+    fresh = FakeDockerUpdater(updater.home, data_missing_ok=True)
+    u.load_job(fresh, "fixture-job")
+    # README: the stage matches its manifest, is moved into place, the rollback is run again.
+    assert u.tree_manifest(stage) == json.loads((updater.job / "restore-stage.manifest.json").read_text())
+    os.replace(stage, updater.data)
+    fresh = FakeDockerUpdater(updater.home)
+    fresh.image, fresh.running, fresh.tags = NEW, False, dict(updater.tags)
+    u.load_job(fresh, "fixture-job")
+    fresh.rollback()
+    assert fresh.receipt["status"] == "rolled_back" and fresh.image == OLD and fresh.running
+    assert (displaced / "new-message.txt").read_text() == "written on the new release"
+    assert not (fresh.data / "new-message.txt").exists()
+    assert fresh.receipt["post_update_changes"] is None
+    assert not fresh.exports_reviewed(fresh.job, fresh.receipt)
+
+
 class Killed(BaseException):
     """A process that died: no `except Exception` and no cleanup runs for it."""
 
@@ -1239,6 +1451,25 @@ def _large_inodes(*roots, minimum=1 << 20):
 
 def _data_size(root):
     return sum(path.lstat().st_size for path in Path(root).rglob("*") if path.is_file() and not path.is_symlink())
+
+
+def _copies_needed(updater, mode):
+    """Bytes of physical copies on one file system, summed by hand from the fixture's files.
+
+    Update: `before` (all of DATA), the rehearsal's state.db, the page-backup peak
+    (state.db is the only database). Rollback: config.yaml and every credential
+    file copied from the failed DATA (link); DATA again plus the peak (copy).
+    """
+    data = updater.data
+    credentials = [data / "auth.json", data / "revoked.token"]
+    credentials += [p for p in (data / "browser-profiles").rglob("*") if p.is_file()]
+    credential_bytes = sum(p.stat().st_size for p in credentials)
+    state = (data / "state.db").stat().st_size
+    size = _data_size(data)
+    update = size + state + state
+    if mode == "link":
+        return update + (data / "config.yaml").stat().st_size + credential_bytes
+    return update + size + state + credential_bytes
 
 
 def _cross_filesystem(monkeypatch):
@@ -1306,33 +1537,40 @@ def test_rollback_across_filesystems_copies_before_and_keeps_it(updater, monkeyp
 
 
 @pytest.mark.parametrize("mode", ["link", "copy"])
-def test_space_gate_is_before_plus_headroom_and_names_the_rollback_path(updater, monkeypatch, mode):
+def test_space_gate_counts_every_copy_and_names_the_rollback_path(updater, monkeypatch, mode):
     _blob(updater, 4)
+    (updater.data / "browser-profiles").mkdir()
+    (updater.data / "browser-profiles/profile-blob").write_bytes(os.urandom(1 << 20))
     updater.free_space = u.Updater.free_space.__get__(updater)
     if mode == "copy":
         _cross_filesystem(monkeypatch)
     size, gib = _data_size(updater.data), 1024**3
-    copies = 1 if mode == "link" else 2
+    required = _copies_needed(updater, mode) + 2 * gib
 
     def free(value):
         monkeypatch.setattr(u.shutil, "disk_usage", lambda path: types.SimpleNamespace(free=value))
 
-    free(copies * size + 2 * gib)
+    free(required)
     updater.free_space()
     assert updater.receipt["rollback_path"] == mode
-    assert updater.receipt["rollback_required_bytes"] == copies * size + 2 * gib
+    assert updater.receipt["rollback_required_bytes"] == required
     assert updater.receipt["data_bytes"] == size
-    free(copies * size + 2 * gib - 1)
+    budget = updater.receipt["rollback_budget"]
+    assert budget["credential_bytes"] >= 1 << 20 and budget["config_bytes"] > 0
+    assert budget["state_db_bytes"] == budget["sqlite_peak_bytes"] > 0
+    assert budget["headroom_bytes"] == 2 * gib and budget["image_bytes"] == 0
+    free(required - 1)
     with pytest.raises(u.UpdateError, match="Insufficient space"):
         updater.free_space()
-    # The old gate, 3 × DATA + 2 GiB, would have refused the first of these.
-    assert 3 * size + 2 * gib > copies * size + 2 * gib or mode == "copy" and size == 0
+    # The first draft of the hard-link gate, DATA + 2 GiB, would have let this through.
+    assert required > size + 2 * gib
 
 
-def test_a_disk_with_room_for_before_alone_updates_and_rolls_back(updater, monkeypatch):
+def test_a_disk_with_room_for_every_copy_updates_and_rolls_back(updater, monkeypatch):
     original = _blob(updater, 4).read_bytes()
     updater.free_space = u.Updater.free_space.__get__(updater)
-    free = _data_size(updater.data) + 2 * 1024**3
+    # The second gate runs after the drain, which has written a few bytes into DATA.
+    free = _copies_needed(updater, "link") + 2 * 1024**3 + 4096
     monkeypatch.setattr(u.shutil, "disk_usage", lambda path: types.SimpleNamespace(free=free))
     updater.fail_smoke = True
     with pytest.raises(u.UpdateError, match="Injected model"):
@@ -1341,14 +1579,240 @@ def test_a_disk_with_room_for_before_alone_updates_and_rolls_back(updater, monke
     assert updater.receipt["rollback_path"] == "link"
 
 
-def test_a_disk_without_room_for_before_never_drains(updater, monkeypatch):
+def test_a_disk_without_room_for_every_copy_never_drains(updater, monkeypatch):
     _blob(updater, 4)
     updater.free_space = u.Updater.free_space.__get__(updater)
-    free = _data_size(updater.data) + 2 * 1024**3 - 1
+    free = _copies_needed(updater, "link") + 2 * 1024**3 - 1
     monkeypatch.setattr(u.shutil, "disk_usage", lambda path: types.SimpleNamespace(free=free))
     with pytest.raises(u.UpdateError, match="Insufficient space"):
         updater.update("registry.example/korra:latest")
     assert not any(call[0] in {"native", "stop", "pull"} for call in updater.calls)
+
+
+def test_a_package_migrated_after_the_gate_is_paid_for_before_the_container_stops(updater, monkeypatch):
+    # The package lands in DATA, then `before` and the restore stage copy it
+    # again: the gate that ran before the migration did not count it.
+    _blob(updater, 4)
+    updater.free_space = u.Updater.free_space.__get__(updater)
+    disk = {"free": _copies_needed(updater, "link") + 2 * 1024**3}
+    monkeypatch.setattr(u.shutil, "disk_usage", lambda path: types.SimpleNamespace(free=disk["free"]))
+
+    def migrate():
+        (updater.data / "lazy-packages").mkdir()
+        (updater.data / "lazy-packages/blob.bin").write_bytes(os.urandom(2 << 20))
+        disk["free"] -= 2 << 20
+
+    monkeypatch.setattr(updater, "migrate_writable_packages", migrate)
+    with pytest.raises(u.UpdateError, match="Insufficient space"):
+        updater.update("registry.example/korra:latest")
+    assert not any(call[0] == "stop" for call in updater.calls)
+    assert updater.running and updater.image == OLD and not updater.is_draining
+    assert updater.receipt["status"] == "failed" and "Insufficient space" in updater.receipt["error"]
+    assert not (updater.job / "before").exists()
+
+
+def test_the_update_copies_are_charged_to_the_file_system_of_updates(updater, monkeypatch):
+    # updates/ is its own mount, nearly full; deploy/ and DATA's parent are roomy.
+    real_stat = Path.stat
+    queried = []
+
+    def stat(path, **kwargs):
+        info = real_stat(path, **kwargs)
+        return types.SimpleNamespace(st_dev=987654, st_mode=info.st_mode) if path == updater.jobs else info
+
+    def usage(path):
+        queried.append(Path(path))
+        return types.SimpleNamespace(free=0 if Path(path) == updater.jobs else 1 << 60)
+
+    updater.free_space = u.Updater.free_space.__get__(updater)
+    monkeypatch.setattr(Path, "stat", stat)
+    monkeypatch.setattr(u.shutil, "disk_usage", usage)
+    with pytest.raises(u.UpdateError, match="Insufficient space at .*updates"):
+        updater.free_space()
+    required = updater.receipt["rollback_budget"]["required_by_location"]
+    assert required[str(updater.jobs)] == 2 * 1024**3 + updater.receipt["rollback_budget"]["update_copies_bytes"]
+    assert str(updater.home) not in required
+
+
+@pytest.mark.parametrize("topology", [(1, 1, 1), (1, 2, 3), (1, 2, 1), (1, 1, 2)])
+def test_budget_groups_locations_by_device(updater, monkeypatch, topology):
+    terms = dict(data_bytes=100, state_db_bytes=20, sqlite_peak_bytes=10, config_bytes=3, credential_bytes=7)
+    monkeypatch.setattr(u, "copy_budget", lambda _: terms)
+    monkeypatch.setattr(updater, "rollback_path", lambda: "link" if topology[0] == topology[1] else "copy")
+    updater.free_space = u.Updater.free_space.__get__(updater)
+    locations = [updater.jobs, updater.data.parent, Path("/var/lib/docker")]
+    devices = dict(zip(locations, topology))
+    real_stat, real_exists = Path.stat, Path.exists
+    monkeypatch.setattr(Path, "exists", lambda p: True if p in devices else real_exists(p))
+    monkeypatch.setattr(Path, "stat", lambda p, **kw: types.SimpleNamespace(st_dev=devices[p], st_mode=real_stat(Path("/"), **kw).st_mode)
+                        if p in devices else real_stat(p, **kw))
+    monkeypatch.setattr(u.shutil, "disk_usage", lambda _: types.SimpleNamespace(free=1 << 60))
+    updater.free_space(image_bytes=50)
+    restore = 10 if topology[0] == topology[1] else 117
+    copies = [130, restore, 50]
+    expected = {str(p): 2 * 1024**3 + sum(n for n, dev in zip(copies, topology) if dev == devices[p]) for p in locations}
+    assert updater.receipt["rollback_budget"]["required_by_location"] == expected
+
+
+# Every place updater.py writes a physical copy, and the budget term that pays for it.
+COPY_SITES = {
+    ("snapshot", "copytree"): "data_bytes",
+    ("snapshot", "backup"): "sqlite_peak_bytes",
+    ("link_tree", "copy2"): "config_bytes",
+    ("overlay_credentials", "copy2"): "credential_bytes",
+    ("Updater.rehearse_schema", "copy2"): "state_db_bytes",
+    # Runs in the container, sized by the old container's diff: unknown at the
+    # first gate. Its bytes land in DATA, so the gate runs again after it.
+    ("MIGRATE_PACKAGES_CODE", "copy2"): "data_bytes",
+}
+
+
+def _copy_sites():
+    import ast
+    tree = ast.parse(SOURCE.read_text())
+    copies = {"copy", "copy2", "copyfile", "copyfileobj", "copytree", "move", "backup", "sendfile",
+              "copy_file_range", "write_bytes"}
+    found = set()
+
+    def calls(node):
+        for call in ast.walk(node):
+            if isinstance(call, ast.Call):
+                name = getattr(call.func, "attr", getattr(call.func, "id", None))
+                if name in copies:
+                    yield name
+
+    def visit(node, scope):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.ClassDef):
+                visit(child, child.name + ".")
+            elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                found.update((scope + child.name, name) for name in calls(child))
+            elif (isinstance(child, ast.Assign) and isinstance(child.value, ast.Constant)
+                  and isinstance(child.value.value, str)):
+                for name in copies:
+                    if "." + name + "(" in child.value.value:
+                        found.add((child.targets[0].id, name))
+    visit(tree, "")
+    return found
+
+
+def test_every_physical_copy_of_the_update_and_rollback_path_has_a_budget_term(updater):
+    # A new copy that is not listed here (and so not paid by free_space) fails this test.
+    assert _copy_sites() == set(COPY_SITES)
+    updater.free_space = u.Updater.free_space.__get__(updater)
+    updater.free_space()
+    budget = updater.receipt["rollback_budget"]
+    for term in COPY_SITES.values():
+        assert term in budget
+
+
+@pytest.mark.parametrize("mode", ["link", "copy"])
+def test_the_bytes_an_update_and_rollback_add_stay_within_what_the_gate_reserved(updater, monkeypatch, mode):
+    _blob(updater, 4)
+    (updater.data / "browser-profiles").mkdir()
+    (updater.data / "browser-profiles/profile-blob").write_bytes(os.urandom(1 << 20))
+    if mode == "copy":
+        _cross_filesystem(monkeypatch)
+
+    def distinct_bytes(*roots):
+        seen = {}
+        for root in roots:
+            for path in [Path(root), *Path(root).rglob("*")]:
+                info = path.lstat()
+                if path.is_file() and not path.is_symlink():
+                    seen[(info.st_dev, info.st_ino)] = info.st_size
+        return sum(seen.values())
+
+    updater.free_space = u.Updater.free_space.__get__(updater)
+    monkeypatch.setattr(u.shutil, "disk_usage", lambda path: types.SimpleNamespace(free=1 << 60))
+    updater.free_space()
+    reserved = updater.receipt["rollback_required_bytes"] - 2 * 1024**3
+    roots = (updater.jobs, updater.data, updater.data.parent / "data.after-fixture-job")
+    grown_from = distinct_bytes(updater.jobs, updater.data)
+    updater.fail_smoke = True
+    with pytest.raises(u.UpdateError, match="Injected model"):
+        updater.update("registry.example/korra:latest")
+    assert updater.receipt["status"] == "rolled_back" and updater.receipt["rollback_path"] == mode
+    grown_by = distinct_bytes(*roots) - grown_from
+    assert 0 < grown_by <= reserved
+    # The copies are real: more than DATA itself was written.
+    assert grown_by > _data_size(updater.data)
+
+
+def test_gate_refuses_what_the_hard_link_gate_alone_would_have_let_through(updater, monkeypatch):
+    """Byte-budget fault injection, not a real full volume: a 3 GiB credential blob is scaled
+    through lstat while a tiny file is stored. The old gate, DATA + 2 GiB, passed this."""
+    gib = 1024**3
+    large = updater.data / "browser-profiles" / "profile-blob"
+    large.parent.mkdir()
+    large.write_bytes(b"synthetic large profile")
+    real_lstat = Path.lstat
+    logical_blob_size = 3 * gib
+
+    def lstat(path, *args, **kwargs):
+        info = real_lstat(path, *args, **kwargs)
+        if path == large:
+            return types.SimpleNamespace(st_mode=info.st_mode, st_size=logical_blob_size)
+        return info
+
+    actual_data = sum(p.stat().st_size for p in updater.data.rglob("*") if p.is_file())
+    logical_data = actual_data - large.stat().st_size + logical_blob_size
+    free = logical_data + 2 * gib + 1
+    monkeypatch.setattr(Path, "lstat", lstat)
+    monkeypatch.setattr(u.shutil, "disk_usage", lambda _: types.SimpleNamespace(free=free))
+    with pytest.raises(u.UpdateError, match="Insufficient space"):
+        u.Updater.free_space(updater, image_bytes=1)
+    budget = updater.receipt["rollback_budget"]
+    assert budget["credential_bytes"] >= logical_blob_size
+    assert updater.receipt["rollback_required_bytes"] >= logical_data + logical_blob_size + 2 * gib
+
+
+def test_a_disk_with_exactly_the_reserved_bytes_never_runs_out_during_rollback(updater, monkeypatch):
+    """The same scaled blob, a byte budget that every physical copy draws on."""
+    gib = 1024**3
+    large = updater.data / "browser-profiles" / "profile-blob"
+    large.parent.mkdir()
+    large.write_bytes(b"synthetic large profile")
+    real_lstat, real_copy2, real_snapshot = Path.lstat, shutil.copy2, u.snapshot
+    logical_blob_size = 3 * gib
+    actual_data = sum(p.stat().st_size for p in updater.data.rglob("*") if p.is_file())
+    logical_data = actual_data - large.stat().st_size + logical_blob_size
+    budget = {"free": 0, "armed": False}
+
+    def lstat(path, *args, **kwargs):
+        info = real_lstat(path, *args, **kwargs)
+        if path == large:
+            return types.SimpleNamespace(st_mode=info.st_mode, st_size=logical_blob_size)
+        return info
+
+    with monkeypatch.context() as gate:
+        gate.setattr(Path, "lstat", lstat)
+        gate.setattr(u.shutil, "disk_usage", lambda _: types.SimpleNamespace(free=1 << 60))
+        u.Updater.free_space(updater)
+    budget["free"] = updater.receipt["rollback_required_bytes"]
+
+    def snapshot(source, destination):
+        result = real_snapshot(source, destination)
+        if destination == updater.job / "before":
+            budget["free"] -= logical_data
+            budget["armed"] = True
+        return result
+
+    def copy2(source, destination, *args, **kwargs):
+        if budget["armed"]:
+            required = logical_blob_size if Path(source).name == large.name else Path(source).stat().st_size
+            if required > budget["free"]:
+                raise OSError(errno.ENOSPC, "synthetic volume capacity exhausted")
+            budget["free"] -= required
+        return real_copy2(source, destination, *args, **kwargs)
+
+    monkeypatch.setattr(u, "snapshot", snapshot)
+    monkeypatch.setattr(u.shutil, "copy2", copy2)
+    updater.fail_smoke = True
+    with pytest.raises(u.UpdateError, match="Injected model"):
+        updater.update("registry.example/korra:latest")
+    assert updater.receipt["status"] == "rolled_back" and updater.running
+    assert budget["free"] >= 2 * gib
 
 
 def test_rollback_path_is_asked_of_the_filesystem(updater, monkeypatch):
@@ -3691,16 +4155,34 @@ def test_new_image_that_changes_a_shipped_dependency_breaks_a_working_package(up
     assert not any(call[0] in {"stop", "start_image"} for call in updater.calls)
 
 
-def test_requires_conflict_stays_preexisting_when_only_the_shipped_version_differs(updater, tmp_path):
+def test_requires_conflict_stays_preexisting_when_the_dependency_is_the_same_on_both_images(updater, tmp_path):
     make_user_package(updater.data, requires=["review_dep>=2"], cli=None)
-    for image, version in ((OLD, "1.0"), (NEW, "1.5")):
+    for image in (OLD, NEW):
         core = tmp_path / ("core-" + image[-1])
-        make_user_package(core, "review_dep", version, cli=None)
+        make_user_package(core, "review_dep", "1.5", cli=None)
         updater.image_cores[image] = core / "lazy-packages"
     updater.update("registry.example/korra:latest")
     assert updater.receipt["status"] == "succeeded"
     assert updater.receipt["user_packages"]["conflicts"] == []
     assert "1.5" in updater.receipt["user_packages"]["preexisting"][0]["detail"]
+
+
+def test_requires_conflict_does_not_hide_a_dependency_the_new_image_changed(updater, tmp_path):
+    """Прежний `requires` не доказывает, что при другой версии зависимости пакет цел (ревью, P2)."""
+    make_user_package(updater.data, requires=["review_dep<2"], cli=None)
+    for image, version in ((OLD, "2.0"), (NEW, "3.0")):
+        core = tmp_path / ("core-" + image[-1])
+        make_user_package(core, "review_dep", version, cli=None)
+        updater.image_cores[image] = core / "lazy-packages"
+    before = tree(updater.data)
+    with pytest.raises(u.UpdateError, match="Пакеты пользователя"):
+        updater.update("registry.example/korra:latest")
+    packages = updater.receipt["user_packages"]
+    assert updater.receipt["error_code"] == "user_packages_conflict"
+    assert [(c["kind"], c["have"]) for c in packages["conflicts"]] == [("requires", "core 3.0")]
+    assert packages["preexisting"] == []
+    assert not any(call[0] in {"stop", "start_image"} or call == ("native", "drain") for call in updater.calls)
+    assert updater.image == OLD and updater.running and tree(updater.data) == before
 
 
 @pytest.mark.parametrize("fault", ["command_error", "timeout"])

@@ -126,7 +126,9 @@ print(json.dumps({'skills': skills}))
 # версий) выводятся списком `shadowed_modules` (владелец — `shadowed_by`); по ним
 # verify_user_packages сравнивает целевой образ с текущим: конфликт — модуль,
 # который раньше грузился из хранилища, а теперь перекрыт. Остальные конфликты
-# сравниваются по (пакет, вид, key): уже существующие в текущем образе не новые. `shadowed` (дубль
+# сравниваются по (пакет, вид, key, have): уже существующие в текущем образе не новые,
+# пока зависимость, из-за которой конфликт, отдаёт та же версия от того же
+# владельца (`have`): иной образ с иной версией мог сломать то, что работало. `shadowed` (дубль
 # версии или модуля, ярлыки kind) — только диагностика для receipt; конфликтом он
 # остаётся у пакета, перенесённого из writable слоя (третий аргумент).
 # ABI-токен повторяет tools.lazy_deps._python_abi_tag (тест следит).
@@ -138,10 +140,11 @@ migrated = set(json.loads(sys.argv[3])) if len(sys.argv) > 3 else set()
 store = root / 'lazy-packages'
 norm = lambda n: re.sub(r'[-_.]+', '-', n).lower()
 result = {'packages': [], 'conflicts': [], 'shadowed': [], 'shadowed_modules': [], 'shadowed_by': {}}
-def conflict(package, kind, detail, key=None):
+def conflict(package, kind, detail, key=None, have=None):
     # key — то же без версий поставки: verify_user_packages сопоставляет конфликты
-    # текущего и целевого образов, а версия зависимости от образа к образу меняется.
-    result['conflicts'].append({'package': package, 'kind': kind, 'detail': detail, 'key': key or detail})
+    # текущего и целевого образов. have — кто и какой версией фактически отвечает
+    # за зависимость: прежний конфликт безопасен, только пока это не изменилось.
+    result['conflicts'].append({'package': package, 'kind': kind, 'detail': detail, 'key': key or detail, 'have': have})
 def shadow(package, kind, detail, version, shipped):
     # Хранилище в конце sys.path: дубль поставки не загружается и ничего не меняет.
     # Перенесённый из writable слоя пакет раньше перекрывал поставку, поэтому
@@ -201,11 +204,12 @@ if dists:
             except Exception:
                 continue
             have = core.get(norm(req.name)) or user.get(norm(req.name))
+            provider = 'core' if norm(req.name) in core else 'store'
             if have is None:
                 conflict(name, 'requires', 'нет зависимости ' + req.name)
             elif req.specifier and not req.specifier.contains(have, prereleases=True):
                 conflict(name, 'requires', '%s %s не подходит под %s' % (req.name, have, req.specifier),
-                         '%s не подходит под %s' % (req.name, req.specifier))
+                         '%s не подходит под %s' % (req.name, req.specifier), provider + ' ' + have)
         scripts = sorted(ep.name for ep in d.entry_points if ep.group == 'console_scripts')
         for script in scripts:
             path = store / 'bin' / script
@@ -570,6 +574,10 @@ class UpdateError(RuntimeError):
     pass
 
 
+class DataMissing(UpdateError):
+    pass
+
+
 def validate_capability(value):
     if value == {"mode": "foundation"}:
         return value
@@ -777,16 +785,21 @@ def checked_identifier(value):
     return value
 
 
-def canonical_data(value):
+def canonical_data(value, *, allow_missing=False):
+    """Validated DATA path. `allow_missing` admits an absent DATA for the recovery
+    of an interrupted restore swap only (:meth:`Updater.finish_interrupted_swap`)."""
     path = Path(value)
     if not path.is_absolute() or path.resolve() != path or len(path.parts) < 4:
         raise UpdateError("DATA must be an absolute, non-symlink dedicated directory")
-    if not path.is_dir():
-        raise UpdateError("DATA does not exist")
+    absent = allow_missing and not os.path.lexists(path)
+    if not path.is_dir() and not absent:
+        raise DataMissing("DATA does not exist")
     for parent in path.parents:
         info = parent.lstat()
         if info.st_uid != 0 or (info.st_mode & 0o022 and not info.st_mode & stat.S_ISVTX):
             raise UpdateError("DATA ancestors must prevent an agent from replacing the deployment directory")
+    if absent:
+        return path
     if not (path / "config.yaml").is_file():
         raise UpdateError("DATA is not an initialized Korra home (config.yaml missing)")
     return path
@@ -1059,7 +1072,15 @@ def gateway_intent(root):
     return intent
 
 
+SQLITE_SIDECARS = ("-wal", "-shm", "-journal")
+
+
 def credential_path(relative):
+    # A credential SQLite is one database with its sidecars: committed rows may
+    # live only in the WAL until a checkpoint, so they travel together.
+    for suffix in SQLITE_SIDECARS:
+        if str(relative).lower().endswith(suffix):
+            return credential_path(str(relative)[:-len(suffix)])
     p = Path(relative)
     low = p.name.lower()
     parts = tuple(part.lower() for part in p.parts)
@@ -1106,6 +1127,52 @@ def merge_config_credentials(before, now):
                 merge_config_credentials(entry, other)
 
 
+def copy_budget(data):
+    """Bytes of every physical copy an update and a rollback write, read from DATA.
+
+    data_bytes: DATA itself (`before`; across file systems also the restore
+    stage). state_db_bytes: the databases the schema rehearsal copies.
+    sqlite_peak_bytes: the largest database with its WAL, the temporary page
+    backup `snapshot` writes beside the copied one. config_bytes: the files
+    :func:`link_tree` copies. credential_bytes: what :func:`overlay_credentials`
+    copies from the failed DATA. A new physical copy needs a term here.
+    """
+    terms = dict.fromkeys(("data_bytes", "credential_bytes", "config_bytes",
+                           "state_db_bytes", "sqlite_peak_bytes"), 0)
+    for root, _dirs, files in os.walk(data):
+        for name in files:
+            path = Path(root) / name
+            try:
+                info = path.lstat()
+            except FileNotFoundError:
+                # A running service may remove a temporary file after
+                # os.walk listed it. It no longer needs backup space.
+                continue
+            if stat.S_ISLNK(info.st_mode):
+                continue
+            relative = path.relative_to(data)
+            terms["data_bytes"] += info.st_size
+            if name in REWRITTEN_IN_PLACE:
+                terms["config_bytes"] += info.st_size
+            if credential_path(relative.as_posix()):
+                terms["credential_bytes"] += info.st_size
+            if info.st_size < 512 or not stat.S_ISREG(info.st_mode):
+                continue
+            try:
+                with path.open("rb") as stream:
+                    is_db = stream.read(16) == b"SQLite format 3\x00"
+            except FileNotFoundError:
+                continue
+            if is_db:
+                wal = path.with_name(name + "-wal")
+                size = info.st_size + (wal.lstat().st_size if wal.is_file() and not wal.is_symlink() else 0)
+                terms["sqlite_peak_bytes"] = max(terms["sqlite_peak_bytes"], size)
+                parts = relative.parts
+                if parts == ("state.db",) or (len(parts) == 3 and parts[0] == "profiles" and name == "state.db"):
+                    terms["state_db_bytes"] += size
+    return terms
+
+
 def overlay_credentials(latest, restored):
     """Keep latest credential stores, including deliberate deletions/revocations."""
     paths = set(tree_manifest(latest)) | set(tree_manifest(restored))
@@ -1149,10 +1216,11 @@ def overlay_credentials(latest, restored):
 
 
 class Updater:
-    def __init__(self, home=HERE):
+    def __init__(self, home=HERE, *, data_missing_ok=False):
         self.home = Path(home)
         self.name = checked_identifier(os.environ.get("NAME", "korra"))
-        self.data = canonical_data(os.environ.get("DATA", "/opt/korra/data"))
+        self.data = canonical_data(os.environ.get("DATA", "/opt/korra/data"), allow_missing=data_missing_ok)
+        self.data_missing = not self.data.is_dir()
         self.panel = int(os.environ.get("PANEL_PORT", "9119"))
         self.api = int(os.environ.get("API_PORT", "8650"))
         if not all(1024 <= p <= 65535 for p in (self.panel, self.api)) or self.panel == self.api:
@@ -1433,29 +1501,47 @@ class Updater:
             probe.unlink(missing_ok=True)
 
     def free_space(self, image_bytes=0):
-        size = 0
-        for root, _dirs, files in os.walk(self.data):
-            for name in files:
-                try:
-                    info = (Path(root) / name).lstat()
-                except FileNotFoundError:
-                    # A running service may remove a temporary file after
-                    # os.walk listed it. It no longer needs backup space.
-                    continue
-                if not stat.S_ISLNK(info.st_mode):
-                    size += info.st_size
+        """Refuse before quiescing unless every file system holds all copies written on it.
+
+        The terms come from :func:`copy_budget` and are written to the receipt
+        (`rollback_budget`). Each location is held to its own copies plus the
+        headroom; locations on one file system add up.
+        """
+        terms = copy_budget(self.data)
         # The same sum sizes the readiness budget of a large contour.
-        self.receipt["data_bytes"] = size
-        # `before` is the one full copy an update writes. A rollback sets the
-        # failed DATA aside by rename and stages the restored one from `before`
-        # as hard links; only across filesystems is that stage a second copy.
-        # Plus dependency/image headroom. Each location is held to the sum.
+        self.receipt["data_bytes"] = terms["data_bytes"]
         mode = self.rollback_path()
-        required = (1 if mode == "link" else 2) * size + image_bytes + 2 * 1024**3
-        self.receipt.update(rollback_path=mode, rollback_required_bytes=required)
-        for location in {self.home, self.data.parent, Path("/var/lib/docker")}:
-            if location.exists() and shutil.disk_usage(location).free < required:
-                raise UpdateError(f"Insufficient space at {location}; need {required} bytes")
+        # Update: `before` and its SQLite peak, plus the schema rehearsal's DB
+        # copies, all under updates/. Rollback: the stage under DATA's parent is
+        # hard links to `before`, so only what the restore rewrites is new —
+        # config.yaml and every credential path, copied from the failed DATA;
+        # across file systems the stage is a second full copy.
+        update_bytes = terms["data_bytes"] + terms["state_db_bytes"] + terms["sqlite_peak_bytes"]
+        if mode == "link":
+            restore_bytes = terms["config_bytes"] + terms["credential_bytes"]
+        else:
+            restore_bytes = terms["data_bytes"] + terms["sqlite_peak_bytes"] + terms["credential_bytes"]
+        headroom = 2 * 1024**3
+        # `before` and the rehearsal copies are written under updates/, which may be its own mount.
+        updates = self.jobs if self.jobs.is_dir() else self.home
+        wanted = [(updates, update_bytes), (self.data.parent, restore_bytes),
+                  (Path("/var/lib/docker"), image_bytes)]
+        devices = {}
+        for location, copies in wanted:
+            if location.exists():
+                devices.setdefault(location.stat().st_dev, []).append((location, copies))
+        required = {}
+        for group in devices.values():
+            need = headroom + sum(copies for _location, copies in group)
+            required.update({str(location): need for location, _copies in group})
+        self.receipt["rollback_budget"] = dict(terms, image_bytes=image_bytes, headroom_bytes=headroom,
+                                               update_copies_bytes=update_bytes,
+                                               restore_copies_bytes=restore_bytes,
+                                               required_by_location=required)
+        self.receipt.update(rollback_path=mode, rollback_required_bytes=max(required.values(), default=headroom))
+        for location, need in required.items():
+            if shutil.disk_usage(location).free < need:
+                raise UpdateError(f"Insufficient space at {location}; need {need} bytes")
 
     def resolve_image(self, reference):
         path = Path(reference)
@@ -1833,6 +1919,11 @@ class Updater:
             raise UpdateError("Проверка пакетов пользователя вернула некорректный ответ") from None
         return result
 
+    @staticmethod
+    def conflict_identity(item):
+        """Конфликт без версий поставки, но с фактической версией зависимости."""
+        return (item["package"], item["kind"], item.get("key", item["detail"]), item.get("have"))
+
     def verify_user_packages(self, image, root=None, *, strict=True, current=None):
         """Сверить пакеты пользователя в DATA/lazy-packages с поставкой образа.
 
@@ -1849,6 +1940,9 @@ class Updater:
         (requires, cli, pinned, abi, incomplete), которые текущий образ над теми
         же данными даёт тоже (ключ: пакет, вид, `key` без версий поставки),
         обновление не ухудшает: они пишутся в `preexisting` и не останавливают.
+        Для `requires` ещё нужно, чтобы зависимость отдавала ту же версию тот же
+        владелец (`have`): новый образ с другой версией мог убрать то, чем пакет
+        пользовался, и прежний конфликт этого не доказывает.
         Без базового прогона (образа нет, таймаут, ответ некорректный) любое
         перекрытие и любой конфликт считаются новыми. Сбой основного прогона при обычной операции — отказ до
         drain, при автоматическом откате — запись и продолжение.
@@ -1872,14 +1966,14 @@ class Updater:
                     raise UpdateError("текущий образ неизвестен")
                 base = self.user_packages_probe(current, root, [])
                 known = set(base["shadowed_modules"])
-                seen = {(c["package"], c["kind"], c.get("key", c["detail"])) for c in base["conflicts"]}
+                seen = {self.conflict_identity(c) for c in base["conflicts"]}
                 result["baseline"] = {"image": current, "shadowed_modules": len(known)}
                 reason = "новый образ его перекрывает"
             except (UpdateError, KeyError, TypeError) as exc:
                 known, seen = set(), set()
                 result["baseline"] = {"image": current, "error": str(exc)}
                 reason = f"не удалось проверить текущую среду ({exc}), перекрытие считается новым"
-            result["preexisting"] = [c for c in conflicts if (c["package"], c["kind"], c.get("key", c["detail"])) in seen]
+            result["preexisting"] = [c for c in conflicts if self.conflict_identity(c) in seen]
             conflicts = [c for c in conflicts if c not in result["preexisting"]]
             for module in sorted(modules - known):
                 conflicts.append({"package": result["shadowed_by"].get(module, module), "kind": "module",
@@ -2628,6 +2722,58 @@ print(json.dumps(changed))
             return {}
         return record if isinstance(record, dict) else {}
 
+    def require_data(self):
+        if self.data_missing:
+            raise UpdateError("DATA does not exist")
+
+    def pending_swap(self):
+        """The stage that completes an interrupted restore swap, or the plain DATA error.
+
+        A missing DATA is acceptable only when this job's own record says the
+        restore died between its two renames: phase `swapping`, `path` the
+        stage this job owns, `displaced` this job's `data.after-*` tree, both
+        real directories beside DATA. Anything else is not a swap in flight.
+        """
+        job_id = self.receipt.get("job_id")
+        record = self.restore_record()
+        stage = self.data.with_name(self.data.name + ".restore-" + str(job_id))
+        displaced = Path(str(record.get("displaced")))
+        owned = re.compile(re.escape(self.data.name + ".after-" + str(job_id)) + r"(?:\.retry-[0-9a-f]{8})?")
+        if (self.job is None or not self.data_missing or record.get("phase") != "swapping"
+                or record.get("path") != str(stage) or displaced.parent != self.data.parent
+                or not owned.fullmatch(displaced.name) or os.path.lexists(self.data)
+                or any(p.is_symlink() or not p.is_dir() for p in (stage, displaced))):
+            raise UpdateError(self.unfinished_legacy_swap(record, stage) or "DATA does not exist")
+        return stage
+
+    def unfinished_legacy_swap(self, record, stage):
+        """Explain a rollback of 0.21.16/0.21.17 killed between its two renames, else None.
+
+        That code leaves phase `verified` without `displaced` and no DATA; this
+        updater does not resume it. Both trees are intact, the owner finishes by hand.
+        """
+        job_id = str(self.receipt.get("job_id"))
+        if (self.job is None or not self.data_missing or record.get("phase") != "verified"
+                or "displaced" in record or record.get("path") != str(stage)
+                or stage.is_symlink() or not stage.is_dir()):
+            return None
+        failed = sorted(self.data.parent.glob(self.data.name + ".after-" + job_id + "*"))
+        if not failed:
+            return None
+        return ("DATA does not exist: a rollback by an older updater (0.21.16/0.21.17) was interrupted "
+                f"between its two renames. The restored tree is {stage} (manifest "
+                f"{self.job / 'restore-stage.manifest.json'}); the failed release's DATA is "
+                + ", ".join(map(str, failed)) + ". Nothing is lost; finish by hand as described in "
+                "docs/client-deploy/README.md, 'Шаг 14. Откат выпуска', 'Откат старого updater, оборванный между переименованиями'")
+
+    def finish_interrupted_swap(self):
+        """Second rename of an interrupted restore. The caller holds the target lock."""
+        stage = self.pending_swap()
+        os.replace(stage, self.data)
+        self.data = canonical_data(self.data)
+        self.data_missing = False
+        self.log("restore: interrupted swap completed; DATA is the staged restored tree")
+
     def restore(self):
         """Put the verified `before` back as DATA; the failed DATA is set aside whole.
 
@@ -2667,6 +2813,13 @@ print(json.dumps(changed))
         raw = tree_manifest(self.data)
         after = {k: v for k, v in raw.items() if Path(k).name not in VOLATILE}
         changes = sorted(k for k in set(manifest) | set(after) if manifest.get(k) != after.get(k))
+        count = len(changes)
+        if displaced.exists() or displaced.is_symlink():
+            # A rollback of an older updater already swapped DATA, so `changes`
+            # compares the restored copy with itself. The earlier export stays
+            # the only copy of its writes: its count is never lowered, and an
+            # unknown one stays unknown (null) for every later attempt.
+            changes, count = self.retried_changes(changes)
         atomic_json(self.job / "post-update-changes.json", changes)
         if stage.exists() or stage.is_symlink():
             if stage.is_symlink() or record.get("path") != str(stage):
@@ -2703,7 +2856,7 @@ print(json.dumps(changed))
             displaced = displaced.with_name(displaced.name + ".retry-" + uuid.uuid4().hex[:8])
         atomic_json(self.job / (displaced.name + ".manifest.json"), raw)
         done = {"path": str(stage), "source": str(backup), "mode": "link" if link else "copy",
-                "displaced": str(displaced), "post_update_changes": len(changes),
+                "displaced": str(displaced), "post_update_changes": count,
                 "preserved_credentials": len(credentials), "restored_gateways": len(gateways)}
         atomic_json(stage_record, dict(done, phase="swapping"))
         os.replace(self.data, displaced)
@@ -2715,6 +2868,23 @@ print(json.dumps(changed))
             raise
         atomic_json(stage_record, dict(done, phase="swapped"))
         self.finish_restore(dict(done, phase="swapped"))
+
+    def retried_changes(self, changes):
+        """(paths, count) of a retry that finds an earlier export; count None = unknown.
+
+        Only a whole `post_update_changes` in the receipt is evidence. The
+        list on disk is not: an older updater overwrites it on every retry,
+        so its length proves nothing about the writes of earlier attempts.
+        """
+        try:
+            listed = json.loads((self.job / "post-update-changes.json").read_text())
+        except (OSError, ValueError):
+            listed = None
+        recorded = self.receipt.get("post_update_changes")
+        merged = sorted(set(listed if isinstance(listed, list) else []) | set(changes))
+        if type(recorded) is not int:
+            return (merged if isinstance(listed, list) else None), None
+        return merged, max(recorded, len(merged))
 
     def finish_restore(self, record):
         """Report a completed swap; drop a `before` that now shares live DATA's inodes."""
@@ -2732,8 +2902,9 @@ print(json.dumps(changed))
                 shutil.rmtree(backup)
             except OSError as exc:
                 self.log(f"restore: linked before not removed: {exc}")
-        self.log(f"Post-update writes kept in {displaced}: {record['post_update_changes']} paths "
-                 "differ; see post-update-changes.json")
+        differ = record["post_update_changes"]
+        self.log(f"Post-update writes kept in {displaced}: {'an unknown number of' if differ is None else differ} "
+                 "paths differ; see post-update-changes.json")
 
     def update(self, reference, dry_run=False):
         stopped = False
@@ -2806,6 +2977,9 @@ print(json.dumps(changed))
             self.drain()
             self.inspect_target(old)
             self.migrate_writable_packages()
+            # Migrated packages now sit in DATA and are copied again by `before`
+            # and the restore stage: ask the gate once more, still before stop.
+            self.free_space()
             self.phase("stopping")
             self.docker("stop", "--time", "60", self.name, timeout=90)
             stopped = True
@@ -3051,8 +3225,13 @@ def main(argv=None):
     if args.warm_deps:
         warm_dependencies()
         return 0
-    updater = Updater()
+    try:
+        updater = Updater()
+    except DataMissing:
+        # Only the recovery of an interrupted restore swap may go on without DATA.
+        updater = Updater(data_missing_ok=True)
     if args.diagnose:
+        updater.require_data()
         print(json.dumps(updater.image_integrity(), ensure_ascii=False))
         return 0
     if updater.home == updater.data or updater.data in updater.home.parents or updater.home in updater.data.parents:
@@ -3065,18 +3244,22 @@ def main(argv=None):
         if not job_id:
             entries = sorted(updater.jobs.glob("*/status.json"), key=lambda p: p.stat().st_mtime)
             if not entries:
+                updater.require_data()
                 print(json.dumps({"job_id": None, "phase": "idle", "status": "pending", "error": None,
                                   "old_image_id": None, "target_image_id": None, "backup_path": None,
                                   "started_at": None, "updated_at": utc()}))
                 return 0
             job_id = entries[-1].parent.name
         load_job(updater, job_id)
+        if updater.data_missing:
+            updater.pending_swap()
         reconcile_interrupted(updater)
         print(json.dumps(updater.receipt))
         return 0
     updater.jobs.mkdir(mode=0o700, exist_ok=True)
     trusted_control(updater.jobs)
     if args.gc:
+        updater.require_data()
         # Housekeeping runs under the same target lock as an update: a live
         # operation's candidate tag is exactly what must not be removed.
         with target_lock_path(updater.data).open("a") as lock:
@@ -3091,6 +3274,8 @@ def main(argv=None):
             raise UpdateError("Worker requires inherited target lock")
         lock = os.fdopen(args.lock_fd, "a")
         load_job(updater, args.worker)
+        if updater.data_missing:
+            updater.finish_interrupted_swap()
     else:
         lock = target_lock_path(updater.data).open("a")
         try:
@@ -3114,10 +3299,13 @@ def main(argv=None):
             raise UpdateError("Another update holds the target lock") from exc
         if args.rollback:
             load_job(updater, args.rollback)
+            if updater.data_missing:
+                updater.finish_interrupted_swap()
             if updater.receipt.get("status") == "rolled_back":
                 print(json.dumps(updater.receipt))
                 return 0
         else:
+            updater.require_data()
             job_id = checked_identifier(args.job_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ-") + uuid.uuid4().hex[:8])
             if (updater.jobs / job_id).exists():
                 load_job(updater, job_id)
