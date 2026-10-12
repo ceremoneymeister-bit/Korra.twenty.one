@@ -517,6 +517,22 @@ def _plan_owner_recipients(
     return fields
 
 
+def _worker_flag_note(worker_flag: bool, recipients: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Tell a kanban worker what really happened to its ``recipients_confirmed`` flag."""
+    if not worker_flag:
+        return {}
+    if recipients:
+        return {
+            "recipient_confirmation_deferred": True,
+            "note": (
+                "recipients_confirmed was ignored: only the owner confirms recipients. "
+                "The automation is saved paused; the owner confirms the new recipients "
+                "in the decision centre."
+            ),
+        }
+    return {"note": "recipients_confirmed was ignored; no new recipients needed confirmation."}
+
+
 def _show_recipients_card(job: Dict[str, Any], card: Dict[str, Any]) -> Dict[str, Any]:
     """Create the card for a job saved paused with pending recipients."""
     from cron import recipients
@@ -1764,15 +1780,26 @@ def cronjob(
         normalized = (action or "").strip().lower()
         if not isinstance(recipients_confirmed, bool):
             return tool_error("recipients_confirmed must be a boolean", success=False)
+        worker_flag = False
         if recipients_confirmed:
             from gateway.principal import current_principal
 
             principal = current_principal()
-            if normalized not in {"create", "update"} or not (
-                principal.owner and principal.live and _creator_is_owner()
-            ):
+            if normalized not in {"create", "update"}:
                 return tool_error("Only the live owner can confirm automation recipients in chat.",
                                   success=False)
+            if not (principal.owner and principal.live and _creator_is_owner()):
+                if principal.kind == "kanban_worker" and _creator_is_owner():
+                    # A board worker acts for the owner but nobody is typing: it
+                    # may prepare the automation, never record the owner's
+                    # consent. The mistaken flag counts as absent, so new
+                    # recipients wait for the owner exactly as for any other
+                    # background author (setup stays paused with a card).
+                    recipients_confirmed = False
+                    worker_flag = True
+                else:
+                    return tool_error("Only the live owner can confirm automation recipients in chat.",
+                                      success=False)
         if normalized in {"create", "update"} and audience:
             scan_error = _scan_cron_prompt(audience)
             if scan_error:
@@ -1913,6 +1940,7 @@ def cronjob(
                 _partial = exc.to_dict()
                 return tool_error(_partial.pop("error"), success=False, **_partial)
             _recipients = _show_recipients_card(job, _card) if _card else None
+            _flag_note = _worker_flag_note(worker_flag, _recipients)
             _create_message = f"Cron job '{job['name']}' created."
             _local_notice = _local_delivery_notice(job, _normalize_deliver_param(deliver))
             if _local_notice:
@@ -1944,6 +1972,8 @@ def cronjob(
                 _result["guidance"] = _notes
             if _recipients:
                 _result["recipients"] = _recipients
+            if _flag_note:
+                _result.update(_flag_note)
             return json.dumps(_result, indent=2)
 
         if normalized == "list":
@@ -2270,6 +2300,12 @@ def cronjob(
                     return reach_error
                 updates["audience"] = audience.strip() or None
             if not updates and not recipients_confirmed:
+                if worker_flag:
+                    return tool_error(
+                        "Nothing to update: a kanban worker cannot confirm automation "
+                        "recipients. The owner confirms them in the decision centre.",
+                        success=False,
+                    )
                 return tool_error("No updates provided.", success=False)
             _card = None
             _retire = ""
@@ -2321,6 +2357,9 @@ def cronjob(
                 _upd_result["guidance"] = _upd_notes
             if _upd_recipients:
                 _upd_result["recipients"] = _upd_recipients
+            _upd_flag_note = _worker_flag_note(worker_flag, _upd_recipients)
+            if _upd_flag_note:
+                _upd_result.update(_upd_flag_note)
             return json.dumps(_upd_result, indent=2)
 
         return tool_error(f"Unknown cron action '{action}'", success=False)

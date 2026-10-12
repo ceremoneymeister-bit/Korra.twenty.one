@@ -177,3 +177,27 @@ def test_waiting_row_names_the_board_card_so_the_dashboard_shows_it_once(home, m
                    "updated_at": 1, "history_count": 1, "user_message": {"role": "user", "content": "Проверь договор"}}
     runs = chat_activity.project_chat_activity([browser_run], profile=None, session_id=None)
     assert [(r["status"], r.get("kanban_task_urls")) for r in runs] == [("waiting_decision", [item["task_url"]])]
+
+
+def test_question_from_a_reset_chat_is_answered_in_the_new_one_but_not_elsewhere(home):
+    db = SessionDB(home / "state.db")
+    db.create_session("r1", source="api_server", session_key="key-a")
+    db.end_session("r1", "session_reset")
+    db.create_session("r2", source="api_server", session_key="key-a", parent_session_id="r1",
+                      model_config={"_reset_from": "r1"})
+    db.create_session("web-new", source="api_server", session_key="key-b")
+    db.create_session("r2-fork", source="api_server", session_key="key-a", parent_session_id="r1",
+                      model_config={"_branched_from": "r1"})
+    db.close()
+    with kb.connect_closing() as conn:
+        tid = kb.create_task(conn, title="Вопрос", assignee="lawyer", session_id="r1")
+        kb.claim_task(conn, tid, claimer="worker")
+        kb.block_task(conn, tid, kind="needs_input", reason="Какой срок?")
+        item = decisions.project_task(conn, kb.get_task(conn, tid), "default")
+    assert decisions.session_ids("r2") >= {"r1", "r2"}
+    assert decisions.list_pending(decisions.session_ids("r2"))[0]["request_id"] == item["request_id"]
+    assert decisions.list_pending(decisions.session_ids("web-new")) == []
+    assert decisions.list_pending(decisions.session_ids("r2-fork")) == []
+    with pytest.raises(decisions.KanbanDecisionConflict):
+        decisions.resolve(item["request_id"], "once", source_session_id="web-new", answer="x")
+    assert decisions.resolve(item["request_id"], "once", source_session_id="r2", answer="Завтра")["ok"]

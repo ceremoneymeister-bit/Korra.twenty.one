@@ -108,8 +108,90 @@ def list_pending(session_ids: set[str] | None = None) -> list[dict]:
     return result
 
 
+_NON_OWNER_SOURCES = {"kanban", "agent_service", "subagent", "cron", "tool"}
+
+
+def _reset_neighbours(db, session_id: str) -> list[str]:
+    """Reset-linked rows next to *session_id*: its reset parent and reset children.
+
+    A reset keeps the routing key, so the key must match and be non-empty;
+    nothing is matched by chat title or recency.
+    """
+    from korra_state_common import _RESET_CHILD_SQL, _RESET_END_REASONS
+
+    row = db.get_session(session_id)
+    if not row:
+        return []
+    found: list[str] = []
+    key = row.get("session_key")
+    parent_id = row.get("parent_session_id")
+    if key and parent_id and not db._is_explicit_fork_child_row(row):
+        parent = db.get_session(parent_id)
+        if (parent and parent.get("session_key") == key
+                and parent.get("end_reason") in _RESET_END_REASONS):
+            found.append(parent_id)
+    with db._read_ctx() as conn:
+        children = conn.execute(
+            "SELECT * FROM sessions c WHERE c.parent_session_id = ? AND c.session_key = ? "
+            "AND c.session_key != '' AND (" + _RESET_CHILD_SQL.format(a="c") + ") "
+            "ORDER BY c.started_at ASC",
+            (session_id, key or ""),
+        ).fetchall() if key and row.get("end_reason") in _RESET_END_REASONS else []
+    for child in children:
+        child = dict(child)
+        if not db._is_explicit_fork_child_row(child):
+            found.append(child["id"])
+    return found
+
+
+def _chat_chain(db, session_id: str) -> list[str]:
+    """Compression lineages of *session_id* and of the chats reset into/from it."""
+    chain: list[str] = []
+    seen: set[str] = set()
+    queue = [session_id]
+    while queue and len(seen) < 64:
+        current = queue.pop(0)
+        if current in seen:
+            continue
+        seen.add(current)
+        for sid in db.get_compression_lineage(current):
+            if sid not in chain:
+                chain.append(sid)
+            if sid not in seen:
+                queue.append(sid)
+        queue.extend(_reset_neighbours(db, current))
+    return chain
+
+
+def live_successor(db, session_id: str) -> str | None:
+    """Open session that continues *session_id* after reset/compression, if any.
+
+    Unlinked sessions (for example a new web chat) have no successor.
+    """
+    row = db.get_session(session_id)
+    if not row or row.get("source") in _NON_OWNER_SOURCES:
+        return None
+    current = row
+    for _ in range(64):
+        if current.get("ended_at") is None:
+            return None if current["id"] == session_id else current["id"]
+        if current.get("end_reason") == "compression":
+            tail = db.get_compression_lineage(current["id"])[-1]
+            nxt = db.get_session(tail)
+            if not nxt or nxt["id"] == current["id"]:
+                return None
+            current = nxt
+            continue
+        kids = [k for k in _reset_neighbours(db, current["id"])
+                if (db.get_session(k) or {}).get("parent_session_id") == current["id"]]
+        if not kids:
+            return None
+        current = db.get_session(kids[-1])
+    return None
+
+
 def session_ids(session_id: str, home: Path | None = None) -> set[str]:
-    """Allow only compression continuations of the original owner chat."""
+    """Chats of one owner conversation: compression and reset continuations."""
     from korra_constants import get_hermes_home
     from korra_cli.web_server import _open_session_db_at_path
 
@@ -119,9 +201,9 @@ def session_ids(session_id: str, home: Path | None = None) -> set[str]:
     db = _open_session_db_at_path(path, read_only=True)
     try:
         row = db.get_session(session_id)
-        if not row or row.get("source") in {"kanban", "agent_service", "subagent", "cron", "tool"}:
+        if not row or row.get("source") in _NON_OWNER_SOURCES:
             return set()
-        return set(db.get_compression_lineage(session_id))
+        return set(_chat_chain(db, session_id))
     finally:
         db.close()
 

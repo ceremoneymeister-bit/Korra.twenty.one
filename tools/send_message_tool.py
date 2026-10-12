@@ -499,8 +499,15 @@ def _decision_session_identity(
     from tools.approval import get_current_session_key
 
     session_key = source_session_key.strip() or get_current_session_key(default="")
+    session_id = source_session_id.strip()
+    if not session_id:
+        # A card worker acts for the chat that handed the card over, so the
+        # owner decides in that chat even when the executor is another profile.
+        from korra_cli.kanban_db import current_task_origin_session
+
+        session_id = current_task_origin_session()
     session_id = (
-        source_session_id.strip()
+        session_id
         or get_session_env("KORRA_SESSION_ID", "").strip()
         or session_key
     )

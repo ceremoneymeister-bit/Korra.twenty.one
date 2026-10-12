@@ -468,37 +468,30 @@ describe("useChatStream — одобрение опасных команд", () 
     expect(current.approvals[0].request.choices).toEqual(["once", "deny"]);
   });
 
-  it("после F5 восстанавливает ожидающую отправку и два компактных исхода", async () => {
+  it("после F5 прячет только явно завершённые решения, остальные остаются", async () => {
+    const effect = (id: string, status: string) => ({
+      request_id: id,
+      decision_kind: "outbound_message",
+      effect_status: status,
+      source_session_id: "s-effects",
+      command: `Кому: email:1\n\n${id}`,
+      choices: ["once", "deny"],
+    });
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: RequestInfo | URL) => {
         if (String(url).includes("/api/chat/approvals")) {
           return Response.json({
             data: [
-              {
-                request_id: "effect_pending",
-                decision_kind: "outbound_message",
-                effect_status: "pending",
-                source_session_id: "s-effects",
-                command: "Кому: telegram:3\n\nТретий черновик",
-                choices: ["once", "deny"],
-              },
-              {
-                request_id: "effect_sent",
-                decision_kind: "outbound_message",
-                effect_status: "succeeded",
-                source_session_id: "s-effects",
-                command: "Кому: email:1\n\nПервый черновик",
-                choices: ["once", "deny"],
-              },
-              {
-                request_id: "effect_denied",
-                decision_kind: "outbound_message",
-                effect_status: "denied",
-                source_session_id: "s-effects",
-                command: "Кому: slack:2\n\nВторой черновик",
-                choices: ["once", "deny"],
-              },
+              effect("effect_pending", "pending"),
+              effect("effect_sent", "succeeded"),
+              effect("effect_denied", "denied"),
+              effect("effect_expired", "expired"),
+              effect("effect_superseded", "superseded"),
+              effect("effect_failed", "failed"),
+              effect("effect_unknown", "unknown"),
+              effect("effect_review", "needs_review"),
+              effect("effect_future", "quarantined"),
             ],
           });
         }
@@ -513,14 +506,57 @@ describe("useChatStream — одобрение опасных команд", () 
     await act(async () => current.loadSession("s-effects"));
     await settle();
 
-    expect(current.approvals).toHaveLength(3);
-    expect(current.approvals.map((entry) => [entry.request.request_id, entry.status, entry.decision])).toEqual([
-      ["effect_pending", "pending", undefined],
-      ["effect_sent", "settled", "once"],
-      ["effect_denied", "settled", "deny"],
+    expect(current.approvals.map((entry) => entry.request.request_id)).toEqual([
+      "effect_pending",
+      "effect_failed",
+      "effect_unknown",
+      "effect_review",
+      "effect_future",
     ]);
-    expect(current.approvals[1].note).toBe("Сообщение отправлено один раз.");
-    expect(current.approvals[2].note).toBe("Сообщение не отправлено.");
+    const failed = current.approvals.find((entry) => entry.request.request_id === "effect_failed");
+    expect(failed).toMatchObject({ status: "settled", note: expect.stringContaining("не выполнено") });
+    const unknown = current.approvals.find((entry) => entry.request.request_id === "effect_unknown");
+    expect(unknown).toMatchObject({ status: "settled" });
+  });
+
+  it("решение, принятое в этом чате, остаётся на виду, хотя сервер уже считает его завершённым", async () => {
+    const asked = {
+      request_id: "effect_live",
+      decision_kind: "outbound_message",
+      effect_status: "pending",
+      source_session_id: "s-live",
+      command: "Кому: email:1\n\nЧерновик",
+      choices: ["once", "deny"],
+    };
+    let poll: (() => void) | undefined;
+    const realInterval = window.setInterval.bind(window);
+    vi.spyOn(window, "setInterval").mockImplementation((handler, delay) => {
+      if (delay === 5000) poll = handler as () => void;
+      return realInterval(handler, delay) as unknown as ReturnType<typeof window.setInterval>;
+    });
+    let phase = "pending";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: RequestInfo | URL) => {
+        if (String(url).includes("/api/chat/approvals")) {
+          return Response.json({ data: [{ ...asked, effect_status: phase }] });
+        }
+        return Response.json({});
+      }),
+    );
+    vi.spyOn(api, "getSessionMessages").mockResolvedValue({
+      session_id: "s-live",
+      messages: [{ role: "user", content: "Отправь" }] as unknown as SessionMessage[],
+    });
+    await act(async () => current.loadSession("s-live"));
+    await settle();
+    expect(current.approvals).toHaveLength(1);
+
+    phase = "succeeded";
+    expect(poll).toBeDefined();
+    await act(async () => { poll!(); await new Promise(resolve => setTimeout(resolve, 0)); });
+    expect(current.approvals).toHaveLength(1);
+    expect(current.approvals[0]).toMatchObject({ status: "settled", decision: "once" });
   });
 });
 

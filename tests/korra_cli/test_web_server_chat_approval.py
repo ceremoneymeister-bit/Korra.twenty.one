@@ -265,3 +265,144 @@ def test_panel_marks_its_own_chat_stream_as_read_by_a_human(monkeypatch):
     asyncio.run(_call())
     assert _Recorder.calls, "запрос до движка не дошёл"
     assert _Recorder.calls[0]["headers"]["X-Korra-Attended"] == "1"
+
+
+# ---------------------------------------------------------------------------
+# K21-299: решения исполнителя другого профиля — в исходном чате по связи карточки
+# ---------------------------------------------------------------------------
+
+
+class _ByUrl(_Recorder):
+    bodies: dict = {}
+    failing: set = set()
+
+    def _respond(self, method, url, headers=None, json=None):
+        response = super()._respond(method, url, headers, json)
+        for needle in type(self).failing:
+            if needle in str(url):
+                return httpx.Response(503, content=b"{}")
+        for needle, body in type(self).bodies.items():
+            if needle in str(url):
+                return httpx.Response(
+                    200, content=json_module.dumps(body).encode(),
+                    headers={"content-type": "application/json"},
+                )
+        return response
+
+
+json_module = json
+
+
+async def _call_by_url(monkeypatch, method, path, body=None):
+    real_client = httpx.AsyncClient
+    app = _route_app("/api/chat/approval", "/api/chat/approvals", "/api/chat/decisions")
+    transport = httpx.ASGITransport(app=app)
+    async with real_client(transport=transport, base_url="http://testserver") as cli:
+        monkeypatch.setattr(httpx, "AsyncClient", _ByUrl)
+        if method == "POST":
+            return await cli.post(path, json=body)
+        return await cli.get(path)
+
+
+@pytest.fixture
+def linked_home(tmp_path, monkeypatch):
+    """Чат chat-1 передал карточку исполнителю sender; чат chat-9 ничего не передавал."""
+    from korra_cli import kanban_db as kb
+    from korra_state import SessionDB
+
+    home = tmp_path / ".hermes"
+    (home / "profiles" / "sender").mkdir(parents=True)
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.delenv("HERMES_KANBAN_DB", raising=False)
+    kb._INITIALIZED_PATHS.clear()
+    db = SessionDB(home / "state.db")
+    for sid in ("chat-1", "chat-9"):
+        db.create_session(sid, source="api_server")
+    db.close()
+    kb.init_db()
+    with kb.connect_closing() as conn:
+        kb.create_task(conn, title="send", assignee="sender", session_id="chat-1")
+    _ByUrl.bodies, _ByUrl.failing = {}, set()
+    return home
+
+
+def test_effect_of_the_executor_shows_in_the_origin_chat(linked_home, monkeypatch):
+    _ByUrl.bodies = {
+        "/p/sender/api/sessions/chat-1/approvals": {"data": [
+            {"request_id": "effect_mine"}, {"request_id": "kb_not_an_effect"},
+        ]},
+        "/api/sessions/chat-1/approvals": {"data": [{"request_id": "req-own"}]},
+    }
+    response = asyncio.run(_call_by_url(monkeypatch, "GET", "/api/chat/approvals?session_id=chat-1"))
+    assert [i["request_id"] for i in response.json()["data"]] == ["req-own", "effect_mine"]
+
+
+def test_chat_without_handed_over_cards_asks_only_its_own_profile(linked_home, monkeypatch):
+    _ByUrl.bodies = {"/api/sessions/chat-9/approvals": {"data": [{"request_id": "req-own"}]}}
+    response = asyncio.run(_call_by_url(monkeypatch, "GET", "/api/chat/approvals?session_id=chat-9"))
+    assert [i["request_id"] for i in response.json()["data"]] == ["req-own"]
+    assert len(_ByUrl.calls) == 1
+
+
+def test_unreachable_executor_does_not_hide_own_decisions(linked_home, monkeypatch):
+    _ByUrl.bodies = {"/api/sessions/chat-1/approvals": {"data": [{"request_id": "req-own"}]}}
+    _ByUrl.failing = {"/p/sender/"}
+    response = asyncio.run(_call_by_url(monkeypatch, "GET", "/api/chat/approvals?session_id=chat-1"))
+    assert response.status_code == 200
+    assert [i["request_id"] for i in response.json()["data"]] == ["req-own"]
+
+
+def test_answer_goes_to_the_executor_profile_with_the_stored_session(linked_home, monkeypatch):
+    from korra_state import SessionDB
+
+    db = SessionDB(linked_home / "state.db")
+    db.end_session("chat-1", "session_reset")
+    db.close()
+    db = SessionDB(linked_home / "state.db")
+    db.create_session("chat-2", source="api_server", session_key="k", parent_session_id="chat-1",
+                      model_config={"_reset_from": "chat-1"})
+    db.close()
+    # the reset needs a shared routing key to count as the same chat
+    import sqlite3
+    conn = sqlite3.connect(linked_home / "state.db")
+    conn.execute("UPDATE sessions SET session_key='k' WHERE id='chat-1'")
+    conn.commit(); conn.close()
+    _ByUrl.bodies = {"/p/sender/api/sessions/chat-1/approvals": {"data": [{"request_id": "effect_mine"}]}}
+    response = asyncio.run(_call_by_url(monkeypatch, "POST", "/api/chat/approval", {
+        "session_id": "chat-2", "choice": "once", "request_id": "effect_mine"}))
+    assert response.status_code == 200
+    posts = [c for c in _ByUrl.calls if c["method"] == "POST"]
+    assert len(posts) == 1 and posts[0]["url"].endswith("/p/sender/api/sessions/chat-1/approval")
+
+
+def test_executor_center_answer_is_forwarded_unchanged(linked_home, monkeypatch):
+    # The executor's own centre posts the stored origin session to its own
+    # profile: no link is needed and no foreign-session check may refuse it.
+    _ByUrl.bodies = {}
+    response = asyncio.run(_call_by_url(monkeypatch, "POST", "/api/chat/approval?profile=sender", {
+        "session_id": "chat-1", "choice": "once", "request_id": "effect_mine"}))
+    assert response.status_code == 200
+    assert [c["url"] for c in _ByUrl.calls if c["method"] == "POST"][0].endswith(
+        "/p/sender/api/sessions/chat-1/approval")
+
+
+def test_background_origin_is_not_linked_and_passes_through(linked_home, monkeypatch):
+    response = asyncio.run(_call_by_url(monkeypatch, "POST", "/api/chat/approval?profile=sender", {
+        "session_id": "cron:job:run1", "choice": "deny", "request_id": "effect_cron"}))
+    assert response.status_code == 200
+    assert _ByUrl.calls[0]["url"].endswith("/p/sender/api/sessions/cron%3Ajob%3Arun1/approval")
+
+
+def test_other_chat_cannot_reach_the_executor_effect(linked_home, monkeypatch):
+    _ByUrl.bodies = {"/p/sender/api/sessions/chat-1/approvals": {"data": [{"request_id": "effect_mine"}]}}
+    asyncio.run(_call_by_url(monkeypatch, "POST", "/api/chat/approval", {
+        "session_id": "chat-9", "choice": "once", "request_id": "effect_mine"}))
+    assert all("/p/sender/" not in c["url"] for c in _ByUrl.calls)
+
+
+def test_executor_down_is_reported_as_unavailable_not_as_missing(linked_home, monkeypatch):
+    _ByUrl.failing = {"/p/sender/"}
+    response = asyncio.run(_call_by_url(monkeypatch, "POST", "/api/chat/approval", {
+        "session_id": "chat-1", "choice": "once", "request_id": "effect_mine"}))
+    assert response.status_code == 503
+    assert not [c for c in _ByUrl.calls if c["method"] == "POST"]

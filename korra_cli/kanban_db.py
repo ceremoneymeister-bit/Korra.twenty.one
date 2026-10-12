@@ -5365,6 +5365,101 @@ def reassign_task(
         return False
 
 
+def _board_file(slug: str) -> Path:
+    return (kanban_home() / "kanban.db") if slug == DEFAULT_BOARD else board_dir(slug) / "kanban.db"
+
+
+def count_board_tasks(slug: str) -> int:
+    """Live (not archived) cards on a board, read-only; 0 if it cannot be read."""
+    path = _board_file(slug)
+    if not path.is_file():
+        return 0
+    try:
+        other = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1)
+        try:
+            return int(other.execute(
+                "SELECT COUNT(*) FROM tasks WHERE status != 'archived'"
+            ).fetchone()[0])
+        finally:
+            other.close()
+    except sqlite3.Error:
+        return 0
+
+
+def _tasks_on_other_boards(
+    ids: Iterable[str], only: Optional[str] = None,
+) -> dict[str, tuple[str, Optional[str]]]:
+    """Look ids up read-only on every board; returns ``{id: (board, created_by)}``.
+
+    A card made on another board is a real card. The phantom detectors read
+    only the board they run on, so without this a correct reference to a
+    sibling board would be reported as invented. An unreadable board is
+    skipped: this is an advisory lookup, never a reason to block anything.
+    """
+    wanted = list(dict.fromkeys(i for i in ids if i))
+    found: dict[str, tuple[str, Optional[str]]] = {}
+    if not wanted:
+        return found
+    try:
+        slugs = [only] if only else [m.get("slug") for m in list_boards(include_archived=True)]
+    except OSError:
+        return found
+    marks = ",".join(["?"] * len(wanted))
+    for slug in slugs:
+        path = _board_file(slug) if slug else None
+        if path is None or not path.is_file():
+            continue
+        try:
+            other = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1)
+            try:
+                for row in other.execute(
+                    f"SELECT id, created_by FROM tasks WHERE id IN ({marks})", tuple(wanted),
+                ):
+                    found.setdefault(row[0], (slug, row[1]))
+            finally:
+                other.close()
+        except sqlite3.Error:
+            continue
+    return found
+
+
+def executors_for_sessions(session_ids: Iterable[str]) -> dict[str, set[str]]:
+    """Profiles that hold cards handed over from these chat sessions.
+
+    ``{assignee: {card origin session, ...}}`` from every board, read-only. This
+    is the proven origin -> executor link: it comes from the card itself, so a
+    decision can be shown and answered in the owner's chat without scanning
+    other profiles' ledgers. An unreadable board contributes nothing.
+    """
+    wanted = list(dict.fromkeys(i for i in session_ids if i))
+    result: dict[str, set[str]] = {}
+    if not wanted:
+        return result
+    try:
+        slugs = [m.get("slug") for m in list_boards(include_archived=True)]
+    except OSError:
+        return result
+    marks = ",".join(["?"] * len(wanted))
+    for slug in slugs:
+        path = _board_file(slug) if slug else None
+        if path is None or not path.is_file():
+            continue
+        try:
+            other = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1)
+            try:
+                for assignee, session_id in other.execute(
+                    "SELECT DISTINCT assignee, session_id FROM tasks "
+                    f"WHERE session_id IN ({marks}) AND assignee IS NOT NULL AND assignee != ''",
+                    tuple(wanted),
+                ):
+                    result.setdefault(assignee, set()).add(session_id)
+            finally:
+                other.close()
+        except sqlite3.Error:
+            continue
+    return result
+
+
 def _verify_created_cards(
     conn: sqlite3.Connection,
     completing_task_id: str,
@@ -5416,6 +5511,10 @@ def _verify_created_cards(
         tuple(ordered),
     ).fetchall()
     found = {r["id"]: r["created_by"] for r in rows}
+    for cid, (_slug, created_by) in _tasks_on_other_boards(
+        [c for c in ordered if c not in found]
+    ).items():
+        found[cid] = created_by
 
     # Pull the set of cards linked as children of the completing task.
     # Cheap: one query, indexed on parent_id.
@@ -5476,6 +5575,9 @@ def _scan_prose_for_phantom_ids(
         tuple(unique),
     ).fetchall()
     existing = {r["id"] for r in rows}
+    missing = [m for m in unique if m not in existing]
+    if missing:
+        existing |= set(_tasks_on_other_boards(missing))
     return [m for m in unique if m not in existing]
 
 
@@ -12865,6 +12967,74 @@ def remove_notify_sub(
             (task_id, platform, chat_id, thread_id or ""),
         )
     return cur.rowcount > 0
+
+
+def current_task_origin_session() -> str:
+    """Owner chat session of the card this dispatcher worker is executing, or ''."""
+    task_id = korra_env("KORRA_KANBAN_TASK")
+    if not task_id:
+        return ""
+    try:
+        from agent.delegation_context import is_dispatcher_owned_worker_context
+
+        if not is_dispatcher_owned_worker_context():
+            return ""
+        with connect_closing() as conn:
+            task = get_task(conn, task_id)
+        return (task.session_id or "") if task else ""
+    except Exception:
+        return ""
+
+
+def reroute_notify_sub(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str,
+    platform: str,
+    chat_id: str,
+    thread_id: Optional[str] = None,
+    new_chat_id: str,
+) -> bool:
+    """Move one subscription to *new_chat_id*, keeping its event cursor.
+
+    The row is rewritten in place, so ``last_event_id`` travels with the route
+    and nothing is replayed. If the target route already follows the task, the
+    older row is dropped and the target keeps the larger cursor.
+    """
+    if not new_chat_id or new_chat_id == chat_id:
+        return False
+    thread = thread_id or ""
+    with write_txn(conn):
+        old = conn.execute(
+            "SELECT last_event_id FROM kanban_notify_subs WHERE task_id = ? "
+            "AND platform = ? AND chat_id = ? AND thread_id = ?",
+            (task_id, platform, chat_id, thread),
+        ).fetchone()
+        if old is None:
+            return False
+        existing = conn.execute(
+            "SELECT last_event_id FROM kanban_notify_subs WHERE task_id = ? "
+            "AND platform = ? AND chat_id = ? AND thread_id = ?",
+            (task_id, platform, new_chat_id, thread),
+        ).fetchone()
+        if existing is None:
+            conn.execute(
+                "UPDATE kanban_notify_subs SET chat_id = ? WHERE task_id = ? "
+                "AND platform = ? AND chat_id = ? AND thread_id = ?",
+                (new_chat_id, task_id, platform, chat_id, thread),
+            )
+        else:
+            conn.execute(
+                "UPDATE kanban_notify_subs SET last_event_id = MAX(last_event_id, ?) "
+                "WHERE task_id = ? AND platform = ? AND chat_id = ? AND thread_id = ?",
+                (old["last_event_id"], task_id, platform, new_chat_id, thread),
+            )
+            conn.execute(
+                "DELETE FROM kanban_notify_subs WHERE task_id = ? "
+                "AND platform = ? AND chat_id = ? AND thread_id = ?",
+                (task_id, platform, chat_id, thread),
+            )
+    return True
 
 
 def purge_stale_done_notify_subs(
