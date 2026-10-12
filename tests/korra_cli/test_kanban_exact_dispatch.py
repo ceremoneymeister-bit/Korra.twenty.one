@@ -106,7 +106,11 @@ def test_request_is_recorded_once_and_only_for_a_startable_card(home):
         assert kb.request_exact_dispatch(conn, ready) == "requested"
         assert kb.request_exact_dispatch(conn, ready) == "already"
         assert kb.request_exact_dispatch(conn, human) == "human"
-        assert kb.request_exact_dispatch(conn, waiting) == "not_ready"
+        assert kb.request_exact_dispatch(conn, waiting) == "requested"
+        assert kb.request_exact_dispatch(conn, waiting) == "already"
+        blocked = _card(conn)
+        kb.block_task(conn, blocked, reason="wait")
+        assert kb.request_exact_dispatch(conn, blocked) == "not_ready"
         assert kb.request_exact_dispatch(conn, "t_nope") == "missing"
         assert len(_events(conn, ready, "dispatch_requested")) == 1
         assert _events(conn, human, "dispatch_requested") == []
@@ -244,6 +248,20 @@ def test_next_step_after_the_owner_accepts_is_requested(home):
         assert out["ok"], out
         assert kb.get_task(conn, second).status == "ready"
         assert kb.pending_exact_dispatch_ids(conn) == [second]
+
+
+def test_waiting_card_requested_in_advance_starts_after_a_parent_nobody_requested(home):
+    with kb.connect_closing() as conn:
+        parent = _card(conn, "old task")
+        kb.claim_task(conn, parent)
+        child = _card(conn, "explicit", parents=[parent])
+        assert kb.request_exact_dispatch(conn, child, source="kanban_create") == "requested"
+        assert kb.get_task(conn, child).status == "todo"
+        assert kb.pending_exact_dispatch_ids(conn) == []
+        kb.complete_task(conn, parent, result="ok")
+        assert kb.get_task(conn, child).status == "ready"
+        assert kb.pending_exact_dispatch_ids(conn) == [child]
+        assert len(_events(conn, child, "dispatch_requested")) == 1
 
 
 def test_chain_without_a_request_is_not_lifted(home):

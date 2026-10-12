@@ -10931,7 +10931,7 @@ def _request_exact_in_txn(
         return "missing"
     if (row["actor_kind"] or "") == "human":
         return "human"
-    if row["status"] != "ready":
+    if row["status"] not in ("ready", "todo"):
         return "not_ready"
     if not (row["assignee"] or "").strip():
         return "unassigned"
@@ -10952,9 +10952,10 @@ def _request_exact_in_txn(
 def request_exact_dispatch(
     conn: sqlite3.Connection, task_id: str, *, source: str = "request",
 ) -> str:
-    """Ask the dispatcher to start one ready card. Must run OUTSIDE a write txn.
+    """Ask the dispatcher to start one card. Must run OUTSIDE a write txn.
 
-    Returns ``requested`` / ``already`` (a valid request exists) or the reason
+    A card still waiting for its parents (``todo``) keeps the request; the
+    dispatcher only picks it once it is ``ready``. Returns ``requested`` / ``already`` (a valid request exists) or the reason
     nothing was written: ``missing``, ``human``, ``not_ready``, ``unassigned``.
     """
     with write_txn(conn):

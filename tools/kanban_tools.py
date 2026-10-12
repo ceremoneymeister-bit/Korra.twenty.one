@@ -1929,7 +1929,8 @@ def _created_card_execution(kb: Any, conn: Any, task: Any, *, subscribed: bool) 
 
     ``started`` is true only when the card is claimed with a live run; creating
     a card never starts it. In exact-request mode this is also where the
-    request to start it is recorded; the dispatcher does the starting.
+    request to start it is recorded, for a card waiting on parents too; the
+    dispatcher does the starting once the card is ready.
     """
     notify = "subscribed" if subscribed else "not_subscribed"
     out: dict[str, Any] = {
@@ -1949,14 +1950,11 @@ def _created_card_execution(kb: Any, conn: Any, task: Any, *, subscribed: bool) 
             run_id=task.current_run_id,
             reason="" if alive else "Claimed, but no live worker process is linked to the run yet.",
         )
-    elif status == "todo":
-        out.update(state="waiting_for_parents", will_start=True,
-                   reason="Starts after its parent steps are done.")
     elif status == "blocked":
         out.update(state="blocked", reason=task.block_reason or "The card is blocked.")
     elif status == "triage":
         out.update(state="triage", reason="Waiting to be specified before it can start.")
-    elif status != "ready":
+    elif status not in ("ready", "todo"):
         out.update(state=status, reason=f"Card status is {status}; nothing is started.")
     else:
         settings = kb.owner_kanban_settings()
@@ -1993,6 +1991,11 @@ def _created_card_execution(kb: Any, conn: Any, task: Any, *, subscribed: bool) 
         if paused and out["will_start"]:
             out.update(state="paused", will_start=False,
                        reason="The global emergency stop is on; the card starts after it is lifted.")
+        if status == "todo" and out["state"] in ("queued", "no_dispatcher"):
+            # The request (exact mode) is kept now; the dispatcher picks the card
+            # once its parents are done.
+            out.update(state="waiting_for_parents",
+                       reason=f"Starts after its parent steps are done. {out['reason']}")
     if not subscribed:
         out["reason"] = (out["reason"] + " " if out["reason"] else "") + (
             "This chat is not subscribed to the card: results will not arrive here; "
