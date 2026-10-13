@@ -77,7 +77,7 @@ def container_name(request) -> Iterator[str]:
     name = f"hermes-test-{safe}"
     yield name
     subprocess.run(
-        ["docker", "rm", "-f", name],
+        ["docker", "rm", "-f", "--volumes", name],
         capture_output=True, timeout=10,
     )
 

@@ -165,7 +165,7 @@ def test_symlinked_allowlisted_file_not_chowned(
         # Clean up root/hermes-owned files left by stage2 chown
         if host_data is not None:
             subprocess.run(
-                ["docker", "rm", "-f", container_name],
+                ["docker", "rm", "-f", "--volumes", container_name],
                 capture_output=True, timeout=10,
             )
             subprocess.run(

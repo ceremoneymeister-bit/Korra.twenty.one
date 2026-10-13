@@ -84,7 +84,7 @@ def _wait_for_cont_init(container: str) -> None:
 def sleep_container(built_image: str, container_name: str) -> Iterator[str]:
     """Long-lived container running `sleep infinity` so we can docker exec into it."""
     subprocess.run(
-        ["docker", "rm", "-f", container_name],
+        ["docker", "rm", "-f", "--volumes", container_name],
         capture_output=True, check=False,
     )
     r = subprocess.run(
@@ -98,7 +98,7 @@ def sleep_container(built_image: str, container_name: str) -> Iterator[str]:
         yield container_name
     finally:
         subprocess.run(
-            ["docker", "rm", "-f", container_name],
+            ["docker", "rm", "-f", "--volumes", container_name],
             capture_output=True, check=False,
         )
 
