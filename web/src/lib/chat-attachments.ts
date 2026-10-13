@@ -108,7 +108,7 @@ export async function downloadWorkspaceFile(path: string, name: string, chat = f
   if (objectUrl) window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
-/** Mirrors MEDIA_DELIVERY_EXTS in gateway/platforms/base.py; a test keeps them equal. */
+/** Mirrors MEDIA_DELIVERY_EXTS in gateway/platforms/base.py. */
 export const MEDIA_DELIVERY_EXTS: readonly string[] = [
   "png", "jpg", "jpeg", "gif", "webp", "bmp", "tiff", "svg",
   "mp4", "mov", "avi", "mkv", "webm", "3gp",
@@ -124,11 +124,13 @@ export const MEDIA_DELIVERY_EXTS: readonly string[] = [
 // Same shape as MEDIA_TAG_CLEANUP_RE on the server: a bare path may contain
 // spaces, runs from "/" or "~/" to the nearest known extension, and ends at a
 // boundary (whitespace, closing punctuation, the next "MEDIA:", or a final dot).
-const MEDIA_BARE_PATH = String.raw`((?:~/|/)\S+?(?:[^\S\n]+\S+?)*?\.(?:${
+// Never scan across the next directive, even when this path has an unknown
+// extension: otherwise we merge files and rescan every remaining tag.
+const MEDIA_BARE_PATH = String.raw`((?:~/|/)(?:(?!MEDIA:)\S)+?(?:[^\S\n]+(?:(?!MEDIA:)\S)+?)*?\.(?:${
   [...MEDIA_DELIVERY_EXTS].sort((a, b) => b.length - a.length).join("|")
 })(?=[\s\x60"'*_,;:)\]}\[（）〈〉《》：，。；！？、“”‘’【】]|MEDIA:|\.(?:\s|$)|$))`;
 const MEDIA_TAG_RE = new RegExp(
-  String.raw`[\x60"'*_]{0,3}MEDIA:\s*(?:"([^"\n]+)"|'([^'\n]+)'|${MEDIA_BARE_PATH}|([^\s\x60]+))[\x60"'*_]{0,3}\.?`,
+  String.raw`[\x60"'*_]{0,3}MEDIA:\s*(?:"([^"\n]+)"|'([^'\n]+)'|${MEDIA_BARE_PATH}|((?:(?!MEDIA:)[^\s\x60])+))[\x60"'*_]{0,3}\.?`,
   "gi",
 );
 

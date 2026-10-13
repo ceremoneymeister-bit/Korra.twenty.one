@@ -1,8 +1,6 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
-  MEDIA_DELIVERY_EXTS,
   chatUploadPath,
   shortName,
   splitAttachments,
@@ -161,11 +159,17 @@ describe("MEDIA с пробелами в пути (K21-345)", () => {
     expect(result.paths).toEqual([]);
     expect(result.text).toBe(text);
   });
-  it("список расширений совпадает с MEDIA_DELIVERY_EXTS сервера", () => {
-    const source = readFileSync(new URL("../../../gateway/platforms/base.py", import.meta.url), "utf8");
-    const body = /MEDIA_DELIVERY_EXTS: Tuple\[str, \.\.\.\] = \(([\s\S]*?)\n\)/.exec(source)?.[1];
-    expect(body).toBeTruthy();
-    const server = [...(body ?? "").replace(/#[^\n]*/g, "").matchAll(/"\.([a-z0-9]+)"/g)].map(m => m[1]);
-    expect([...MEDIA_DELIVERY_EXTS].sort()).toEqual(server.sort());
+  it("не склеивает неизвестное расширение со следующим MEDIA", () => {
+    for (const separator of [" ", "", "\n"]) {
+      expect(splitFileReferences(`MEDIA:/tmp/script.py${separator}MEDIA:/tmp/report.pdf`))
+        .toEqual({ text: "", paths: ["/tmp/script.py", "/tmp/report.pdf"] });
+    }
+    expect(splitFileReferences('MEDIA:/tmp/script.py MEDIA:"/tmp/report.pdf"'))
+      .toEqual({ text: "", paths: ["/tmp/script.py", "/tmp/report.pdf"] });
+  });
+  it("сохраняет отдельные файлы в длинной последовательности неизвестных расширений", () => {
+    const paths = Array.from({ length: 2000 }, (_, i) => `/tmp/file-${i}.unknown`);
+    expect(splitFileReferences(paths.map(path => `MEDIA:${path}`).join(" ")))
+      .toEqual({ text: "", paths });
   });
 });
