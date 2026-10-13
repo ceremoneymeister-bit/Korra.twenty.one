@@ -1,9 +1,12 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
+  MEDIA_DELIVERY_EXTS,
   chatUploadPath,
   shortName,
   splitAttachments,
+  splitFileReferences,
   toDisplay,
 } from "./chat-attachments";
 
@@ -108,5 +111,61 @@ describe("выдача файлов агента", () => {
     for (const href of ["javascript:alert(1)", "file://host/path.xlsx", "//host/path.xlsx", "/workspace/../secret.xlsx"]) {
       expect(splitFileReferences(`[файл](${href})`).paths).toEqual([]);
     }
+  });
+});
+
+describe("MEDIA с пробелами в пути (K21-345)", () => {
+  const dir = "/opt/data/workspace/agents/0b8bf0d2e4679cad/results";
+  const docx = `${dir}/Коммерческое предложение — блокноты и акриловые фигуры.docx`;
+  const pdf = `${dir}/Коммерческое предложение — блокноты и акриловые фигуры.pdf`;
+
+  it("два файла Марины на соседних строках дают два полных пути", () => {
+    const result = splitFileReferences(`MEDIA:${docx}\nMEDIA:${pdf}`);
+    expect(result.paths).toEqual([docx, pdf]);
+    expect(result.text).toBe("");
+  });
+  it("два тега на одной строке дают два файла", () => {
+    const result = splitFileReferences(`MEDIA:${docx} MEDIA:${pdf}`);
+    expect(result.paths).toEqual([docx, pdf]);
+    expect(result.text).toBe("");
+  });
+  it("склеенные теги без пробела не сливаются", () => {
+    const result = splitFileReferences("MEDIA:/a/b c.pngMEDIA:/a/d e.png");
+    expect(result.paths).toEqual(["/a/b c.png", "/a/d e.png"]);
+  });
+  it("точка и запятая в конце предложения не входят в путь", () => {
+    expect(splitFileReferences(`Файл: MEDIA:${pdf}.`)).toEqual({ text: "Файл:", paths: [pdf] });
+    expect(splitFileReferences(`MEDIA:${pdf}, готово`)).toEqual({ text: ", готово", paths: [pdf] });
+    expect(splitFileReferences("MEDIA:/a/data.tar.gz.").paths).toEqual(["/a/data.tar.gz"]);
+  });
+  it("текст после пути без расширения в конце остаётся текстом", () => {
+    const result = splitFileReferences("MEDIA:/a/b/отчёт за май.pdf вот он, проверьте");
+    expect(result.paths).toEqual(["/a/b/отчёт за май.pdf"]);
+    expect(result.text).toBe("вот он, проверьте");
+  });
+  it("кавычки, обратные кавычки и выделение работают", () => {
+    expect(splitFileReferences(`MEDIA:"${pdf}"`).paths).toEqual([pdf]);
+    expect(splitFileReferences(`MEDIA:'${pdf}'`).paths).toEqual([pdf]);
+    expect(splitFileReferences(`\`MEDIA:${pdf}\``)).toEqual({ text: "", paths: [pdf] });
+    expect(splitFileReferences(`**MEDIA:${pdf}**`)).toEqual({ text: "", paths: [pdf] });
+    expect(splitFileReferences("MEDIA:/a/b.PDF").paths).toEqual(["/a/b.PDF"]);
+  });
+  it("путь без пробелов и неизвестное расширение разбираются как раньше", () => {
+    expect(splitFileReferences("MEDIA:/a/b.pdf").paths).toEqual(["/a/b.pdf"]);
+    expect(splitFileReferences("MEDIA:/a/script.py").paths).toEqual(["/a/script.py"]);
+    expect(splitFileReferences("MEDIA:/a/report.pdf\nдальше текст").text).toBe("дальше текст");
+  });
+  it("код в блоке и инлайн-коде не разбирается", () => {
+    const text = `\`\`\`\nMEDIA:${pdf}\n\`\`\`\nпример: \`/a/b c.pdf\``;
+    const result = splitFileReferences(text);
+    expect(result.paths).toEqual([]);
+    expect(result.text).toBe(text);
+  });
+  it("список расширений совпадает с MEDIA_DELIVERY_EXTS сервера", () => {
+    const source = readFileSync(new URL("../../../gateway/platforms/base.py", import.meta.url), "utf8");
+    const body = /MEDIA_DELIVERY_EXTS: Tuple\[str, \.\.\.\] = \(([\s\S]*?)\n\)/.exec(source)?.[1];
+    expect(body).toBeTruthy();
+    const server = [...(body ?? "").replace(/#[^\n]*/g, "").matchAll(/"\.([a-z0-9]+)"/g)].map(m => m[1]);
+    expect([...MEDIA_DELIVERY_EXTS].sort()).toEqual(server.sort());
   });
 });
