@@ -97,7 +97,7 @@ def test_non_running_value_ignored(
             f"bogus value {bogus!r} should not seed a state file: {r.stdout}"
         )
         subprocess.run(
-            ["docker", "rm", "-f", name],
+            ["docker", "rm", "-f", "--volumes", name],
             capture_output=True, timeout=10,
         )
 
@@ -124,7 +124,7 @@ def _cleanup_bind_mount(built_image: str, container_name: str, host_dir: Path) -
     before the temp dir is cleaned up.
     """
     subprocess.run(
-        ["docker", "rm", "-f", container_name],
+        ["docker", "rm", "-f", "--volumes", container_name],
         capture_output=True, timeout=10,
     )
     subprocess.run(

@@ -54,7 +54,7 @@ def restart_container(request, built_image: str):
     safe = request.node.name.replace("[", "_").replace("]", "_")
     name = f"hermes-restart-{safe}"
     volume = f"hermes-restart-vol-{safe}"
-    _docker("rm", "-f", name)
+    _docker("rm", "-f", "--volumes", name)
     _docker("volume", "rm", "-f", volume)
     _docker("volume", "create", volume, timeout=10).check_returncode()
     r = _docker(
@@ -71,7 +71,7 @@ def restart_container(request, built_image: str):
     # readiness signal.
     wait_for_log(name, "/opt/data/logs/container-boot.log", "profile=default")
     yield name
-    _docker("rm", "-f", name)
+    _docker("rm", "-f", "--volumes", name)
     _docker("volume", "rm", "-f", volume)
 
 
