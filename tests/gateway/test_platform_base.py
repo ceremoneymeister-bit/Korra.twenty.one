@@ -276,12 +276,13 @@ class TestExtractMedia:
     # Windows path support — regression coverage for #34632
 
 
-    def test_relative_path_still_ignored(self):
-        """Relative Windows-style paths (no drive letter) must not match."""
-        media, _ = BasePlatformAdapter.extract_media(
-            r"MEDIA:Users\kotsu\file.pdf"
-        )
-        assert media == []
+    def test_relative_path_is_rejected_by_delivery_filter(self):
+        """Relative paths are requests, never eligible uploads."""
+        path = r"Users\kotsu\file.pdf"
+        media, cleaned = BasePlatformAdapter.extract_media(f"MEDIA:{path}")
+        assert media == [(path, False)]
+        assert BasePlatformAdapter.filter_media_delivery_paths(media) == []
+        assert "MEDIA:" not in cleaned
 
     # --- Code block / inline code / blockquote false-positive guards (#35695) ---
 
@@ -383,19 +384,15 @@ class TestMediaExtensionAllowlistParity:
                       "tsv", "svg"]
 
 
-    def test_unknown_extension_not_black_holed_by_cleanup(self):
-        """A MEDIA: tag with an unknown extension is NOT stripped from the
-        body by the extension-anchored cleanup — and when the path does not
-        validate (nonexistent file here), it is not delivered either, so the
-        tag survives visibly instead of vanishing (the core of issue #34517).
-        Validated unknown-extension paths DO deliver — see
-        TestUniversalMediaEgress (#36060)."""
-        from gateway.platforms.base import MEDIA_TAG_CLEANUP_RE
-        text = "Saved to MEDIA:/tmp/data.weirdext done"
-        media, _ = BasePlatformAdapter.extract_media(text)
-        assert media == []  # nonexistent path fails validation, not delivered
-        stripped = MEDIA_TAG_CLEANUP_RE.sub("", text)
-        assert "/tmp/data.weirdext" in stripped  # path preserved, not dropped
+    def test_unknown_extension_not_black_holed_by_cleanup(self, tmp_path):
+        """Unavailable explicit paths reach the filter and its failure notice."""
+        path = tmp_path / "data.weirdext"
+        text = f"Saved to MEDIA:{path} done"
+        media, cleaned = BasePlatformAdapter.extract_media(text)
+        assert media == [(str(path), False)]
+        assert BasePlatformAdapter.filter_media_delivery_paths(media) == []
+        assert "MEDIA:" not in cleaned
+        assert "done" in cleaned
 
 
 class TestExtensionlessMediaDelivery:
@@ -427,9 +424,8 @@ class TestUniversalMediaEgress:
     """#36060: every MEDIA: path is deliverable regardless of file type.
 
     Known extensions extract unconditionally (MEDIA_TAG_CLEANUP_RE); unknown
-    extensions and extension-less files extract via the validated pass —
-    delivered when validate_media_delivery_path accepts them, left visible
-    when it does not (nonexistent, denylisted).
+    extensions and extension-less files resolve via the validated pass.
+    Unavailable directives still reach the delivery filter and failure notice.
     """
 
     def _patch_allow_root(self, monkeypatch, root):
