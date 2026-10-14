@@ -3382,6 +3382,7 @@ export interface CronJobHistory {
 // параллельный набор `*OwnerCronJob*` слал `expected_revision` и звал
 // несуществующий `/archive`, из-за чего раздел «Задачи» не работал вовсе.
 export interface CronJob {
+  warning?: string;
   id: string;
   profile?: string | null;
   profile_name?: string | null;

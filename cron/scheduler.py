@@ -498,7 +498,8 @@ def _repeat_alert_withheld(incident: dict) -> bool:
 
 
 def _upsert_incident_for_failure(
-    job: dict, error: str, *, output_file: Optional[Any] = None
+    job: dict, error: str, *, output_file: Optional[Any] = None,
+    failure_type: Optional[str] = None,
 ) -> tuple[bool, Optional[str]]:
     """Record a durable failure incident for this run.
 
@@ -523,6 +524,7 @@ def _upsert_incident_for_failure(
             str(error or ""),
             job_name=job.get("name"),
             output_file=output_file,
+            failure_type=failure_type,
         )
         incident = get_incident(incident_id)
         state = incident.get("state") if incident else None
@@ -536,13 +538,14 @@ def _upsert_incident_for_failure(
         return False, None
 
 
-def _resolve_incidents_for_recovered_job(job: dict) -> None:
+def _resolve_incidents_for_recovered_job(job: dict, *, delivery_recovered: bool = True) -> None:
     """Best-effort: a successful run marks the job's open incidents ``resolved``."""
     try:
         from cron.incidents import close_incidents_for_recovered_job
 
         close_incidents_for_recovered_job(
-            job["id"], provider=job.get("_resolved_subscription_provider")
+            job["id"], provider=job.get("_resolved_subscription_provider"),
+            delivery_recovered=delivery_recovered,
         )
     except Exception as exc:
         logger.debug("Incident store unavailable for job %s (delivery unaffected): %s", job["id"], exc)
@@ -5811,6 +5814,53 @@ def _preflight_check_delivery(job: dict) -> Optional[str]:
     return None
 
 
+def cron_delivery_warning(job: dict, *, profile_home: Optional[Path] = None) -> Optional[str]:
+    """Warn on save using the same connectivity check as delivery preflight.
+
+    Web chat and Bot Chat use local delivery. A dashboard targeting another
+    profile must inspect that profile's secrets, never the process credentials.
+    The warning is response metadata, not persisted job state or a send attempt.
+    """
+    parts = []
+    for part in _normalize_deliver_value(job.get("deliver", "local")).split(","):
+        part = part.strip()
+        if part == "origin":
+            part = str((job.get("origin") or {}).get("platform") or "origin")
+        if part.split(":", 1)[0] == WEB_CHAT_PLATFORM:
+            continue
+        parts.append(part)
+    checked = {**job, "deliver": ",".join(parts) or "local"}
+    token = None
+    try:
+        if profile_home is not None:
+            from agent.secret_scope import (
+                _is_global_env, build_profile_secret_scope, set_secret_scope,
+            )
+
+            # Empty values mask process credentials even in a serve process
+            # where multiplex mode is off and scopes are otherwise overlays.
+            secrets = {key: "" for key in os.environ if not _is_global_env(key)}
+            secrets.update(build_profile_secret_scope(profile_home))
+            token = set_secret_scope(secrets)
+        problem = _preflight_check_delivery(checked)
+    finally:
+        if token is not None:
+            from agent.secret_scope import reset_secret_scope
+
+            reset_secret_scope(token)
+    if not problem:
+        return None
+    # Preflight diagnostics name the failing platform. Keep its name in the
+    # owner's warning, while leaving runtime implementation details in logs.
+    channel = re.search(r"delivery platform '([^']+)'", problem)
+    label = channel.group(1) if channel else "выбранный канал"
+    return (
+        f"Задача сохранена, но результат не будет доставлен: канал «{label}» "
+        "недоступен в этом профиле. Подключите его в разделе «Каналы» "
+        "или измените доставку задачи на подключённый канал либо внутренний чат."
+    )
+
+
 def _preflight_check_skills(job: dict) -> Optional[str]:
     """Check attached skills report ready (no missing required env/commands).
 
@@ -8027,7 +8077,6 @@ def _run_one_job_body(
             else:
                 if success:
                     deliver_content = final_response
-                    _resolve_incidents_for_recovered_job(job)
                 else:
                     if incident_acked and not drift_skip:
                         deliver_content = ""
@@ -8228,6 +8277,21 @@ def _run_one_job_body(
             delivery_outcome = "suppressed_acked"
         else:
             delivery_outcome = "suppressed"
+        if success:
+            # Computation recovery cannot close a delivery incident until a
+            # result actually arrives. Silence / approval queues prove nothing
+            # about the previous failed delivery. Local is an explicit opt-out.
+            _resolve_incidents_for_recovered_job(
+                job, delivery_recovered=delivery_outcome == "delivered" or normalized_deliver == "local"
+            )
+        if delivery_error:
+            _upsert_incident_for_failure(
+                job,
+                ("Результат вычислен, но не доставлен. Причина: " if success else
+                 "Уведомление о сбое не доставлено. Причина: ") + delivery_error,
+                output_file=output_file,
+                failure_type="delivery",
+            )
         if delivery_outcome == "delivered" and not success:
             # The failure ping left the process — record it on the incident so the CLI
             # distinguishes "failure seen" from "operator was pinged".
@@ -8339,6 +8403,11 @@ def _run_one_job_body(
                     delivery_outcome = "delivered"
                 if delivery_outcome == "delivered":
                     _mark_incident_alerted(failure_incident_id)
+        if delivery_error:
+            _upsert_incident_for_failure(
+                job, "Уведомление о сбое не доставлено. Причина: " + delivery_error,
+                failure_type="delivery",
+            )
         try:
             if not _consume_interrupted_flag(job["id"], execution_token):
                 mark_kwargs = {}

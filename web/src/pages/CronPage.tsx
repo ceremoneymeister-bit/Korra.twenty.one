@@ -643,11 +643,16 @@ export default function CronPage() {
   const [view, setView] = useState<"jobs" | "blueprints">("jobs");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [deliveryWarning, setDeliveryWarning] = useState<string | null>(null);
   const { toast, showToast } = useToast();
   const { t, locale, tr } = useI18n();
   const { setAfterTitle, setEnd } = usePageHeader();
   const { profile: scopedProfile, currentProfile } = useProfileScope();
   const selectedProfile = scopedProfile || currentProfile || "default";
+
+  useEffect(() => {
+    setDeliveryWarning(null);
+  }, [selectedProfile]);
 
   useLayoutEffect(() => {
     setAfterTitle(<ProfileScopeChip />);
@@ -831,11 +836,12 @@ export default function CronPage() {
     }
     setCreating(true);
     try {
-      await api.createCronJob(payload, createProfile);
+      const saved = await api.createCronJob(payload, createProfile);
+      setDeliveryWarning(saved.warning || null);
       // Движок создаёт задачу сразу включённой (`create_job` не умеет
       // черновиков), поэтому и говорим о запуске по расписанию, а не о
       // черновике, который «пока не запускается».
-      showToast(
+      if (!saved.warning) showToast(
         clientMode
           ? "Задача добавлена и будет запускаться по расписанию."
           : t.common.create + " ✓",
@@ -876,8 +882,9 @@ export default function CronPage() {
     }
     setSaving(true);
     try {
-      await api.updateCronJob(editJob.id, payload, getJobProfile(editJob));
-      showToast(clientMode ? "Изменения сохранены." : tr("Saved changes ✓"), "success");
+      const saved = await api.updateCronJob(editJob.id, payload, getJobProfile(editJob));
+      setDeliveryWarning(saved.warning || null);
+      if (!saved.warning) showToast(clientMode ? "Изменения сохранены." : tr("Saved changes ✓"), "success");
       setEditJob(null);
       loadJobs(selectedProfile);
     } catch (e) {
@@ -1014,6 +1021,11 @@ export default function CronPage() {
     <div className="flex flex-col gap-6">
       <PluginSlot name="cron:top" />
       <Toast toast={toast} />
+      {deliveryWarning && (
+        <div role="status" className="rounded-xl border border-warning/40 bg-warning/10 p-4 text-sm text-warning break-words">
+          {deliveryWarning}
+        </div>
+      )}
 
       {!clientMode && (
         <Segmented
@@ -1054,7 +1066,10 @@ export default function CronPage() {
       {view === "blueprints" && (
         <AutomationBlueprints
           profile={selectedProfile === "all" ? "default" : selectedProfile}
-          onCreated={() => loadJobs(selectedProfile)}
+          onCreated={warning => {
+            setDeliveryWarning(warning || null);
+            loadJobs(selectedProfile);
+          }}
         />
       )}
 

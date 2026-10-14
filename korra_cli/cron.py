@@ -710,6 +710,8 @@ def cron_create(args):
         print(color(f"Не удалось создать задачу: {result.get('error', 'неизвестная ошибка')}", Colors.RED))
         return 1
     print(color(f"Задача создана: {result['job_id']}", Colors.GREEN))
+    if result.get("warning"):
+        print(color(result["warning"], Colors.YELLOW))
     print(f"  Название: {result['name']}")
     print(f"  Расписание: {result['schedule']}")
     if result.get("skills"):
@@ -785,6 +787,8 @@ def cron_edit(args):
         print(color(f"Не удалось обновить задачу: {result.get('error', 'неизвестная ошибка')}", Colors.RED))
         return 1
 
+    if result.get("warning"):
+        print(color(result["warning"], Colors.YELLOW))
     updated = result["job"]
     print(color(f"Задача обновлена: {updated['job_id']}", Colors.GREEN))
     print(f"  Название: {updated['name']}")

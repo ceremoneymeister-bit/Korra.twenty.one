@@ -17,7 +17,7 @@ import { useI18n } from "@/i18n";
 interface AutomationBlueprintsProps {
   profile: string;
   /** Called after a blueprint is instantiated so the parent can refresh its job list. */
-  onCreated?: () => void;
+  onCreated?: (warning?: string) => void;
 }
 
 /** Initial form values for a blueprint = each field's default (or ""). */
@@ -157,7 +157,7 @@ function BlueprintCard({
   blueprint: AutomationBlueprint;
   profile: string;
   showToast: (message: string, type: "error" | "success") => void;
-  onCreated?: () => void;
+  onCreated?: (warning?: string) => void;
 }) {
   const { t, tr } = useI18n();
   const [open, setOpen] = useState(false);
@@ -172,10 +172,10 @@ function BlueprintCard({
     try {
       const job = await api.instantiateAutomationBlueprint({ blueprint: blueprint.key, values }, profile);
       const when = job.schedule_display ? ` — ${job.schedule_display}` : "";
-      showToast(tr("{title} scheduled{when}", { title: copy.title, when }), "success");
+      if (!job.warning) showToast(tr("{title} scheduled{when}", { title: copy.title, when }), "success");
       setOpen(false);
       setValues(initialValues(blueprint));
-      onCreated?.();
+      onCreated?.(job.warning);
     } catch (e) {
       // 422 from the API carries the slot-level validation message.
       setError(ownerFacingError(e, "Не удалось создать задачу по расписанию."));
