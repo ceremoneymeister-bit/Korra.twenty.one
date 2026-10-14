@@ -1175,6 +1175,7 @@ def write_runtime_status(
     exit_reason: Any = _UNSET,
     restart_requested: Any = _UNSET,
     active_agents: Any = _UNSET,
+    active_agent_counts: Any = _UNSET,
     platform: Any = _UNSET,
     platform_state: Any = _UNSET,
     error_code: Any = _UNSET,
@@ -1223,6 +1224,11 @@ def write_runtime_status(
         payload["restart_requested"] = bool(restart_requested)
     if active_agents is not _UNSET:
         payload["active_agents"] = parse_active_agents(active_agents)
+    if active_agent_counts is not _UNSET:
+        payload["active_agent_counts"] = {
+            str(source): parse_active_agents(count)
+            for source, count in active_agent_counts.items()
+        }
     if served_profiles is not _UNSET:
         # Profiles this gateway multiplexes (multi-profile mode). Absent/empty
         # for a single-profile gateway. Lets `hermes status` show per-profile

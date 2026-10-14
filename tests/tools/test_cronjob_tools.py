@@ -10,6 +10,11 @@ from tools.cronjob_tools import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _configured_cron_model(monkeypatch):
+    monkeypatch.setenv("KORRA_MODEL", "test-cron-model")
+
+
 # =========================================================================
 # Cron prompt scanning
 # =========================================================================

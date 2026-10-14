@@ -36,6 +36,29 @@ def _drain_queue(q):
             return values
 
 
+def test_model_validation_uses_target_profile_on_create_and_edit(isolated_profiles, monkeypatch):
+    from korra_cli import web_server
+    from korra_cli.web_models import CronJobCreate, CronJobUpdate
+
+    monkeypatch.delenv("KORRA_MODEL", raising=False)
+    monkeypatch.delenv("HERMES_MODEL", raising=False)
+    (isolated_profiles["default"] / "config.yaml").write_text("model: {}\n")
+    body = CronJobCreate(prompt="Daily report", schedule="every 1d")
+    with pytest.raises(HTTPException, match="no model configured") as caught:
+        web_server._create_cron_job_sync(body, "default")
+    assert caught.value.status_code == 400
+    assert web_server._call_cron_for_profile("default", "load_jobs") == []
+    worker_job = web_server._create_cron_job_sync(body, "worker_alpha")
+    assert worker_job["profile"] == "worker_alpha"
+    root_job = web_server._create_cron_job_sync(
+        CronJobCreate(prompt="Report", schedule="every 1d", model="pinned"), "default",
+    )
+    with pytest.raises(HTTPException, match="no model configured") as caught:
+        web_server._update_cron_job_sync(root_job["id"], CronJobUpdate(updates={"model": None}), "default")
+    assert caught.value.status_code == 400
+    assert web_server._call_cron_for_profile("default", "get_job", root_job["id"])["model"] == "pinned"
+
+
 def test_reminder_history_without_chat_database_is_profile_scoped(isolated_profiles):
     from cron.executions import create_execution, finish_execution
     from korra_cli import web_server

@@ -2122,14 +2122,11 @@ def _resolve_default_model_snapshot() -> Optional[str]:
             cron_model = cron_cfg.get("model")
             if isinstance(cron_model, str) and cron_model.strip():
                 return cron_model.strip()
-        model_cfg = cfg.get("model") or {}
-        if isinstance(model_cfg, str):
-            return model_cfg.strip() or None
-        if isinstance(model_cfg, dict):
-            default = model_cfg.get("default") or model_cfg.get("model")
-            if isinstance(default, str):
-                return default.strip() or None
-        return None
+        from korra_cli.config import resolve_cron_model_drift_defaults
+
+        # Use the ticker's config aliases; snapshots exclude the env fallback.
+        _, model = resolve_cron_model_drift_defaults(cfg, environ={})
+        return model or None
     except Exception:
         return None
 
@@ -2141,6 +2138,24 @@ def _normalize_job_optional_text(value: Any, *, strip_trailing_slash: bool = Fal
     if strip_trailing_slash:
         text = text.rstrip("/")
     return text or None
+
+
+def _validate_job_model(job: Dict[str, Any]) -> None:
+    """Reject agent schedules whose own profile cannot resolve a model."""
+    if job.get("no_agent") or job.get("reminder"):
+        return
+    model = (
+        _normalize_job_optional_text(job.get("model"))
+        or _resolve_default_model_snapshot()
+        or _normalize_job_optional_text(korra_env("KORRA_MODEL"))
+    )
+    if not model:
+        raise ValueError(
+            "Для агентного расписания не настроена модель (no model configured). "
+            "Задание не сохранено. Укажите model.default или cron.model в "
+            "config.yaml этого профиля либо используйте --model <name> "
+            "в командах `korra cron add` или `korra cron edit`."
+        )
 
 
 def _normalize_reasoning_effort(value: Any) -> Optional[str]:
@@ -2455,6 +2470,9 @@ def create_job(
     if not reminder and not prompt_text and not normalized_script and not normalized_skills:
         raise ValueError(EMPTY_PAYLOAD_ERROR)
 
+    _validate_job_model({"model": normalized_model, "no_agent": normalized_no_agent,
+                         "reminder": reminder})
+
     # Reject cron jobs that schedule gateway-lifecycle commands. Prevents
     # agent-driven SIGTERM-respawn loops under launchd/systemd KeepAlive
     # (#30719). Enforced here (not only in the CLI layer) so the agent's
@@ -2703,6 +2721,9 @@ def update_job(job_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]
 
             previous_inference_axes = _normalized_inference_axes(job)
             updated = _apply_skill_fields({**job, **updates})
+            # Match create_job: whitespace clears a pin instead of masking
+            # the default with a truthy but unusable model at fire time.
+            updated["model"] = _normalize_job_optional_text(updated.get("model"))
             from cron.reminders import reminder_text
 
             updated["reminder"] = reminder_text(updated)
@@ -2710,6 +2731,15 @@ def update_job(job_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]
             validate_reminder_delivery(updated)
             from cron.result_validity import validate_policy
             validate_policy(updated)
+
+            # A broken legacy job must still be pausable, and recording a
+            # delivery failure must not itself fail. Definition edits and
+            # reactivation validate the merged job before any store write.
+            if set(updates) != {"last_delivery_error"} and not (
+                set(updates) <= {"enabled", "state", "paused_at", "paused_reason"}
+                and updated.get("enabled") is False
+            ):
+                _validate_job_model(updated)
 
             if (
                 is_terminal_job(job)

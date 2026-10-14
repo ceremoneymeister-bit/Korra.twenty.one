@@ -3846,6 +3846,19 @@ class TestGatewayBusyReadout:
         assert data["gateway_drainable"] is False
 
 
+    def test_status_exposes_sources_of_active_agents(self, monkeypatch):
+        import korra_cli.web_server as ws
+
+        counts = {"messaging": 0, "cron": 0, "api": 1}
+        monkeypatch.setattr(ws, "get_running_pid_cached", lambda: 1234)
+        monkeypatch.setattr(ws, "read_runtime_status", lambda: {
+            "gateway_state": "running", "platforms": {},
+            "active_agents": sum(counts.values()), "active_agent_counts": counts,
+        })
+        data = self.client.get("/api/status").json()
+        assert data["active_agent_counts"] == counts
+        assert data["active_agents"] == sum(data["active_agent_counts"].values())
+
     def test_active_agents_unparseable_in_file_degrades_to_zero(self, monkeypatch):
         """A corrupt active_agents value in the status file must not 500 or
         produce a spurious busy — it degrades to 0/not-busy."""
