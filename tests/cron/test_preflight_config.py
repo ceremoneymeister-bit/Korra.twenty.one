@@ -126,7 +126,7 @@ class TestMissingProviderKeyBlocks:
     def test_single_alert_across_two_ticks_and_blocked_status(self, tmp_path):
         """Two ticks of a blocked job through run_one_job deliver exactly ONE
         alert and persist last_status='blocked_config'."""
-        job = _job()
+        job = _job(deliver="telegram:42")
         deliveries = []
 
         def fake_deliver(
@@ -206,17 +206,16 @@ class TestHealthyJobUnaffected:
         assert final_response == "ok"
         assert agent_constructed is True
 
-    def test_recovery_clears_alert_marker(self, tmp_path):
-        """After a blocked tick, a healthy tick clears the alert-dedup marker
-        so a FUTURE config break re-alerts."""
+    def test_preflight_never_claims_delivery_before_sending(self, tmp_path):
+        """Preflight only reports a failure; it cannot claim an owner was alerted."""
         job = _job()
         with cron_jobs.use_cron_store(tmp_path):
             cron_jobs.save_jobs([job])
             # Tick 1: blocked.
             _run_job_patched(job, tmp_path, resolve=_AuthErrorFactory())
             stored = [j for j in cron_jobs.load_jobs() if j["id"] == job["id"]][0]
-            assert stored.get("preflight_alerted")
-            # Tick 2: key restored → healthy run clears the marker.
+            assert not stored.get("preflight_alerted")
+            # Tick 2: key restored → healthy run.
             fresh = [j for j in cron_jobs.load_jobs() if j["id"] == job["id"]][0]
             success, *_rest, agent_constructed = _run_job_patched(fresh, tmp_path)
             assert success is True

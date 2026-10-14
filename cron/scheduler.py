@@ -64,6 +64,9 @@ from agent.delegation_context import (
 
 logger = logging.getLogger(__name__)
 
+# Serialize the shared subscription incident through delivery, across cron workers.
+_subscription_notice_lock = threading.RLock()
+
 
 def _close_late_session_db_result(future: "concurrent.futures.Future") -> None:
     """Done-callback: close a SessionDB whose constructor finished after run_job's timeout.
@@ -499,8 +502,8 @@ def _upsert_incident_for_failure(
 ) -> tuple[bool, Optional[str]]:
     """Record a durable failure incident for this run.
 
-    The incident store groups "same job + same error signature" across runs.
-    Returns ``(withheld, incident_id)``: ``withheld`` is True when the incident
+    The incident store groups job/error signatures across runs and subscription
+    login failures across jobs using the same provider in this profile. Returns ``(withheld, incident_id)``: ``withheld`` is True when the incident
     is already ``closed`` (acked) or was reported (``alerted``) less than
     ``cron.failure_repeat_alert_hours`` ago — the per-run failure ping is then
     suppressed, and exactly one reminder goes out after the pause. A new error
@@ -538,7 +541,9 @@ def _resolve_incidents_for_recovered_job(job: dict) -> None:
     try:
         from cron.incidents import close_incidents_for_recovered_job
 
-        close_incidents_for_recovered_job(job["id"])
+        close_incidents_for_recovered_job(
+            job["id"], provider=job.get("_resolved_subscription_provider")
+        )
     except Exception as exc:
         logger.debug("Incident store unavailable for job %s (delivery unaffected): %s", job["id"], exc)
 
@@ -3252,6 +3257,36 @@ def _is_owner_side_chat(job: dict, platform_name: str, chat_id) -> bool:
         return False
 
 
+def _subscription_notice_job(job: dict) -> dict:
+    """One existing personal destination, without an agent turn or a result TTL.
+
+    Respect explicit local delivery. Reports addressed to clients or Bot Chat
+    may still notify the creator's private chat or the configured owner home.
+    No destination is invented when none of those channels is available.
+    """
+    notice = dict(job)
+    notice.pop("delivery_ttl_seconds", None)
+    notice["deliver"] = "local"
+    if _normalize_deliver_value(job.get("deliver", "local")) == "local":
+        return notice
+    candidates = _resolve_delivery_targets(job)
+    origin = _resolve_single_delivery_target(job, "origin")
+    if origin:
+        candidates.append(origin)
+    for platform in _iter_home_target_platforms():
+        home = _resolve_single_delivery_target(job, platform)
+        if home:
+            candidates.append(home)
+    for target in candidates:
+        if not _is_owner_side_chat(job, target["platform"], target["chat_id"]):
+            continue
+        notice["deliver"] = f"{target['platform']}:{target['chat_id']}"
+        if target.get("thread_id") is not None:
+            notice["deliver"] += f":{target['thread_id']}"
+        break
+    return notice
+
+
 def _prepare_required_file_result(job: dict, content: str) -> tuple[str, Optional[str]]:
     """Attach this run's result file and enforce an explicit file contract.
 
@@ -3367,6 +3402,12 @@ def _deliver_result(
         msg = f"no delivery target resolved for deliver={deliver_value}"
         logger.warning("Job '%s': %s", job["id"], msg)
         return msg
+
+    if failure_notice and not any(
+        _is_owner_side_chat(job, target["platform"], target["chat_id"])
+        for target in targets
+    ):
+        return "Уведомление не отправлено: личный канал владельца не настроен."
 
     from tools.send_message_tool import _send_to_platform
     from gateway.config import load_gateway_config, Platform
@@ -5469,14 +5510,11 @@ def _block_and_pause_job(
 
 # Marker prefix stamped into the error string returned by ``run_job`` when the
 # pre-dispatch configuration validation (T1-26) refuses to run the agent.
-# ``run_one_job`` keys off it to record ``last_status='blocked_config'`` and to
-# apply the alert-once dedup. The ``:silent`` variant means "already alerted on
-# a previous tick — do not deliver again".
+# ``run_one_job`` records blocked_config and uses the existing incident pause.
+# Legacy :silent errors are accepted for status, but no longer imply delivery.
 BLOCKED_CONFIG_MARKER = "[blocked_config]"
-BLOCKED_CONFIG_SILENT_MARKER = "[blocked_config:silent]"
 
-# Marker prefix for a #44585 drift-guard skip. Same alert-once contract as
-# blocked_config: run_one_job keys off it to record last_status and the
+# Marker prefix for a #44585 drift-guard skip. run_one_job records last_status; the
 # ``:silent`` variant means "already alerted on a previous tick — do not
 # deliver again" (the drift_alerted bit on the job record, #73506 shape).
 DRIFT_SKIP_MARKER = "[drift_skip]"
@@ -5627,6 +5665,13 @@ def _preflight_check_provider_key(job: dict, cfg: dict) -> Optional[str]:
             kwargs["explicit_base_url"] = job.get("base_url")
         resolve_runtime_provider(**kwargs)
     except AuthError as exc:
+        from cron.incidents import is_transient_service_failure, subscription_provider, subscription_notice
+
+        if is_transient_service_failure(exc):
+            return None  # Resolution/fallback and the existing retry path handle congestion.
+        subscription = subscription_provider(exc)
+        if subscription:
+            return subscription_notice(subscription)
         return (
             f"provider credential missing: {exc}. "
             "Set the provider API key in .env (or `hermes setup`), or pin a "
@@ -6636,8 +6681,7 @@ def _run_job_inner(
         # feed a doomed runtime into it, so a misconfigured job never burns
         # an LLM call. run_one_job keys off the BLOCKED_CONFIG_MARKER in
         # the returned error to record last_status='blocked_config' and
-        # alert exactly once (dedup persisted via the job's
-        # `preflight_alerted` bit — the #73506 alert-once shape).
+        # deduplicate through the durable incident ledger after delivery.
         # Runs after the wake-gate/prompt build so silent script ticks stay
         # silent. Opt-out: `cron.preflight: false` in config.yaml.
         # ---------------------------------------------------------------
@@ -6645,14 +6689,6 @@ def _run_job_inner(
         try:
             if _cron_preflight_enabled(_cfg):
                 _pf_reason = _preflight_job_config(job, _cfg)
-                if not _pf_reason and job.get("preflight_alerted"):
-                    # Configuration validates again — clear the alert-once
-                    # marker so a FUTURE config break re-alerts.
-                    try:
-                        from cron.jobs import clear_preflight_alerted
-                        clear_preflight_alerted(job_id)
-                    except Exception:
-                        pass
         except Exception:
             # The validator must never take down a runnable job — fail open.
             logger.debug(
@@ -6667,19 +6703,6 @@ def _run_job_inner(
                 "validation — %s (no LLM call was made)",
                 job_name, job_id, _pf_reason,
             )
-            already_alerted = False
-            try:
-                from cron.jobs import mark_preflight_alerted
-                already_alerted = mark_preflight_alerted(job_id)
-            except Exception:
-                logger.debug(
-                    "Job '%s': could not persist preflight alert marker",
-                    job_id, exc_info=True,
-                )
-            marker = (
-                BLOCKED_CONFIG_SILENT_MARKER if already_alerted
-                else BLOCKED_CONFIG_MARKER
-            )
             blocked_doc = (
                 f"# Cron Job: {job_name}\n\n"
                 f"**Job ID:** {job_id}\n"
@@ -6688,12 +6711,12 @@ def _run_job_inner(
                 "Pre-dispatch validation found a configuration problem and "
                 "the agent was NOT run (no tokens spent).\n\n"
                 f"**Reason:** {_pf_reason}\n\n"
-                "The job will stay blocked (without re-alerting) until the "
+                "The job will stay blocked until the "
                 "configuration is fixed; the next healthy run clears this "
                 "state. Set `cron.preflight: false` in config.yaml to "
                 "disable this validation."
             )
-            return False, blocked_doc, "", f"{marker} {_pf_reason}"
+            return False, blocked_doc, "", f"{BLOCKED_CONFIG_MARKER} {_pf_reason}"
 
         primary_model_for_drift = model
         configured_provider_for_drift = (
@@ -6791,6 +6814,13 @@ def _run_job_inner(
                     logger.debug("Job '%s': fallback %s failed: %s", job_id, fb_provider, fb_exc)
             if runtime is None:
                 raise RuntimeError(format_runtime_provider_error(resolve_exc)) from resolve_exc
+
+        job.pop("_resolved_subscription_provider", None)
+        if runtime.get("provider") == "openai-codex" or (
+            runtime.get("provider") == "anthropic"
+            and str(runtime.get("api_key") or "").startswith("sk-ant-oat")
+        ):
+            job["_resolved_subscription_provider"] = runtime["provider"]
 
         reasoning_config = _resolve_job_reasoning_config(
             job, _cfg if isinstance(_cfg, dict) else {}, str(model)
@@ -7317,6 +7347,11 @@ def _run_job_inner(
 
     except Exception as e:
         error_msg = f"{type(e).__name__}: {str(e)}"
+        from cron.incidents import subscription_provider, subscription_notice
+
+        subscription = subscription_provider(e, job.get("_resolved_subscription_provider", ""))
+        if subscription:
+            error_msg = subscription_notice(subscription)
         logger.exception("Job '%s' failed: %s", job_name, error_msg)
         try:
             from cron.unreachable_retry import is_model_unreachable_failure
@@ -7787,6 +7822,8 @@ def _run_one_job_body(
     )
 
     _scope_token = None
+    subscription_notice_locked = False
+    notice_job = job
     try:
         # Pre-run dispatch claim (issue #38758): atomically commit a finite
         # one-shot's dispatch BEFORE its side effect runs, so a tick that dies
@@ -7923,21 +7960,26 @@ def _run_one_job_body(
                     error = file_error
                     delivery_error = file_error
 
+            from cron.incidents import subscription_provider, subscription_notice, is_transient_service_failure
+
+            blocked_config = bool(error) and str(error).startswith("[blocked_config")
+            subscription = subscription_provider(error, job.get("_resolved_subscription_provider", "")) if not success else None
+            transient_service = not success and is_transient_service_failure(error)
+            if subscription:
+                _subscription_notice_lock.acquire()
+                subscription_notice_locked = True
+                error = subscription_notice(subscription)
+                notice_job = _subscription_notice_job(job)
+            if not success:
+                incident_acked, failure_incident_id = _upsert_incident_for_failure(
+                    job, error or "", output_file=output_file
+                )
+
             # Deliver the final response to the origin/target chat.
             # If the agent responded with [SILENT], skip delivery (but
             # output is already saved above).  Failed jobs always deliver.
             #
-            # Exception: a run blocked by pre-dispatch config validation
-            # (T1-26) alerts exactly ONCE — the silent marker means the
-            # operator was already told on a previous tick, so re-delivering
-            # the same alert every tick would be spam (#73506 alert-once
-            # shape).
-            blocked_config_silent = (
-                bool(error) and BLOCKED_CONFIG_SILENT_MARKER in str(error)
-            )
-            blocked_config = blocked_config_silent or (
-                bool(error) and BLOCKED_CONFIG_MARKER in str(error)
-            )
+            # Config failures use the same confirmed-delivery incident pause.
             # Drift-guard skip (#44585): same alert-once contract as
             # blocked_config — the silent marker means the operator already
             # got the alert on a previous tick.
@@ -7949,6 +7991,8 @@ def _run_one_job_body(
             )
             if file_error:
                 deliver_content = f"⚠️ {job.get('name') or job['id']}: {file_error}"
+            elif subscription:
+                deliver_content = "⚠️ " + subscription_notice(subscription)
             elif blocked_config and not success:
                 # Blocked-config alert: bypass the generic failure summarizer
                 # (whose auth/timeout heuristics would mislabel this as a
@@ -7961,7 +8005,7 @@ def _run_one_job_body(
                     f"⛔ Cron '{job.get('name') or job['id']}' blocked by "
                     f"configuration validation (no LLM call was made): "
                     f"{_pf_text} "
-                    "This alert is sent once; the job stays blocked until "
+                    "The job stays blocked until "
                     "the configuration is fixed."
                 )
             else:
@@ -7969,15 +8013,6 @@ def _run_one_job_body(
                     deliver_content = final_response
                     _resolve_incidents_for_recovered_job(job)
                 else:
-                    # Durable failure incident: record this job+error
-                    # signature once and, when the operator already acked it,
-                    # suppress the per-run failure ping (the streak nudge and
-                    # the failure summarizer stay intact for un-acked
-                    # failures). Best-effort — an incident-store error never
-                    # breaks the delivery path (see _upsert_incident_for_failure).
-                    incident_acked, failure_incident_id = _upsert_incident_for_failure(
-                        job, error or "", output_file=output_file
-                    )
                     if incident_acked and not drift_skip:
                         deliver_content = ""
                     else:
@@ -8006,7 +8041,7 @@ def _run_one_job_body(
             # responses: do not deliver a blank message, and let the
             # empty-response guard below mark the run as a soft failure.
             should_deliver = bool(deliver_content.strip())
-            if blocked_config_silent or drift_skip_silent:
+            if drift_skip_silent or (not success and incident_acked and not drift_skip) or transient_service:
                 should_deliver = False
             if should_deliver and not success and job.get("_model_unreachable"):
                 from cron.unreachable_retry import will_retry
@@ -8036,8 +8071,8 @@ def _run_one_job_body(
 
             if should_deliver:
                 unresolved_origin = (
-                    _normalize_deliver_value(job.get("deliver", "local")) == "origin"
-                    and not _resolve_delivery_targets(job)
+                    _normalize_deliver_value(notice_job.get("deliver", "local")) == "origin"
+                    and not _resolve_delivery_targets(notice_job)
                 )
                 try:
                     with _side_effect_fence() as owns_delivery:
@@ -8045,12 +8080,12 @@ def _run_one_job_body(
                             raise _FireClaimLostDuringSideEffect
                         delivery_attempted = True
                         send_error = _deliver_result(
-                            job,
+                            notice_job,
                             deliver_content,
                             adapters=adapters,
                             loop=loop,
-                            decision_session_id=_delivery_decision_session(
-                                job, execution_id
+                            decision_session_id="" if subscription else _delivery_decision_session(
+                                notice_job, execution_id
                             ),
                             failure_notice=not success,
                             # Журнал отправок выполнения нужен результату, а не
@@ -8158,7 +8193,7 @@ def _run_one_job_body(
                 error="Fire claim ownership lost before terminal completion.",
             )
             return True
-        normalized_deliver = _normalize_deliver_value(job.get("deliver", "local"))
+        normalized_deliver = _normalize_deliver_value(notice_job.get("deliver", "local"))
         if delivery_waiting_decision:
             delivery_outcome = "waiting_decision"
         elif delivery_unknown:
@@ -8177,9 +8212,8 @@ def _run_one_job_body(
             delivery_outcome = "suppressed_acked"
         else:
             delivery_outcome = "suppressed"
-        if delivery_outcome in ("delivered", "not_configured") and not success:
-            # The failure ping left the process (or was composed for a
-            # configured target) — record it on the incident so the CLI
+        if delivery_outcome == "delivered" and not success:
+            # The failure ping left the process — record it on the incident so the CLI
             # distinguishes "failure seen" from "operator was pinged".
             _mark_incident_alerted(failure_incident_id)
         finish_execution(
@@ -8210,6 +8244,15 @@ def _run_one_job_body(
             _err_text,
             exc_info=(type(e), e, e.__traceback__),
         )
+        from cron.incidents import subscription_provider, subscription_notice, is_transient_service_failure
+
+        subscription = subscription_provider(e, job.get("_resolved_subscription_provider", ""))
+        if subscription:
+            if not subscription_notice_locked:
+                _subscription_notice_lock.acquire()
+                subscription_notice_locked = True
+            _err_text = subscription_notice(subscription)
+            notice_job = _subscription_notice_job(job)
         delivery_outcome = "suppressed"
         # Owner fencing: a stale worker whose fire claim was taken over (or a
         # transport-cancelled worker) must not send a failure alert on top of
@@ -8222,7 +8265,7 @@ def _run_one_job_body(
             and not _fire_claim_ownership_lost()
         ):
             normalized_deliver = _normalize_deliver_value(
-                job.get("deliver", "local")
+                notice_job.get("deliver", "local")
             )
             unresolved_origin = False
             # Durable failure incident: same ack gate as the normal failure
@@ -8233,11 +8276,13 @@ def _run_one_job_body(
             )
             if incident_acked:
                 delivery_outcome = "suppressed_acked"
+            elif is_transient_service_failure(e):
+                delivery_outcome = "suppressed"
             else:
                 try:
                     delivery_attempted = True
                     delivery_error = _deliver_result(
-                        job,
+                        notice_job,
                         # Failure notices use the same authorization as normal
                         # results, including failures raised outside run_job.
                         # mark_job_run below records THIS run in failure_streak
@@ -8245,11 +8290,13 @@ def _run_one_job_body(
                         # run body every tick builds a streak nobody is ever told
                         # about: its alerts only ever leave through here, and the
                         # nudge only ever left through there (#88655).
-                        _summarize_cron_failure_for_delivery(job, _err_text)
-                        + _failure_streak_nudge(job),
+                        ("⚠️ " + _err_text) if subscription else (
+                            _summarize_cron_failure_for_delivery(job, _err_text)
+                            + _failure_streak_nudge(job)
+                        ),
                         adapters=adapters,
                         loop=loop,
-                        decision_session_id=_delivery_decision_session(job, execution_id),
+                        decision_session_id="" if subscription else _delivery_decision_session(notice_job, execution_id),
                         failure_notice=True,
                     )
                     if delivery_error and delivery_error.startswith(
@@ -8263,7 +8310,7 @@ def _run_one_job_body(
                         "Delivery failed for job %s: %s", job["id"], delivery_exc
                     )
                 if not delivery_error and normalized_deliver == "origin":
-                    unresolved_origin = not _resolve_delivery_targets(job)
+                    unresolved_origin = not _resolve_delivery_targets(notice_job)
                 if delivery_waiting_decision:
                     delivery_outcome = "waiting_decision"
                 elif delivery_error:
@@ -8273,7 +8320,7 @@ def _run_one_job_body(
                     delivery_outcome = "not_configured"
                 elif normalized_deliver != "local":
                     delivery_outcome = "delivered"
-                if delivery_outcome in ("delivered", "not_configured"):
+                if delivery_outcome == "delivered":
                     _mark_incident_alerted(failure_incident_id)
         try:
             if not _consume_interrupted_flag(job["id"], execution_token):
@@ -8310,6 +8357,8 @@ def _run_one_job_body(
         # teardown, claim-loss handling and bookkeeping, not just run_job.
         # An earlier revision reset inside the run block's finally, which left
         # _deliver_result unscoped — do not move it back in a tidy-up.
+        if subscription_notice_locked:
+            _subscription_notice_lock.release()
         if _scope_token is not None:
             reset_secret_scope(_scope_token)
 
