@@ -3649,6 +3649,12 @@ def text_to_speech_tool(
                 chunk_path = base_path.with_name(
                     f"{base_path.stem}.chunk{index:03d}{base_path.suffix}"
                 )
+            if os.path.lexists(chunk_path):
+                # Upstream 7085fbf775: failed synthesis must not truncate or sweep user data.
+                import uuid
+                chunk_path = chunk_path.with_name(
+                    f".{chunk_path.stem}.{uuid.uuid4().hex}{chunk_path.suffix}"
+                )
             generated_artifacts.add(str(chunk_path))
             raw_result = _text_to_speech_single(
                 text=chunk,
