@@ -351,6 +351,15 @@ def _background_review_write_guard(
     except Exception:
         return None
 
+    return _background_review_write_policy(name, skill_dir, action)
+
+
+def _background_review_write_policy(
+    name: str,
+    skill_dir: Path,
+    action: str,
+) -> Optional[Dict[str, Any]]:
+    """Shared ownership policy for planning and enforcing background writes."""
     # Pin must be respected by autonomous maintenance. The curator already
     # skips pinned skills from every auto-transition; the background review
     # fork is the same kind of autonomous, no-user-present actor, so it must
@@ -453,6 +462,23 @@ def _background_review_write_guard(
             ),
         }
     return None
+
+
+def background_review_editable_skills() -> List[Dict[str, Any]]:
+    """Return existing skills a review may edit, using the write guard's policy.
+
+    Lifecycle reports also include pinned skills and optionally built-ins for
+    deterministic pruning. Neither belongs in an LLM's mutation plan.
+    """
+    from tools import skill_usage
+
+    rows = []
+    for row in skill_usage.curated_report():
+        name = row["name"]
+        existing = _find_skill(name)
+        if existing and not _background_review_write_policy(name, existing["path"], "edit"):
+            rows.append(row)
+    return rows
 
 
 def _background_review_read_before_write_guard(

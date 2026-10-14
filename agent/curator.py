@@ -452,8 +452,12 @@ CURATOR_REVIEW_PROMPT = (
     "Hard rules — do not violate:\n"
     "1. DO NOT touch bundled, hub-installed, or external-dir skills "
     "(`skills.external_dirs`). The candidate list below is already filtered "
-    "to local curator-managed skills only; external skills are externally "
-    "owned and read-only to this background curator.\n"
+    "by the write guard to editable local curator-managed skills only. All "
+    "other existing skills are read-only, including user-owned and pinned "
+    "skills. Use only listed candidates or skills you create in this review "
+    "as sources or destinations of changes. "
+    "Do not create a shadow copy or replacement of a read-only built-in; "
+    "leave its lesson unsaved when it has no editable target.\n"
     "2. DO NOT delete any skill. Archiving (moving the skill's directory "
     "into ~/.hermes/skills/.archive/) is the maximum destructive action. "
     "Archives are recoverable; deletion is not.\n"
@@ -1503,9 +1507,11 @@ def _render_report_markdown(p: Dict[str, Any]) -> str:
 # Orchestrator — spawn a forked AIAgent for the LLM review pass
 # ---------------------------------------------------------------------------
 
-def _render_candidate_list() -> str:
-    """Human/agent-readable list of curator-managed skills with usage stats."""
-    rows = skill_usage.curated_report()
+def _render_candidate_list(rows: Optional[List[Dict[str, Any]]] = None) -> str:
+    """Human/agent-readable list of editable review candidates with usage stats."""
+    if rows is None:
+        from tools.skill_manager_tool import background_review_editable_skills
+        rows = background_review_editable_skills()
     if not rows:
         return "No curator-managed skills to review."
     cron_referenced = _cron_referenced_skills()
@@ -1675,8 +1681,9 @@ def run_curator_review(
 
         llm_meta: Dict[str, Any] = {}
         try:
-            candidate_list = _render_candidate_list()
-            if "No agent-created skills" in candidate_list:
+            from tools.skill_manager_tool import background_review_editable_skills
+            candidates = background_review_editable_skills()
+            if not candidates:
                 final_summary = f"{prefix}{auto_summary}; llm: skipped (no candidates)"
                 llm_meta = {
                     "final": "",
@@ -1687,30 +1694,15 @@ def run_curator_review(
                     "error": None,
                 }
             else:
-                # When pruning built-ins is enabled, the candidate list now
-                # includes bundled skills. Override the default "don't touch
-                # bundled" rule for them — but only archiving is permitted, and
-                # hub-installed skills remain strictly off-limits.
-                builtins_note = ""
-                if get_prune_builtins():
-                    builtins_note = (
-                        "\n\nPRUNE-BUILTINS MODE IS ON: bundled built-in skills "
-                        "ARE included in the candidate list below and MAY be "
-                        "archived for staleness/irrelevance, overriding hard "
-                        "rule #1 for bundled skills ONLY. Hub-installed skills "
-                        "remain strictly off-limits. Treat a stale built-in the "
-                        "same as a stale agent-created skill: archive it (never "
-                        "delete). It will be restored on `hermes update` only if "
-                        "the user explicitly restores it."
-                    )
+                candidate_list = _render_candidate_list(candidates)
                 if dry_run:
                     prompt = (
                         f"{CURATOR_DRY_RUN_BANNER}\n\n"
-                        f"{CURATOR_REVIEW_PROMPT}{builtins_note}\n\n"
+                        f"{CURATOR_REVIEW_PROMPT}\n\n"
                         f"{candidate_list}"
                     )
                 else:
-                    prompt = f"{CURATOR_REVIEW_PROMPT}{builtins_note}\n\n{candidate_list}"
+                    prompt = f"{CURATOR_REVIEW_PROMPT}\n\n{candidate_list}"
                 llm_meta = _run_llm_review(prompt)
                 final_summary = (
                     f"{prefix}{auto_summary}; llm: {llm_meta.get('summary', 'no change')}"
