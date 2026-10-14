@@ -1822,15 +1822,13 @@ export default function BubbleChatPage({
     [resolveApproval],
   );
 
-  // Delete chat: api.deleteSession then refresh the sidebar. If the deleted
-  // thread is the one currently open, clear the bubble state too — otherwise
-  // the user would be left with messages from a session that no longer
-  // exists on the server.
+  // The shared DELETE path invalidates cached history and mounted readers.
+  // Refresh this sidebar after success; a late deletion must not reset a chat
+  // the owner opened while the request was in flight.
   const sessionDelete = useConfirmDelete<string>({
     onDelete: async (id) => {
       await api.deleteSession(id, agentProfile || undefined);
       setHistoryRevision(value => value + 1);
-      if (id === sessionId) reset();
       void sessionList.refresh();
     },
   });

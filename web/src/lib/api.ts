@@ -1,3 +1,4 @@
+import { chatHistoryKey, forgetCachedChat } from "@/lib/chat-history-cache";
 import { buildHermesWebSocketUrl } from "@hermes/shared";
 import { russianInterfaceText } from "@/lib/russian-interface-text";
 
@@ -832,13 +833,16 @@ export const api = {
         profile,
       ),
     ),
-  deleteSession: (id: string, profile = getManagementProfile()) =>
-    fetchJSON<{ ok: boolean }>(
+  deleteSession: async (id: string, profile = getManagementProfile()) => {
+    const result = await fetchJSON<{ ok: boolean }>(
       appendProfileParam(`/api/sessions/${encodeURIComponent(id)}`, profile),
       {
         method: "DELETE",
       },
-    ),
+    );
+    if (result.ok) forgetCachedChat(chatHistoryKey(HERMES_BASE_PATH, profile, id));
+    return result;
+  },
   getEmptySessionsCount: (profile = getManagementProfile()) =>
     fetchJSON<{ count: number }>(
       appendProfileParam("/api/sessions/empty/count", profile),

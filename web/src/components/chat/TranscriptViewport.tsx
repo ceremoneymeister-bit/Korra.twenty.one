@@ -142,6 +142,7 @@ export function TranscriptViewport({ children, followKey, awaitingApproval, stor
       const first = historyRow(anchorKey);
       if (target) {
         el.scrollTop = messageTop(el, target) + saved.offset;
+        reading.current = saved;
         place.current = null;
       } else if ((wanted === null ? Boolean(saved.key) : first !== null && wanted < first) && older?.hasOlder && !older.failed
         && restorePages.current < MAX_RESTORE_PAGES) {

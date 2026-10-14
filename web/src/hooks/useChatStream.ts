@@ -1,5 +1,5 @@
 import { clearChatAttachmentDraft } from "@/hooks/useChatAttachmentDraft";
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
 import { chatViewKey, clearChatDraft, forgetChatSelection, readChatSelection, writeChatSelection } from "@/lib/chat-view-state";
 import { $viewedChat, markChatViewed, chatRunHeaders, chatRunUrl, getChatRuns, isRunBusy, refreshChatRuns, type ChatRun } from "@/lib/chat-runs";
 import type { ToolEntry } from "@/components/ToolCall";
@@ -16,7 +16,7 @@ import {
   sendApprovalDecision,
 } from "@/lib/chat-approvals";
 import { previewArguments, previewToolResult } from "@/components/chat/tool-labels";
-import { api, withBasePath, type SessionMessage } from "@/lib/api";
+import { api, HERMES_BASE_PATH, withBasePath, type SessionMessage } from "@/lib/api";
 import { splitSSEBuffer } from "@/lib/sse-parser";
 import { splitAttachments, toDisplay, type UploadedAttachment } from "@/lib/chat-attachments";
 import { ownerFacingError } from "@/lib/owner-facing-error";
@@ -28,6 +28,9 @@ import {
   saveChatOutbox,
   type ChatOutboxRecord,
 } from "@/lib/chat-outbox";
+
+import { chatHistoryCache, chatHistoryKey, CHAT_HISTORY_REMOVED, type HistoryWindow } from "@/lib/chat-history-cache";
+export type { HistoryWindow } from "@/lib/chat-history-cache";
 
 // ---------------------------------------------------------------------------
 // State & Actions
@@ -60,19 +63,8 @@ const APPROVAL_POLL_MS = 5000;
 // перечиток истории после хода — и итог виден без возврата на вкладку.
 const LEARNING_FOLLOW_UP_MS = [4000, 6000, 10000, 15000, 20000, 30000, 45000];
 
-/** Сколько сообщений ленты открывается сразу и догружается за раз при
- *  прокрутке к началу. 500 строк за раз на телефоне весили до 1,3 МБ и
- *  держали «Обновляем переписку…» (Бирюкова, 28.09; решение Дмитрия). */
-export const CHAT_HISTORY_PAGE = 30;
-
-/** Какая часть переписки загружена: курсор следующей, более ранней страницы. */
-export interface HistoryWindow {
-  cursor: number | null;
-  hasOlder: boolean;
-  /** Раньше загруженного есть сжатая часть разговора, лента её пока не
-   *  показывает (решение Дмитрия 28.09, вариант А). */
-  archivedBefore?: boolean;
-}
+/** The API counts visible bubbles and keeps an entire agent turn together. */
+export const CHAT_HISTORY_PAGE = 70;
 
 const NO_OLDER: HistoryWindow = { cursor: null, hasOlder: false };
 
@@ -83,6 +75,7 @@ function historyWindow(resp: { messages?: unknown; pagination?: { before_id?: nu
 }
 
 interface StreamState {
+  cacheKey: string | null;
   messages: ChatMessage[];
   history: HistoryWindow;
   sessionId: string | null;
@@ -97,11 +90,12 @@ type StreamAction =
   | { type: "RESTORE_PENDING"; sessionId: string; userMsg: ChatMessage; error: string }
   | { type: "MARK_DELIVERY"; messageId: string; delivery: "sending" | "failed" | "delivered"; terminal?: boolean; error?: string }
   | { type: "DISCARD_PENDING"; messageId: string }
-  | { type: "SET_SESSION_ID"; sessionId: string | null }
-  | { type: "LOAD_SESSION"; sessionId: string; messages: ChatMessage[]; history?: HistoryWindow }
+  | { type: "SET_SESSION_ID"; sessionId: string | null; cacheKey: string }
+  | { type: "LOAD_SESSION"; cacheKey?: string; sessionId: string; messages: ChatMessage[]; history?: HistoryWindow }
   | { type: "PREPEND_OLDER"; sessionId: string; cursor: number; messages: ChatMessage[]; history: HistoryWindow }
   | {
       type: "SYNC_SESSION";
+      cacheKey: string;
       sessionId: string;
       messages: ChatMessage[];
       history?: HistoryWindow;
@@ -124,6 +118,7 @@ type StreamAction =
   | { type: "RESET_STREAMING" };
 
 const initialState: StreamState = {
+  cacheKey: null,
   messages: [],
   history: NO_OLDER,
   sessionId: null,
@@ -432,12 +427,13 @@ function reducer(state: StreamState, action: StreamAction): StreamState {
     }
 
     case "SET_SESSION_ID": {
-      return { ...state, sessionId: action.sessionId };
+      return { ...state, sessionId: action.sessionId, cacheKey: action.cacheKey };
     }
 
     case "LOAD_SESSION": {
       return {
         ...state,
+        cacheKey: action.cacheKey ?? null,
         sessionId: action.sessionId,
         messages: action.messages,
         history: action.history ?? NO_OLDER,
@@ -452,9 +448,10 @@ function reducer(state: StreamState, action: StreamAction): StreamState {
     case "SYNC_SESSION": {
       // Освежение уже открытого чата. Чужую переписку сюда не пускаем: если
       // за время проверки открыли другой чат, ведём себя как обычная загрузка.
-      if (state.sessionId !== action.sessionId) {
+      if (state.sessionId !== action.sessionId || state.cacheKey !== action.cacheKey) {
         return {
           ...state,
+          cacheKey: action.cacheKey,
           sessionId: action.sessionId,
           messages: action.messages,
           history: action.history ?? NO_OLDER,
@@ -466,20 +463,6 @@ function reducer(state: StreamState, action: StreamAction): StreamState {
       // Освежение приносит только последнюю страницу. Догруженные раньше
       // более ранние сообщения остаются над ней: человек их листал.
       const firstId = action.messages.find(message => message.historyId !== undefined)?.historyId;
-      const shownIds = state.messages.flatMap(message => message.historyId === undefined ? [] : [message.historyId]);
-      if (firstId !== undefined && shownIds.length > 0 && firstId > Math.max(...shownIds)) {
-        // Новая страница не пересекается с показанной: пока вкладка была в
-        // фоне, пришло больше, чем страница. Склеить их — значит молча
-        // потерять середину (ревью Astra R3). Лента начинается с новой
-        // страницы, более ранние снова догружаются прокруткой.
-        return {
-          ...state,
-          messages: mergeMessages(state.messages, action.messages, action.replay !== true),
-          history: action.history ?? NO_OLDER,
-          isStreaming: action.streaming ?? false,
-          error: null,
-        };
-      }
       let kept = 0;
       if (firstId !== undefined) {
         while (kept < state.messages.length && (state.messages[kept]!.historyId ?? Infinity) < firstId) kept += 1;
@@ -685,6 +668,7 @@ function reducer(state: StreamState, action: StreamAction): StreamState {
 
     case "RESET": {
       return {
+        cacheKey: null,
         messages: [],
         history: NO_OLDER,
         sessionId: null,
@@ -943,6 +927,14 @@ export function useChatStream(
   const active = options?.active !== false;
   const selectionKey = `${chatViewKey(profile)}:selected`;
   const [state, dispatch] = useReducer(reducer, initialState);
+  const stateRef = useRef(state);
+  const scopeRef = useRef(selectionKey);
+  useLayoutEffect(() => {
+    stateRef.current = state;
+    if (!state.cacheKey) return;
+    if (state.error || state.messages.length === 0 || state.messages.some(message => message.delivery === "failed")) chatHistoryCache.delete(state.cacheKey);
+    else chatHistoryCache.set(state.cacheKey, { messages: state.messages, history: state.history });
+  }, [state]);
   const [isLoading, setIsLoading] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
@@ -953,7 +945,6 @@ export function useChatStream(
   /** Догрузка более ранней страницы: одна за раз, отменяется открытием чата. */
   const olderRequestRef = useRef<AbortController | null>(null);
   const backgroundLoadRef = useRef<AbortController | null>(null);
-  const loadedSessionRef = useRef<string | null>(null);
   const [olderStatus, setOlderStatus] = useState<"idle" | "loading" | "failed">("idle");
   // Synchronous mirror of state.isStreaming so concurrent send() calls
   // can guard against re-entry without waiting for a re-render. React
@@ -974,13 +965,37 @@ export function useChatStream(
   // (Codex stop-gate review #10.)
   const activeStreamIdRef = useRef<string | null>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      activeStreamIdRef.current = null;
       abortControllerRef.current?.abort();
+      olderRequestRef.current?.abort();
+      olderRequestRef.current = null;
     };
   }, []);
+
+  useLayoutEffect(() => {
+    scopeRef.current = selectionKey;
+    openIntentRef.current += 1;
+    // Scope changes detach both readers before restoring the new profile.
+    activeStreamIdRef.current = null;
+    abortControllerRef.current?.abort();
+    olderRequestRef.current?.abort();
+    olderRequestRef.current = null;
+    backgroundLoadRef.current = null;
+    streamingRef.current = false;
+    setOlderStatus("idle");
+    setIsLoading(false);
+    dispatch({ type: "RESET" });
+    return () => {
+      activeStreamIdRef.current = null;
+      abortControllerRef.current?.abort();
+      olderRequestRef.current?.abort();
+      olderRequestRef.current = null;
+    };
+  }, [selectionKey]);
 
   useEffect(() => {
     const selection = readChatSelection(selectionKey);
@@ -1035,10 +1050,17 @@ export function useChatStream(
   }, [profile, state.sessionId]);
 
   const loadSession = useCallback(async (sessionId: string, options?: LoadSessionOptions): Promise<void> => {
-    const background = options?.background === true || loadedSessionRef.current === `${selectionKey}\0${sessionId}`;
-    if (background && backgroundLoadRef.current) return;
-    if (!background) openIntentRef.current += 1;
-    if (!background) { loadedSessionRef.current = null; setIsLoading(true); }
+    if (!mountedRef.current || scopeRef.current !== selectionKey) return;
+    const cacheKey = chatHistoryKey(HERMES_BASE_PATH, profile, sessionId);
+    const sameSession = stateRef.current.cacheKey === cacheKey;
+    const cached = sameSession ? undefined : chatHistoryCache.get(cacheKey);
+    const refreshing = sameSession || Boolean(cached);
+    const background = options?.background === true || refreshing;
+    // A background callback for a chat left meanwhile must not navigate back.
+    if (options?.background && !sameSession && (stateRef.current.sessionId || readChatSelection(selectionKey) === null)) return;
+    if (background && backgroundLoadRef.current && sameSession) return;
+    if (!options?.background) openIntentRef.current += 1;
+    setIsLoading(!background);
     writeChatSelection(selectionKey, sessionId);
     const generation = crypto.randomUUID();
     activeStreamIdRef.current = generation;
@@ -1048,8 +1070,8 @@ export function useChatStream(
     backgroundLoadRef.current = background ? controller : null;
     // Only opening a conversation excludes send; background reads yield to it.
     streamingRef.current = !background;
-    const current = () => mountedRef.current && activeStreamIdRef.current === generation;
-    if (!background) {
+    const current = () => mountedRef.current && activeStreamIdRef.current === generation && !controller.signal.aborted;
+    if (!sameSession) {
       olderRequestRef.current?.abort();
       olderRequestRef.current = null;
       setOlderStatus("idle");
@@ -1060,9 +1082,9 @@ export function useChatStream(
      *  историю нельзя. Освежение текущего чата её не трогает: новое доезжает
      *  поверх показанного, а неизменившееся остаётся тем же самым. */
     const show = (messages: ChatMessage[], replay?: { streaming: boolean }) =>
-      dispatch(background
-        ? { type: "SYNC_SESSION", sessionId, messages, history: loadedWindow, ...(replay ? { streaming: replay.streaming, replay: true } : {}) }
-        : { type: "LOAD_SESSION", sessionId, messages, history: loadedWindow });
+      dispatch(refreshing
+        ? { type: "SYNC_SESSION", cacheKey, sessionId, messages, history: loadedWindow, ...(replay ? { streaming: replay.streaming, replay: true } : {}) }
+        : { type: "LOAD_SESSION", cacheKey, sessionId, messages, history: loadedWindow });
     // Пустая лента на время проверки — это и есть «всё загружается заново»:
     // пузыри монтируются с нуля, карточки вложений заново проверяют файл и
     // заново качают превью, а место чтения теряется.
@@ -1087,6 +1109,12 @@ export function useChatStream(
         return outboxMessage(record, failure);
       });
     };
+    if (cached) {
+      const pending = pendingMessages().filter(message =>
+        !cached.messages.some(shown => shown.clientMessageId === message.clientMessageId));
+      dispatch({ type: "LOAD_SESSION", cacheKey, sessionId, history: cached.history,
+        messages: pending.length ? [...cached.messages, ...pending] : cached.messages });
+    }
     const showWithPending = (messages: ChatMessage[], runs: ChatRun[] = []) => {
       const restored = [...messages];
       const runsById = new Map(runs.map((run) => [run.message_id, run]));
@@ -1119,7 +1147,7 @@ export function useChatStream(
       // Read the run AFTER history: completion between these reads is replayed
       // from the same ledger, never from a stale history snapshot.
       let missing = false;
-      const resp = await api.getSessionMessages(
+      let resp = await api.getSessionMessages(
         sessionId, profile || "default", controller.signal, { displayLimit: CHAT_HISTORY_PAGE },
       ).catch(error => {
         if (error instanceof Error && /^404(?:\s|:)/.test(error.message)) {
@@ -1133,8 +1161,12 @@ export function useChatStream(
       // нет, 404 закономерен. Это не пропавший разговор — открываем его с
       // сохранённым сообщением и повтором, а не уводим в прошлый (четвёртое
       // чистое ревью Astra, P1-2).
-      if (missing && !background && loadChatOutboxRecords(profile ?? "", sessionId).length > 0) missing = false;
-      if (missing && !background) {
+      const knownHistory = (cached?.messages ?? (sameSession ? stateRef.current.messages : []))
+        .some(message => message.historyId !== undefined);
+      if (missing && !knownHistory && loadChatOutboxRecords(profile ?? "", sessionId).length > 0) missing = false;
+      if (missing) {
+        chatHistoryCache.delete(cacheKey);
+        dispatch({ type: "RESET" });
         window.clearTimeout(historyTimer);
         // Every way of opening a chat — a pick, a link from the notification,
         // a remembered choice — lands on something real (Astra review P2-8).
@@ -1144,12 +1176,28 @@ export function useChatStream(
           forgetChatSelection(selectionKey);
           void openLatestRef.current?.();
         });
-        queueMicrotask(onMissing);
+        const intent = openIntentRef.current;
+        queueMicrotask(() => {
+          if (mountedRef.current && scopeRef.current === selectionKey && openIntentRef.current === intent) onMissing();
+        });
         return;
       }
-      loadedSessionRef.current = `${selectionKey}\0${sessionId}`;
-      const chatMessages = sessionMessagesToChat(sessionId, resp.messages as HistoryMessage[]);
+      let chatMessages = sessionMessagesToChat(sessionId, resp.messages as HistoryMessage[]);
       loadedWindow = historyWindow(resp);
+      // Bridge a disjoint latest page before reconciliation. The previous
+      // implementation threw away all loaded pages to avoid a silent gap.
+      const previous = cached?.messages ?? (sameSession ? stateRef.current.messages : []);
+      const lastShown = previous.reduce((last, message) => Math.max(last, message.historyId ?? 0), 0);
+      while (lastShown && (chatMessages[0]?.historyId ?? 0) > lastShown && loadedWindow.hasOlder) {
+        const cursor = loadedWindow.cursor!;
+        resp = await api.getSessionMessages(sessionId, profile || "default", controller.signal,
+          { displayLimit: CHAT_HISTORY_PAGE, beforeId: cursor });
+        if (!current()) return;
+        const window = historyWindow(resp);
+        if (window.cursor !== null && window.cursor >= cursor) throw new Error("История не продолжила предыдущую страницу.");
+        chatMessages = [...sessionMessagesToChat(sessionId, resp.messages as HistoryMessage[]), ...chatMessages];
+        loadedWindow = window;
+      }
       let runs: ChatRun[];
       try {
         runs = await getChatRuns(profile ?? "", sessionId, controller.signal);
@@ -1212,10 +1260,10 @@ export function useChatStream(
       // The durable stream replays from byte zero. Remove this turn's saved
       // copy before replay, including tool messages, so it appears exactly once.
       const beforeRun = runAt < 0 ? chatMessages : chatMessages.slice(0, runAt);
-      if (background) {
+      if (refreshing) {
         show([...beforeRun, userMsg, assistantMsg], { streaming: isRunBusy(run) });
       } else {
-        dispatch({ type: "LOAD_SESSION", sessionId, messages: beforeRun, history: loadedWindow });
+        dispatch({ type: "LOAD_SESSION", cacheKey, sessionId, messages: beforeRun, history: loadedWindow });
         dispatch({ type: "SEND_USER", streaming: isRunBusy(run), userMsg, assistantMsg });
       }
       // Подключение к журналу ограничено всегда; тишина — только у готового
@@ -1282,7 +1330,7 @@ export function useChatStream(
       }
       void refreshChatRuns();
     } catch (err) {
-      if (current()) {
+      if (mountedRef.current && activeStreamIdRef.current === generation) {
         const pending = loadChatOutboxRecords(profile ?? "", sessionId)[0];
         if (pending) dispatch({ type: "MARK_DELIVERY", messageId: pending.messageId, delivery: "failed", error: outboxFailure(pending) });
         dispatch({
@@ -1298,7 +1346,7 @@ export function useChatStream(
       window.clearTimeout(historyTimer);
       window.clearTimeout(replayTimer);
       if (backgroundLoadRef.current === controller) backgroundLoadRef.current = null;
-      if (current()) {
+      if (mountedRef.current && activeStreamIdRef.current === generation) {
         setIsLoading(false);
         streamingRef.current = false;
         activeStreamIdRef.current = null;
@@ -1309,7 +1357,6 @@ export function useChatStream(
 
   const reset = useCallback(() => {
     openIntentRef.current += 1;
-    loadedSessionRef.current = null;
     writeChatSelection(selectionKey, null);
     // Same triple-guard as loadSession — abort any active stream so its
     // residual APPEND_DELTAs don't leak into the new chat.
@@ -1325,10 +1372,20 @@ export function useChatStream(
     dispatch({ type: "RESET" });
   }, [selectionKey]);
 
+  useEffect(() => {
+    const removed = (event: Event) => {
+      const key = (event as CustomEvent<string>).detail;
+      const selected = readChatSelection(selectionKey);
+      if (key === stateRef.current.cacheKey || (selected && key === chatHistoryKey(HERMES_BASE_PATH, profile, selected))) reset();
+    };
+    window.addEventListener(CHAT_HISTORY_REMOVED, removed);
+    return () => window.removeEventListener(CHAT_HISTORY_REMOVED, removed);
+  }, [profile, selectionKey, reset]);
+
   const historySessionId = state.sessionId;
   const historyCursor = state.history.hasOlder ? state.history.cursor : null;
   const loadOlder = useCallback(async (): Promise<void> => {
-    if (!historySessionId || historyCursor === null || olderRequestRef.current) return;
+    if (!mountedRef.current || scopeRef.current !== selectionKey || stateRef.current.sessionId !== historySessionId || !historySessionId || historyCursor === null || olderRequestRef.current) return;
     const controller = new AbortController();
     olderRequestRef.current = controller;
     setOlderStatus("loading");
@@ -1354,7 +1411,7 @@ export function useChatStream(
       window.clearTimeout(timer);
       if (olderRequestRef.current === controller) olderRequestRef.current = null;
     }
-  }, [historyCursor, historySessionId, profile]);
+  }, [historyCursor, historySessionId, profile, selectionKey]);
 
   const send = useCallback(
     async (
@@ -1362,6 +1419,7 @@ export function useChatStream(
       attachments: UploadedAttachment[] = [],
       retryRecord?: ChatOutboxRecord,
     ): Promise<boolean> => {
+      if (!mountedRef.current || scopeRef.current !== selectionKey || stateRef.current.sessionId !== state.sessionId) return false;
       // Reject concurrent sends. The composer UI already swaps Send for
       // Stop while streaming, but Enter-key submits bypass the swap, and
       // programmatic callers (tests, plugins) can call send() directly.
@@ -1379,9 +1437,9 @@ export function useChatStream(
       let sessionId = retryRecord?.sessionId ?? state.sessionId;
       if (sessionId === null) {
         sessionId = crypto.randomUUID();
-        dispatch({ type: "SET_SESSION_ID", sessionId });
+        dispatch({ type: "SET_SESSION_ID", sessionId, cacheKey: chatHistoryKey(HERMES_BASE_PATH, profile, sessionId) });
       } else if (retryRecord && state.sessionId !== sessionId) {
-        dispatch({ type: "SET_SESSION_ID", sessionId });
+        dispatch({ type: "SET_SESSION_ID", sessionId, cacheKey: chatHistoryKey(HERMES_BASE_PATH, profile, sessionId) });
       }
       writeChatSelection(selectionKey, sessionId);
       // Tag this stream as the one currently allowed to mutate state.
@@ -1734,6 +1792,7 @@ export function useChatStream(
   useEffect(() => { sessionRef.current = state.sessionId; }, [state.sessionId]);
   /** Открыть последний разговор агента — тот же, что первым стоит в «Чатах». */
   const openLatest = useCallback(async (): Promise<void> => {
+    if (!mountedRef.current || scopeRef.current !== selectionKey) return;
     const intent = ++openIntentRef.current;
     // Never keep another agent's or a deleted conversation on screen while
     // the latest one is looked up; nothing is saved as a choice here.
@@ -1743,6 +1802,7 @@ export function useChatStream(
     dispatch({ type: "RESET" });
     setIsLoading(true);
     const controller = new AbortController();
+    abortControllerRef.current = controller;
     const timer = window.setTimeout(() => controller.abort(), HISTORY_LOAD_TIMEOUT_MS);
     let latest: string | undefined;
     try {
@@ -1752,7 +1812,7 @@ export function useChatStream(
       latest = response.sessions[0]?.id;
     } catch {
       window.clearTimeout(timer);
-      if (!mountedRef.current || openIntentRef.current !== intent) return;
+      if (!mountedRef.current || scopeRef.current !== selectionKey || openIntentRef.current !== intent) return;
       // A failed lookup is not «no conversations»: say so, keep nothing saved
       // (Astra review P2-7).
       setIsLoading(false);
@@ -1760,7 +1820,7 @@ export function useChatStream(
       return;
     }
     window.clearTimeout(timer);
-    if (!mountedRef.current || openIntentRef.current !== intent) return;
+    if (!mountedRef.current || scopeRef.current !== selectionKey || openIntentRef.current !== intent) return;
     if (latest) {
       sessionRef.current = latest;
       // One attempt: if the listed chat is gone too, say so instead of
@@ -1782,7 +1842,7 @@ export function useChatStream(
   useEffect(() => { openLatestRef.current = openLatest; }, [openLatest]);
 
   const restoredKeyRef = useRef<string | null>(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     // An agent tab nobody has opened yet downloads no history: on a phone
     // with many agents every mounted tab used to fetch its whole conversation
     // at once (0.21.15 Astra review; Birukova 28.09). It loads on first open.
@@ -1814,6 +1874,10 @@ export function useChatStream(
       // hid the history from the owner on the phone (Birukova, 28.09.2026).
       void openLatest();
     } else reset();
+    return () => {
+      restoredKeyRef.current = null;
+      selectionLoadRef.current = null;
+    };
   }, [active, loadSession, openLatest, profile, selectionKey, reset]);
   useEffect(() => {
     if (!active) return;

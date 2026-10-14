@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 
-import { act, useEffect } from "react";
+import { act, StrictMode, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api, type SessionMessage } from "@/lib/api";
 import { chatViewKey, writeChatSelection } from "@/lib/chat-view-state";
 import { loadChatOutbox, loadChatOutboxRecords, saveChatOutbox } from "@/lib/chat-outbox";
+import { chatHistoryCache } from "@/lib/chat-history-cache";
 import { useChatStream, type UseChatStreamReturn } from "./useChatStream";
 
 vi.mock("@/lib/chat-runs", async importOriginal => ({
@@ -31,6 +32,7 @@ function Probe({ onValue, profile, active = true }: { onValue: (value: UseChatSt
 }
 
 beforeEach(async () => {
+  chatHistoryCache.clear();
   localStorage.clear();
   sessionStorage.clear();
   shown = [];
@@ -969,7 +971,7 @@ describe("K21-117 activation reconciliation", () => {
     await act(async () => root.render(<Probe active onValue={onValue} />));
 
     expect(refreshChatRuns).toHaveBeenCalled();
-    expect(history).toHaveBeenCalledWith("chosen", "default", expect.any(AbortSignal), { displayLimit: 30 });
+    expect(history).toHaveBeenCalledWith("chosen", "default", expect.any(AbortSignal), { displayLimit: 70 });
   });
 });
 
@@ -1178,7 +1180,7 @@ describe("opening an agent continues its conversation (Бирюкова, 28.09)"
       session_id: "latest", messages: [{ role: "assistant", content: "Готово" }] as SessionMessage[],
     });
     await mount("nyura");
-    expect(history).toHaveBeenCalledWith("latest", "nyura", expect.any(AbortSignal), { displayLimit: 30 });
+    expect(history).toHaveBeenCalledWith("latest", "nyura", expect.any(AbortSignal), { displayLimit: 70 });
     expect(current.sessionId).toBe("latest");
   });
 
@@ -1190,7 +1192,7 @@ describe("opening an agent continues its conversation (Бирюкова, 28.09)"
       return { session_id: id, messages: [{ role: "assistant", content: "Макет" }] as SessionMessage[] };
     });
     await mount("designer");
-    expect(history).toHaveBeenCalledWith("latest", "designer", expect.any(AbortSignal), { displayLimit: 30 });
+    expect(history).toHaveBeenCalledWith("latest", "designer", expect.any(AbortSignal), { displayLimit: 70 });
     expect(current.sessionId).toBe("latest");
     expect(localStorage.getItem(key("designer"))).toBe("latest");
   });
@@ -1337,12 +1339,12 @@ describe("фоновые вкладки агентов (0.21.15 Astra review)", 
 
     await act(async () => root.render(<Probe profile="rop" active onValue={onValue} />));
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
-    expect(history).toHaveBeenCalledWith("latest", "rop", expect.any(AbortSignal), { displayLimit: 30 });
+    expect(history).toHaveBeenCalledWith("latest", "rop", expect.any(AbortSignal), { displayLimit: 70 });
     expect(current.sessionId).toBe("latest");
   });
 });
 
-describe("лента грузится страницами по 30 (Дмитрий, 28.09)", () => {
+describe("лента грузится видимыми страницами", () => {
   const row = (id: number, role: "user" | "assistant", content: string) => ({ id, role, content }) as SessionMessage;
   const page = (from: number, to: number) => {
     const rows: SessionMessage[] = [];
@@ -1362,13 +1364,13 @@ describe("лента грузится страницами по 30 (Дмитри
         ? { session_id: "long", messages: page(0, 5), pagination: { order: "latest", returned: 10, before_id: 1, has_more: false } }
         : { session_id: "long", messages: page(5, 20), pagination: { order: "latest", returned: 30, before_id: 11, has_more: true } });
     await act(async () => { await current.loadSession("long"); });
-    expect(history).toHaveBeenLastCalledWith("long", "default", expect.any(AbortSignal), { displayLimit: 30 });
+    expect(history).toHaveBeenLastCalledWith("long", "default", expect.any(AbortSignal), { displayLimit: 70 });
     expect(current.messages).toHaveLength(30);
     expect(current.messages[0]?.content).toBe("вопрос 5");
     expect(current.older).toEqual({ hasOlder: true, loading: false, failed: false, archivedBefore: false });
 
     await act(async () => { await current.loadOlder(); });
-    expect(history).toHaveBeenLastCalledWith("long", "default", expect.any(AbortSignal), { displayLimit: 30, beforeId: 11 });
+    expect(history).toHaveBeenLastCalledWith("long", "default", expect.any(AbortSignal), { displayLimit: 70, beforeId: 11 });
     expect(current.messages).toHaveLength(40);
     expect(current.messages[0]?.content).toBe("вопрос 0");
     expect(current.messages.at(-1)?.content).toBe("ответ 19");
@@ -1492,11 +1494,12 @@ describe("ход узнаётся по id сообщения, а не по те�
     })) as SessionMessage[];
     vi.spyOn(api, "getSessionMessages")
       .mockResolvedValueOnce({ session_id: "gap", messages: page(1, 30), pagination: { order: "latest", returned: 30, before_id: 1, has_more: false } })
-      .mockResolvedValueOnce({ session_id: "gap", messages: page(71, 100), pagination: { order: "latest", returned: 30, before_id: 71, has_more: true } });
+      .mockResolvedValueOnce({ session_id: "gap", messages: page(71, 100), pagination: { order: "latest", returned: 30, before_id: 71, has_more: true } })
+      .mockResolvedValueOnce({ session_id: "gap", messages: page(1, 70), pagination: { order: "latest", returned: 70, before_id: 1, has_more: false } });
     await act(async () => { await current.loadSession("gap"); });
     await act(async () => { await current.loadSession("gap", { background: true }); });
-    expect(current.messages[0]?.historyId).toBe(71);
-    expect(current.older.hasOlder).toBe(true);
+    expect(current.messages.map(message => message.historyId)).toEqual(page(1, 100).map(message => message.id));
+    expect(current.older.hasOlder).toBe(false);
   });
 });
 
@@ -1626,13 +1629,15 @@ it("новый чат с сорвавшимся первым сообщение�
 it("K21-206: disjoint repeated dialogue keeps the new persisted identities", async () => {
   const { getChatRuns } = await import("@/lib/chat-runs");
   vi.mocked(getChatRuns).mockReset().mockResolvedValue([]);
-  const page = (first: number) => Array.from({ length: 30 }, (_, n) => ({ id: first+n, role: n%2 ? "assistant" as const : "user" as const, content: n%2 ? "Готово" : "Да" }));
+  const page = (first: number, count = 30) => Array.from({ length: count }, (_, n) => ({ id: first+n, role: n%2 ? "assistant" as const : "user" as const, content: n%2 ? "Готово" : "Да" }));
   vi.spyOn(api,"getSessionMessages")
     .mockResolvedValueOnce({session_id:"review",messages:page(1)})
-    .mockResolvedValueOnce({session_id:"review",messages:page(71),pagination:{order:"latest",before_id:71,has_more:true,returned:30}});
+    .mockResolvedValueOnce({session_id:"review",messages:page(71),pagination:{order:"latest",before_id:71,has_more:true,returned:30}})
+    .mockResolvedValueOnce({session_id:"review",messages:page(1,70),pagination:{order:"latest",before_id:1,has_more:false,returned:70}});
   await act(async()=>{await current.loadSession("review");});
   await act(async()=>{await current.loadSession("review",{background:true});});
-  expect(current.messages.map(message => message.historyId)).toEqual(page(71).map(message => message.id));
+  expect(current.messages.map(message => message.historyId)).toEqual(page(1,100).map(message => message.id));
+  expect(new Set(current.messages.map(message => message.id)).size).toBe(100);
 });
 
 it("K21-220/234: a send supersedes slow background history without blocking input", async () => {
@@ -1739,4 +1744,258 @@ describe("итог фонового разбора после хода (K21-294)
       vi.useRealTimers();
     }
   });
+});
+
+describe("K21-207: opened history stays available in memory", () => {
+  const rows = (first: number, count: number): SessionMessage[] => Array.from({ length: count }, (_, n) => ({
+    id: first + n, role: n % 2 ? "assistant" : "user", content: `row ${first + n}`,
+  }));
+  beforeEach(async () => {
+    const { getChatRuns } = await import("@/lib/chat-runs");
+    vi.mocked(getChatRuns).mockReset().mockResolvedValue([]);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ approvals: [] }))));
+  });
+  it("opens roughly seventy visible messages on a first visit", async () => {
+    vi.spyOn(api, "getSessionMessages").mockImplementation(async (id, _profile, _signal, page) => ({
+      session_id: id, messages: rows(1, Math.min(page?.displayLimit ?? 0, 100)),
+    }));
+    await act(async () => { await current.loadSession("cache-initial"); });
+    expect(current.messages.length).toBeGreaterThanOrEqual(68);
+    expect(current.messages.length).toBeLessThanOrEqual(72);
+  });
+  it("returns all loaded pages immediately while the server is still pending", async () => {
+    const history = vi.spyOn(api, "getSessionMessages").mockImplementation(async (id, _profile, _signal, page) => ({
+      session_id: id, messages: id === "cache-pages" ? (page?.beforeId ? rows(1, 20) : rows(21, 70)) : rows(201, 2),
+      pagination: { order: "latest", returned: 70, before_id: page?.beforeId ? 1 : 21, has_more: !page?.beforeId },
+    }));
+    await act(async () => { await current.loadSession("cache-pages"); });
+    await act(async () => { await current.loadOlder(); });
+    const loaded = current.messages;
+    await act(async () => { await current.loadSession("cache-other"); });
+    let resolve!: (value: Awaited<ReturnType<typeof api.getSessionMessages>>) => void;
+    history.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+    let pending!: Promise<void>;
+    await act(async () => { pending = current.loadSession("cache-pages"); });
+    expect(current.isLoading).toBe(false);
+    expect(current.messages).toBe(loaded);
+    expect(current.older.hasOlder).toBe(false);
+    await act(async () => { resolve({ session_id: "cache-pages", messages: rows(21, 70), pagination: { order: "latest", returned: 70, before_id: 21, has_more: true } }); await pending; });
+    expect(current.messages).toHaveLength(90);
+    expect(current.messages[0]?.historyId).toBe(1);
+    expect(current.older.hasOlder).toBe(false);
+  });
+  it("restores on remount without borrowing another profile's same session id", async () => {
+    vi.spyOn(api, "getSessionMessages").mockImplementation(async (id, profile) => ({
+      session_id: id, messages: [{ id: 1, role: "user", content: profile ?? "default" }],
+    }));
+    writeChatSelection(`${chatViewKey("cache-owner")}:selected`, "cache-shared-id");
+    await act(async () => root.render(<Probe profile="cache-owner" onValue={value => { current = value; }} />));
+    const loaded = current.messages;
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    const history = vi.mocked(api.getSessionMessages).mockImplementation(() => new Promise(() => {}));
+    await act(async () => root.render(<Probe profile="cache-owner" onValue={value => { current = value; }} />));
+    expect(current.isLoading).toBe(false);
+    expect(current.messages).toBe(loaded);
+    writeChatSelection(`${chatViewKey("cache-neighbor")}:selected`, "cache-shared-id");
+    await act(async () => root.render(<Probe profile="cache-neighbor" onValue={value => { current = value; }} />));
+    expect(current.messages).toEqual([]);
+    expect(history).toHaveBeenLastCalledWith("cache-shared-id", "cache-neighbor", expect.any(AbortSignal), expect.anything());
+  });
+});
+
+describe("K21-207 cache reconciliation safety", () => {
+  beforeEach(async () => {
+    const { getChatRuns } = await import("@/lib/chat-runs");
+    vi.mocked(getChatRuns).mockReset().mockResolvedValue([]);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ok: true, approvals: [] }))));
+  });
+  const transcript = (id: string, text = "Saved") => ({ session_id: id, messages: [
+    { id: 1, role: "user" as const, content: text }, { id: 2, role: "assistant" as const, content: "Answer" },
+  ] });
+  it("a successful DELETE invalidates the cached window and its pending reader", async () => {
+    const history = vi.spyOn(api, "getSessionMessages").mockResolvedValue(transcript("cache-deleted"));
+    await act(async () => { await current.loadSession("cache-deleted"); });
+    let release!: (value: ReturnType<typeof transcript>) => void;
+    history.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+    let pending!: Promise<void>;
+    await act(async () => { pending = current.loadSession("cache-deleted", { background: true }); });
+    await act(async () => { await api.deleteSession("cache-deleted", "default"); });
+    await act(async () => { release(transcript("cache-deleted", "Late deleted snapshot")); await pending; });
+    expect(current.sessionId).toBeNull();
+    expect(current.messages).toEqual([]);
+    expect(chatHistoryCache.get(JSON.stringify(["", "default", "cache-deleted"]))).toBeUndefined();
+  });
+  it("a server 404 on a cached return forgets the window and opens a real conversation", async () => {
+    const history = vi.spyOn(api, "getSessionMessages").mockResolvedValue(transcript("cache-gone"));
+    await act(async () => { await current.loadSession("cache-gone"); });
+    await act(async () => { await current.loadSession("cache-other-real"); });
+    vi.spyOn(api, "getSessions").mockResolvedValue({ sessions: [{ id: "cache-other-real" }], total: 1, offset: 0, limit: 1 } as Awaited<ReturnType<typeof api.getSessions>>);
+    history.mockImplementation(async id => {
+      if (id === "cache-gone") throw new Error("404: missing");
+      return transcript(id, "Real");
+    });
+    await act(async () => { await current.loadSession("cache-gone"); });
+    expect(current.sessionId).toBe("cache-other-real");
+    expect(current.messages[0]?.content).toBe("Real");
+    expect(chatHistoryCache.get(JSON.stringify(["", "default", "cache-gone"]))).toBeUndefined();
+  });
+  it("a failed history load never caches the previous chat under the requested identity", async () => {
+    const history = vi.spyOn(api, "getSessionMessages").mockResolvedValue(transcript("cache-good"));
+    await act(async () => { await current.loadSession("cache-good"); });
+    history.mockRejectedValueOnce(new Error("network unavailable"));
+    await act(async () => { await current.loadSession("cache-error"); });
+    expect(current.error).toBeTruthy();
+    expect(chatHistoryCache.get(JSON.stringify(["", "default", "cache-error"]))).toBeUndefined();
+    await act(async () => { await current.loadSession("cache-good"); });
+    expect(current.messages[0]?.content).toBe("Saved");
+  });
+  it("reset cancels a cached refresh and old background callbacks cannot reopen it", async () => {
+    const history = vi.spyOn(api, "getSessionMessages").mockResolvedValue(transcript("cache-reset"));
+    await act(async () => { await current.loadSession("cache-reset"); });
+    let release!: (value: ReturnType<typeof transcript>) => void;
+    history.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+    let pending!: Promise<void>;
+    const load = current.loadSession;
+    await act(async () => { pending = load("cache-reset", { background: true }); });
+    await act(async () => { current.reset(); });
+    await act(async () => { release(transcript("cache-reset", "Late")); await pending; await load("cache-reset", { background: true }); });
+    expect(current.sessionId).toBeNull();
+    expect(current.messages).toEqual([]);
+  });
+  it("a cached return still replays a running turn and clears its outbox only on DONE", async () => {
+    const { getChatRuns } = await import("@/lib/chat-runs");
+    vi.spyOn(api, "getSessionMessages").mockImplementation(async id => transcript(id));
+    await act(async () => { await current.loadSession("cache-live"); });
+    await act(async () => { await current.loadSession("cache-other-live"); });
+    saveChatOutbox({ messageId: "cache-run-id-12345678", sessionId: "cache-live", profile: "", text: "New", attachments: [], createdAt: 3, status: "sending" });
+    vi.mocked(getChatRuns).mockResolvedValue([{ message_id: "cache-run-id-12345678", session_id: "cache-live", profile: "", status: "running", updated_at: 3,
+      history_count: 2, history_row_id: null, turn_tracked: true, user_message: { role: "user", content: "New" } }]);
+    let stream!: ReadableStreamDefaultController<Uint8Array>;
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.includes("/stream")
+      ? new Response(new ReadableStream<Uint8Array>({ start(controller) { stream = controller; } }), { headers: { "content-type": "text/event-stream" } })
+      : new Response('{"approvals":[]}')));
+    let pending!: Promise<void>;
+    await act(async () => { pending = current.loadSession("cache-live"); });
+    expect(current.messages.map(m => m.content)).toEqual(["Saved", "Answer", "New", ""]);
+    expect(current.isStreaming).toBe(true);
+    expect(loadChatOutboxRecords("", "cache-live")).toHaveLength(1);
+    await act(async () => { stream.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"Live answer"}}]}\n\ndata: [DONE]\n\n')); await pending; });
+    expect(current.messages.map(m => m.content)).toEqual(["Saved", "Answer", "New", "Live answer"]);
+    expect(loadChatOutboxRecords("", "cache-live")).toHaveLength(0);
+  });
+  it("a completed live answer remains in memory until server reconciliation can replace it", async () => {
+    vi.spyOn(api, "getSessionMessages").mockImplementation(async id => transcript(id));
+    await act(async () => { await current.loadSession("cache-sent"); });
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.includes("/chat/completions")
+      ? sseResponse('data: {"choices":[{"delta":{"content":"Fresh answer"}}]}\n\n', 'data: [DONE]\n\n')
+      : new Response('{"approvals":[]}')));
+    await act(async () => { await current.send("Fresh question"); });
+    const sent = current.messages;
+    await act(async () => { await current.loadSession("cache-other-sent"); });
+    vi.mocked(api.getSessionMessages).mockImplementationOnce(() => new Promise(() => {}));
+    await act(async () => { void current.loadSession("cache-sent"); });
+    expect(current.messages).toBe(sent);
+    expect(current.messages.at(-1)?.content).toBe("Fresh answer");
+  });
+});
+
+it("K21-207: a late older page and callbacks from a departed profile cannot replace its neighbor", async () => {
+  const { getChatRuns } = await import("@/lib/chat-runs");
+  vi.mocked(getChatRuns).mockReset().mockResolvedValue([]);
+  vi.stubGlobal("fetch", vi.fn(async () => new Response('{"approvals":[]}')));
+  let release!: (value: Awaited<ReturnType<typeof api.getSessionMessages>>) => void;
+  const history = vi.spyOn(api, "getSessionMessages").mockImplementation(async (id, profile, _signal, page) => {
+    if (page?.beforeId) return await new Promise(resolve => { release = resolve; });
+    return { session_id: id, messages: [{ id: 21, role: "user", content: profile ?? "default" }],
+      pagination: { order: "latest", returned: 1, before_id: 21, has_more: true } };
+  });
+  writeChatSelection(`${chatViewKey("cache-profile-a")}:selected`, "cache-profile-shared");
+  writeChatSelection(`${chatViewKey("cache-profile-b")}:selected`, "cache-profile-shared");
+  await act(async () => root.render(<Probe profile="cache-profile-a" onValue={value => { current = value; }} />));
+  const oldLoad = current.loadSession;
+  const oldOlder = current.loadOlder;
+  let pending!: Promise<void>;
+  await act(async () => { pending = oldOlder(); });
+  await act(async () => root.render(<Probe profile="cache-profile-b" onValue={value => { current = value; }} />));
+  await act(async () => {
+    release({ session_id: "cache-profile-shared", messages: [{ id: 1, role: "user", content: "Foreign late page" }] });
+    await pending;
+    await oldLoad("cache-profile-shared");
+    await oldOlder();
+  });
+  expect(current.messages.map(m => m.content)).toEqual(["cache-profile-b"]);
+  expect(history).toHaveBeenCalledTimes(3);
+});
+
+it("K21-207: cached history preserves an unposted outbox message even while refresh is pending", async () => {
+  const { getChatRuns } = await import("@/lib/chat-runs");
+  vi.mocked(getChatRuns).mockReset().mockResolvedValue([]);
+  vi.stubGlobal("fetch", vi.fn(async () => new Response('{"approvals":[]}')));
+  vi.spyOn(api, "getSessionMessages").mockImplementation(async id => ({ session_id: id, messages: [{ id: 1, role: "user", content: id }] }));
+  await act(async () => { await current.loadSession("cache-outbox"); });
+  await act(async () => { await current.loadSession("cache-outbox-other"); });
+  saveChatOutbox({ messageId: "cache-pending-12345678", sessionId: "cache-outbox", profile: "", text: "Unposted", attachments: [], createdAt: 3, status: "failed" });
+  vi.mocked(api.getSessionMessages).mockImplementationOnce(() => new Promise(() => {}));
+  await act(async () => { void current.loadSession("cache-outbox"); });
+  expect(current.messages.map(m => m.content)).toEqual(["cache-outbox", "Unposted"]);
+  expect(current.messages.at(-1)?.delivery).toBe("failed");
+  expect(loadChatOutboxRecords("", "cache-outbox")).toHaveLength(1);
+});
+
+it("K21-207: pending outbox does not turn a deleted persisted chat into a new one", async () => {
+  const { getChatRuns } = await import("@/lib/chat-runs");
+  vi.mocked(getChatRuns).mockReset().mockResolvedValue([]);
+  vi.stubGlobal("fetch", vi.fn(async () => new Response('{"approvals":[]}')));
+  const history = vi.spyOn(api, "getSessionMessages").mockResolvedValue({ session_id: "cache-deleted-pending", messages: [{ id: 1, role: "user", content: "Persisted" }] });
+  await act(async () => { await current.loadSession("cache-deleted-pending"); });
+  saveChatOutbox({ messageId: "deleted-pending-12345678", sessionId: "cache-deleted-pending", profile: "", text: "Still recoverable", attachments: [], createdAt: 3, status: "failed" });
+  history.mockRejectedValueOnce(new Error("404: missing"));
+  const missing = vi.fn(() => current.reset());
+  await act(async () => { await current.loadSession("cache-deleted-pending", { background: true, onMissing: missing }); });
+  expect(missing).toHaveBeenCalledTimes(1);
+  expect(current.sessionId).toBeNull();
+  expect(loadChatOutboxRecords("", "cache-deleted-pending")).toHaveLength(1);
+});
+
+it("K21-207: callbacks captured before switching chat cannot send into the current transcript", async () => {
+  const { getChatRuns } = await import("@/lib/chat-runs");
+  vi.mocked(getChatRuns).mockReset().mockResolvedValue([]);
+  const fetchMock = vi.fn<(url: string) => Promise<Response>>(async () => new Response('{"approvals":[]}'));
+  vi.stubGlobal("fetch", fetchMock);
+  vi.spyOn(api, "getSessionMessages").mockImplementation(async id => ({ session_id: id, messages: [{ id: 1, role: "user", content: id }] }));
+  await act(async () => { await current.loadSession("cache-stale-send-a"); });
+  const send = current.send;
+  await act(async () => { await current.loadSession("cache-stale-send-b"); });
+  await act(async () => { expect(await send("Stale send")).toBe(false); });
+  expect(current.messages.map(m => m.content)).toEqual(["cache-stale-send-b"]);
+  expect(fetchMock.mock.calls.some(args => String(args[0]).includes("/chat/completions"))).toBe(false);
+});
+
+it("K21-207: finishing deletion of a departed chat keeps the currently opened conversation", async () => {
+  const { getChatRuns } = await import("@/lib/chat-runs");
+  vi.mocked(getChatRuns).mockReset().mockResolvedValue([]);
+  vi.stubGlobal("fetch", vi.fn(async () => new Response('{"approvals":[]}')));
+  vi.spyOn(api, "getSessionMessages").mockImplementation(async id => ({ session_id: id, messages: [{ id: 1, role: "user", content: id }] }));
+  await act(async () => { await current.loadSession("cache-delete-a"); });
+  let finish!: (response: Response) => void;
+  vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => init?.method === "DELETE"
+    ? await new Promise<Response>(resolve => { finish = resolve; }) : new Response('{"approvals":[]}')));
+  let pending!: Promise<{ ok: boolean }>;
+  await act(async () => { pending = api.deleteSession("cache-delete-a", "default"); });
+  await act(async () => { await current.loadSession("cache-delete-b"); });
+  const loaded = current.messages;
+  await act(async () => { finish(new Response('{"ok":true}')); await pending; });
+  expect(current.sessionId).toBe("cache-delete-b");
+  expect(current.messages).toBe(loaded);
+});
+
+it("K21-207: React effect teardown and setup restore the selected chat again", async () => {
+  const { getChatRuns } = await import("@/lib/chat-runs");
+  vi.mocked(getChatRuns).mockReset().mockResolvedValue([]);
+  vi.stubGlobal("fetch", vi.fn(async () => new Response('{"approvals":[]}')));
+  writeChatSelection(`${chatViewKey("cache-strict")}:selected`, "cache-strict-chat");
+  vi.spyOn(api, "getSessionMessages").mockImplementation(async id => ({ session_id: id, messages: [{ id: 1, role: "user", content: "Selected" }] }));
+  await act(async () => root.render(<StrictMode><Probe profile="cache-strict" onValue={value => { current = value; }} /></StrictMode>));
+  expect(current.messages.map(m => m.content)).toEqual(["Selected"]);
 });

@@ -274,3 +274,22 @@ it("K21-207: F5 searches older pages for a live response key", async () => {
   expect(sessionStorage.getItem("chat:scroll")).toContain("older-client");
   sessionStorage.clear();
 });
+
+it("K21-207: immediately restored cached pages hold the reading anchor when an attachment grows", async () => {
+  sessionStorage.setItem("chat:scroll", JSON.stringify({ id: "c-h36", offset: 10 }));
+  let messageY = 500;
+  vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+    const viewport = host.querySelector<HTMLDivElement>('[aria-label="Переписка"]');
+    const top = this.getAttribute("data-chat-message") === "c-h36" ? messageY - (viewport?.scrollTop ?? 0) : 0;
+    return { top, bottom: top + 100, left: 0, right: 0, width: 0, height: 100, x: 0, y: top, toJSON() {} } as DOMRect;
+  });
+  const load = vi.fn();
+  const viewport = await renderStored(["c-h1", "c-h36", "c-h61"], { hasOlder: false, loading: false, failed: false, load });
+  expect(viewport.scrollTop).toBe(510);
+  expect(load).not.toHaveBeenCalled();
+  messageY += 200;
+  height += 200;
+  await act(async () => resized());
+  expect(viewport.scrollTop).toBe(710);
+  sessionStorage.removeItem("chat:scroll");
+});
