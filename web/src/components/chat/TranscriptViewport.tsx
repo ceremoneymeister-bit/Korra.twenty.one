@@ -6,9 +6,6 @@ interface OlderMessages {
   hasOlder: boolean;
   loading: boolean;
   failed: boolean;
-  archivedBefore?: boolean;
-  /** Открыть сжатую часть разговора для чтения. */
-  showArchive?: () => void;
   load: () => void;
 }
 
@@ -20,6 +17,8 @@ interface TranscriptViewportProps {
   awaitingApproval?: boolean;
   /** id первого сообщения: его смена без прокрутки вниз — догруженное начало. */
   anchorKey?: string;
+  /** Пришли строки истории, включая сообщения с непрозрачной идентичностью. */
+  historyReady?: boolean;
   /** Более ранние сообщения, которые догружаются к началу ленты. */
   older?: OlderMessages;
 }
@@ -57,7 +56,7 @@ function historyRow(id: string | undefined): number | null {
 }
 
 /** Поток следует вниз, пока человек не начал читать предыдущий текст. */
-export function TranscriptViewport({ children, followKey, awaitingApproval, storageKey, anchorKey, older }: TranscriptViewportProps) {
+export function TranscriptViewport({ children, followKey, awaitingApproval, storageKey, anchorKey, historyReady = historyRow(anchorKey) !== null, older }: TranscriptViewportProps) {
   const viewport = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const saved = storageKey ? parsePlace(readChatView(storageKey)) : null;
@@ -132,19 +131,17 @@ export function TranscriptViewport({ children, followKey, awaitingApproval, stor
       place.current = reading.current;
       restorePages.current = 0;
     }
-    if (place.current !== null && historyRow(anchorKey) === null) {
+    if (place.current !== null && !historyReady) {
       // История чата ещё не пришла: пустая лента или только неотправленное
       // сообщение — не повод забывать место чтения (ревью Astra, раунд 6, P2-2).
     } else if (place.current !== null) {
       const saved = place.current;
       const target = findPlace(saved);
-      const wanted = historyRow(saved.id);
-      const first = historyRow(anchorKey);
       if (target) {
         el.scrollTop = messageTop(el, target) + saved.offset;
         reading.current = saved;
         place.current = null;
-      } else if ((wanted === null ? Boolean(saved.key) : first !== null && wanted < first) && older?.hasOlder && !older.failed
+      } else if (older?.hasOlder && !older.failed
         && restorePages.current < MAX_RESTORE_PAGES) {
         // Место чтения раньше загруженной страницы: догружаем до него.
         if (!older.loading) {
@@ -162,7 +159,7 @@ export function TranscriptViewport({ children, followKey, awaitingApproval, stor
     else if (prepended && !holdReading(el)) el.scrollTop += el.scrollHeight - lastHeight.current;
     lastHeight.current = el.scrollHeight;
     lastTop.current = el.scrollTop;
-  }, [children, followKey, anchorKey, older?.hasOlder, older?.loading, older?.failed]);
+  }, [children, followKey, anchorKey, historyReady, older?.hasOlder, older?.loading, older?.failed]);
 
   useEffect(() => {
     if (!content.current || typeof ResizeObserver === "undefined") return;
@@ -211,24 +208,6 @@ export function TranscriptViewport({ children, followKey, awaitingApproval, stor
         }}
       >
         <div ref={content}>
-          {older && !older.hasOlder && older.archivedBefore && (
-            <div className="flex flex-col items-center gap-2 px-4 pt-4 text-center text-xs text-[var(--neo-text-secondary)]">
-              <p>
-                {older.showArchive
-                  ? "Более ранняя часть этого разговора сохранена."
-                  : "Более ранняя часть этого разговора сохранена, но пока не показывается в чате."}
-              </p>
-              {older.showArchive && (
-                <button
-                  type="button"
-                  onClick={older.showArchive}
-                  className="min-h-[44px] rounded-full border-0 bg-[var(--neo-surface)] px-4 py-2 text-xs text-[var(--neo-text-primary)] shadow-[var(--neo-depth-2)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--neo-accent-line)]"
-                >
-                  Показать раннюю часть
-                </button>
-              )}
-            </div>
-          )}
           {older?.hasOlder && (
             <div className="flex justify-center px-4 pt-4">
               <div className="relative flex">
