@@ -6333,13 +6333,14 @@ def _try_cleanup_parent_workspaces(conn: sqlite3.Connection, task_id: str) -> No
         ).fetchall()
         for (parent_id,) in parents:
             row = conn.execute(
-                "SELECT workspace_kind, workspace_path, branch_name FROM tasks WHERE id = ?",
+                "SELECT workspace_kind, workspace_path, branch_name, status FROM tasks WHERE id = ?",
                 (parent_id,),
             ).fetchone()
             if (
                 not row
                 or row["workspace_kind"] not in ("scratch", "worktree")
                 or not row["workspace_path"]
+                or row["status"] not in ("done", "archived", "failed", "cancelled")
             ):
                 continue
             # Check if ALL children of this parent are terminal
