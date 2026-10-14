@@ -667,7 +667,8 @@ def test_multiple_actual_compressions_preserve_original_slots(homes, legacy, fir
         db.append_messages_batch(sid, initial)
         expected = all_history(db, sid)
         for epoch, rotate in enumerate((first_rotate, not first_rotate, first_rotate, not first_rotate)):
-            compressed, tail_count = compress_real(db.get_messages_as_conversation(sid))
+            compressed, tail_count = compress_real(db.get_messages_as_conversation(sid),
+                protect_first_n=7 if first_rotate and with_tools else 3)
             if rotate:
                 child = f'actual-child-{epoch}'
                 db.publish_compression_child(parent_session_id=sid, child_session_id=child,
@@ -724,3 +725,19 @@ def test_real_compressor_keeps_identical_occurrences_by_source_id(homes):
         db.archive_and_compact('chat', compressed, tail_count=tail_count)
         after = all_history(db, 'chat')
         assert [r['display_id'] for r in after] == [r['display_id'] for r in before]
+
+
+def test_copied_cursor_rewind_removes_boundary(homes):
+    from korra_state_history import HistoryUnavailableError
+    with SessionDB(homes['default'] / 'state.db') as db:
+        db.create_session('chat', source='dashboard')
+        original = [dict(role=msg['role'], content=msg['content'] + ': ' + 'ordinary text '*150) for msg in turns(0, 80)]
+        db.append_messages_batch('chat', original)
+        initial = db.get_history_display_page('chat', limit=10)
+        compressed, tail_count = compress_real(original)
+        db.archive_and_compact('chat', compressed, tail_count=tail_count)
+        current = db.get_history_display_page('chat', limit=10)
+        assert current[1][0]['display_id'] == initial[1][0]['display_id']
+        db.rewind_to_message('chat', current[1][0]['id'])
+        with pytest.raises(HistoryUnavailableError, match='boundary'):
+            db.get_history_display_page('chat', limit=70, before_cursor=initial[2])

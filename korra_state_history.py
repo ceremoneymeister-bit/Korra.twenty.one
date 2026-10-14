@@ -203,10 +203,13 @@ def _segments(db, conn, chain, records):
                 count = _overlap(preceding, head)
                 if 0 < count < len(preceding):
                     boundary = preceding[-count]['id']
-                elif count == len(preceding) and len(preceding) <= 4 and sid != chain[0]:
-                    # A child's initial handoff already starts at its first
-                    # protected row; there is no older generation in this sid.
-                    boundary = 0
+                elif preceding and count == len(preceding) and sid != chain[0]:
+                    # Distinguish a child's copied protected head (any size)
+                    # from genuine new activity before a later in-place pass.
+                    parent_sid = chain[chain.index(sid) - 1]
+                    parent_rows = _generation_rows(db, conn, Segment(parent_sid, 0, 2**63 - 1))
+                    if len(_legacy_pairs(parent_rows, preceding)) == len(preceding):
+                        boundary = 0
             starts.append(boundary)
         active_start = conn.execute(
             'SELECT MIN(id) FROM messages WHERE session_id=? AND active=1 AND id<?',
@@ -295,6 +298,11 @@ def get_history_page(db, session_id, *, limit, before_cursor=None, max_rows=1000
         # when a protected head or tail is copied into a later generation.
         position = None
         if anchor is not None:
+            if anchor in representatives:
+                current = conn.execute('SELECT active,compacted FROM messages WHERE id=?',
+                                       (representatives[anchor],)).fetchone()
+                if current is None or not (current['active'] or current['compacted']):
+                    raise HistoryUnavailableError('History cursor boundary is no longer available')
             for index, segment in enumerate(segments):
                 raw = conn.execute(
                     'SELECT id,active,compacted FROM messages WHERE session_id=? AND id=? '
