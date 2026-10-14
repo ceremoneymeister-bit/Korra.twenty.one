@@ -11168,6 +11168,23 @@ def skills_block_reason(assignee: str, missing: list[str]) -> str:
     )
 
 
+def _record_nonspawnable_assignee(conn: sqlite3.Connection, task_id: str, assignee: str) -> None:
+    """Explain a skip once until the card changes (upstream #122422).
+
+    Ready and review lanes share the same diagnostic. Compare and append
+    under one write transaction, including across dispatchers/homes.
+    """
+    payload = {"assignee": assignee}
+    with write_txn(conn):
+        last = conn.execute(
+            "SELECT kind, payload FROM task_events WHERE task_id = ? "
+            "ORDER BY created_at DESC, id DESC LIMIT 1", (task_id,),
+        ).fetchone()
+        if (last is None or last["kind"] != "skipped_nonspawnable"
+                or last["payload"] != json.dumps(payload, ensure_ascii=False)):
+            _append_event(conn, task_id, "skipped_nonspawnable", payload)
+
+
 def _dispatch_once_locked(
     conn: sqlite3.Connection,
     *,
@@ -11475,6 +11492,8 @@ def _dispatch_once_locked(
             # multi-lane setups where the ready queue is steadily full
             # of human-pulled work.
             result.skipped_nonspawnable.append(row["id"])
+            if not dry_run:
+                _record_nonspawnable_assignee(conn, row["id"], row_assignee)
             continue
         # Per-profile concurrency cap (#21582): even if there's global
         # headroom, refuse to spawn for an assignee that's already at
@@ -11646,6 +11665,8 @@ def _dispatch_once_locked(
             profile_exists = None  # type: ignore[assignment]
         if profile_exists is not None and not profile_exists(row["assignee"]):
             result.skipped_nonspawnable.append(row["id"])
+            if not dry_run:
+                _record_nonspawnable_assignee(conn, row["id"], row["assignee"])
             continue
         if _per_profile_cap is not None:
             current = _per_profile_running.get(row["assignee"], 0)
