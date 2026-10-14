@@ -37,7 +37,7 @@ from cryptography.hazmat.primitives.asymmetric.x25519 import (
 from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
-SECRETS_MEMBER = "secrets.korra-enc"
+from korra_cli.backup_secrets import SECRETS_MEMBER  # noqa: F401  (re-export)
 
 # Public key of the Korra team. The private half never lives on a client server.
 DEFAULT_OPERATOR_PUBLIC_KEY = "BvpA+gR/pm4zRQgcnk+ybtAjh1rx/eEg3vkAhfeuhVA="

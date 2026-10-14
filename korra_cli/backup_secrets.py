@@ -15,6 +15,9 @@ import fnmatch
 import re
 from pathlib import Path, PurePosixPath
 
+# Name of the archive member that carries the encrypted secrets.
+SECRETS_MEMBER = "secrets.korra-enc"
+
 # Any path component equal to one of these makes the whole subtree secret.
 _SECRET_DIR_NAMES = frozenset({
     "secrets", ".secrets",
