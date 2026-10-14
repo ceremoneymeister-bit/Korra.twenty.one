@@ -502,3 +502,225 @@ def test_deletion_between_resolution_and_snapshot_returns_not_found(client, home
     assert response.status_code == 404
     with SessionDB(homes['default'] / 'state.db') as db:
         assert db.get_session('chat') is None
+
+
+def all_history(db, sid, limit=70, cursor=None):
+    pages = []
+    for _ in range(30):
+        _, rows, cursor, more = db.get_history_display_page(sid, limit=limit, before_cursor=cursor)
+        pages.append(rows)
+        if not more:
+            return [row for chunk in reversed(pages) for row in chunk]
+    pytest.fail('history did not terminate')
+
+
+def compress_real(messages, *, protect_first_n=3):
+    from unittest.mock import patch
+    from agent.context_compressor import ContextCompressor, SUMMARY_PREFIX, _COMPACTION_TAIL_MARKER
+    compressor = ContextCompressor(model='test', config_context_length=32000,
+                                   quiet_mode=True, protect_first_n=protect_first_n)
+    # Only the network call is replaced; pruning, protected head, carrier
+    # assembly and tail selection run through the production compressor.
+    with patch.object(compressor, '_generate_summary', return_value=SUMMARY_PREFIX + '\nEarlier work summarized.'):
+        compressed = compressor.compress(messages, force=True)
+    assert compressed is not messages
+    tail_count = sum(bool(msg.pop(_COMPACTION_TAIL_MARKER, False)) for msg in compressed)
+    return compressed, tail_count
+
+
+@pytest.mark.parametrize('rotate', [False, True])
+@pytest.mark.parametrize('legacy', [False, True])
+@pytest.mark.parametrize('live', [False, True])
+@pytest.mark.parametrize('protect_first_n', [0, 3])
+def test_real_compressor_preserves_order_identity_and_paging(homes, rotate, legacy, live, protect_first_n):
+    with SessionDB(homes['default'] / 'state.db') as db:
+        sid = 'chat'
+        db.create_session(sid, source='dashboard')
+        original = turns(0, 80)
+        for msg in original:
+            msg['content'] += ': ' + 'ordinary text ' * 150
+            if live:
+                msg.pop('timestamp')
+        db.append_messages_batch(sid, original)
+        before = all_history(db, sid)
+        initial = db.get_history_display_page(sid, limit=10)
+        messages = original if live else db.get_messages_as_conversation(sid)
+        compressed, tail_count = compress_real(messages, protect_first_n=protect_first_n)
+        if rotate:
+            db.publish_compression_child(parent_session_id=sid, child_session_id='child',
+                source='dashboard', messages=compressed, require_compression_lease=False)
+        else:
+            db.archive_and_compact(sid, compressed, tail_count=tail_count)
+        model = db.get_messages_as_conversation('child' if rotate else sid)
+        if legacy:
+            db._execute_write(lambda conn: conn.execute('DELETE FROM display_compactions'))
+        if legacy and live:
+            # Generated SQL timestamps cannot establish old copy identity.
+            from korra_state_history import HistoryAmbiguousError
+            with pytest.raises(HistoryAmbiguousError):
+                all_history(db, sid)
+            return
+        after = all_history(db, sid)
+        assert [r.get('display_content', r['content']).strip() for r in after] == [r['content'].strip() for r in before]
+        assert [r['display_id'] for r in after] == [r['display_id'] for r in before]
+        assert len({r['display_id'] for r in after}) == len(original)
+        previous = all_history(db, sid, cursor=initial[2])
+        assert [r['display_id'] for r in previous + initial[1]] == [r['display_id'] for r in before]
+        assert db.get_messages_as_conversation('child' if rotate else sid) == model
+
+
+@pytest.mark.parametrize('legacy', [False, True])
+def test_real_tool_prune_does_not_duplicate_conversation(homes, legacy):
+    from agent.context_compressor import ContextCompressor
+    with SessionDB(homes['default'] / 'state.db') as db:
+        db.create_session('chat', source='dashboard')
+        original = [dict(role='user', content='start', timestamp=1)]
+        for i in range(8):
+            original.extend([
+                dict(role='assistant', content=f'working {i}', timestamp=2+i*2,
+                     tool_calls=[dict(id=f'call-{i}', type='function', function=dict(name='terminal', arguments='{"command":"ls"}'))]),
+                dict(role='tool', tool_call_id=f'call-{i}', content=chr(65+i)*24000 if i<3 else 'ok', timestamp=3+i*2)])
+        original.append(dict(role='assistant', content='done', timestamp=99))
+        db.append_messages_batch('chat', original)
+        before = all_history(db, 'chat')
+        compressor = ContextCompressor(model='test', config_context_length=32000, quiet_mode=True,
+            proactive_prune_tokens=1000, proactive_prune_min_reclaim_tokens=100, protect_last_n=4)
+        compressor._session_db = db
+        compressor._session_id = 'chat'
+        rewritten, pruned = compressor.prune_tool_results_only(db.get_messages_as_conversation('chat'), current_tokens=120000)
+        assert pruned == 3
+        if legacy:
+            db._execute_write(lambda conn: conn.execute('DELETE FROM display_compactions'))
+        after = all_history(db, 'chat')
+        assert [r['display_id'] for r in after] == [r['display_id'] for r in before]
+        assert [r['role'] for r in after] == [r['role'] for r in original]
+        assert [r['content'] for r in after if r['role'] != 'tool'] == [r['content'] for r in original if r['role'] != 'tool']
+        assert [r['content'] for r in after] == [r['content'] for r in rewritten]
+
+
+@pytest.mark.parametrize('anchor', [2**63, 2**100, 0, -1, True, 1.5, '1'])
+def test_invalid_numeric_cursor_returns_400(client, homes, anchor):
+    import base64
+    import json
+    with SessionDB(homes['default'] / 'state.db') as db:
+        db.create_session('chat', source='dashboard')
+        db.append_messages_batch('chat', turns(0, 80))
+    cursor = page(client)['pagination']['next_cursor']
+    payload = json.loads(base64.urlsafe_b64decode(cursor + '=' * (-len(cursor) % 4)))
+    payload[-1] = anchor
+    forged = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
+    response = client.get('/api/sessions/chat/messages', params={'include_history': 'true', 'before_cursor': forged})
+    assert response.status_code == 400
+    assert 'Cursor' in response.json()['detail']
+
+
+@pytest.mark.parametrize('live', [False, True])
+def test_ambiguous_legacy_returns_separate_live_and_archive(client, homes, live):
+    with SessionDB(homes['default'] / 'state.db') as db:
+        db.create_session('chat', source='dashboard')
+        original = turns(0, 80)
+        for msg in original:
+            msg['content'] = 'same: ' + 'ordinary text ' * 150
+            if live:
+                msg.pop('timestamp')
+            else:
+                msg['timestamp'] = 1234
+        db.append_messages_batch('chat', original)
+        compressed, tail_count = compress_real(original)
+        db.archive_and_compact('chat', compressed, tail_count=tail_count)
+        db._execute_write(lambda conn: conn.execute('DELETE FROM display_compactions'))
+        expected = db.get_display_page('chat', limit=70)[0]
+    response = page(client)
+    assert response['pagination']['history_separate'] is True
+    assert response['pagination']['include_history'] is False
+    assert [r['id'] for r in response['messages']] == [r['id'] for r in expected]
+    archive = client.get('/api/sessions/chat/messages', params={'archive': 'true', 'limit': 100})
+    assert archive.status_code == 200
+    assert archive.json()['messages']
+
+
+@pytest.mark.parametrize('legacy', [False, True])
+@pytest.mark.parametrize('first_rotate', [False, True])
+@pytest.mark.parametrize('with_tools', [False, True])
+def test_multiple_actual_compressions_preserve_original_slots(homes, legacy, first_rotate, with_tools):
+    def add_tool_steps(messages):
+        if not with_tools:
+            return messages
+        result = []
+        for msg in messages:
+            if msg['role'] == 'assistant':
+                call_id = 'call-' + msg['content'].split(':')[0]
+                result.extend([
+                    dict(role='assistant', content='', timestamp=msg['timestamp'],
+                         tool_calls=[dict(id=call_id, type='function', function=dict(name='terminal', arguments='{}'))]),
+                    dict(role='tool', content='same tool output', timestamp=msg['timestamp'], tool_call_id=call_id, tool_name='terminal')])
+            result.append(msg)
+        return result
+
+    with SessionDB(homes['default'] / 'state.db') as db:
+        sid = 'chat'
+        db.create_session(sid, source='dashboard')
+        initial = turns(0, 80)
+        for msg in initial:
+            msg['content'] += ': ' + 'ordinary text ' * 150
+        initial = add_tool_steps(initial)
+        db.append_messages_batch(sid, initial)
+        expected = all_history(db, sid)
+        for epoch, rotate in enumerate((first_rotate, not first_rotate, first_rotate, not first_rotate)):
+            compressed, tail_count = compress_real(db.get_messages_as_conversation(sid))
+            if rotate:
+                child = f'actual-child-{epoch}'
+                db.publish_compression_child(parent_session_id=sid, child_session_id=child,
+                    source='dashboard', messages=compressed, require_compression_lease=False)
+                sid = child
+            else:
+                db.archive_and_compact(sid, compressed, tail_count=tail_count)
+            extra = turns(80 + epoch * 20, 20)
+            for msg in extra:
+                msg['content'] += ': ' + 'ordinary text ' * 150
+            extra = add_tool_steps(extra)
+            db.append_messages_batch(sid, extra)
+            fresh = all_history(db, sid)
+            expected.extend(fresh[-len(extra):])
+            if legacy:
+                db._execute_write(lambda conn: conn.execute('DELETE FROM display_compactions'))
+            after = all_history(db, 'chat')
+            assert [r['display_id'] for r in after] == [r['display_id'] for r in expected]
+            assert [r.get('display_content', r['content']).strip() for r in after] == [r.get('display_content', r['content']).strip() for r in expected]
+
+
+@pytest.mark.parametrize('rotate', [False, True])
+def test_real_compression_concurrent_live_tail_keeps_ids_and_cursor(homes, rotate):
+    with SessionDB(homes['default'] / 'state.db') as db:
+        db.create_session('chat', source='dashboard')
+        original = [{'role': msg['role'], 'content': msg['content'] + ': ' + 'ordinary text ' * 150} for msg in turns(0, 80)]
+        db.append_messages_batch('chat', original)
+        watermark = db.get_active_message_watermark('chat')
+        compressed, tail_count = compress_real(original)
+        concurrent = [{'role': msg['role'], 'content': msg['content']} for msg in turns(80, 3)]
+        db.append_messages_batch('chat', concurrent)
+        before = all_history(db, 'chat')
+        initial = db.get_history_display_page('chat', limit=4)
+        if rotate:
+            db.publish_compression_child(parent_session_id='chat', child_session_id='child',
+                source='dashboard', messages=compressed, require_compression_lease=False, watermark=watermark)
+        else:
+            db.archive_and_compact('chat', compressed, tail_count=tail_count, watermark=watermark)
+        after = all_history(db, 'chat')
+        assert [r['display_id'] for r in after] == [r['display_id'] for r in before]
+        assert [r.get('display_content', r['content']).strip() for r in after] == [r['content'].strip() for r in before]
+        older = all_history(db, 'chat', cursor=initial[2])
+        assert [r['display_id'] for r in older + initial[1]] == [r['display_id'] for r in before]
+
+
+def test_real_compressor_keeps_identical_occurrences_by_source_id(homes):
+    with SessionDB(homes['default'] / 'state.db') as db:
+        db.create_session('chat', source='dashboard')
+        original = [dict(role=role, content='same: ' + 'ordinary text ' * 150, timestamp=1234)
+                    for _ in range(80) for role in ('user', 'assistant')]
+        db.append_messages_batch('chat', original)
+        before = all_history(db, 'chat')
+        compressed, tail_count = compress_real(original)
+        db.archive_and_compact('chat', compressed, tail_count=tail_count)
+        after = all_history(db, 'chat')
+        assert [r['display_id'] for r in after] == [r['display_id'] for r in before]

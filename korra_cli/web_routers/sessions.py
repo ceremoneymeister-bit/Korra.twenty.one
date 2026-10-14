@@ -764,7 +764,7 @@ async def get_session_messages(
             if not include_history:
                 sid = db.resolve_resume_session_id(sid)
             if include_history:
-                from korra_state_history import HistoryCursorError, HistoryNotFoundError, HistoryUnavailableError
+                from korra_state_history import HistoryAmbiguousError, HistoryCursorError, HistoryNotFoundError, HistoryUnavailableError
 
                 page_limit = display_limit or 70
                 try:
@@ -775,6 +775,18 @@ async def get_session_messages(
                     return None
                 except HistoryCursorError as exc:
                     raise HTTPException(status_code=400, detail=str(exc)) from exc
+                except HistoryAmbiguousError as exc:
+                    if before_cursor is not None:
+                        raise HTTPException(status_code=409, detail=str(exc)) from exc
+                    # Imported/old copies without reliable provenance stay in
+                    # the established separate archive, never in a mixed feed.
+                    sid = db.resolve_resume_session_id(sid)
+                    rows, cursor, has_more = db.get_display_page(sid, limit=page_limit)
+                    return sid, page_limit, _light_tool_results(rows), {
+                        "include_history": False, "history_separate": True,
+                        "before_id": cursor, "has_more": has_more,
+                        "archived_before": db.has_history_before_live(sid),
+                    }
                 except HistoryUnavailableError as exc:
                     raise HTTPException(status_code=409, detail=str(exc)) from exc
                 return sid, page_limit, _light_tool_results(rows), {

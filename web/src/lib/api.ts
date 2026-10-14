@@ -795,6 +795,19 @@ export const api = {
       ),
       signal ? { signal } : undefined,
     ),
+  getSessionArchive: (
+    id: string,
+    profile: string,
+    signal: AbortSignal | undefined,
+    page: { limit: number; offset: number },
+  ) =>
+    fetchJSON<SessionMessagesResponse>(
+      appendProfileParam(
+        `/api/sessions/${encodeURIComponent(id)}/messages?archive=true&limit=${page.limit}&offset=${page.offset}`,
+        profile,
+      ),
+      signal ? { signal } : undefined,
+    ),
   /** «Отменить» под сообщением «Учёл…»: откат изменения, о котором оно сообщило. */
   undoLearningNotice: (
     sessionId: string,
@@ -3013,6 +3026,7 @@ export interface SessionMessagesResponse {
     /** Курсор следующей, более ранней страницы. */
     before_id?: number | null;
     include_history?: boolean;
+    history_separate?: boolean;
     next_cursor?: string | null;
     has_more?: boolean;
     /** Раньше живой истории есть сжатая часть, которую лента пока не показывает. */

@@ -3,6 +3,7 @@ import type { ChatMessage } from "@/lib/chat-types";
 export interface HistoryWindow {
   cursor: number | string | null;
   hasOlder: boolean;
+  separateArchive?: boolean;
 }
 
 export interface CachedChatHistory {
@@ -38,7 +39,7 @@ export class ChatHistoryCache {
   set(key: string, value: CachedChatHistory): void {
     const existing = this.entries.get(key)?.value;
     if (existing?.messages === value.messages && existing.history.cursor === value.history.cursor &&
-      existing.history.hasOlder === value.history.hasOlder) return;
+      existing.history.hasOlder === value.history.hasOlder && existing.history.separateArchive === value.history.separateArchive) return;
     this.delete(key);
     const bytes = JSON.stringify(value).length * 2;
     if (bytes > this.maxBytes) return;

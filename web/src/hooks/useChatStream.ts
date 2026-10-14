@@ -74,10 +74,10 @@ function historyPage(cursor: number | string) {
 
 const NO_OLDER: HistoryWindow = { cursor: null, hasOlder: false };
 
-function historyWindow(resp: { messages?: unknown; pagination?: SessionMessagesResponse["pagination"] }): HistoryWindow {
+function historyWindow(resp: { messages?: unknown; pagination?: SessionMessagesResponse["pagination"] }, separateArchive = false): HistoryWindow {
   const cursor = resp.pagination?.include_history ? resp.pagination.next_cursor ?? null : resp.pagination?.before_id ?? null;
   const hasOlder = cursor !== null && resp.pagination?.has_more === true;
-  return { cursor, hasOlder };
+  return { cursor, hasOlder, ...(resp.pagination?.history_separate || separateArchive ? { separateArchive: true } : {}) };
 }
 
 interface StreamState {
@@ -495,6 +495,10 @@ function reducer(state: StreamState, action: StreamAction): StreamState {
           approvals: [],
         };
       }
+      if (action.history?.separateArchive && !state.history.separateArchive) {
+        return { ...state, messages: mergeMessages([], action.messages, action.replay !== true),
+          history: action.history, isStreaming: action.streaming ?? false, error: null };
+      }
       // Освежение приносит только последнюю страницу. Догруженные раньше
       // более ранние сообщения остаются над ней: человек их листал.
       if (action.messages.some(message => message.historyIdentity)) {
@@ -784,6 +788,7 @@ export interface UseChatStreamReturn {
 }
 
 export interface OlderHistoryState {
+  separateArchive?: boolean;
   hasOlder: boolean;
   loading: boolean;
   failed: boolean;
@@ -826,6 +831,7 @@ export function sessionMessagesToChat(
   const result: ChatMessage[] = [];
   /** Незакрытый ход агента: в него дописываются вызовы и текст. */
   let turn: ChatMessage | null = null;
+  let turnOrigin: string | undefined;
 
   /** `complete` — ход закрыл ответ агента без вызовов. Иначе в истории лишь
    *  его промежуточный снимок («Сейчас проверю» и вызов инструмента): ход
@@ -857,7 +863,12 @@ export function sessionMessagesToChat(
       ...(message.display_id ? { historyIdentity: message.display_id, readOnly: message.read_only === true,
         sourceSessionId: message.source_session_id } : {}),
     };
-    if (turn && (turn.sourceSessionId !== history.sourceSessionId || Boolean(turn.readOnly) !== Boolean(history.readOnly))) closeTurn();
+    if (turn && (turnOrigin && message.origin_session_id
+      ? turnOrigin !== message.origin_session_id
+      : turn.sourceSessionId !== history.sourceSessionId || Boolean(turn.readOnly) !== Boolean(history.readOnly))) closeTurn();
+    // A protected head and the archived remainder still form one original
+    // agent turn. Any archived part keeps the composed bubble read-only.
+    if (turn && history.readOnly) turn.readOnly = true;
 
     if (message.role === "user") {
       closeTurn();
@@ -904,6 +915,7 @@ export function sessionMessagesToChat(
     }
 
     if (!turn) {
+      turnOrigin = message.origin_session_id;
       turn = {
         id,
         role: "assistant",
@@ -1249,7 +1261,7 @@ export function useChatStream(
         visited.add(cursor);
         resp = await api.getSessionMessages(sessionId, profile || "default", controller.signal, historyPage(cursor));
         if (!current()) return;
-        const window = historyWindow(resp);
+        const window = historyWindow(resp, loadedWindow.separateArchive);
         if (window.cursor !== null && (window.cursor === cursor || (typeof cursor === "number" && typeof window.cursor === "number" && window.cursor >= cursor))) throw new Error("История не продолжила предыдущую страницу.");
         const page = sessionMessagesToChat(sessionId, resp.messages as HistoryMessage[]);
         changed ||= changedHistory(previous, page);
@@ -1483,7 +1495,7 @@ export function useChatStream(
         sessionId: historySessionId,
         cursor: historyCursor,
         messages: sessionMessagesToChat(historySessionId, resp.messages as HistoryMessage[]),
-        history: historyWindow(resp),
+        history: historyWindow(resp, stateRef.current.history.separateArchive),
       });
       setOlderStatus("idle");
     } catch {
@@ -2171,6 +2183,7 @@ export function useChatStream(
     approvals: state.approvals,
     older: {
       hasOlder: state.history.hasOlder,
+      ...(state.history.separateArchive ? { separateArchive: true } : {}),
       loading: olderStatus === "loading",
       failed: olderStatus === "failed",
     },
