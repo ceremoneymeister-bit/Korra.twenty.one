@@ -417,7 +417,7 @@ def _is_sqlite_database(path: Path) -> bool:
         return False
 
 
-def _should_skip_backup_file(abs_path: Path, rel_path: Path, out_path: Path) -> bool:
+def _should_skip_backup_file(abs_path: Path, rel_path: Path, out_path: Optional[Path]) -> bool:
     """Return True when a candidate file should not be written to a backup zip."""
     if _should_exclude(rel_path):
         return True
@@ -429,6 +429,8 @@ def _should_skip_backup_file(abs_path: Path, rel_path: Path, out_path: Path) -> 
     if _is_runtime_ipc_file(abs_path):
         return True
 
+    if out_path is None:
+        return False
     try:
         return abs_path.resolve() == out_path.resolve()
     except (OSError, ValueError):
@@ -894,6 +896,112 @@ def run_backup(args) -> None:
         raise SystemExit(2) from exc
 
 
+def _scan_backup_files(
+    hermes_root: Path, out_path: Optional[Path] = None
+) -> tuple[list[tuple[Path, Path]], set[str]]:
+    """Walk *hermes_root* and return ``([(absolute, relative)], skipped_dirs)``."""
+    files_to_add: list[tuple[Path, Path]] = []
+    skipped_dirs: set[str] = set()
+
+    for dirpath, dirnames, filenames in os.walk(hermes_root, followlinks=False):
+        dp = Path(dirpath)
+        rel_dir = dp.relative_to(hermes_root)
+
+        # Prune excluded directories in-place so os.walk doesn't descend
+        # ``hermes-agent`` is only pruned at the root level; nested dirs
+        # with the same name (e.g. in skills/) must be preserved.
+        is_root = rel_dir == Path(".")
+        orig_dirnames = dirnames[:]
+        dirnames[:] = [
+            d for d in dirnames
+            if d not in _EXCLUDED_DIRS or (d == "hermes-agent" and not is_root)
+        ]
+        for removed in set(orig_dirnames) - set(dirnames):
+            skipped_dirs.add(str(rel_dir / removed))
+
+        for fname in filenames:
+            fpath = dp / fname
+            rel = fpath.relative_to(hermes_root)
+
+            if _should_skip_backup_file(fpath, rel, out_path):
+                continue
+
+            files_to_add.append((fpath, rel))
+    return files_to_add, skipped_dirs
+
+
+def _scan_external_files() -> tuple[list[tuple[Path, str]], list[str]]:
+    """External memory-provider state (e.g. ~/.honcho, ~/.hindsight).
+
+    It lives outside HERMES_HOME, so the walk above never sees it. Ask the
+    active provider for its declared paths and stage them under the reserved
+    ``_external/`` arc prefix, encoded relative to the user's home dir. Only
+    paths under home are captured (security + portability); anything else is
+    skipped with a note.
+    """
+    home_dir = Path.home().resolve()
+    external_to_add: list[tuple[Path, str]] = []  # (absolute, arcname)
+    skipped_external: list[str] = []
+    for base in _collect_memory_provider_external_paths():
+        try:
+            base_resolved = base.resolve()
+            base_resolved.relative_to(home_dir)
+        except (ValueError, OSError):
+            skipped_external.append(str(base))
+            continue
+        for fpath in _iter_external_files(base):
+            try:
+                rel_to_home = fpath.resolve().relative_to(home_dir)
+            except (ValueError, OSError):
+                continue
+            arcname = _EXTERNAL_PREFIX + rel_to_home.as_posix()
+            external_to_add.append((fpath, arcname))
+    return external_to_add, skipped_external
+
+
+def _write_backup_member(
+    zf: zipfile.ZipFile,
+    abs_path: Path,
+    arcname: str,
+    snapshot_dir: Path,
+    errors: list[str],
+    fts_notes: list[str],
+) -> int:
+    """Add one file to *zf*; return its size, or 0 after recording an error.
+
+    SQLite databases are written from a consistent snapshot taken in
+    *snapshot_dir*, which must be on a filesystem that can hold them.
+    """
+    try:
+        if _is_sqlite_database(abs_path):
+            with tempfile.NamedTemporaryFile(
+                suffix=".db", delete=False, dir=str(snapshot_dir)
+            ) as tmp:
+                tmp_db = Path(tmp.name)
+            try:
+                if not _safe_copy_db(abs_path, tmp_db):
+                    errors.append(f"  {arcname}: SQLite safe copy failed")
+                    return 0
+                # K21-039: импорт проверяет каждую базу из архива своим
+                # `quick_check`, поэтому копию с повреждённым обратным
+                # индексом FTS5 отдавать нельзя — восстановление из
+                # такого архива требовало ручной пересборки. Снимок ещё
+                # никому не принадлежит, так что индекс чинится прямо в
+                # нём, а боевая база остаётся нетронутой.
+                repaired = _repair_snapshot_fts(tmp_db, Path(arcname))
+                if repaired is not None:
+                    fts_notes.append(repaired)
+                zf.write(tmp_db, arcname=arcname)
+                return tmp_db.stat().st_size
+            finally:
+                tmp_db.unlink(missing_ok=True)
+        zf.write(abs_path, arcname=arcname)
+        return abs_path.stat().st_size
+    except (PermissionError, OSError, ValueError) as exc:
+        errors.append(f"  {arcname}: {exc}")
+        return 0
+
+
 def _run_backup_locked(args, hermes_root: Path) -> None:
     """Write a full backup while the cross-process backup slot is held."""
 
@@ -927,57 +1035,8 @@ def _run_backup_locked(args, hermes_root: Path) -> None:
     scan_started = time.monotonic()
     logger.info("backup phase=scan status=started")
     print(f"Проверяю файлы в {display_hermes_home()}…")
-    files_to_add: list[tuple[Path, Path]] = []  # (absolute, relative)
-    skipped_dirs = set()
-
-    for dirpath, dirnames, filenames in os.walk(hermes_root, followlinks=False):
-        dp = Path(dirpath)
-        rel_dir = dp.relative_to(hermes_root)
-
-        # Prune excluded directories in-place so os.walk doesn't descend
-        # ``hermes-agent`` is only pruned at the root level; nested dirs
-        # with the same name (e.g. in skills/) must be preserved.
-        is_root = rel_dir == Path(".")
-        orig_dirnames = dirnames[:]
-        dirnames[:] = [
-            d for d in dirnames
-            if d not in _EXCLUDED_DIRS or (d == "hermes-agent" and not is_root)
-        ]
-        for removed in set(orig_dirnames) - set(dirnames):
-            skipped_dirs.add(str(rel_dir / removed))
-
-        for fname in filenames:
-            fpath = dp / fname
-            rel = fpath.relative_to(hermes_root)
-
-            if _should_skip_backup_file(fpath, rel, out_path):
-                continue
-
-            files_to_add.append((fpath, rel))
-
-    # External memory-provider state (e.g. ~/.honcho, ~/.hindsight) lives
-    # outside HERMES_HOME, so the walk above never sees it. Ask the active
-    # provider for its declared paths and stage them under the reserved
-    # ``_external/`` arc prefix, encoded relative to the user's home dir.
-    # Only paths under home are captured (security + portability); anything
-    # else is skipped with a note.
-    home_dir = Path.home().resolve()
-    external_to_add: list[tuple[Path, str]] = []  # (absolute, arcname)
-    skipped_external: list[str] = []
-    for base in _collect_memory_provider_external_paths():
-        try:
-            base_resolved = base.resolve()
-            base_resolved.relative_to(home_dir)
-        except (ValueError, OSError):
-            skipped_external.append(str(base))
-            continue
-        for fpath in _iter_external_files(base):
-            try:
-                rel_to_home = fpath.resolve().relative_to(home_dir)
-            except (ValueError, OSError):
-                continue
-            arcname = _EXTERNAL_PREFIX + rel_to_home.as_posix()
-            external_to_add.append((fpath, arcname))
+    files_to_add, skipped_dirs = _scan_backup_files(hermes_root, out_path)
+    external_to_add, skipped_external = _scan_external_files()
 
     if not files_to_add and not external_to_add:
         logger.info(
@@ -1007,40 +1066,9 @@ def _run_backup_locked(args, hermes_root: Path) -> None:
         strict_timestamps=False,
     ) as zf:
         for i, (abs_path, rel_path) in enumerate(files_to_add, 1):
-            try:
-                # Safe copy for SQLite databases (handles WAL mode)
-                if _is_sqlite_database(abs_path):
-                    # Stage the snapshot alongside the output zip so that the
-                    # temp file lives on the same filesystem.  The system
-                    # default (/tmp) may be a small tmpfs that cannot hold
-                    # large databases, causing silent backup incompleteness.
-                    with tempfile.NamedTemporaryFile(
-                        suffix=".db", delete=False, dir=str(out_path.parent)
-                    ) as tmp:
-                        tmp_db = Path(tmp.name)
-                    if _safe_copy_db(abs_path, tmp_db):
-                        # K21-039: импорт проверяет каждую базу из архива своим
-                        # `quick_check`, поэтому копию с повреждённым обратным
-                        # индексом FTS5 отдавать нельзя — восстановление из
-                        # такого архива требовало ручной пересборки. Снимок ещё
-                        # никому не принадлежит, так что индекс чинится прямо в
-                        # нём, а боевая база остаётся нетронутой.
-                        repaired = _repair_snapshot_fts(tmp_db, rel_path)
-                        if repaired is not None:
-                            fts_notes.append(repaired)
-                        zf.write(tmp_db, arcname=str(rel_path))
-                        total_bytes += tmp_db.stat().st_size
-                        tmp_db.unlink(missing_ok=True)
-                    else:
-                        tmp_db.unlink(missing_ok=True)
-                        errors.append(f"  {rel_path}: SQLite safe copy failed")
-                        continue
-                else:
-                    zf.write(abs_path, arcname=str(rel_path))
-                    total_bytes += abs_path.stat().st_size
-            except (PermissionError, OSError, ValueError) as exc:
-                errors.append(f"  {rel_path}: {exc}")
-                continue
+            total_bytes += _write_backup_member(
+                zf, abs_path, str(rel_path), out_path.parent, errors, fts_notes
+            )
 
             # Progress every 500 files
             if i % 500 == 0:
@@ -1055,12 +1083,9 @@ def _run_backup_locked(args, hermes_root: Path) -> None:
         # prefix. These never include ``.db`` files in practice (config/env
         # blobs), so a straight zf.write is fine.
         for abs_path, arcname in external_to_add:
-            try:
-                zf.write(abs_path, arcname=arcname)
-                total_bytes += abs_path.stat().st_size
-            except (PermissionError, OSError, ValueError) as exc:
-                errors.append(f"  {arcname}: {exc}")
-                continue
+            total_bytes += _write_backup_member(
+                zf, abs_path, arcname, out_path.parent, errors, fts_notes
+            )
 
     elapsed = time.monotonic() - t0
     zip_size = out_path.stat().st_size
