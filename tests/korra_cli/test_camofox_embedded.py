@@ -573,6 +573,24 @@ def test_a_dead_server_does_not_stop_the_deletion(install, data):
     assert not (data / "profiles" / "gone").exists()
 
 
+def test_profile_login_setting_reads_only_the_requested_profile(data):
+    from korra_constants import get_hermes_home
+
+    (data / "config.yaml").write_text("browser:\n  camofox:\n    user_id: root-browser\n")
+    profile = data / "profiles" / "other"
+    profile.mkdir(parents=True)
+    config = profile / "config.yaml"
+    config.write_text("browser:\n  camofox:\n    user_id: profile-browser\n")
+    keys = ("browser", "camofox", "user_id")
+    assert emb._profile_setting(profile, "CAMOFOX_USER_ID", keys) == "profile-browser"
+    (profile / ".env").write_text('CAMOFOX_USER_ID="env-browser"\n')
+    assert emb._profile_setting(profile, "CAMOFOX_USER_ID", keys) == "env-browser"
+    (profile / ".env").unlink()
+    config.unlink()
+    assert emb._profile_setting(profile, "CAMOFOX_USER_ID", keys) == ""
+    assert get_hermes_home() == data
+
+
 def test_an_external_server_and_a_shared_identity_are_left_alone(install, data, monkeypatch):
     (data / "profiles" / "ext").mkdir(parents=True)
     (data / "profiles" / "ext" / ".env").write_text('CAMOFOX_URL="http://camofox.example:9377"\n')
