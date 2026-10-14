@@ -45,7 +45,8 @@ def test_camoufox_archive_is_pinned_and_verified() -> None:
     block = _block()
     assert re.search(r"ARG CAMOUFOX_RELEASE=152\.0\.4-beta\.30\n", block)
     assert re.search(r"ARG CAMOUFOX_X86_64_SHA256=[0-9a-f]{64}\n", block)
-    assert "sha256sum -c -" in block
+    assert "sha256sum -c /tmp/camoufox.sha256" in block
+    assert "| sha256sum" not in block  # hadolint DL4006: без pipe в RUN
     assert "aarch64" not in block and 'uname -m' in block  # только amd64, остальное — понятная ошибка
 
 

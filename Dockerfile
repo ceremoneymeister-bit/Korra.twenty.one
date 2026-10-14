@@ -408,7 +408,9 @@ RUN set -eu; \
     zip="camoufox-${CAMOUFOX_RELEASE}-lin.x86_64.zip"; \
     curl -fsSL --retry 5 --retry-all-errors --connect-timeout 20 -o "/tmp/${zip}" \
         "https://github.com/daijro/camoufox/releases/download/v${CAMOUFOX_RELEASE}/${zip}"; \
-    printf '%s  %s\n' "${CAMOUFOX_X86_64_SHA256}" "/tmp/${zip}" | sha256sum -c -; \
+    printf '%s  %s\n' "${CAMOUFOX_X86_64_SHA256}" "/tmp/${zip}" > /tmp/camoufox.sha256; \
+    sha256sum -c /tmp/camoufox.sha256; \
+    rm -f /tmp/camoufox.sha256; \
     mkdir -p /opt/camofox/browser; \
     unzip -q "/tmp/${zip}" -d /opt/camofox/browser; \
     rm -f "/tmp/${zip}"; \
@@ -416,7 +418,9 @@ RUN set -eu; \
     printf '{"version": "%s", "release": "%s"}' "${CAMOUFOX_RELEASE%%-*}" "${CAMOUFOX_RELEASE#*-}" \
         > /opt/camofox/browser/version.json; \
     curl -fsSL --retry 5 --retry-all-errors --connect-timeout 20 -o /tmp/ublock.xpi "${UBLOCK_XPI_URL}"; \
-    printf '%s  %s\n' "${UBLOCK_XPI_SHA256}" /tmp/ublock.xpi | sha256sum -c -; \
+    printf '%s  %s\n' "${UBLOCK_XPI_SHA256}" /tmp/ublock.xpi > /tmp/ublock.sha256; \
+    sha256sum -c /tmp/ublock.sha256; \
+    rm -f /tmp/ublock.sha256; \
     mkdir -p /opt/camofox/browser/addons/UBO; \
     unzip -q /tmp/ublock.xpi -d /opt/camofox/browser/addons/UBO; \
     rm -f /tmp/ublock.xpi; \
