@@ -670,7 +670,10 @@ def build_parser(parent_subparsers: argparse._SubParsersAction) -> argparse.Argu
     )
     p_rework.add_argument("task_id")
     p_rework.add_argument("--reason", required=True, help='Что исправить')
-    p_rework.add_argument("--version", type=int, required=True, help='submitted_version из show --json')
+    # Не «--version»: общий флаг версии Korra перехватил бы его до разбора подкоманды
+    # (приёмка 0.21.19 на sandbox21, A19-01).
+    p_rework.add_argument("--card-version", dest="card_version", type=int, required=True,
+                          help='submitted_version из show --json')
     p_rework.add_argument("--request-id", default=None, help='Одинаковый ключ при повторе запроса')
 
     p_reopen_review = sub.add_parser(
@@ -2509,7 +2512,7 @@ def _cmd_return_for_rework(args: argparse.Namespace) -> int:
     with kb.connect_closing() as conn:
         outcome = kb.return_for_rework(
             conn, args.task_id, comment=str(kb.redact_review_value(args.reason)),
-            author=_profile_author(), version=args.version, request_id=args.request_id,
+            author=_profile_author(), version=args.card_version, request_id=args.request_id,
         )
     if not outcome["ok"]:
         print(f"Не удалось вернуть {args.task_id}: {outcome['reason']}", file=sys.stderr)

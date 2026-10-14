@@ -1,6 +1,9 @@
 """K21-335: one card survives owner rework, with attempt and graph fences."""
 from pathlib import Path
 import json
+import os
+import subprocess
+import sys
 
 import pytest
 
@@ -96,7 +99,7 @@ def test_tool_and_cli_return_the_same_card(board):
     with kb.connect_closing() as conn:
         cli_tid, _ = finished(conn)
         cli_version = kb.submitted_version(conn, cli_tid)
-    command = f'return-for-rework {cli_tid} --reason "fix via CLI" --version {cli_version} --request-id cli-1'
+    command = f'return-for-rework {cli_tid} --reason "fix via CLI" --card-version {cli_version} --request-id cli-1'
     assert 'Возвращено' in run_slash(command)
     assert 'Возвращено' in run_slash(command)
     with kb.connect_closing() as conn:
@@ -187,3 +190,21 @@ def test_rework_waits_for_its_parent_and_keeps_exact_request(board, monkeypatch)
         assert not kb.claim_task(conn, tid)
         assert kb.complete_task(conn, parent, result='new parent result')
         assert kb.pending_exact_dispatch_ids(conn) == [tid]
+
+
+def test_rework_through_the_real_korra_command(board):
+    """A19-01: «korra kanban … return-for-rework» доходит до подкоманды, а не печатает версию Korra."""
+    with kb.connect_closing() as conn:
+        tid, _ = finished(conn)
+        version = kb.submitted_version(conn, tid)
+    root = Path(__file__).resolve().parents[2]
+    proc = subprocess.run(
+        [sys.executable, '-m', 'korra_cli.main', 'kanban', 'return-for-rework', tid,
+         '--reason', 'исправить по CLI', '--card-version', str(version), '--request-id', 'cli-real'],
+        cwd=root, env={**os.environ, 'HERMES_HOME': str(board)}, capture_output=True, text=True, timeout=120,
+    )
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    assert 'Возвращено' in proc.stdout, proc.stdout[-2000:]
+    with kb.connect_closing() as conn:
+        assert kb.get_task(conn, tid).status == 'ready'
+        assert [c.body for c in kb.list_comments(conn, tid)] == ['исправить по CLI']
