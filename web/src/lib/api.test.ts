@@ -13,6 +13,8 @@ vi.mock("./dashboard-auth-reload", () => ({
   clearDashboardTokenReloadAttempt: reloadMocks.clearDashboardTokenReloadAttempt,
 }));
 
+import { chatHistoryCache, chatHistoryKey, CHAT_HISTORY_REMOVED } from "./chat-history-cache";
+
 const SESSION_HEADER = "X-Hermes-Session-Token";
 
 beforeEach(() => {
@@ -433,4 +435,42 @@ it("K21-203: unified history encodes an opaque cursor and keeps the profile boun
   expect(url.searchParams.get("before_cursor")).toBe(cursor);
   expect(url.searchParams.get("before_id")).toBeNull();
   expect(url.searchParams.get("profile")).toBe("lawyer");
+});
+
+
+describe("session deletion cache scope (T4-05)", () => {
+  beforeEach(() => chatHistoryCache.clear());
+  afterEach(() => chatHistoryCache.clear());
+
+  const cache = (profile: string, id: string, base = "") => {
+    const key = chatHistoryKey(base, profile, id);
+    chatHistoryCache.set(key, { messages: [], history: { cursor: null, hasOlder: false } });
+    return key;
+  };
+
+  it("bulk deletion invalidates every requested ID, including already absent rows, in its own scope", async () => {
+    const removed = [cache("worker", "a"), cache("worker", "b")];
+    const kept = [cache("worker", "c"), cache("default", "a"), cache("worker", "a", "/other")];
+    const events: string[] = [];
+    const listener = (event: Event) => events.push((event as CustomEvent<string>).detail);
+    window.addEventListener(CHAT_HISTORY_REMOVED, listener);
+    try {
+      vi.stubGlobal("fetch", jsonFetchMock({ ok: true, deleted: 0 }));
+      await api.bulkDeleteSessions(["a", "b"], "worker");
+      for (const key of removed) expect(chatHistoryCache.get(key)).toBeUndefined();
+      for (const key of kept) expect(chatHistoryCache.get(key)).toBeDefined();
+      expect(events).toEqual(removed);
+    } finally {
+      window.removeEventListener(CHAT_HISTORY_REMOVED, listener);
+    }
+  });
+
+  it.each(["refused", "offline"])("keeps the cache when bulk deletion is %s", async outcome => {
+    const key = cache("worker", "a");
+    vi.stubGlobal("fetch", outcome === "offline"
+      ? vi.fn(async () => { throw new Error("Network unavailable"); })
+      : jsonFetchMock({ ok: false, deleted: 0 }));
+    await api.bulkDeleteSessions(["a"], "worker").catch(() => {});
+    expect(chatHistoryCache.get(key)).toBeDefined();
+  });
 });

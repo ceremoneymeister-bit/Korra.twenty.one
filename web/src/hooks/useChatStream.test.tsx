@@ -1814,18 +1814,37 @@ describe("K21-207 cache reconciliation safety", () => {
   const transcript = (id: string, text = "Saved") => ({ session_id: id, messages: [
     { id: 1, role: "user" as const, content: text }, { id: 2, role: "assistant" as const, content: "Answer" },
   ] });
-  it("a successful DELETE invalidates the cached window and its pending reader", async () => {
+  it.each(["single", "bulk"])("a successful %s deletion invalidates the cached window and its pending reader", async mode => {
     const history = vi.spyOn(api, "getSessionMessages").mockResolvedValue(transcript("cache-deleted"));
     await act(async () => { await current.loadSession("cache-deleted"); });
     let release!: (value: ReturnType<typeof transcript>) => void;
     history.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
     let pending!: Promise<void>;
     await act(async () => { pending = current.loadSession("cache-deleted", { background: true }); });
-    await act(async () => { await api.deleteSession("cache-deleted", "default"); });
+    await act(async () => {
+      if (mode === "bulk") await api.bulkDeleteSessions(["cache-deleted"], "default");
+      else await api.deleteSession("cache-deleted", "default");
+    });
     await act(async () => { release(transcript("cache-deleted", "Late deleted snapshot")); await pending; });
     expect(current.sessionId).toBeNull();
     expect(current.messages).toEqual([]);
     expect(chatHistoryCache.get(JSON.stringify(["", "default", "cache-deleted"]))).toBeUndefined();
+  });
+  it.each(["single", "bulk"])("returning after %s deletion stays empty when REST is unavailable", async mode => {
+    const history = vi.spyOn(api, "getSessionMessages").mockResolvedValue(transcript("cache-deleted-return"));
+    await act(async () => { await current.loadSession("cache-deleted-return"); });
+    await act(async () => root.unmount()); // Navigate to Sessions before deleting.
+    root = createRoot(container);
+    if (mode === "bulk") await api.bulkDeleteSessions(["cache-deleted-return"], "default");
+    else await api.deleteSession("cache-deleted-return", "default");
+    expect(chatHistoryCache.get(JSON.stringify(["", "default", "cache-deleted-return"]))).toBeUndefined();
+    let reject!: (error: Error) => void;
+    history.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
+    await act(async () => root.render(<Probe onValue={value => { current = value; }} />));
+    expect(current.messages).toEqual([]);
+    await act(async () => { reject(new Error("Network unavailable")); });
+    expect(current.messages).toEqual([]);
+    expect(current.error).toBeTruthy();
   });
   it("a server 404 on a cached return forgets the window and opens a real conversation", async () => {
     const history = vi.spyOn(api, "getSessionMessages").mockResolvedValue(transcript("cache-gone"));

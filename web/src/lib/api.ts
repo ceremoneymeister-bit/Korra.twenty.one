@@ -840,12 +840,17 @@ export const api = {
         method: "DELETE",
       },
     ),
-  bulkDeleteSessions: (ids: string[], profile = getManagementProfile()) =>
-    fetchJSON<{ ok: boolean; deleted: number }>("/api/sessions/bulk-delete", {
+  bulkDeleteSessions: async (ids: string[], profile = getManagementProfile()) => {
+    const result = await fetchJSON<{ ok: boolean; deleted: number }>("/api/sessions/bulk-delete", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ids, profile: profile || undefined }),
-    }),
+    });
+    if (result.ok) {
+      for (const id of ids) forgetCachedChat(chatHistoryKey(HERMES_BASE_PATH, profile, id));
+    }
+    return result;
+  },
   renameSession: (id: string, title: string, profile = getManagementProfile()) =>
     fetchJSON<{ ok: boolean; title: string }>(
       `/api/sessions/${encodeURIComponent(id)}`,
