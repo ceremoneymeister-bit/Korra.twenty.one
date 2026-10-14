@@ -109,18 +109,28 @@ _EXCLUDED_DIRS = {
     ".ruff_cache",
 }
 
+# SQLite sidecar files — the backup takes a consistent snapshot of every SQLite
+# database via ``sqlite3.backup()``, so shipping the live WAL / shared-memory /
+# rollback-journal alongside would pair a fresh snapshot with stale sidecar
+# state and produce a torn restore on the next open. They're transient and
+# regenerated on first connection anyway.
+_SQLITE_SIDECAR_SUFFIXES = (
+    ".db-wal",
+    ".db-shm",
+    ".db-journal",
+    ".sqlite-wal",
+    ".sqlite-shm",
+    ".sqlite-journal",
+    ".sqlite3-wal",
+    ".sqlite3-shm",
+    ".sqlite3-journal",
+)
+
 # File-name suffixes to skip
 _EXCLUDED_SUFFIXES = (
     ".pyc",
     ".pyo",
-    # SQLite sidecar files — the backup takes a consistent snapshot of ``*.db``
-    # via ``sqlite3.backup()``, so shipping the live WAL / shared-memory /
-    # rollback-journal alongside would pair a fresh snapshot with stale sidecar
-    # state and produce a torn restore on the next open. They're transient and
-    # regenerated on first connection anyway.
-    ".db-wal",
-    ".db-shm",
-    ".db-journal",
+    *_SQLITE_SIDECAR_SUFFIXES,
 )
 
 # File names to skip (runtime state that's meaningless on another machine)
@@ -381,6 +391,30 @@ def _is_runtime_ipc_file(path: Path) -> bool:
         # its existing error path, rather than silently treating them as IPC.
         return False
     return stat.S_ISSOCK(mode) or stat.S_ISFIFO(mode)
+
+
+_SQLITE_SUFFIXES = (".db", ".sqlite", ".sqlite3")
+_SQLITE_MAGIC = b"SQLite format 3\x00"
+
+
+def _is_sqlite_database(path: Path) -> bool:
+    """True when *path* must be snapshotted through the SQLite backup API.
+
+    ``*.db`` always goes through ``_safe_copy_db`` (a zeroed or broken one must
+    fail loudly, not be copied byte-for-byte). ``*.sqlite``/``*.sqlite3`` are
+    taken only with the SQLite header, so an unrelated file with that suffix is
+    archived as an ordinary file.
+    """
+    suffix = path.suffix.lower()
+    if suffix == ".db":
+        return True
+    if suffix not in _SQLITE_SUFFIXES:
+        return False
+    try:
+        with path.open("rb") as stream:
+            return stream.read(len(_SQLITE_MAGIC)) == _SQLITE_MAGIC
+    except OSError:
+        return False
 
 
 def _should_skip_backup_file(abs_path: Path, rel_path: Path, out_path: Path) -> bool:
@@ -969,12 +1003,13 @@ def _run_backup_locked(args, hermes_root: Path) -> None:
     t0 = time.monotonic()
 
     with _atomic_output_path(out_path) as archive_path, zipfile.ZipFile(
-        archive_path, "w", zipfile.ZIP_DEFLATED, compresslevel=6
+        archive_path, "w", zipfile.ZIP_DEFLATED, compresslevel=6,
+        strict_timestamps=False,
     ) as zf:
         for i, (abs_path, rel_path) in enumerate(files_to_add, 1):
             try:
                 # Safe copy for SQLite databases (handles WAL mode)
-                if abs_path.suffix == ".db":
+                if _is_sqlite_database(abs_path):
                     # Stage the snapshot alongside the output zip so that the
                     # temp file lives on the same filesystem.  The system
                     # default (/tmp) may be a small tmpfs that cannot hold
@@ -1511,7 +1546,7 @@ def _import_archive_plan(zf, root, home, *, same_host_restore=False):
                     or relative.name in _IMPORT_IDENTITY_NAMES or target.name in _IMPORT_IDENTITY_NAMES)
         skipped = (relative.name in _IMPORT_SKIP_NAMES or target.name in _IMPORT_SKIP_NAMES
                    or (relative.name.startswith("gateway.loop-tick.") and relative.name.endswith(".sock"))
-                   or relative.name.endswith((".db-wal", ".db-shm", ".db-journal"))
+                   or relative.name.endswith(_SQLITE_SIDECAR_SUFFIXES)
                    or (not same_host_restore and identity))
         # Locks never transfer, even in explicit same-host recovery.
         skipped = skipped or relative.name == ".install_id.lock"
@@ -2532,11 +2567,12 @@ def _write_full_zip_backup_locked(out_path: Path, hermes_root: Path) -> Optional
     archive_started = time.monotonic()
     try:
         with _atomic_output_path(out_path) as archive_path, zipfile.ZipFile(
-            archive_path, "w", zipfile.ZIP_DEFLATED, compresslevel=6
+            archive_path, "w", zipfile.ZIP_DEFLATED, compresslevel=6,
+            strict_timestamps=False,
         ) as zf:
             for index, (abs_path, rel_path) in enumerate(files_to_add, 1):
                 try:
-                    if abs_path.suffix == ".db":
+                    if _is_sqlite_database(abs_path):
                         # Stage the snapshot alongside the output zip so that the
                         # temp file lives on the same filesystem.  The system
                         # default (/tmp) may be a small tmpfs that cannot hold
