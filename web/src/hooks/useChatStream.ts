@@ -84,6 +84,20 @@ interface StreamState {
   approvals: ChatApprovalEntry[];
 }
 
+/** Only stable snapshots and departure need a full size estimate. Streaming
+ * keeps immutable state references; chunks must not serialize the old prefix. */
+function rememberHistory(state: StreamState): void {
+  if (!state.cacheKey) return;
+  if (state.error || state.messages.length === 0) {
+    chatHistoryCache.delete(state.cacheKey);
+    return;
+  }
+  const cached = chatHistoryCache.get(state.cacheKey);
+  if (cached?.messages === state.messages && cached.history === state.history) return;
+  if (state.messages.some(message => message.delivery === "failed")) chatHistoryCache.delete(state.cacheKey);
+  else chatHistoryCache.set(state.cacheKey, { messages: state.messages, history: state.history });
+}
+
 type StreamAction =
   | { type: "SEND_USER"; userMsg: ChatMessage; assistantMsg: ChatMessage; streaming?: boolean }
   | { type: "RETRY_USER"; userMsg: ChatMessage; assistantMsg: ChatMessage }
@@ -463,6 +477,13 @@ function reducer(state: StreamState, action: StreamAction): StreamState {
       // Освежение приносит только последнюю страницу. Догруженные раньше
       // более ранние сообщения остаются над ней: человек их листал.
       const firstId = action.messages.find(message => message.historyId !== undefined)?.historyId;
+      const lastShown = state.messages.reduce((last, message) => Math.max(last, message.historyId ?? 0), 0);
+      if (firstId !== undefined && lastShown && firstId > lastShown) {
+        // Bridging ended without reaching the old live rows (e.g. in-place
+        // compaction). Their archive must not be silently retained as live.
+        return { ...state, messages: mergeMessages(state.messages, action.messages, action.replay !== true),
+          history: action.history ?? NO_OLDER, isStreaming: action.streaming ?? false, error: null };
+      }
       let kept = 0;
       if (firstId !== undefined) {
         while (kept < state.messages.length && (state.messages[kept]!.historyId ?? Infinity) < firstId) kept += 1;
@@ -931,10 +952,16 @@ export function useChatStream(
   const scopeRef = useRef(selectionKey);
   useLayoutEffect(() => {
     stateRef.current = state;
-    if (!state.cacheKey) return;
-    if (state.error || state.messages.length === 0 || state.messages.some(message => message.delivery === "failed")) chatHistoryCache.delete(state.cacheKey);
-    else chatHistoryCache.set(state.cacheKey, { messages: state.messages, history: state.history });
+    // The ref also covers replay of an already completed run: that reader is
+    // busy even though its public isStreaming flag is false.
+    if (!streamingRef.current) rememberHistory(state);
   }, [state]);
+  const rememberCurrent = useCallback(() => {
+    const current = stateRef.current;
+    // RESET/DELETE have already cleared the selection before teardown. Never
+    // let their old render refill a deleted cache entry during unmount.
+    if (current.sessionId === readChatSelection(selectionKey)) rememberHistory(current);
+  }, [selectionKey]);
   const [isLoading, setIsLoading] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
@@ -990,12 +1017,13 @@ export function useChatStream(
     setIsLoading(false);
     dispatch({ type: "RESET" });
     return () => {
+      rememberCurrent();
       activeStreamIdRef.current = null;
       abortControllerRef.current?.abort();
       olderRequestRef.current?.abort();
       olderRequestRef.current = null;
     };
-  }, [selectionKey]);
+  }, [selectionKey, rememberCurrent]);
 
   useEffect(() => {
     const selection = readChatSelection(selectionKey);
@@ -1059,6 +1087,7 @@ export function useChatStream(
     // A background callback for a chat left meanwhile must not navigate back.
     if (options?.background && !sameSession && (stateRef.current.sessionId || readChatSelection(selectionKey) === null)) return;
     if (background && backgroundLoadRef.current && sameSession) return;
+    rememberCurrent();
     if (!options?.background) openIntentRef.current += 1;
     setIsLoading(!background);
     writeChatSelection(selectionKey, sessionId);
@@ -1166,6 +1195,7 @@ export function useChatStream(
       if (missing && !knownHistory && loadChatOutboxRecords(profile ?? "", sessionId).length > 0) missing = false;
       if (missing) {
         chatHistoryCache.delete(cacheKey);
+        forgetChatSelection(selectionKey);
         dispatch({ type: "RESET" });
         window.clearTimeout(historyTimer);
         // Every way of opening a chat — a pick, a link from the notification,
@@ -1353,9 +1383,10 @@ export function useChatStream(
         if (replayTimedOut) dispatch({ type: "RESET_STREAMING" });
       }
     }
-  }, [profile, selectionKey]);
+  }, [profile, selectionKey, rememberCurrent]);
 
-  const reset = useCallback(() => {
+  const reset = useCallback((preserveHistory = true) => {
+    if (preserveHistory) rememberCurrent();
     openIntentRef.current += 1;
     writeChatSelection(selectionKey, null);
     // Same triple-guard as loadSession — abort any active stream so its
@@ -1370,13 +1401,13 @@ export function useChatStream(
 
     setIsLoading(false);
     dispatch({ type: "RESET" });
-  }, [selectionKey]);
+  }, [selectionKey, rememberCurrent]);
 
   useEffect(() => {
     const removed = (event: Event) => {
       const key = (event as CustomEvent<string>).detail;
       const selected = readChatSelection(selectionKey);
-      if (key === stateRef.current.cacheKey || (selected && key === chatHistoryKey(HERMES_BASE_PATH, profile, selected))) reset();
+      if (key === stateRef.current.cacheKey || (selected && key === chatHistoryKey(HERMES_BASE_PATH, profile, selected))) reset(false);
     };
     window.addEventListener(CHAT_HISTORY_REMOVED, removed);
     return () => window.removeEventListener(CHAT_HISTORY_REMOVED, removed);
@@ -1793,6 +1824,7 @@ export function useChatStream(
   /** Открыть последний разговор агента — тот же, что первым стоит в «Чатах». */
   const openLatest = useCallback(async (): Promise<void> => {
     if (!mountedRef.current || scopeRef.current !== selectionKey) return;
+    rememberCurrent();
     const intent = ++openIntentRef.current;
     // Never keep another agent's or a deleted conversation on screen while
     // the latest one is looked up; nothing is saved as a choice here.
@@ -1838,7 +1870,7 @@ export function useChatStream(
       setIsLoading(false);
       reset();
     }
-  }, [loadSession, profile, reset, selectionKey]);
+  }, [loadSession, profile, reset, selectionKey, rememberCurrent]);
   useEffect(() => { openLatestRef.current = openLatest; }, [openLatest]);
 
   const restoredKeyRef = useRef<string | null>(null);

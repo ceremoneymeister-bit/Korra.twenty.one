@@ -293,3 +293,22 @@ it("K21-207: immediately restored cached pages hold the reading anchor when an a
   expect(viewport.scrollTop).toBe(710);
   sessionStorage.removeItem("chat:scroll");
 });
+
+it("K21-207 round 2: loading keeps the same older button in layout and places status over it", async () => {
+  const load = vi.fn();
+  const idle = { hasOlder: true, loading: false, failed: false, load };
+  const viewport = await renderPaged("Messages", "c-h181", idle);
+  const button = [...host.querySelectorAll<HTMLButtonElement>("button")].find(item => item.textContent?.includes("Показать более ранние сообщения"))!;
+  await scroll(viewport, 0);
+  await renderPaged("Messages", "c-h181", { ...idle, loading: true });
+  expect(button.isConnected).toBe(true);
+  expect(button.disabled).toBe(true);
+  expect(getComputedStyle(button).visibility).toBe("hidden");
+  expect(button.getAttribute("aria-hidden")).toBe("true");
+  const status = host.querySelector<HTMLElement>('[role="status"]')!;
+  expect(status.parentElement).toBe(button.parentElement);
+  expect(getComputedStyle(status).position).toBe("absolute");
+  await renderPaged("Messages", "c-h181", idle);
+  expect(button.disabled).toBe(false);
+  expect(getComputedStyle(button).visibility).not.toBe("hidden");
+});

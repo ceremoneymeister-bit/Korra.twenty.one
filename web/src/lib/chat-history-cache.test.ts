@@ -42,3 +42,13 @@ describe("K21-207 bounded tab memory", () => {
     expect(cache.get(key)).toBe(value);
   });
 });
+
+it("default profile aliases share a scope, while named profiles and base paths stay separate", () => {
+  const cache = new ChatHistoryCache();
+  const value = history();
+  cache.set(chatHistoryKey("/one", undefined, "same"), value);
+  expect(cache.get(chatHistoryKey("/one", "", "same"))).toBe(value);
+  expect(cache.get(chatHistoryKey("/one", "default", "same"))).toBe(value);
+  expect(cache.get(chatHistoryKey("/one", "other", "same"))).toBeUndefined();
+  expect(cache.get(chatHistoryKey("/two", "default", "same"))).toBeUndefined();
+});

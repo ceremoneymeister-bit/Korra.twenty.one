@@ -38,7 +38,8 @@ export class ChatHistoryCache {
 
   set(key: string, value: CachedChatHistory): void {
     const existing = this.entries.get(key)?.value;
-    if (existing?.messages === value.messages && existing.history === value.history) return;
+    if (existing?.messages === value.messages && existing.history.cursor === value.history.cursor &&
+      existing.history.hasOlder === value.history.hasOlder && existing.history.archivedBefore === value.history.archivedBefore) return;
     this.delete(key);
     const bytes = JSON.stringify(value).length * 2;
     if (bytes > this.maxBytes) return;

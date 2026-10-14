@@ -1999,3 +1999,180 @@ it("K21-207: React effect teardown and setup restore the selected chat again", a
   await act(async () => root.render(<StrictMode><Probe profile="cache-strict" onValue={value => { current = value; }} /></StrictMode>));
   expect(current.messages.map(m => m.content)).toEqual(["Selected"]);
 });
+
+describe("K21-207 round 2: reconciliation after compaction", () => {
+  beforeEach(async () => {
+    const { getChatRuns } = await import("@/lib/chat-runs");
+    vi.mocked(getChatRuns).mockReset().mockResolvedValue([]);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response('{"approvals":[]}')));
+  });
+  it.each([
+    { before_id: 101, has_more: false },
+    { before_id: null, has_more: true },
+  ])("replaces cached live rows when the new pair has no usable older page: %j", async pagination => {
+    const history = vi.spyOn(api, "getSessionMessages").mockResolvedValue({ session_id: "r2-compact", messages: [
+      { id: 1, role: "user", content: "Same question" }, { id: 2, role: "assistant", content: "Same answer" },
+    ] });
+    await act(async () => { await current.loadSession("r2-compact"); });
+    await act(async () => { await current.loadSession("r2-neighbor"); });
+    history.mockResolvedValueOnce({ session_id: "r2-compact", messages: [
+      { id: 101, role: "user", content: "Same question" }, { id: 102, role: "assistant", content: "Same answer" },
+    ], pagination: { order: "latest", returned: 2, ...pagination, archived_before: true } });
+    await act(async () => { await current.loadSession("r2-compact"); });
+    expect(current.messages.map(message => message.historyId)).toEqual([101, 102]);
+    expect(current.older).toMatchObject({ hasOlder: false, archivedBefore: true });
+  });
+  it("a non-progressing bridge keeps the existing window and reports the failed refresh", async () => {
+    const history = vi.spyOn(api, "getSessionMessages").mockResolvedValueOnce({ session_id: "r2-stuck", messages: [
+      { id: 1, role: "user", content: "Old" }, { id: 2, role: "assistant", content: "Old answer" },
+    ] });
+    await act(async () => { await current.loadSession("r2-stuck"); });
+    const previous = current.messages;
+    history.mockResolvedValue({ session_id: "r2-stuck", messages: [{ id: 101, role: "user", content: "New" }],
+      pagination: { order: "latest", returned: 1, before_id: 101, has_more: true } });
+    await act(async () => { await current.loadSession("r2-stuck", { background: true }); });
+    expect(history).toHaveBeenCalledTimes(3);
+    expect(current.messages).toBe(previous);
+    expect(current.error).toContain("История не продолжила предыдущую страницу");
+  });
+});
+
+it("K21-207 round 2: SSE chunks do not serialize the cached transcript", async () => {
+  const { getChatRuns } = await import("@/lib/chat-runs");
+  vi.mocked(getChatRuns).mockReset().mockResolvedValue([]);
+  vi.spyOn(api, "getSessionMessages").mockResolvedValue({ session_id: "r2-chunks", messages: [
+    { id: 1, role: "user", content: "Heavy history ".repeat(1000) }, { id: 2, role: "assistant", content: "Previous answer" },
+  ] });
+  vi.stubGlobal("fetch", vi.fn(async () => new Response('{"approvals":[]}')));
+  await act(async () => { await current.loadSession("r2-chunks"); });
+  let stream!: ReadableStreamDefaultController<Uint8Array>;
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => url.includes("/chat/completions")
+    ? new Response(new ReadableStream<Uint8Array>({ start(controller) { stream = controller; } }))
+    : new Response('{"approvals":[]}')));
+  let pending!: Promise<boolean>;
+  await act(async () => { pending = current.send("New question"); });
+  const cacheWrites = vi.spyOn(chatHistoryCache, "set");
+  for (const content of ["First", " second", " third"]) {
+    await act(async () => { stream.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`)); });
+  }
+  const writesDuringStream = cacheWrites.mock.calls.length;
+  await act(async () => { stream.enqueue(new TextEncoder().encode("data: [DONE]\n\n")); await pending; });
+  expect(current.messages.at(-1)?.content).toBe("First second third");
+  expect(writesDuringStream).toBe(0);
+  expect(cacheWrites).toHaveBeenCalledTimes(1);
+});
+
+describe("K21-207 round 2: keep partial output when detaching the stream", () => {
+  beforeEach(async () => {
+    const { getChatRuns } = await import("@/lib/chat-runs");
+    vi.mocked(getChatRuns).mockReset().mockResolvedValue([]);
+    vi.spyOn(api, "getSessionMessages").mockImplementation(async id => ({ session_id: id, messages: [
+      { id: 1, role: "user", content: id }, { id: 2, role: "assistant", content: "Earlier" },
+    ] }));
+    vi.stubGlobal("fetch", vi.fn(async () => new Response('{"approvals":[]}')));
+  });
+  it.each(["switch", "reset", "unmount", "profile"] as const)("snapshots the live partial on %s and returns it before network", async leave => {
+    await act(async () => { await current.loadSession("r2-partial"); });
+    let stream!: ReadableStreamDefaultController<Uint8Array>;
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.includes("/chat/completions")
+      ? new Response(new ReadableStream<Uint8Array>({ start(controller) { stream = controller; } }))
+      : new Response('{"approvals":[]}')));
+    let pending!: Promise<boolean>;
+    await act(async () => { pending = current.send("In progress"); });
+    await act(async () => { stream.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"Partial answer"}}]}\n\n')); });
+    const partial = current.messages;
+    if (leave === "switch") await act(async () => { await current.loadSession("r2-other"); });
+    else if (leave === "reset") await act(async () => { current.reset(); });
+    else if (leave === "unmount") {
+      await act(async () => root.unmount());
+      root = createRoot(container);
+    } else {
+      writeChatSelection(`${chatViewKey("r2-neighbor")}:selected`, null);
+      await act(async () => root.render(<Probe profile="r2-neighbor" onValue={value => { current = value; }} />));
+      expect(current.messages).toEqual([]);
+    }
+    await act(async () => { stream.close(); await pending; });
+    vi.mocked(api.getSessionMessages).mockImplementationOnce(() => new Promise(() => {}));
+    if (leave === "unmount" || leave === "profile") {
+      await act(async () => root.render(<Probe onValue={value => { current = value; }} />));
+    } else await act(async () => { void current.loadSession("r2-partial"); });
+    expect(current.messages).toBe(partial);
+    expect(current.messages.at(-1)?.content).toBe("Partial answer");
+  });
+  it("deletion and teardown never save a live partial over invalidation", async () => {
+    await act(async () => { await current.loadSession("r2-delete-partial"); });
+    let stream!: ReadableStreamDefaultController<Uint8Array>;
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.includes("/chat/completions")
+      ? new Response(new ReadableStream<Uint8Array>({ start(controller) { stream = controller; } }))
+      : new Response('{"ok":true,"approvals":[]}')));
+    let pending!: Promise<boolean>;
+    await act(async () => { pending = current.send("In progress"); });
+    await act(async () => { stream.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"Deleted partial"}}]}\n\n')); });
+    await act(async () => { await api.deleteSession("r2-delete-partial", "default"); root.unmount(); });
+    await act(async () => { stream.close(); await pending; });
+    expect(chatHistoryCache.get(JSON.stringify(["", "default", "r2-delete-partial"]))).toBeUndefined();
+    root = createRoot(container);
+    await act(async () => root.render(<Probe onValue={value => { current = value; }} />));
+    expect(current.messages).toEqual([]);
+  });
+});
+
+it("K21-207 round 2: completed run replay chunks also defer caching until the reader finishes", async () => {
+  const { getChatRuns } = await import("@/lib/chat-runs");
+  vi.mocked(getChatRuns).mockReset().mockResolvedValue([{ message_id: "r2-completed-12345678", session_id: "r2-completed", profile: "",
+    status: "completed", updated_at: 3, history_count: 1, history_row_id: 1, turn_tracked: true,
+    user_message: { role: "user", content: "Question" } }]);
+  vi.spyOn(api, "getSessionMessages").mockResolvedValue({ session_id: "r2-completed", messages: [
+    { id: 1, role: "user", content: "Question", display_metadata: { client_message_id: "r2-completed-12345678" } },
+  ] });
+  let stream!: ReadableStreamDefaultController<Uint8Array>;
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => url.includes("/stream")
+    ? new Response(new ReadableStream<Uint8Array>({ start(controller) { stream = controller; } }))
+    : new Response('{"approvals":[]}')));
+  let pending!: Promise<void>;
+  await act(async () => { pending = current.loadSession("r2-completed"); });
+  expect(current.isStreaming).toBe(false);
+  const writes = vi.spyOn(chatHistoryCache, "set");
+  await act(async () => { stream.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"Ready answer"}}]}\n\n')); });
+  const duringReplay = writes.mock.calls.length;
+  await act(async () => { stream.enqueue(new TextEncoder().encode("data: [DONE]\n\n")); await pending; });
+  expect(duringReplay).toBe(0);
+  expect(writes).toHaveBeenCalledTimes(1);
+  expect(current.messages.at(-1)?.content).toBe("Ready answer");
+});
+
+it("K21-207 round 2: settling approvals leaves the immutable cached transcript untouched", async () => {
+  const { getChatRuns } = await import("@/lib/chat-runs");
+  vi.mocked(getChatRuns).mockReset().mockResolvedValue([]);
+  vi.spyOn(api, "getSessionMessages").mockResolvedValue({ session_id: "r2-approval", messages: [
+    { id: 1, role: "user", content: "Earlier" }, { id: 2, role: "assistant", content: "Answer" },
+  ] });
+  vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => new Response(JSON.stringify(init?.method === "POST"
+    ? { resolved: 1 } : { data: [{ request_id: "r2-approval-request", command: "echo ok", choices: ["once", "deny"] }] }))));
+  await act(async () => { await current.loadSession("r2-approval"); });
+  expect(current.approvals).toHaveLength(1);
+  const messages = current.messages;
+  const writes = vi.spyOn(chatHistoryCache, "set");
+  await act(async () => { expect(await current.resolveApproval("r2-approval-request", "once")).toBe(true); });
+  expect(current.approvals[0]?.status).toBe("settled");
+  expect(current.messages).toBe(messages);
+  expect(writes).not.toHaveBeenCalled();
+});
+
+it("K21-207 round 2: a stale 404 cannot forget or overwrite the newly opened conversation", async () => {
+  const { getChatRuns } = await import("@/lib/chat-runs");
+  vi.mocked(getChatRuns).mockReset().mockResolvedValue([]);
+  vi.stubGlobal("fetch", vi.fn(async () => new Response('{"approvals":[]}')));
+  const history = vi.spyOn(api, "getSessionMessages").mockImplementation(async id => ({ session_id: id, messages: [{ id: 1, role: "user", content: id }] }));
+  await act(async () => { await current.loadSession("r2-stale-404-a"); });
+  let reject!: (reason: Error) => void;
+  history.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
+  let pending!: Promise<void>;
+  await act(async () => { pending = current.loadSession("r2-stale-404-a", { background: true }); });
+  await act(async () => { await current.loadSession("r2-stale-404-b"); });
+  const messages = current.messages;
+  await act(async () => { reject(new Error("404: missing")); await pending; });
+  expect(current.messages).toBe(messages);
+  expect(current.sessionId).toBe("r2-stale-404-b");
+  expect(sessionStorage.getItem(`${chatViewKey()}:selected`)).toBe("r2-stale-404-b");
+});
