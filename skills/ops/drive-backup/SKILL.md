@@ -67,12 +67,21 @@ metadata:
 установки. Сначала проверь, нет ли уже такой задачи (`cronjob` с `action=list`,
 имя «Резервная копия на Google Диск»), чтобы не создавать дубль.
 
-1. Создай скрипт `~/.hermes/scripts/korra-backup-weekly.sh`:
+1. Создай скрипт в каталоге `scripts` активной установки. Планировщик ищет
+   скрипты именно там (`$HERMES_HOME/scripts`), а не в `~/.hermes`: в Docker,
+   в именованном профиле и при другом `HOME` терминала это разные места. Путь
+   не угадывай, возьми его из `HERMES_HOME` терминала:
 
    ```bash
+   SCRIPTS_DIR="${HERMES_HOME:-$HOME/.hermes}/scripts"
+   mkdir -p "$SCRIPTS_DIR"
+   cat > "$SCRIPTS_DIR/korra-backup-weekly.sh" <<'EOF'
    #!/bin/bash
    set -e
    korra backup --to-drive
+   EOF
+   chmod 700 "$SCRIPTS_DIR/korra-backup-weekly.sh"
+   echo "$SCRIPTS_DIR/korra-backup-weekly.sh"
    ```
 
 2. Создай задачу инструментом `cronjob`: `action=create`,
@@ -80,7 +89,14 @@ metadata:
    `script="korra-backup-weekly.sh"`, `no_agent=true`, `deliver="origin"`.
    Результат придёт в этот же чат.
 
-3. Скажи владельцу: копия будет делаться каждое воскресенье в 03:00, в Диске
+3. Проверь, что планировщик находит скрипт, не дожидаясь воскресенья: запусти
+   задачу сразу (`cronjob` с `action=run` и её `job_id`). Это одновременно первая
+   копия. Если в итоге написано `Script not found`, скрипт лежит не там, где его
+   ищет планировщик: возьми путь из этого сообщения, положи скрипт туда, удали
+   неудачную задачу (`action=remove`) и создай заново. Задачу, которую не
+   удалось проверить, владельцу как рабочую не называй.
+
+4. Скажи владельцу: копия будет делаться каждое воскресенье в 03:00, в Диске
    хранятся последние 4. Отключить можно в любой момент, просто попросив об этом
    (`cronjob` с `action=pause` или `action=remove`).
 
