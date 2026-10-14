@@ -19,7 +19,7 @@ const calls = vi.hoisted(() => ({
   requestUpdate: vi.fn(),
   cancelUpdateRequest: vi.fn(),
 }));
-vi.mock('@/lib/api', () => ({ api: calls }));
+vi.mock('@/lib/api', () => ({ api: calls, HERMES_BASE_PATH: '/c/demo', withBasePath: (path: string) => `/c/demo${path}` }));
 
 let root: Root;
 let container: HTMLDivElement;
@@ -313,5 +313,35 @@ describe('ход обновления', () => {
     expect(container.textContent).toContain('Данные, память и доступы остались как были');
     // Выпуск снова доступен: после отката его можно поставить заново.
     expect(button('Обновить')).not.toBeNull();
+  });
+});
+
+
+describe('снимки и прошлые выпуски', () => {
+  it('показывает установленный выпуск первым и все его пункты со снимками', async () => {
+    const screenshot = { src: '/releases/current/browser.webp', alt: 'Сайт, открытый агентом' };
+    calls.getUpdatesState.mockResolvedValue(state({
+      installed: { ...AVAILABLE, screenshot, sections: [{ heading: 'Что нового', items: AVAILABLE.sections[0].items.map(item => ({ ...item, screenshot })) }] },
+      available: INSTALLED,
+    }));
+    await render();
+    expect(container.querySelector('.upd-card h2')?.textContent).toBe(AVAILABLE.title);
+    expect(container.textContent).toContain('Пятый пункт');
+    const images = [...container.querySelectorAll('img')];
+    expect(images.length).toBe(AVAILABLE.sections[0].items.length + 1);
+    for (const image of images) {
+      expect(image.getAttribute('src')).toBe('/c/demo/releases/current/browser.webp');
+      expect(image.alt).toBe(screenshot.alt);
+      expect(image.getAttribute('loading')).toBe('lazy');
+    }
+  });
+
+  it('прошлый выпуск раскрывается отдельно и поддерживает старые заметки', async () => {
+    calls.getUpdatesState.mockResolvedValue(state({ history: [AVAILABLE] }));
+    await render();
+    const details = container.querySelector('details');
+    expect(details?.open).toBe(false);
+    expect(details?.querySelector('h2')?.textContent).toBe(AVAILABLE.title);
+    expect(container.querySelector('img')).toBeNull();
   });
 });

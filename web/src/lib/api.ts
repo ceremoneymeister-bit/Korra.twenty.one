@@ -2457,9 +2457,15 @@ export interface HookCreate {
 }
 
 /** Пункт заметок к выпуску: короткий заголовок и пояснение к нему. */
+export interface ReleaseScreenshot {
+  src: string;
+  alt: string;
+}
+
 export interface ReleaseNoteItem {
   title: string;
   detail: string;
+  screenshot?: ReleaseScreenshot;
 }
 
 export interface ReleaseNoteSection {
@@ -2474,6 +2480,7 @@ export interface ReleaseNote {
   published_at: string;
   summary: string;
   sections: ReleaseNoteSection[];
+  screenshot?: ReleaseScreenshot;
   /** Только у установленного: версия движка и ревизия сборки. */
   version?: string;
   revision?: string;
@@ -2518,6 +2525,7 @@ export interface UpdateProgress {
 
 export interface UpdatesState {
   installed: ReleaseNote;
+  history?: ReleaseNote[];
   available: ReleaseNote | null;
   up_to_date: boolean;
   /** Обновлением управляет хост: панель себя не перезапускает. */

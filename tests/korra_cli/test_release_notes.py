@@ -237,3 +237,38 @@ def test_draft_leaves_the_revision_to_the_build(repo):
     """Черновик не подсовывает автору хэш, который к моменту сборки устареет."""
     draft = release_notes.draft_release_note(repo, "HEAD~3..HEAD", "K21-2026.09.09")
     assert f"- Ревизия: {release_notes.BUILD_REVISION_MARK}" in draft
+
+
+def test_markdown_screenshots_attach_to_release_and_item_without_changing_text():
+    text = SAMPLE.replace('### Что нового', '![Панель на телефоне](/releases/release/mobile.webp)\n\n### Что нового', 1)
+    text = text.replace('- Пункт без выделения.', '  ![Документ открыт в чате](/releases/release/file.webp)\n- Пункт без выделения.', 1)
+    note = release_notes.parse_release_notes(text)[0]
+    old = release_notes.parse_release_notes(SAMPLE)[0]
+    assert note.summary == old.summary
+    assert note.screenshot == {'src': '/releases/release/mobile.webp', 'alt': 'Панель на телефоне'}
+    item = note.sections[0].items[0]
+    assert (item.title, item.detail) == (old.sections[0].items[0].title, old.sections[0].items[0].detail)
+    assert item.to_dict()['screenshot']['alt'] == 'Документ открыт в чате'
+    assert 'screenshot' not in old.to_dict()
+    assert 'screenshot' not in old.sections[0].items[0].to_dict()
+    assert 'screenshot' not in note.sections[0].items[1].to_dict()
+    assert release_notes.parse_release_notes(text)[1].to_dict() == release_notes.parse_release_notes(SAMPLE)[1].to_dict()
+
+
+@pytest.mark.parametrize('src', ['https://example.org/a.webp', '//example.org/a.webp', '/releases/../a.webp', '/releases/r/a.svg', '/api/files/a.webp'])
+def test_screenshots_only_reference_panel_assets(src):
+    text = f'## K21-X\n\nОписание.\n\n![Панель]({src})\n\n### Что нового\n- **Пункт.** Пояснение.'
+    note = release_notes.parse_release_notes(text)[0]
+    assert note.screenshot is None
+    assert note.summary == 'Описание.'
+    assert note.sections[0].items[0].detail == 'Пояснение.'
+
+
+def test_all_shipped_screenshots_have_descriptions_and_small_repository_assets():
+    for note in release_notes.read_release_notes():
+        pictures = [note.screenshot] + [item.screenshot for section in note.sections for item in section.items]
+        for picture in filter(None, pictures):
+            assert picture['alt']
+            asset = release_notes.PROJECT_ROOT / 'web' / 'public' / picture['src'].lstrip('/')
+            assert asset.is_file(), picture['src']
+            assert 0 < asset.stat().st_size <= 150 * 1024

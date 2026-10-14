@@ -26,10 +26,12 @@ import {
   Sparkles,
 } from "lucide-react";
 import { usePageHeader } from "@/contexts/usePageHeader";
-import { api } from "@/lib/api";
+import { api, withBasePath } from "@/lib/api";
+import { markReleaseSeen } from "@/store/release-notice";
 import type {
   ReleaseNote,
   ReleaseNoteSection,
+  ReleaseScreenshot,
   UpdateProgress,
   UpdatesState,
 } from "@/lib/api";
@@ -85,8 +87,8 @@ function ReleaseSections({ sections, expanded }: { sections: ReleaseNoteSection[
             {section.heading && <p>{section.heading}</p>}
             <ul>
               {items.map((item) => (
-                <li key={item.title}>
-                  <Sparkles size={16} aria-hidden />
+                <li key={item.title} className={item.screenshot ? "upd-feature" : undefined}>
+                  {item.screenshot ? <Screenshot picture={item.screenshot} /> : <Sparkles size={16} aria-hidden />}
                   <div>
                     <h4>{item.title}</h4>
                     {item.detail && <p>{item.detail}</p>}
@@ -101,6 +103,15 @@ function ReleaseSections({ sections, expanded }: { sections: ReleaseNoteSection[
   );
 }
 
+function Screenshot({ picture }: { picture: ReleaseScreenshot }) {
+  return (
+    <figure className="upd-picture">
+      <img src={withBasePath(picture.src)} alt={picture.alt} loading="lazy" decoding="async" />
+      <figcaption>{picture.alt}</figcaption>
+    </figure>
+  );
+}
+
 /** Карточка выпуска: заголовок, одно предложение сути и «что нового». */
 function ReleaseCard({
   release,
@@ -109,6 +120,7 @@ function ReleaseCard({
   badge,
   badgeTone,
   children,
+  current = false,
 }: {
   release: ReleaseNote;
   eyebrow: string;
@@ -116,6 +128,7 @@ function ReleaseCard({
   badge?: string;
   badgeTone?: string;
   children?: React.ReactNode;
+  current?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const total = release.sections.reduce((sum, section) => sum + section.items.length, 0);
@@ -152,8 +165,9 @@ function ReleaseCard({
         )}
       </p>
       {children}
-      {total > 0 && <ReleaseSections sections={release.sections} expanded={expanded} />}
-      {total > PREVIEW_ITEMS && (
+      {release.screenshot && <Screenshot picture={release.screenshot} />}
+      {total > 0 && <ReleaseSections sections={release.sections} expanded={current || expanded} />}
+      {!current && total > PREVIEW_ITEMS && (
         <button type="button" className="upd-more" onClick={() => setExpanded(!expanded)}>
           {expanded ? "Свернуть" : `Показать всё (${total})`}
           <ArrowRight size={15} aria-hidden />
@@ -277,6 +291,7 @@ export default function UpdatesPage() {
   const load = useCallback(async () => {
     try {
       const next = await api.getUpdatesState();
+      markReleaseSeen(next.installed.release_id);
       setState(next);
       setError("");
       setOffline(false);
@@ -364,6 +379,34 @@ export default function UpdatesPage() {
         <Progress progress={progress} steps={steps} offline={offline} />
       )}
 
+      <ReleaseCard
+        release={installed}
+        current
+        eyebrow="У вас установлено"
+        icon={<Check size={17} aria-hidden />}
+        badge={!available && !active ? "Последняя версия" : undefined}
+        badgeTone="ready"
+      >
+        {finished && (
+          <div className="upd-note">
+            <Check size={18} aria-hidden />
+            <div>
+              <strong>{progress?.status === "rolled_back" ? "Вернули прежнюю версию" : "Обновление прошло, всё на месте"}</strong>
+              <p>{progress?.status === "rolled_back" ? "Данные, память и доступы остались как были." : "Профили, доступы и ответ модели проверены после переключения."}</p>
+            </div>
+          </div>
+        )}
+        {!available && !active && !finished && (
+          <div className="upd-note">
+            {state.managed_externally ? <Circle size={18} aria-hidden /> : <Info size={18} aria-hidden />}
+            <div>
+              <strong>{state.managed_externally ? "Новых выпусков пока нет" : "Эта установка обновляется вручную"}</strong>
+              <p>{state.managed_externally ? "Как только выйдет новый, он появится здесь вместе со списком изменений." : "Она собрана не из готового образа, поэтому кнопки обновления здесь нет — обновление делает тот, кто её поставил."}</p>
+            </div>
+          </div>
+        )}
+      </ReleaseCard>
+
       {available && !active && (
         <ReleaseCard
           release={available}
@@ -421,52 +464,17 @@ export default function UpdatesPage() {
         </ReleaseCard>
       )}
 
-      <ReleaseCard
-        release={installed}
-        eyebrow="У вас установлено"
-        icon={<Check size={17} aria-hidden />}
-        badge={!available && !active ? "Последняя версия" : undefined}
-        badgeTone="ready"
-      >
-        {finished && (
-          <div className="upd-note">
-            <Check size={18} aria-hidden />
-            <div>
-              <strong>
-                {progress?.status === "rolled_back"
-                  ? "Вернули прежнюю версию"
-                  : "Обновление прошло, всё на месте"}
-              </strong>
-              <p>
-                {progress?.status === "rolled_back"
-                  ? "Данные, память и доступы остались как были."
-                  : "Профили, доступы и ответ модели проверены после переключения."}
-              </p>
-            </div>
-          </div>
-        )}
-        {!available && !active && !finished && !state.managed_externally && (
-          <div className="upd-note">
-            <Info size={18} aria-hidden />
-            <div>
-              <strong>Эта установка обновляется вручную</strong>
-              <p>
-                Она собрана не из готового образа, поэтому кнопки обновления здесь нет — обновление
-                делает тот, кто её поставил.
-              </p>
-            </div>
-          </div>
-        )}
-        {!available && !active && !finished && state.managed_externally && (
-          <div className="upd-note">
-            <Circle size={18} aria-hidden />
-            <div>
-              <strong>Новых выпусков пока нет</strong>
-              <p>Как только выйдет новый, он появится здесь вместе со списком изменений.</p>
-            </div>
-          </div>
-        )}
-      </ReleaseCard>
+      {state.history?.length ? (
+        <section className="upd-history" aria-label="Прошлые выпуски">
+          <h3>Прошлые выпуски</h3>
+          {state.history.map(release => (
+            <details key={release.release_id}>
+              <summary>{release.title || release.release_id}<span>{release.published_at}</span></summary>
+              <ReleaseCard release={release} current eyebrow="Прошлый выпуск" icon={<Clock3 size={17} aria-hidden />} />
+            </details>
+          ))}
+        </section>
+      ) : null}
     </div>
   );
 }
