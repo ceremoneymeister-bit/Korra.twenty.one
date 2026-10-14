@@ -479,6 +479,7 @@ class TestOwnershipIntegration:
         (hermes_home / "config.yaml").write_text(
             """
 auxiliary:
+  free_only: false  # Owner explicitly permits this API fallback.
   classifier:
     provider: auto
     fallback_chain:
@@ -562,6 +563,7 @@ auxiliary:
         (hermes_home / "config.yaml").write_text(
             """
 auxiliary:
+  free_only: false  # Owner explicitly permits this API fallback.
   classifier:
     provider: primary-provider
     model: primary-model
@@ -610,6 +612,7 @@ auxiliary:
         (hermes_home / "config.yaml").write_text(
             """
 auxiliary:
+  free_only: false  # Owner explicitly permits this API fallback.
   classifier:
     provider: primary-provider
     model: primary-model
