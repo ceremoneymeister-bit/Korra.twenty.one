@@ -2254,6 +2254,9 @@ def run_kanban_goal_loop(
         # via kanban_complete / kanban_block, not by parking), so a WAIT
         # verdict is treated as CONTINUE here.
         verdict, reason, _parse_failed, _wait, _transport_failed = judge_goal(goal_text, last_response)
+        if _transport_failed:
+            _log(f"kanban goal loop: judge transport failed on turn {turns_used}; stopping")
+            return {"outcome": "stopped", "turns_used": turns_used, "reason": "judge transport failure"}
         if verdict == "wait":
             verdict = "continue"
         _log(f"kanban goal loop: turn {turns_used}/{max_turns} verdict={verdict} reason={_truncate(reason, 120)}")
