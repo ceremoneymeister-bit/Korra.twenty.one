@@ -16,7 +16,7 @@ import {
   sendApprovalDecision,
 } from "@/lib/chat-approvals";
 import { previewArguments, previewToolResult } from "@/components/chat/tool-labels";
-import { api, HERMES_BASE_PATH, withBasePath, type SessionMessage } from "@/lib/api";
+import { api, HERMES_BASE_PATH, withBasePath, type SessionMessage, type SessionMessagesResponse } from "@/lib/api";
 import { splitSSEBuffer } from "@/lib/sse-parser";
 import { splitAttachments, toDisplay, type UploadedAttachment } from "@/lib/chat-attachments";
 import { ownerFacingError } from "@/lib/owner-facing-error";
@@ -66,12 +66,18 @@ const LEARNING_FOLLOW_UP_MS = [4000, 6000, 10000, 15000, 20000, 30000, 45000];
 /** The API counts visible bubbles and keeps an entire agent turn together. */
 export const CHAT_HISTORY_PAGE = 70;
 
+function historyPage(cursor: number | string) {
+  return typeof cursor === "string"
+    ? { displayLimit: CHAT_HISTORY_PAGE, includeHistory: true, beforeCursor: cursor }
+    : { displayLimit: CHAT_HISTORY_PAGE, beforeId: cursor };
+}
+
 const NO_OLDER: HistoryWindow = { cursor: null, hasOlder: false };
 
-function historyWindow(resp: { messages?: unknown; pagination?: { before_id?: number | null; has_more?: boolean; archived_before?: boolean } }): HistoryWindow {
-  const cursor = resp.pagination?.before_id ?? null;
+function historyWindow(resp: { messages?: unknown; pagination?: SessionMessagesResponse["pagination"] }): HistoryWindow {
+  const cursor = resp.pagination?.include_history ? resp.pagination.next_cursor ?? null : resp.pagination?.before_id ?? null;
   const hasOlder = cursor !== null && resp.pagination?.has_more === true;
-  return { cursor, hasOlder, ...(!hasOlder && resp.pagination?.archived_before ? { archivedBefore: true } : {}) };
+  return { cursor, hasOlder };
 }
 
 interface StreamState {
@@ -106,7 +112,7 @@ type StreamAction =
   | { type: "DISCARD_PENDING"; messageId: string }
   | { type: "SET_SESSION_ID"; sessionId: string | null; cacheKey: string }
   | { type: "LOAD_SESSION"; cacheKey?: string; sessionId: string; messages: ChatMessage[]; history?: HistoryWindow }
-  | { type: "PREPEND_OLDER"; sessionId: string; cursor: number; messages: ChatMessage[]; history: HistoryWindow }
+  | { type: "PREPEND_OLDER"; sessionId: string; cursor: number | string; messages: ChatMessage[]; history: HistoryWindow }
   | {
       type: "SYNC_SESSION";
       cacheKey: string;
@@ -273,16 +279,16 @@ function sameRendered(previous: ChatMessage, next: ChatMessage): boolean {
 function runTurnIndex(messages: ChatMessage[], run: ChatRun): number {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]!;
-    if (message.role === "user" && message.clientMessageId === run.message_id) return index;
+    if (!message.readOnly && message.role === "user" && message.clientMessageId === run.message_id) return index;
   }
   if (run.history_row_id != null) {
-    return messages.findIndex(message => message.role === "user" && message.historyId === run.history_row_id);
+    return messages.findIndex(message => !message.readOnly && (!message.sourceSessionId || message.sourceSessionId === run.session_id) && message.role === "user" && message.historyId === run.history_row_id);
   }
   if (run.turn_tracked) return -1;
   const text = splitAttachments(run.user_message.content ?? "").text;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]!;
-    if (message.role === "user" && visibleText(message) === text) return index;
+    if (!message.readOnly && message.role === "user" && visibleText(message) === text) return index;
   }
   return -1;
 }
@@ -294,7 +300,7 @@ function runTurnIndex(messages: ChatMessage[], run: ChatRun): number {
  * из журнала, а не объявляется показанным.
  */
 function runBeforePage(messages: ChatMessage[], run: ChatRun): boolean {
-  const first = messages.find(message => message.historyId !== undefined)?.historyId;
+  const first = messages.find(message => !message.readOnly && (!message.sourceSessionId || message.sourceSessionId === run.session_id) && message.historyId !== undefined)?.historyId;
   if (first === undefined) return false;
   if (run.history_row_id != null) return run.history_row_id < first;
   // Ход, принятый до хранения id, строки не имеет: прежнее правило.
@@ -306,7 +312,21 @@ function runAnswered(messages: ChatMessage[], run: ChatRun): boolean {
   const at = runTurnIndex(messages, run);
   if (at < 0) return run.status === "completed" && runBeforePage(messages, run);
   // Нужен законченный ход: промежуточный снимок за ответ не считается.
-  return messages.slice(at + 1).some(message => message.role === "assistant" && message.turnComplete !== false);
+  return messages.slice(at + 1).some(message => !message.readOnly && message.role === "assistant" && message.turnComplete !== false);
+}
+
+function persistedIdentity(message: ChatMessage): string | undefined {
+  return message.historyIdentity ?? (message.historyId !== undefined ? `${message.sourceSessionId ?? ""}:row:${message.historyId}` : undefined);
+}
+
+/** Тот же пузырь после сжатия может стать архивом или получить новую строку. */
+function changedHistory(previous: ChatMessage[], next: ChatMessage[]): boolean {
+  const byId = new Map(previous.map(message => [persistedIdentity(message), message]));
+  return next.some(message => {
+    const identity = persistedIdentity(message);
+    const old = identity ? byId.get(identity) : undefined;
+    return old && (Boolean(old.readOnly) !== Boolean(message.readOnly) || old.historyId !== message.historyId || old.sourceSessionId !== message.sourceSessionId);
+  });
 }
 
 function mergeMessages(
@@ -316,7 +336,7 @@ function mergeMessages(
 ): ChatMessage[] {
   const identity = (message: ChatMessage) => message.clientMessageId
     ? `${message.role}:client:${message.clientMessageId}`
-    : message.historyId !== undefined ? `${message.role}:row:${message.historyId}` : undefined;
+    : persistedIdentity(message) ? `${message.role}:history:${persistedIdentity(message)}` : undefined;
   const byIdentity = new Map(previous.flatMap(message => {
     const key = identity(message);
     return key ? [[key, message] as const] : [];
@@ -334,7 +354,8 @@ function mergeMessages(
       return message;
     }
     if (sameRendered(shown, message) && shown.historyId === message.historyId &&
-      shown.clientMessageId === message.clientMessageId) return shown;
+      shown.clientMessageId === message.clientMessageId && shown.readOnly === message.readOnly &&
+      shown.historyIdentity === message.historyIdentity && shown.sourceSessionId === message.sourceSessionId) return shown;
     changed = true;
     return { ...message, id: shown.id };
   });
@@ -476,8 +497,18 @@ function reducer(state: StreamState, action: StreamAction): StreamState {
       }
       // Освежение приносит только последнюю страницу. Догруженные раньше
       // более ранние сообщения остаются над ней: человек их листал.
+      if (action.messages.some(message => message.historyIdentity)) {
+        const first = action.messages.find(message => message.historyIdentity)?.historyIdentity;
+        const overlap = state.messages.findIndex(message => message.historyIdentity === first);
+        const kept = overlap > 0 ? overlap : 0;
+        const tail = kept ? state.messages.slice(kept) : state.messages;
+        const merged = mergeMessages(tail, action.messages, action.replay !== true);
+        const messages = merged === tail ? state.messages : [...state.messages.slice(0, kept), ...merged];
+        return { ...state, messages, history: kept ? state.history : action.history ?? state.history,
+          isStreaming: action.streaming ?? false, error: null };
+      }
       const firstId = action.messages.find(message => message.historyId !== undefined)?.historyId;
-      const lastShown = state.messages.reduce((last, message) => Math.max(last, message.historyId ?? 0), 0);
+      const lastShown = state.messages.reduce((last, message) => message.readOnly ? last : Math.max(last, message.historyId ?? 0), 0);
       if (firstId !== undefined && lastShown && firstId > lastShown) {
         // Bridging ended without reaching the old live rows (e.g. in-place
         // compaction). Their archive must not be silently retained as live.
@@ -505,7 +536,11 @@ function reducer(state: StreamState, action: StreamAction): StreamState {
       // Страница годится, только если продолжает именно загруженную ленту:
       // за время запроса могли открыть другой чат или уже догрузить её.
       if (state.sessionId !== action.sessionId || state.history.cursor !== action.cursor) return state;
-      const older = action.messages.filter(message => message.historyId === undefined || message.historyId < action.cursor);
+      const existing = new Set(state.messages.map(persistedIdentity).filter(Boolean));
+      const older = action.messages.filter(message => {
+        const identity = persistedIdentity(message);
+        return (!identity || !existing.has(identity)) && (typeof action.cursor !== "number" || message.historyId === undefined || message.historyId < action.cursor);
+      });
       return { ...state, messages: [...older, ...state.messages], history: action.history };
     }
 
@@ -752,8 +787,6 @@ export interface OlderHistoryState {
   hasOlder: boolean;
   loading: boolean;
   failed: boolean;
-  /** Раньше загруженного есть сжатая часть, которую лента пока не показывает. */
-  archivedBefore?: boolean;
 }
 
 export interface LoadSessionOptions {
@@ -815,9 +848,16 @@ export function sessionMessagesToChat(
     const shownContent = typeof message.display_content === "string" ? message.display_content : message.content;
     const content = typeof shownContent === "string" ? shownContent : "";
 
-    // id строки базы делает id сообщения устойчивым: страницы, догруженные
-    // к началу, не повторяют id уже показанных.
-    const id = message.id !== undefined ? `${sessionId}-h${message.id}` : `${sessionId}-${index}`;
+    // display_id переживает сжатия; физический id нужен только для действий
+    // над живой строкой. Старый формат читаем без сравнения поколений.
+    const id = message.display_id ? `${sessionId}-d:${message.display_id}`
+      : message.id !== undefined ? `${sessionId}-h${message.id}` : `${sessionId}-${index}`;
+    const history = {
+      ...(message.id !== undefined ? { historyId: message.id } : {}),
+      ...(message.display_id ? { historyIdentity: message.display_id, readOnly: message.read_only === true,
+        sourceSessionId: message.source_session_id } : {}),
+    };
+    if (turn && (turn.sourceSessionId !== history.sourceSessionId || Boolean(turn.readOnly) !== Boolean(history.readOnly))) closeTurn();
 
     if (message.role === "user") {
       closeTurn();
@@ -827,7 +867,7 @@ export function sessionMessagesToChat(
         role: "user",
         content,
         timestamp,
-        ...(message.id !== undefined ? { historyId: message.id } : {}),
+        ...history,
         ...(typeof clientMessageId === "string" && clientMessageId ? { clientMessageId } : {}),
       });
       return;
@@ -857,7 +897,7 @@ export function sessionMessagesToChat(
         content,
         timestamp,
         turnComplete: true,
-        ...(message.id !== undefined ? { historyId: message.id } : {}),
+        ...history,
         ...(receipt ? { learning: { undone: Boolean(receipt.undone) } } : {}),
       });
       return;
@@ -869,7 +909,7 @@ export function sessionMessagesToChat(
         role: "assistant",
         content: "",
         timestamp,
-        ...(message.id !== undefined ? { historyId: message.id } : {}),
+        ...history,
       };
     }
     if (content) {
@@ -1178,7 +1218,7 @@ export function useChatStream(
       // from the same ledger, never from a stale history snapshot.
       let missing = false;
       let resp = await api.getSessionMessages(
-        sessionId, profile || "default", controller.signal, { displayLimit: CHAT_HISTORY_PAGE },
+        sessionId, profile || "default", controller.signal, { displayLimit: CHAT_HISTORY_PAGE, includeHistory: true },
       ).catch(error => {
         if (error instanceof Error && /^404(?:\s|:)/.test(error.message)) {
           missing = true;
@@ -1218,15 +1258,28 @@ export function useChatStream(
       // Bridge a disjoint latest page before reconciliation. The previous
       // implementation threw away all loaded pages to avoid a silent gap.
       const previous = cached?.messages ?? (sameSession ? stateRef.current.messages : []);
-      const lastShown = previous.reduce((last, message) => Math.max(last, message.historyId ?? 0), 0);
-      while (lastShown && (chatMessages[0]?.historyId ?? 0) > lastShown && loadedWindow.hasOlder) {
+      const lastShown = previous.reduce((last, message) => message.readOnly ? last : Math.max(last, message.historyId ?? 0), 0);
+      const oldIdentities = new Set(previous.map(persistedIdentity).filter(Boolean));
+      const firstPrevious = previous.find(message => message.historyIdentity)?.historyIdentity;
+      let changed = changedHistory(previous, chatMessages);
+      const needsBridge = () => chatMessages.some(message => message.historyIdentity)
+        ? oldIdentities.size > 0 && (changed
+          ? !chatMessages.some(message => message.historyIdentity === firstPrevious)
+          : !chatMessages.some(message => oldIdentities.has(persistedIdentity(message))))
+        : Boolean(lastShown && (chatMessages[0]?.historyId ?? 0) > lastShown);
+      const visited = new Set<number | string>();
+      while (needsBridge() && loadedWindow.hasOlder) {
         const cursor = loadedWindow.cursor!;
-        resp = await api.getSessionMessages(sessionId, profile || "default", controller.signal,
-          { displayLimit: CHAT_HISTORY_PAGE, beforeId: cursor });
+        if (visited.has(cursor)) throw new Error("История не продолжила предыдущую страницу.");
+        visited.add(cursor);
+        resp = await api.getSessionMessages(sessionId, profile || "default", controller.signal, historyPage(cursor));
         if (!current()) return;
         const window = historyWindow(resp);
-        if (window.cursor !== null && window.cursor >= cursor) throw new Error("История не продолжила предыдущую страницу.");
-        chatMessages = [...sessionMessagesToChat(sessionId, resp.messages as HistoryMessage[]), ...chatMessages];
+        if (window.cursor !== null && (window.cursor === cursor || (typeof cursor === "number" && typeof window.cursor === "number" && window.cursor >= cursor))) throw new Error("История не продолжила предыдущую страницу.");
+        const page = sessionMessagesToChat(sessionId, resp.messages as HistoryMessage[]);
+        changed ||= changedHistory(previous, page);
+        const existing = new Set(chatMessages.map(persistedIdentity).filter(Boolean));
+        chatMessages = [...page.filter(message => !existing.has(persistedIdentity(message))), ...chatMessages];
         loadedWindow = window;
       }
       let runs: ChatRun[];
@@ -1425,7 +1478,7 @@ export function useChatStream(
     try {
       const resp = await api.getSessionMessages(
         historySessionId, profile || "default", controller.signal,
-        { displayLimit: CHAT_HISTORY_PAGE, beforeId: historyCursor },
+        historyPage(historyCursor),
       );
       if (!mountedRef.current || olderRequestRef.current !== controller) return;
       dispatch({
@@ -1537,7 +1590,7 @@ export function useChatStream(
         ...state.messages
           // Локальная копия с неподтверждённой доставкой остаётся в интерфейсе,
           // но не становится контекстом нового запроса модели.
-          .filter((message) => message.id !== userMsg.id && message.delivery !== "failed" && (message.content || message.role === "user"))
+          .filter((message) => !message.readOnly && message.id !== userMsg.id && message.delivery !== "failed" && (message.content || message.role === "user"))
           .map((m) => ({ role: m.role, content: m.content })),
         { role: userMsg.role, content: userMsg.content },
       ];
@@ -2123,7 +2176,6 @@ export function useChatStream(
       hasOlder: state.history.hasOlder,
       loading: olderStatus === "loading",
       failed: olderStatus === "failed",
-      archivedBefore: state.history.archivedBefore === true,
     },
     loadOlder,
     send,

@@ -421,3 +421,16 @@ describe("transcribeAudio", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+it("K21-203: unified history encodes an opaque cursor and keeps the profile boundary", async () => {
+  const fetcher = jsonFetchMock({ messages: [] });
+  vi.stubGlobal("fetch", fetcher);
+  const cursor = 'ancestor/row+token=дата';
+  await api.getSessionMessages("chat/a", "lawyer", undefined, { displayLimit: 70, includeHistory: true, beforeCursor: cursor });
+  const url = new URL(String(fetcher.mock.calls[0]![0]), "http://korra.test");
+  expect(url.pathname).toContain("chat%2Fa/messages");
+  expect(url.searchParams.get("include_history")).toBe("true");
+  expect(url.searchParams.get("before_cursor")).toBe(cursor);
+  expect(url.searchParams.get("before_id")).toBeNull();
+  expect(url.searchParams.get("profile")).toBe("lawyer");
+});

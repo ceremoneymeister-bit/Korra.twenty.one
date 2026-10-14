@@ -10,7 +10,6 @@ import {
   chatViewKey,
   readChatDraft,
   writeChatDraft,
-  writeChatView,
 } from "@/lib/chat-view-state";
 /**
  * BubbleChatPage — bubble-style chat UI (Phase 2.2 live SSE streaming).
@@ -101,7 +100,6 @@ import { ownerFacingError } from "@/lib/owner-facing-error";
 import { cn } from "@/lib/utils";
 import type { ApprovalChoiceValue, ChatMessage } from "@/lib/chat-types";
 import { api, type SessionInfo } from "@/lib/api";
-import { useChatArchive } from "@/hooks/useChatArchive";
 import { useChatStream, type PendingMessageTarget, type ChatApprovalEntry, type OlderHistoryState } from "@/hooks/useChatStream";
 import { formatDictationClock, useDictation, type DictationState } from "@/hooks/useDictation";
 import { useSessionList } from "@/hooks/useSessionList";
@@ -216,7 +214,7 @@ function UserBubble({
           {message.failureReason}
         </p>
       ) : null}
-      {message.delivery === "sending" ? (
+      {!message.readOnly && message.delivery === "sending" ? (
         <Button
           type="button"
           size="sm"
@@ -228,7 +226,7 @@ function UserBubble({
         >
           Отправляется…
         </Button>
-      ) : message.delivery === "failed" ? (
+      ) : !message.readOnly && message.delivery === "failed" ? (
         <div
           className="flex flex-wrap justify-end gap-1"
           aria-label="Действия с сообщением, оставшимся без ответа"
@@ -280,10 +278,7 @@ function AssistantBubble({
   decisionsBusy,
   decided,
   chatKey,
-  readOnly,
 }: {
-  /** Архив: чтение и копирование без действий записи («Отменить» под «Учёл»). */
-  readOnly?: boolean;
   voiceSettings?: AgentVoiceSettings | null;
   profile?: string;
   active?: boolean;
@@ -348,14 +343,14 @@ function AssistantBubble({
               <>
                 <ChatArtifactList
                   items={artifactSplit.artifacts}
-                  onDecision={onDecision}
+                  onDecision={message.readOnly ? undefined : onDecision}
                   busy={decisionsBusy}
                   decided={decided}
                 />
                 <div className="korra-chat-answer__footer">
                   <CopyTextButton text={message.content} label="Скопировать ответ" />
                 </div>
-                {!readOnly && message.learning && sessionId && message.historyId !== undefined && (
+                {!message.readOnly && message.learning && sessionId && message.historyId !== undefined && (
                   <LearningUndo
                     sessionId={sessionId}
                     messageId={message.historyId}
@@ -598,16 +593,10 @@ export function BubbleChatTranscript({
   onApprovalDecision,
   older,
   onLoadOlder,
-  onShowArchive,
-  readOnly,
 }: {
-  /** Архив только для чтения: без действий записи в ответах агента. */
-  readOnly?: boolean;
   /** Более ранние сообщения этого чата, догружаемые к началу ленты. */
   older?: OlderHistoryState;
   onLoadOlder?: () => void;
-  /** Открыть сжатую часть разговора только для чтения. */
-  onShowArchive?: () => void;
   voiceSettings?: AgentVoiceSettings | null;
   profile?: string;
   active?: boolean;
@@ -643,7 +632,8 @@ export function BubbleChatTranscript({
       followKey={lastUser?.delivery === "sending" ? lastUser.id : undefined}
       awaitingApproval={approvals?.some(entry => entry.status === "pending")}
       anchorKey={messages[0]?.id}
-      older={older && onLoadOlder ? { ...older, load: onLoadOlder, ...(onShowArchive ? { showArchive: onShowArchive } : {}) } : undefined}
+      historyReady={messages.some(message => message.historyIdentity !== undefined || message.historyId !== undefined)}
+      older={older && onLoadOlder ? { ...older, load: onLoadOlder } : undefined}
     >
       <div className="px-4">
         <div className="korra-chat-transcript__content mx-auto w-full max-w-[880px] space-y-5 pt-6">
@@ -691,9 +681,8 @@ export function BubbleChatTranscript({
                   chatKey={messages[i - 1]?.role === "user" && messages[i - 1]?.clientMessageId ? `assistant:${messages[i - 1]?.clientMessageId}` : undefined}
                   message={m}
                   sessionId={sessionId}
-                  readOnly={readOnly}
                   streaming={
-                    streaming === true && lastIsAssistant && i === lastIdx
+                    !m.readOnly && streaming === true && lastIsAssistant && i === lastIdx
                   }
                   // Единственное, что мы про работу агента действительно знаем:
                   // были ли в предыдущем сообщении вложения. Значит, он сейчас
@@ -746,50 +735,6 @@ export function BubbleChatTranscript({
         </div>
       </div>
     </TranscriptViewport>
-  );
-}
-
-/** Ранняя часть разговора до сжатия: только чтение (K21-203). Живая лента и
- *  композер остаются прежними — архив лишь подменяет ленту на время чтения. */
-function ChatArchive({
-  sessionId, profile, active, voiceSettings, agentLabel, onClose,
-}: {
-  sessionId: string;
-  profile: string;
-  active: boolean;
-  voiceSettings: AgentVoiceSettings | null;
-  agentLabel?: string;
-  onClose: () => void;
-}) {
-  const archive = useChatArchive(sessionId, profile);
-  const scrollKey = `${chatViewKey(profile, sessionId)}:archive`;
-  useEffect(() => () => writeChatView(scrollKey, ""), [scrollKey]);
-  return (
-    <>
-      <div role="region" aria-label="Ранняя часть разговора" className="flex flex-wrap items-center gap-3 border-b border-border/60 px-4 py-2 text-sm">
-        <span className="min-w-0 flex-1 text-[var(--neo-text-secondary)]">
-          Ранняя часть разговора — только чтение{archive.reachedStart ? ". Это начало разговора." : "."}
-        </span>
-        <Button size="sm" onClick={onClose}>Вернуться к чату</Button>
-      </div>
-      {archive.loading && <p role="status" className="px-5 py-2 text-sm">Загружаем раннюю часть…</p>}
-      {archive.failed && (
-        <p role="alert" className="px-5 py-2 text-sm">
-          Не удалось загрузить раннюю часть.
-          <button className="ml-2 underline" onClick={() => void archive.load()}>Повторить</button>
-        </p>
-      )}
-      <BubbleChatTranscript
-        voiceSettings={voiceSettings} profile={profile} active={active}
-        scrollKey={scrollKey}
-        messages={archive.messages}
-        older={archive.older}
-        onLoadOlder={() => void archive.load()}
-        sessionId={sessionId}
-        agentLabel={agentLabel}
-        readOnly
-      />
-    </>
   );
 }
 
@@ -1602,8 +1547,6 @@ export default function BubbleChatPage({
   }, [onMobileHistoryChange]);
   const mobileHistoryTitleId = useId();
   const recoveryKey = chatViewKey(agentProfile, sessionId);
-  const [archiveFor, setArchiveFor] = useState<string | null>(null);
-  const archiveOpen = archiveFor === recoveryKey;
   const [recovery, setRecovery] = useState<{ key: string; text: string } | null>(null);
   const recoveryNotice = recovery?.key === recoveryKey ? recovery.text : "";
   const setRecoveryNotice = (text: string) => setRecovery(text ? { key: recoveryKey, text } : null);
@@ -1965,19 +1908,12 @@ export default function BubbleChatPage({
           hideWhenSettledOnPhone={Boolean(mobileHistory)}
           expandRequest={decisionsRequest}
         />
-        {archiveOpen && sessionId ? (
-          <ChatArchive
-            sessionId={sessionId} profile={agentProfile || "default"} active={active !== false}
-            voiceSettings={voiceSettings} agentLabel={agentLabel}
-            onClose={() => setArchiveFor(null)}
-          />
-        ) : <BubbleChatTranscript
+        <BubbleChatTranscript
           voiceSettings={voiceSettings} profile={agentProfile || "default"} active={active !== false}
           scrollKey={`${chatViewKey(agentProfile, sessionId)}:scroll`}
           messages={messages}
           older={older}
           onLoadOlder={() => void loadOlder()}
-          onShowArchive={sessionId ? () => setArchiveFor(recoveryKey) : undefined}
           streaming={isStreaming && !queued}
           error={error}
           onDecision={handleDecision}
@@ -1990,7 +1926,7 @@ export default function BubbleChatPage({
           agentLabel={agentLabel}
           approvals={approvals}
           onApprovalDecision={handleApprovalDecision}
-        />}
+        />
         {queued && <p role="status" className="px-5 py-3 text-sm text-muted-foreground">Все места заняты. Сообщение в очереди — агент начнёт автоматически, можно перейти в другой чат.</p>}
         {recoveryNotice && <p role="status" className="px-5 py-2 text-sm">{recoveryNotice}<button className="ml-2 underline" onClick={() => setRecoveryNotice("")}>Скрыть</button></p>}
         {isLoading && <p role="status" className="px-5 py-2 text-sm">Обновляем переписку…</p>}
