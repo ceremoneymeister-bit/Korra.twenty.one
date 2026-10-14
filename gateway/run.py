@@ -26835,7 +26835,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     agent_path = to_agent_visible_cache_path(os.path.abspath(path))
                     enriched_parts.append(
                         "[voice message could not be transcribed automatically; "
-                        f"the audio is available at: {agent_path}]"
+                        f"the audio is available at: {agent_path}. "
+                        "Do not guess the content; ask the user to resend or type it out.]"
                     )
             except Exception as e:
                 logger.error("Transcription error: %s", e)
@@ -26844,7 +26845,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 agent_path = to_agent_visible_cache_path(os.path.abspath(path))
                 enriched_parts.append(
                     "[voice message could not be transcribed automatically; "
-                    f"the audio is available at: {agent_path}]"
+                    f"the audio is available at: {agent_path}. "
+                        "Do not guess the content; ask the user to resend or type it out.]"
                 )
 
         if enriched_parts:
@@ -26890,10 +26892,32 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             return user_text if user_text is not None else (getattr(event, "text", None) or None), []
 
         text = user_text if user_text is not None else (getattr(event, "text", "") or "")
-        enriched_text, successful_transcripts = await self._enrich_message_with_transcription(
-            text,
-            audio_paths,
-        )
+        # Interrupt monitors and clarify replies run outside the normal inbound
+        # turn scope. Always bind to THIS event, even if a different profile's
+        # turn is currently active; asyncio.to_thread carries this context.
+        source = getattr(event, "source", None)
+        if source is not None and getattr(self.config, "multiplex_profiles", False):
+            with _profile_runtime_scope(self._resolve_profile_home_for_source(source)):
+                enriched_text, successful_transcripts = await self._enrich_message_with_transcription(
+                    text, audio_paths,
+                )
+        else:
+            enriched_text, successful_transcripts = await self._enrich_message_with_transcription(
+                text, audio_paths,
+            )
+        # A clarify/interrupt path may never start a model turn after failure.
+        # Give the person a usable answer here; the event cache deduplicates it.
+        if not successful_transcripts and source is not None and getattr(self.config, "stt_enabled", True):
+            adapter = self._adapter_for_source(source)
+            if adapter is not None:
+                try:
+                    await adapter.send(
+                        source.chat_id,
+                        "Не удалось распознать голосовое сообщение. Пришлите его ещё раз или напишите текстом.",
+                        metadata=self._thread_metadata_for_source(source, self._reply_anchor_for_event(event)),
+                    )
+                except Exception:
+                    logger.debug("Voice transcription failure notice could not be sent", exc_info=True)
         setattr(event, "_gateway_pending_stt_text", enriched_text)
         setattr(event, "_gateway_pending_stt_transcripts", list(successful_transcripts))
         return enriched_text, successful_transcripts
