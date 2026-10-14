@@ -50,6 +50,7 @@ Usage:
 """
 
 import atexit
+from contextvars import Context, copy_context
 import functools
 import json
 import logging
@@ -2198,6 +2199,9 @@ BROWSER_ORPHAN_GRACE_SECONDS = max(3600, BROWSER_SESSION_INACTIVITY_TIMEOUT * 20
 
 # Track last activity time per session
 _session_last_activity: Dict[str, float] = {}
+# The plain reaper thread has no profile context. Retain each session owner
+# at first use (including the secret scope) rather than borrowing its caller.
+_session_cleanup_contexts: Dict[str, Context] = {}
 
 # Session keys flagged suspect after a command timeout (#72205 / #85125 3b).
 # Written by _BrowserSessionBackend.mark_suspect (cheap, lock-free — a single
@@ -2330,9 +2334,9 @@ def _emergency_cleanup_all_sessions():
         _terminate_real_profile_chrome()
     except Exception as e:
         logger.debug("Real-profile chrome cleanup on exit failed: %s", e)
-    if _active_sessions:
+    if _active_sessions or _session_last_activity:
         logger.info("Emergency cleanup: closing %s active session(s)...",
-                    len(_active_sessions))
+                    len(set(_active_sessions) | set(_session_last_activity)))
         try:
             cleanup_all_browsers()
         except Exception as e:
@@ -2341,6 +2345,7 @@ def _emergency_cleanup_all_sessions():
             with _cleanup_lock:
                 _active_sessions.clear()
                 _session_last_activity.clear()
+                _session_cleanup_contexts.clear()
                 _recording_sessions.clear()
 
     # Lightpanda servers (Browser Use mode) are processes we spawned; the
@@ -2777,6 +2782,8 @@ def _update_session_activity(task_id: str):
     """Update the last activity timestamp for a session."""
     with _cleanup_lock:
         _session_last_activity[task_id] = time.time()
+        if task_id not in _session_cleanup_contexts:
+            _session_cleanup_contexts[task_id] = copy_context()
 
 
 # Register cleanup thread stop on exit
@@ -3543,6 +3550,7 @@ def _discard_timed_out_browser_session(
         else:
             _active_sessions.pop(task_id, None)
             _session_last_activity.pop(task_id, None)
+            _session_cleanup_contexts.pop(task_id, None)
 
         bare_task_id = _bare_task_id_for_session_key(task_id)
         if _last_active_session_key.get(bare_task_id) == task_id:
@@ -5859,7 +5867,17 @@ def cleanup_browser(task_id: Optional[str] = None) -> None:
         bare_task_id = task_id
 
     for session_key in session_keys:
-        _cleanup_single_browser_session(session_key)
+        with _cleanup_lock:
+            owner_context = _session_cleanup_contexts.get(session_key)
+        if owner_context is not None:
+            # copy() permits concurrent close paths without entering the same
+            # Context twice. Never mutate the retained owner's scope.
+            owner_context.copy().run(_cleanup_single_browser_session, session_key)
+        else:
+            _cleanup_single_browser_session(session_key)
+        with _cleanup_lock:
+            _session_last_activity.pop(session_key, None)
+            _session_cleanup_contexts.pop(session_key, None)
 
     # Drop stale last-active ownership. Cleaning a bare task drops its binding;
     # cleaning a sidecar drops the binding only if that sidecar was still the
@@ -5995,7 +6013,7 @@ def cleanup_all_browsers() -> None:
     Useful for cleanup on shutdown.
     """
     with _cleanup_lock:
-        task_ids = list(_active_sessions.keys())
+        task_ids = list(dict.fromkeys([*_active_sessions, *_session_last_activity]))
     for task_id in task_ids:
         cleanup_browser(task_id)
 
