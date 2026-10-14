@@ -987,7 +987,10 @@ describe("много агентов", () => {
     });
     expect(document.body.querySelector("[data-run-toast]")).toBeNull();
     expect($unreadChatRuns.get()).toHaveLength(2);
-    expect(fetcher).not.toHaveBeenCalled();
+    // Фоновый опрос /api/chat/runs может сработать на медленном раннере — он не про скрытие.
+    // Скрытие не должно ничего читать и отмечать: других запросов нет.
+    const nonPolling = fetcher.mock.calls.filter(([url]) => !String(url).startsWith("/api/chat/runs"));
+    expect(nonPolling).toHaveLength(0);
     $dismissedRunToasts.set([]);
     $chatRuns.set([]);
     $unreadChatRuns.set([]);
