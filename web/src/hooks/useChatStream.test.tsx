@@ -1814,18 +1814,37 @@ describe("K21-207 cache reconciliation safety", () => {
   const transcript = (id: string, text = "Saved") => ({ session_id: id, messages: [
     { id: 1, role: "user" as const, content: text }, { id: 2, role: "assistant" as const, content: "Answer" },
   ] });
-  it("a successful DELETE invalidates the cached window and its pending reader", async () => {
+  it.each(["single", "bulk"])("a successful %s deletion invalidates the cached window and its pending reader", async mode => {
     const history = vi.spyOn(api, "getSessionMessages").mockResolvedValue(transcript("cache-deleted"));
     await act(async () => { await current.loadSession("cache-deleted"); });
     let release!: (value: ReturnType<typeof transcript>) => void;
     history.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
     let pending!: Promise<void>;
     await act(async () => { pending = current.loadSession("cache-deleted", { background: true }); });
-    await act(async () => { await api.deleteSession("cache-deleted", "default"); });
+    await act(async () => {
+      if (mode === "bulk") await api.bulkDeleteSessions(["cache-deleted"], "default");
+      else await api.deleteSession("cache-deleted", "default");
+    });
     await act(async () => { release(transcript("cache-deleted", "Late deleted snapshot")); await pending; });
     expect(current.sessionId).toBeNull();
     expect(current.messages).toEqual([]);
     expect(chatHistoryCache.get(JSON.stringify(["", "default", "cache-deleted"]))).toBeUndefined();
+  });
+  it.each(["single", "bulk"])("returning after %s deletion stays empty when REST is unavailable", async mode => {
+    const history = vi.spyOn(api, "getSessionMessages").mockResolvedValue(transcript("cache-deleted-return"));
+    await act(async () => { await current.loadSession("cache-deleted-return"); });
+    await act(async () => root.unmount()); // Navigate to Sessions before deleting.
+    root = createRoot(container);
+    if (mode === "bulk") await api.bulkDeleteSessions(["cache-deleted-return"], "default");
+    else await api.deleteSession("cache-deleted-return", "default");
+    expect(chatHistoryCache.get(JSON.stringify(["", "default", "cache-deleted-return"]))).toBeUndefined();
+    let reject!: (error: Error) => void;
+    history.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
+    await act(async () => root.render(<Probe onValue={value => { current = value; }} />));
+    expect(current.messages).toEqual([]);
+    await act(async () => { reject(new Error("Network unavailable")); });
+    expect(current.messages).toEqual([]);
+    expect(current.error).toBeTruthy();
   });
   it("a server 404 on a cached return forgets the window and opens a real conversation", async () => {
     const history = vi.spyOn(api, "getSessionMessages").mockResolvedValue(transcript("cache-gone"));
@@ -2252,6 +2271,54 @@ describe("K21-203 unified compressed history", () => {
     expect(current.messages.map(message => message.content)).toEqual(rows(1, 170).map(row => row.content));
     expect(current.older.hasOlder).toBe(false);
     expect(history).toHaveBeenCalledTimes(3);
+  });
+  it.each(["initial", "bridge"])("T4-07: %s history 404 forgets the selected window and calls onMissing", async phase => {
+    const history = vi.spyOn(api, "getSessionMessages").mockResolvedValueOnce(page(1, 70, null));
+    await act(async () => { await current.loadSession("compressed"); });
+    saveChatOutbox({ messageId: "missing-bridge-12345678", sessionId: "compressed", profile: "", text: "Unposted",
+      attachments: [], createdAt: 3, status: "failed" });
+    if (phase === "bridge") history.mockResolvedValueOnce(page(141, 210, "cursor-141"));
+    history.mockRejectedValueOnce(new Error("404: missing"));
+    const missing = vi.fn();
+    await act(async () => { await current.loadSession("compressed", { background: true, onMissing: missing }); });
+    expect(missing).toHaveBeenCalledOnce();
+    expect(current.sessionId).toBeNull();
+    expect(current.messages).toEqual([]);
+    expect(current.error).toBeNull();
+    expect(chatHistoryCache.get(JSON.stringify(["", "default", "compressed"]))).toBeUndefined();
+    expect(sessionStorage.getItem(`${chatViewKey()}:selected`)).toBeNull();
+    expect(loadChatOutboxRecords("", "compressed")).toHaveLength(1);
+  });
+  it("T4-07: a late bridge 404 cannot clear a newly opened chat or call its old onMissing", async () => {
+    const history = vi.spyOn(api, "getSessionMessages").mockResolvedValueOnce(page(1, 70, null));
+    await act(async () => { await current.loadSession("compressed"); });
+    let reject!: (error: Error) => void;
+    history.mockResolvedValueOnce(page(141, 210, "cursor-141"))
+      .mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
+    const missing = vi.fn();
+    let pending!: Promise<void>;
+    await act(async () => { pending = current.loadSession("compressed", { background: true, onMissing: missing }); });
+    history.mockResolvedValueOnce({ session_id: "other-chat", messages: rows(1, 2, 0) });
+    await act(async () => { await current.loadSession("other-chat"); });
+    const messages = current.messages;
+    await act(async () => { reject(new Error("404: missing")); await pending; });
+    expect(current.sessionId).toBe("other-chat");
+    expect(current.messages).toBe(messages);
+    expect(missing).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem(`${chatViewKey()}:selected`)).toBe("other-chat");
+  });
+  it("T4-07: a bridge network failure preserves the readable history without onMissing", async () => {
+    const history = vi.spyOn(api, "getSessionMessages").mockResolvedValueOnce(page(1, 70, null));
+    await act(async () => { await current.loadSession("compressed"); });
+    const messages = current.messages;
+    history.mockResolvedValueOnce(page(141, 210, "cursor-141"))
+      .mockRejectedValueOnce(new Error("Network unavailable"));
+    const missing = vi.fn();
+    await act(async () => { await current.loadSession("compressed", { background: true, onMissing: missing }); });
+    expect(current.sessionId).toBe("compressed");
+    expect(current.messages).toBe(messages);
+    expect(current.error).toBeTruthy();
+    expect(missing).not.toHaveBeenCalled();
   });
   it("an archived physical row cannot claim an active run with the same row ID", async () => {
     const { getChatRuns } = await import("@/lib/chat-runs");

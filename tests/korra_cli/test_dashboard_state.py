@@ -1530,3 +1530,32 @@ def test_usage_is_delivered_beside_the_quota(tmp_path, owner, wham, monkeypatch)
     assert usage["total"] == {"calls": 1, "output_tokens": 123}
     assert usage["agents"][0]["name"] == owner.label
     assert usage["period"]["starts_at"] == NOW + 86400 - 7 * 86400
+
+
+@pytest.mark.parametrize("profile", ["default", "worker"])
+@pytest.mark.parametrize("provider", ["openai-codex", "anthropic"])
+@pytest.mark.parametrize("source", ["cron", "provider"])
+def test_subscription_attention_link_targets_its_profile(tmp_path, monkeypatch, profile, provider, source):
+    """T4-06: the real profile store must choose the Models page's target."""
+    from urllib.parse import parse_qs, urlsplit
+    from cron import incidents, jobs
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    agent = _agent(tmp_path / ".hermes", profile, "Работник")
+    monkeypatch.setenv("HERMES_HOME", str(agent.home))
+    monkeypatch.setenv("KORRA_HOME", str(agent.home))
+    monkeypatch.setattr(incidents, "EXECUTIONS_FILE", None)
+    if source == "cron":
+        with jobs.use_cron_store(agent.home):
+            incidents.upsert_incident("synthetic-job", incidents.subscription_notice(provider))
+        items = ds._cron_items([agent], now=datetime.now().timestamp(), tz=None)
+    else:
+        (agent.home / "auth.json").write_text(json.dumps({"credential_pool": {
+            provider: [{"last_status": "dead", "last_error_reason": "token_revoked"}],
+        }}), encoding="utf-8")
+        items = ds._provider_items([agent])
+    assert len(items) == 1
+    assert items[0]["profile"] == agent.profile
+    link = urlsplit(items[0]["href"])
+    assert link.path == "/models"
+    assert parse_qs(link.query).get("profile") == [profile]
