@@ -5,6 +5,7 @@ from datetime import timedelta
 from unittest.mock import AsyncMock, patch
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
@@ -73,7 +74,10 @@ def test_missing_login_real_resolution_one_notice_and_recovery(home, deliver):
         text = send.call_args.args[3]
         assert "Вход в подписку ChatGPT" in text and "korra model" in text
     signals = [item for item in attention(home) if item["kind"] == "provider_refused"]
-    assert len(signals) == 1 and signals[0]["href"] == "/models"
+    assert len(signals) == 1
+    link = urlsplit(signals[0]["href"])
+    assert link.path == "/models"
+    assert parse_qs(link.query).get("profile") == [signals[0]["profile"] or "default"]
 
     # A healthy fallback/another provider must not erase the failed subscription.
     incidents.close_incidents_for_recovered_job(first["id"], provider="anthropic")
@@ -519,7 +523,10 @@ def test_dashboard_http_signal_and_recovery(home, monkeypatch):
     response = client.get("/api/dashboard/state", headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN})
     assert response.status_code == 200
     signals = [item for item in response.json()["attention"]["items"] if item["kind"] == "provider_refused"]
-    assert len(signals) == 1 and signals[0]["href"] == "/models"
+    assert len(signals) == 1
+    link = urlsplit(signals[0]["href"])
+    assert link.path == "/models"
+    assert parse_qs(link.query).get("profile") == [signals[0]["profile"] or "default"]
     incidents.close_incidents_for_recovered_job(job["id"], provider="openai-codex")
     dashboard.reset_cache()
     response = client.get("/api/dashboard/state", headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN})

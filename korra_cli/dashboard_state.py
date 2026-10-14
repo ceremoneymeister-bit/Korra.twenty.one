@@ -38,6 +38,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, tzinfo
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
+from urllib.parse import urlencode
 
 logger = logging.getLogger(__name__)
 
@@ -1733,7 +1734,7 @@ def _cron_items(agents: list[Agent], *, now: float, tz: Optional[tzinfo]) -> lis
                     "detail": "Откройте «Модели» и подключите подписку заново или выполните `korra model` в этом профиле.",
                     "agent": agent.label,
                     "profile": agent.profile,
-                    "href": "/models",
+                    "href": "/models?" + urlencode({"profile": agent.profile or "default"}),
                     "action": "Подключить",
                     "at": seen.timestamp(),
                 })
@@ -1823,7 +1824,7 @@ def _provider_items(agents: list[Agent]) -> list[dict[str, Any]]:
             "detail": "Провайдер больше не принимает вход. Подключите его заново, чтобы агенты продолжили отвечать.",
             "agent": bucket["agent"],
             "profile": bucket["profile"],
-            "href": "/models",
+            "href": "/models?" + urlencode({"profile": profile}),
             "action": "Подключить",
             "at": bucket["at"] or None,
         })
