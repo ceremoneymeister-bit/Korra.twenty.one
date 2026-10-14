@@ -33,6 +33,8 @@ vi.hoisted(() => {
 });
 
 const apiMocks = vi.hoisted(() => ({
+  getAutomationBlueprints: vi.fn(),
+  instantiateAutomationBlueprint: vi.fn(),
   getCronJobs: vi.fn(),
   getCronJobHistory: vi.fn(),
   getCronDeliveryTargets: vi.fn(),
@@ -183,6 +185,8 @@ beforeEach(() => {
     configurable: true,
     value: vi.fn(),
   });
+  apiMocks.getAutomationBlueprints.mockResolvedValue({blueprints: [{key:"custom-reminder",name:"Reminder",description:"Reminder",fields:[]}]});
+  apiMocks.instantiateAutomationBlueprint.mockResolvedValue(job());
   apiMocks.getCronJobs.mockResolvedValue([job()]);
   apiMocks.getCronDeliveryTargets.mockResolvedValue({
     targets: [
@@ -286,6 +290,38 @@ describe("CronPage в режиме клиента", () => {
     expect(id).toBe("job-1");
     expect(profile).toBe("secretary");
     expect(payload).toMatchObject({ name: "Вечерний отчёт" });
+  });
+
+  it.each(["create", "update"])("показывает предупреждение доставки после %s", async (action) => {
+    const warning = "Задача сохранена, но результат не будет доставлен: telegram не подключён. Подключите канал этого профиля.";
+    apiMocks.createCronJob.mockResolvedValue(job({ warning }));
+    apiMocks.updateCronJob.mockResolvedValue(job({ warning }));
+    await renderPage();
+    if (action === "create") {
+      await click(findButton("Добавить задачу", document.querySelector('[data-testid="page-header-end"]')!));
+      const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!;
+      await enterText(dialog.querySelector<HTMLInputElement>("#cron-name")!, "Отчёт");
+      await enterText(dialog.querySelector<HTMLTextAreaElement>("#cron-prompt")!, "Собери сводку");
+      await click(findButton("Добавить в расписание", dialog));
+    } else {
+      await click(actionButton("Изменить задачу"));
+      await click(findButton("Сохранить", document.querySelector<HTMLElement>('[role="dialog"]')!));
+    }
+    expect(container.querySelector('[role="status"]')?.textContent).toBe(warning);
+    expect(document.body.textContent).not.toContain("будет запускаться по расписанию");
+  });
+
+  it("форма шаблона сохраняет предупреждение доставки", async () => {
+    window.__KORRA_UI_MODE__ = "admin";
+    session.client = false;
+    const warning = "Задача сохранена, но результат не будет доставлен: telegram не подключён.";
+    apiMocks.instantiateAutomationBlueprint.mockResolvedValue(job({warning}));
+    await renderPage();
+    await click(findButton("Шаблоны"));
+    await click(findButton("Настроить"));
+    await click(findButton("Запланировать"));
+    expect(apiMocks.instantiateAutomationBlueprint).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('[role="status"]')?.textContent).toBe(warning);
   });
 
   it("удаляет задачу через DELETE и предупреждает, что это навсегда", async () => {

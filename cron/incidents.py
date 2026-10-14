@@ -256,7 +256,7 @@ def upsert_incident(
     new incident automatically.
     """
     job_id = str(job_id or "")
-    provider = subscription_provider(error)
+    provider = None if failure_type == "delivery" else subscription_provider(error)
     # The same subscription blocks many jobs in this profile. Keep one incident
     # in the existing ledger, with the triggering job retained for diagnostics.
     signature_job = f"subscription:{provider}" if provider else job_id
@@ -343,7 +343,9 @@ def ack_incident(incident_id: str) -> bool:
     return set_incident_state(incident_id, "closed")
 
 
-def close_incidents_for_recovered_job(job_id: str, *, provider: Optional[str] = None) -> int:
+def close_incidents_for_recovered_job(
+    job_id: str, *, provider: Optional[str] = None, delivery_recovered: bool = True,
+) -> int:
     """Mark the job's open incidents ``resolved`` after a successful run; returns how many.
 
     With a successfully used subscription provider, resolve its shared incident
@@ -359,12 +361,14 @@ def close_incidents_for_recovered_job(job_id: str, *, provider: Optional[str] = 
         ).fetchall()
         resolved = 0
         for row in rows:
+            if row["failure_type"] == "delivery" and not delivery_recovered:
+                continue
             # Legacy per-job auth rows obey the same provider check as the
             # shared subscription signal, even on this job's own green run.
             subscription = (
                 row["failure_type"].removeprefix("subscription:")
                 if row["failure_type"].startswith("subscription:")
-                else subscription_provider(row["error"])
+                else None if row["failure_type"] == "delivery" else subscription_provider(row["error"])
             )
             recovered = subscription == provider if subscription else row["job_id"] == str(job_id or "")
             if recovered:
