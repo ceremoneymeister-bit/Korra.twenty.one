@@ -61,6 +61,7 @@ def test_named_profile_wake_self_posts_to_profile_route(tmp_path, monkeypatch):
     root = tmp_path / "hermes"
     profile = root / "profiles" / "worker"
     profile.mkdir(parents=True)
+    (profile / ".env").write_text("API_SERVER_KEY=test-worker-key-1234567890\n")
     monkeypatch.setenv("HERMES_HOME", str(root))
     seen = []
 
@@ -156,5 +157,61 @@ def test_deliver_wake_retries_429_then_succeeds(monkeypatch):
 
     asyncio.run(run())
     assert calls["n"] == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("root_key", ["test-root-key-1234567890", ""])
+@pytest.mark.parametrize("profile_name", ["worker", "other"])
+async def test_profile_wake_authenticates_with_url_owner(tmp_path, monkeypatch, root_key, profile_name):
+    from aiohttp import web
+    from aiohttp.test_utils import TestClient, TestServer
+    from types import SimpleNamespace
+
+    from gateway.config import GatewayConfig, PlatformConfig
+    from gateway.platforms.api_server import APIServerAdapter
+    from gateway.run import _profile_runtime_scope
+
+    root = tmp_path / "hermes"
+    for name in ("worker", "other"):
+        home = root / "profiles" / name
+        home.mkdir(parents=True)
+        (home / ".env").write_text(f"API_SERVER_KEY=test-{name}-key-1234567890\n")
+    monkeypatch.setenv("HERMES_HOME", str(root))
+    monkeypatch.setenv("API_SERVER_KEY", "test-ambient-key-1234567890")
+    adapter = APIServerAdapter(PlatformConfig(enabled=True, extra={"key": root_key}))
+    adapter.gateway_runner = SimpleNamespace(config=GatewayConfig(multiplex_profiles=True))
+    accepted = []
+
+    async def authenticated(request):
+        refusal = adapter._check_auth(request)
+        if refusal is not None:
+            return refusal
+        accepted.append((request.path, request.headers["X-Hermes-Session-Id"]))
+        return web.json_response({"choices": []})
+
+    app = web.Application(middlewares=[adapter._make_profile_prefix_middleware()])
+    app.router.add_post("/p/{profile}/v1/chat/completions", authenticated)
+    async with TestClient(TestServer(app)) as client:
+        adapter._host = "127.0.0.1"
+        adapter._port = client.server.port
+        with _profile_runtime_scope(root / "profiles" / profile_name):
+            await deliver_wake(adapter, text="completed", session_id="parent")
+    assert accepted == [(f"/p/{profile_name}/v1/chat/completions", "parent")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("key", ["", "weak", "your_api_key_here"])
+async def test_profile_wake_never_borrows_root_key(tmp_path, monkeypatch, key):
+    from gateway.run import _profile_runtime_scope
+
+    root = tmp_path / "hermes"
+    home = root / "profiles" / "worker"
+    home.mkdir(parents=True)
+    (home / ".env").write_text(f"API_SERVER_KEY={key}\n")
+    monkeypatch.setenv("HERMES_HOME", str(root))
+    monkeypatch.setenv("API_SERVER_KEY", "test-ambient-key-1234567890")
+    with _profile_runtime_scope(home), pytest.raises(RuntimeError, match="profile-scoped API_SERVER_KEY"):
+        await deliver_wake(ApiServerLikeAdapter(key="test-root-key-1234567890"),
+                           text="completed", session_id="parent")
 
 

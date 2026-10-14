@@ -344,7 +344,7 @@ class TestMoaAggregatorSharedResolution:
 
 
 
-    def test_main_agent_fallback_uses_aggregator_for_moa_main(self, tmp_path, monkeypatch):
+    def test_main_agent_fallback_uses_aggregator_for_moa_main(self, tmp_path, monkeypatch, owner_api_policy):
         """_try_main_agent_model_fallback with a moa main resolves the
         aggregator instead of asking for a literal "moa" client."""
         from agent.auxiliary_client import _try_main_agent_model_fallback
@@ -1948,7 +1948,7 @@ class TestTryMainAgentModelFallback:
         assert client is None and model is None and label == ""
 
 
-    def test_resolves_main_provider_client(self):
+    def test_resolves_main_provider_client(self, owner_api_policy):
         from agent.auxiliary_client import _try_main_agent_model_fallback
         fake_client = MagicMock()
         with patch("agent.auxiliary_client._read_main_provider", return_value="openrouter"), \

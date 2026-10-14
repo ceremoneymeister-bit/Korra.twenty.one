@@ -21,6 +21,7 @@ import korra_state
 from gateway.config import GatewayConfig, Platform
 from gateway.run import GatewayRunner, _SESSION_DB_UNPINNED, _profile_runtime_scope
 from gateway.session import SessionStore
+from gateway.profile_routing import ProfileRoute
 from korra_constants import get_hermes_home
 from tools import async_delegation as ad
 from tools import process_registry as pr
@@ -277,3 +278,113 @@ ad._persist_dispatch({'delegation_id':'test-abandoned','session_key':'agent:work
         assert row["state"] == "unknown"
         assert row["result"]["summary"] is None
         assert row["delivery_state"] == "delivered"
+
+
+@pytest.mark.parametrize("restarted", [False, True], ids=["live", "restart"])
+@pytest.mark.parametrize("batch", [False, True], ids=["single", "batch"])
+def test_routed_primary_bot_returns_profile_completion(fleet, monkeypatch, restarted, batch):
+    from tests.gateway.test_missing_media_delivery import RecordingAdapter
+    from gateway.session import build_session_key
+
+    _root, profile, runner = fleet
+    runner.config.profile_routes = [ProfileRoute(
+        name="shared-chat", platform="telegram", profile="worker", chat_id="chat-1",
+    )]
+    primary = RecordingAdapter()
+    primary.gateway_runner = runner
+    accepted = []
+
+    async def accept(event):
+        accepted.append((get_hermes_home(), event.source.profile, event.text))
+
+    primary.handle_message = accept
+    runner.adapters = {Platform.TELEGRAM: primary}
+    runner._profile_adapters = {}
+    source = primary.build_source(chat_id="chat-1", chat_type="dm")
+    assert source.profile == "worker"
+    key = build_session_key(source, profile=source.profile)
+    with _profile_runtime_scope(profile):
+        # Persist real source metadata; serialization intentionally drops the
+        # in-process transport ref. Restart must recover the configured route.
+        runner.session_store.get_or_create_session(source)
+        runner.session_store._save()
+    if restarted:
+        runner.session_store._entries.clear()
+        runner.session_store._loaded = False
+    else:
+        runner._session_sources[key] = source
+        # A runtime profile's separate bot must not steal a live completion
+        # commissioned through the primary bot.
+        runner._profile_adapters = {"worker": {Platform.TELEGRAM: SimpleNamespace(
+            handle_message=lambda _: pytest.fail("wrong bot"),
+        )}}
+    did = _dispatch(profile, web=False, restarted=restarted, batch=batch)
+    _run_watcher(monkeypatch, runner)
+    assert len(accepted) == 1
+    assert accepted[0][:2] == (profile, "worker")
+    assert "test result" in accepted[0][2]
+    with _profile_runtime_scope(profile):
+        assert ad.get_durable_delegation(did)["delivery_state"] == "delivered"
+
+
+@pytest.mark.parametrize("route_profile", [None, "other"])
+def test_profile_completion_cannot_use_unrelated_primary_bot(fleet, monkeypatch, route_profile):
+    _root, profile, runner = fleet
+    if route_profile:
+        (profile.parent / route_profile).mkdir()
+        runner.config.profile_routes = [ProfileRoute(
+            name="other-chat", platform="telegram", profile=route_profile, chat_id="chat-1",
+        )]
+    runner.adapters = {Platform.TELEGRAM: SimpleNamespace(
+        handle_message=lambda _: pytest.fail("unrelated primary bot"),
+    )}
+    runner._profile_adapters = {}
+    did = _dispatch(profile, web=False, restarted=False)
+    _run_watcher(monkeypatch, runner)
+    with _profile_runtime_scope(profile):
+        assert ad.get_durable_delegation(did)["delivery_state"] == "pending"
+    assert not pr.process_registry.completion_queue.empty()
+
+
+def test_disconnected_ingress_transport_is_retried_without_switching_bots(fleet, monkeypatch):
+    from tests.gateway.test_missing_media_delivery import RecordingAdapter
+    from gateway.session import build_session_key
+
+    _root, profile, runner = fleet
+    runner.config.profile_routes = [ProfileRoute(
+        name="shared-chat", platform="telegram", profile="worker", chat_id="chat-1",
+    )]
+    primary = RecordingAdapter()
+    primary.gateway_runner = runner
+    accepted = []
+
+    async def accept(event):
+        accepted.append(event.text)
+
+    primary.handle_message = accept
+    runner.adapters = {Platform.TELEGRAM: primary}
+    source = primary.build_source(chat_id="chat-1", chat_type="dm")
+    runner._session_sources[build_session_key(source, profile="worker")] = source
+    wrong_bot = SimpleNamespace(handle_message=lambda _: pytest.fail("wrong bot"))
+    runner.adapters = {Platform.TELEGRAM: wrong_bot}
+    runner._profile_adapters = {"worker": {Platform.TELEGRAM: wrong_bot}}
+    did = _dispatch(profile, web=False, restarted=False)
+    ticks = 0
+
+    async def sleep(_delay):
+        nonlocal ticks
+        ticks += 1
+        if ticks == 2:
+            with _profile_runtime_scope(profile):
+                assert ad.get_durable_delegation(did)["delivery_state"] == "pending"
+            assert not accepted
+            assert not pr.process_registry.completion_queue.empty()
+            runner.adapters[Platform.TELEGRAM] = primary
+        if ticks >= 3:
+            runner._running = False
+
+    monkeypatch.setattr(asyncio, "sleep", sleep)
+    asyncio.run(runner._async_delegation_watcher(interval=0))
+    assert len(accepted) == 1
+    with _profile_runtime_scope(profile):
+        assert ad.get_durable_delegation(did)["delivery_state"] == "delivered"

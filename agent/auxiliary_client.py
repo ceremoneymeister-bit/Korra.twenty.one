@@ -4373,18 +4373,16 @@ def _subscription_fallback_entry_may_resolve(
     entry: Dict[str, Any],
     main_runtime: Optional[Dict[str, Any]],
 ) -> bool:
-    """Preflight a configured fallback under subscription-only runtime.
+    """Preflight a configured fallback under the owner's auxiliary cost policy.
 
     Old config rows are not billing consent. Non-subscription providers and
     inline credentials are rejected before client construction. Anthropic is
     checked again after resolution because its ambient pool can contain either
     OAuth or API-key credentials.
     """
-    subscription_only = _runtime_uses_subscription(main_runtime) or (
-        _aux_openrouter_settings()[0]
-        and _effective_selected_provider(main_runtime) in {"", "auto"}
-    )
-    if not subscription_only:
+    # Missing runtime/expired OAuth cannot turn an old fallback row into
+    # billing consent. Only an explicit boolean free_only: false permits API.
+    if not _aux_openrouter_settings()[0]:
         return True
     provider = _normalize_aux_provider(str(entry.get("provider") or ""))
     if provider in {"openai-codex", "codex"}:
@@ -4400,11 +4398,7 @@ def _subscription_fallback_client_allowed(
     main_runtime: Optional[Dict[str, Any]],
 ) -> bool:
     """Verify that a resolved fallback still uses subscription credentials."""
-    subscription_only = _runtime_uses_subscription(main_runtime) or (
-        _aux_openrouter_settings()[0]
-        and _effective_selected_provider(main_runtime) in {"", "auto"}
-    )
-    if not subscription_only:
+    if not _aux_openrouter_settings()[0]:
         return True
     normalized = _normalize_aux_provider(provider)
     if normalized in {"openai-codex", "codex"}:
@@ -6051,6 +6045,11 @@ def _try_main_agent_model_fallback(
         _log_skip_unhealthy(main_provider, task)
         return None, None, ""
 
+    if not _subscription_fallback_entry_may_resolve(
+        {"provider": main_provider}, runtime,
+    ):
+        return None, None, ""
+
     try:
         client, resolved_model = resolve_provider_client(
             provider=main_provider, model=main_model,
@@ -6059,6 +6058,8 @@ def _try_main_agent_model_fallback(
         client, resolved_model = None, None
 
     if client is None:
+        return None, None, ""
+    if not _subscription_fallback_client_allowed(main_provider, client, runtime):
         return None, None, ""
 
     label = f"main-agent({main_provider})"
@@ -6239,7 +6240,7 @@ def _try_configured_fallback_chain(
         if not _subscription_fallback_entry_may_resolve(entry, main_runtime):
             logger.warning(
                 "Auxiliary %s: ignoring legacy configured fallback %s because "
-                "the live main route is subscription-only; an old config row "
+                "auxiliary.free_only is enabled; an old config row "
                 "is not API-billing consent.",
                 task,
                 label,
@@ -6407,8 +6408,8 @@ def _try_main_fallback_chain(
             continue
         if not _subscription_fallback_entry_may_resolve(entry, main_runtime):
             logger.warning(
-                "Auxiliary %s: ignoring legacy main fallback %s because the "
-                "live main route is subscription-only; an old config row is "
+                "Auxiliary %s: ignoring legacy main fallback %s because "
+                "auxiliary.free_only is enabled; an old config row is "
                 "not API-billing consent.",
                 task or "call",
                 label,
