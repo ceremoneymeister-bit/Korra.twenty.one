@@ -3637,25 +3637,22 @@ def text_to_speech_tool(
             base_path = out_dir / f"tts_{timestamp}.mp3"
     base_path.parent.mkdir(parents=True, exist_ok=True)
 
-    generated_artifacts: set[str] = set()
+    staging = None
     final_paths: List[str] = []
     chunk_results: List[Dict[str, Any]] = []
     try:
+        # Isolate every provider-derived format as well as the requested name.
+        # Keep staging on the destination filesystem for atomic publication.
+        staging = tempfile.TemporaryDirectory(prefix=".tts-", dir=base_path.parent)
+        work_base = Path(staging.name) / base_path.name
         encoded_paths: List[str] = []
         for index, chunk in enumerate(chunks, start=1):
             if len(chunks) == 1:
-                chunk_path = base_path
+                chunk_path = work_base
             else:
-                chunk_path = base_path.with_name(
-                    f"{base_path.stem}.chunk{index:03d}{base_path.suffix}"
+                chunk_path = work_base.with_name(
+                    f"{work_base.stem}.chunk{index:03d}{work_base.suffix}"
                 )
-            if os.path.lexists(chunk_path):
-                # Upstream 7085fbf775: failed synthesis must not truncate or sweep user data.
-                import uuid
-                chunk_path = chunk_path.with_name(
-                    f".{chunk_path.stem}.{uuid.uuid4().hex}{chunk_path.suffix}"
-                )
-            generated_artifacts.add(str(chunk_path))
             raw_result = _text_to_speech_single(
                 text=chunk,
                 output_path=str(chunk_path),
@@ -3681,20 +3678,24 @@ def text_to_speech_tool(
                 raise RuntimeError(
                     f"TTS chunk {index} produced no final audio: {actual_path}"
                 )
-            generated_artifacts.add(actual_path)
             encoded_paths.append(actual_path)
             chunk_results.append(chunk_result)
 
         voice_compatible = bool(chunk_results) and all(
             bool(result.get("voice_compatible")) for result in chunk_results
         )
-        delivery_base = base_path.with_suffix(Path(encoded_paths[0]).suffix)
-        final_paths, combined_chunks = _build_audio_delivery_files(
+        delivery_base = work_base.with_suffix(Path(encoded_paths[0]).suffix)
+        staged_paths, combined_chunks = _build_audio_delivery_files(
             encoded_paths,
             str(delivery_base),
             delivery_profile,
             voice_compatible=voice_compatible,
         )
+        # Synthesis, conversion and delivery validation all succeeded.
+        for staged_path in staged_paths:
+            destination = base_path.parent / Path(staged_path).name
+            os.replace(staged_path, destination)
+            final_paths.append(str(destination))
 
         for path in final_paths:
             logger.info(
@@ -3732,14 +3733,8 @@ def text_to_speech_tool(
         logger.error("%s", error_msg, exc_info=True)
         return tool_error(error_msg, success=False)
     finally:
-        final_absolute = {os.path.abspath(path) for path in final_paths}
-        for artifact in generated_artifacts:
-            if os.path.abspath(artifact) in final_absolute:
-                continue
-            try:
-                os.unlink(artifact)
-            except OSError:
-                pass
+        if staging is not None:
+            staging.cleanup()
 
 
 # ===========================================================================

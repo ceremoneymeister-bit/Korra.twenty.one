@@ -74,3 +74,39 @@ def test_successful_synthesis_still_overwrites_existing_file(audio_dir, monkeypa
     assert result["file_path"] == str(existing)
     assert existing.read_bytes() == b"new-audio"
     assert sorted(p.name for p in audio_dir.iterdir()) == ["notes.mp3"]
+
+
+@pytest.mark.parametrize("target_exists", [False, True])
+def test_failed_piper_preserves_existing_sibling_wav(tmp_path, monkeypatch, target_exists):
+    from types import SimpleNamespace
+    audio_dir = tmp_path / "audio"
+    audio_dir.mkdir()
+    target = audio_dir / "report.mp3"
+    existing = target.with_suffix(".wav")
+    existing.write_bytes(b"original recording")
+    if target_exists:
+        target.write_bytes(b"original mp3")
+
+    class Voice:
+        def synthesize_wav(self, text, wav_file):
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(16000)
+            wav_file.writeframes(b"\x00\x00")
+            raise RuntimeError("synthesis failed")
+
+    monkeypatch.setattr(tts_tool, "_load_tts_config", lambda: {
+        "provider": "piper", "piper": {"voices_dir": str(tmp_path / "voices")},
+    })
+    monkeypatch.setattr(tts_tool, "_import_piper", lambda: SimpleNamespace(load=lambda *a, **kw: Voice()))
+    monkeypatch.setattr(tts_tool, "_resolve_piper_voice_path", lambda *a: tmp_path / "fake.onnx")
+    result = json.loads(tts_tool.text_to_speech_tool("hello", output_path=str(target)))
+    assert result["success"] is False
+    assert existing.read_bytes() == b"original recording"
+    if target_exists:
+        assert target.read_bytes() == b"original mp3"
+    else:
+        assert not target.exists()
+    assert sorted(p.name for p in audio_dir.iterdir()) == (
+        ["report.mp3", "report.wav"] if target_exists else ["report.wav"]
+    )
