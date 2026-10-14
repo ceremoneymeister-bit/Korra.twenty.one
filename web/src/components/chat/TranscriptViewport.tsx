@@ -190,7 +190,13 @@ export function TranscriptViewport({ children, followKey, awaitingApproval, stor
         ref={viewport}
         className="h-full overflow-y-auto [overflow-anchor:none]"
         aria-label="Переписка"
-        onWheel={() => { place.current = null; }}
+        onWheel={event => {
+          place.current = null;
+          // Native scrolling and its scroll event can arrive after a stream
+          // render/ResizeObserver. Yield now; the old anchor would undo it.
+          reading.current = null;
+          if (event.deltaY < 0) following.current = false;
+        }}
         onTouchStart={() => { place.current = null; }}
         onScroll={event => {
           const el = event.currentTarget;
