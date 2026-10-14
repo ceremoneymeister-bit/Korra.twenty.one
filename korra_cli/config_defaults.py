@@ -2474,6 +2474,17 @@ DEFAULT_CONFIG = {
     # Empty string means use server-local time.
     "timezone": "",
 
+    # `korra backup --to-drive`: копия установки на Google Диск владельца.
+    "backup": {
+        # Открытый ключ X25519 (base64 или PEM), которым шифруются секреты
+        # в копии на Диск. Пусто — встроенный ключ команды Korra.
+        "operator_public_key": "",
+        # Сколько последних копий этой установки хранить на Диске.
+        "drive_keep": 4,
+        # Имя установки в имени файла копии; пусто — первые 8 знаков install_id.
+        "installation_name": "",
+    },
+
     # Slack platform settings (gateway mode)
     "slack": {
         "require_mention": True,       # Require @mention to respond in channels

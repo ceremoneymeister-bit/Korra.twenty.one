@@ -5966,6 +5966,9 @@ def cmd_skin(args):
 
 def cmd_backup(args):
     """Back up Hermes home directory to a zip file."""
+    if getattr(args, "quick", False) and getattr(args, "to_drive", False):
+        print("Ошибка: --to-drive не сочетается с --quick.")
+        raise SystemExit(1)
     if getattr(args, "quick", False):
         from korra_cli.backup import run_quick_backup
 
