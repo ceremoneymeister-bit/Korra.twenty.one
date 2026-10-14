@@ -1042,20 +1042,6 @@ def _handle_send(args, *, owner_initiated: bool = False, for_running_job: bool =
     force_document_attachments = "[[as_document]]" in message
 
     media_files, cleaned_message = BasePlatformAdapter.extract_media(message)
-    # A relative or missing extensionless path can survive extraction. Do not
-    # send its literal directive as text or ask the owner to approve that text.
-    remaining = BasePlatformAdapter._mask_protected_spans(cleaned_message)
-    remaining = BasePlatformAdapter._mask_json_string_media(remaining)
-    unresolved = re.search(r"\bMEDIA:\s*(\S+)", remaining, re.IGNORECASE)
-    if unresolved:
-        return tool_error(
-            _sanitize_error_text(
-                f"Unresolved MEDIA path: {unresolved.group(1)[:200]}. Nothing sent. "
-                "Use an existing absolute file path in the active profile and terminal "
-                "workspace; find or recreate the file before retrying."
-            ),
-            success=False, refused_before_send=True,
-        )
     try:
         media_files = BasePlatformAdapter.filter_media_delivery_paths(media_files, require_all=True)
     except ValueError as exc:

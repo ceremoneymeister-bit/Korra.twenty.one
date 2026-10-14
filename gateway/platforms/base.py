@@ -2170,11 +2170,10 @@ MEDIA_TAG_CLEANUP_RE = re.compile(
 # unknown extension (.py, .log, .weirdext, ...) — are validated and delivered
 # via MEDIA_EXTENSIONLESS_TAG_RE. Every ``MEDIA:`` path is therefore
 # deliverable regardless of file type (#36060): known extensions extract
-# unconditionally via the anchored pattern above, everything else extracts
-# only after ``validate_media_delivery_path`` accepts it (exists on disk, not
-# under the credential/system denylist, strict-mode rules honored), so
-# prompt-injection paths that do not validate are left visible instead of
-# silently dropped.
+# unconditionally via the anchored pattern above; other paths first resolve
+# through ``validate_media_delivery_path`` (exists on disk,
+# denylist and strict-mode rules honored). Unavailable requests are captured
+# separately below so callers can report failure instead of sending raw tags.
 #
 # The path class uses a tempered-greedy token (``[^\s\n`"']+?`` followed by
 # a ``(?=...)`` lookahead) instead of the prior ``[^\s\n`"']+`` so a
@@ -2192,13 +2191,27 @@ MEDIA_TAG_CLEANUP_RE = re.compile(
 # fails validation, the candidate is progressively extended forward across
 # single spaces — bounded, stopping at newline / the next ``MEDIA:`` keyword
 # — and the first extension that validates on disk wins. Validation is the
-# oracle, so prose never rides along and non-existent paths stay visible.
+# oracle, so prose never rides along. The unavailable-request pass below
+# keeps missing files visible to the delivery filter.
 MEDIA_EXTENSIONLESS_TAG_RE = re.compile(
     r'''[`"'*_]{0,3}MEDIA:\s*'''
     r'''(?P<path>`[^`\n]+`|"[^"\n]+"|'[^'\n]+'|'''
     r'''(?:~/|/|[A-Za-z]:[/\\])[^\s\n`"']+?)'''
     r'''(?=[`"'\s,;:)\]}''' + _MEDIA_CJK_TERMINATORS + r''']|MEDIA:|$)'''
     r'''[`"'*_]{0,3}\s*''',
+    re.IGNORECASE,
+)
+
+# After the existing extractors resolve supported/spaced paths, capture any
+# remaining explicit request even if the file is unavailable. The delivery
+# filter, not successful extraction, must decide whether it can be uploaded.
+_UNAVAILABLE_MEDIA_TAG_RE = re.compile(
+    r'''[`"'*_]{0,3}MEDIA:\s*'''
+    r'''(?P<path>`[^`\n]+?`|"[^"\n]+?"|'[^'\n]+?'|'''
+    r'''(?:(?!MEDIA:)[^\s`"'])+?(?:[^\S\n]+(?:(?!MEDIA:)[^\s`"'])+?)*?\.[\w-]+'''
+    r'''(?=[\s`"'*_,;:)\]}''' + _MEDIA_CJK_TERMINATORS + r''']|MEDIA:|\.(?:\s|$)|$)|'''
+    r'''[^\s`"']+?(?=[\s`"',;:)\]}''' + _MEDIA_CJK_TERMINATORS + r''']|MEDIA:|$))'''
+    r'''[`"'*_]{0,3}\.?''',
     re.IGNORECASE,
 )
 
@@ -2270,8 +2283,8 @@ def _path_lacks_deliverable_extension(path: str) -> bool:
     Makefile, …) or the extension is not in MEDIA_DELIVERY_EXTS (.py, .log,
     .weirdext, …). Such paths route through the validated delivery pass
     (``validate_media_delivery_path``) instead of the unconditional one, so
-    every file type is deliverable (#36060) while nonexistent / denylisted
-    paths stay visible in the text.
+    every file type is deliverable (#36060). Unavailable paths are captured
+    separately for the delivery filter.
     """
     suffix = Path(path).suffix.lower()
     return not suffix or suffix not in MEDIA_DELIVERY_EXTS
@@ -2319,6 +2332,12 @@ def _strip_media_tag_directives(text: str) -> str:
         resolved = _match_extensionless_path(masked, match)
         if resolved is not None:
             spans.append((match.start(), resolved[1]))
+    # Resolve real spaced/extensionless paths first; the fallback must not
+    # consume prose after an already resolved file (e.g. a later filename).
+    remaining = list(masked)
+    for start, end in _merge_spans(spans):
+        remaining[start:end] = " " * (end - start)
+    spans.extend(m.span() for m in _UNAVAILABLE_MEDIA_TAG_RE.finditer("".join(remaining)))
 
     if spans:
         chars = list(cleaned)
@@ -5221,7 +5240,7 @@ class BasePlatformAdapter(ABC):
         * Only spans opened by a JSON value-context quote (``:``, ``,``, ``{`` or
           ``[`` immediately before the ``"``) are considered.
         * Within such a span, only a ``MEDIA:`` followed by a **bare** path
-          (``/``, ``~/`` or ``X:\\``) is masked. A ``MEDIA:"..."`` quoted-path
+          (absolute or relative) is masked. A ``MEDIA:"..."`` quoted-path
           tag — a real LLM output format the extractor supports — is not bare and
           is left alone.
         * Tags at line start, after prose whitespace, or indented are outside any
@@ -5237,7 +5256,7 @@ class BasePlatformAdapter(ABC):
         # capturing the (escape-aware) string body up to the closing quote.
         for m in re.finditer(r'(?<=[:,{\[])\s*"((?:[^"\\\n]|\\.)*)"', content):
             seg = m.group(1)
-            if re.search(r'MEDIA:\s*(?:~/|/|[A-Za-z]:[/\\])', seg):
+            if re.search(r'\bMEDIA:\s*[^\s`"\']', seg, re.IGNORECASE):
                 for i in range(m.start(1), m.end(1)):
                     if chars[i] != '\n':
                         chars[i] = ' '
@@ -5269,7 +5288,9 @@ class BasePlatformAdapter(ABC):
                 absolute paths. The caller must validate their scope and age.
 
         Returns:
-            Tuple of (list of (path, is_voice) pairs, cleaned content with tags removed).
+            Tuple of (requested (path, is_voice) pairs, content with tags removed).
+            Unavailable requests are included; callers must run the delivery
+            filter and report dropped attachments. Protected examples stay text.
         """
         media = []
         cleaned = content
@@ -5375,16 +5396,32 @@ class BasePlatformAdapter(ABC):
                 cleaned = "".join(chars)
                 cleaned = re.sub(r'\n{3,}', '\n\n', cleaned).strip()
         
+        # Missing unknown-extension and relative paths used to remain literal
+        # text, bypassing the caller's dropped-attachment notice and cron ledger.
+        # Keep them as requests so the same validator rejects every file type.
+        masked = BasePlatformAdapter._mask_protected_spans(cleaned)
+        masked = BasePlatformAdapter._mask_json_string_media(masked)
+        spans = []
+        for match in _UNAVAILABLE_MEDIA_TAG_RE.finditer(masked):
+            path = _normalize_media_tag_path(match.group("path"))
+            if path and path not in seen_paths:
+                media.append((path, has_voice_tag and Path(path).suffix.lower() in _AUDIO_EXTS))
+                seen_paths.add(path)
+            spans.append(match.span())
+        if spans:
+            chars = list(cleaned)
+            for start, end in reversed(_merge_spans(spans)):
+                del chars[start:end]
+            cleaned = re.sub(r'\n{3,}', '\n\n', "".join(chars)).strip()
+
         return media, cleaned
 
     @staticmethod
     def strip_media_directives_for_display(text: str) -> str:
         """Strip MEDIA: directives from streamed/display text.
 
-        Known-extension tags are removed unconditionally (same as
-        ``MEDIA_TAG_CLEANUP_RE``). Extension-less tags are removed only when
-        ``validate_media_delivery_path`` accepts the path so undeliverable
-        paths stay visible for debugging.
+        Explicit tags are removed even for unavailable files; delivery reports
+        their failure separately. Protected examples remain visible.
         """
         if (
             "MEDIA:" not in text
@@ -6835,9 +6872,8 @@ class BasePlatformAdapter(ABC):
                 # Extract image URLs and send them as native platform attachments
                 images, text_content = self.extract_images(response)
                 # Strip any remaining internal directives from message body (fixes #1561).
-                # _strip_media_directives shares MEDIA_TAG_CLEANUP_RE, so a MEDIA: tag
-                # with an unknown extension is intentionally left in the body for
-                # extract_local_files below to pick up rather than silently dropped (#34517).
+                # Explicit tags were extracted above; protected examples stay
+                # text and are never promoted to attachment uploads.
                 text_content = _strip_media_directives(text_content).strip()
                 if images:
                     logger.info("[%s] extract_images found %d image(s) in response (%d chars)", self.name, len(images), len(response))

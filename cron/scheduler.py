@@ -3355,7 +3355,7 @@ def _prepare_required_file_result(job: dict, content: str) -> tuple[str, Optiona
             return content, None
         return content, (
             "Задание требует файл результата, но доступного вложения нет. "
-            "Создайте файл и укажите в финальном ответе MEDIA:/полный/путь/к/файлу."
+            "Создайте файл и укажите в финальном ответе `MEDIA:/полный/путь/к/файлу`."
         )
     # Preserve explicit directives; append only validated fallback references.
     for path in accepted:
@@ -3483,6 +3483,10 @@ def _deliver_result(
         if _policy_dropped > 0
         else []
     )
+    if policy_drop_errors:
+        from gateway.platforms.base import MEDIA_DELIVERY_FAILURE_NOTICE
+
+        cleaned_delivery_content = f"{cleaned_delivery_content}\n\n{MEDIA_DELIVERY_FAILURE_NOTICE}".strip()
 
     # Resolve the delivery-mirror gate ONCE (default off). When on, each
     # successful delivery is also appended to the target chat's gateway session
@@ -3503,6 +3507,8 @@ def _deliver_result(
     else:
         _, raw_mirror_text = BasePlatformAdapter.extract_media(content)
     raw_mirror_text = (raw_mirror_text or "").strip()
+    if policy_drop_errors:
+        raw_mirror_text = f"{raw_mirror_text}\n\n{MEDIA_DELIVERY_FAILURE_NOTICE}".strip()
     mirror_text = raw_mirror_text
 
     try:
