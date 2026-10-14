@@ -2087,6 +2087,9 @@ def spawn_background_review_thread(
         task_cfg = _background_review_task_config()
     from agent.learning_trigger import BOUNDED_EVENT_KINDS, build_event_excerpt
 
+    # Keep the returned task prompt stable. The per-review inventory belongs
+    # only to the fork's new user message, after the reusable prompt prefix.
+    skill_access_note = _skill_access_prompt() if review_skills else ""
     excerpt = None
     if trigger in BOUNDED_EVENT_KINDS and not (focus or "").strip():
         excerpt = build_event_excerpt(messages_snapshot)
@@ -2094,14 +2097,11 @@ def spawn_background_review_thread(
             prompt = build_event_review_prompt(
                 trigger, review_memory, review_skills, excerpt
             )
-            if review_skills:
-                prompt += _skill_access_prompt()
-
             def _event_target() -> None:
                 _run_review_in_thread(
                     agent,
                     messages_snapshot,
-                    prompt,
+                    prompt + skill_access_note,
                     task_cfg=task_cfg,
                     review_run=review_run,
                     review_memory=review_memory,
@@ -2129,14 +2129,11 @@ def spawn_background_review_thread(
             f"focus — prioritize it over the general instructions above:\n"
             f"{focus}"
         )
-    if review_skills:
-        prompt += _skill_access_prompt()
-
     def _target() -> None:
         _run_review_in_thread(
             agent,
             messages_snapshot,
-            prompt,
+            prompt + skill_access_note,
             task_cfg=task_cfg,
             review_run=review_run,
             review_memory=review_memory,
