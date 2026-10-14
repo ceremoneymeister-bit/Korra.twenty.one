@@ -435,7 +435,7 @@ def _sandbox_failure_hint(stderr_text: str, enabled_tools=None) -> Optional[str]
 
     Production mining (state.db): the top execute_code failure classes are
     hermes_tools import misuse (importing tools that aren't in the sandbox,
-    23x in one window), calling the built-in helpers via import, treating
+    23x in one window), missing helper imports, treating
     tool results as strings instead of dicts, and importing third-party
     packages that don't exist in the sandbox interpreter. Bounded scan,
     first match wins, never raises.
@@ -450,12 +450,6 @@ def _sandbox_failure_hint(stderr_text: str, enabled_tools=None) -> Optional[str]
         if m:
             missing = m.group(1)
             available = sorted(SANDBOX_ALLOWED_TOOLS & set(enabled_tools or SANDBOX_ALLOWED_TOOLS))
-            builtin = {"json_parse", "shell_quote", "retry"}
-            if missing in builtin:
-                return (
-                    f"{missing} is a BUILT-IN helper in the sandbox — no import "
-                    f"needed. Remove it from the import line and call {missing}(...) directly."
-                )
             return (
                 f"'{missing}' is not available inside the execute_code sandbox. "
                 f"Importable tools here: {', '.join(available)}. For anything "
@@ -464,8 +458,8 @@ def _sandbox_failure_hint(stderr_text: str, enabled_tools=None) -> Optional[str]
         m = re.search(r"NameError: name '(json_parse|shell_quote|retry)' is not defined", window)
         if m:
             return (
-                f"{m.group(1)} is built into the generated sandbox module — "
-                "call it directly at module scope without importing it."
+                f"Import the helper before calling it: "
+                f"`from hermes_tools import {m.group(1)}`."
             )
         m = re.search(r"ModuleNotFoundError: No module named '([\w.]+)'", window)
         if m:
@@ -2400,7 +2394,8 @@ def build_execute_code_schema(enabled_sandbox_tools: set = None,
         "50KB shows head/tail inline; the FULL text is auto-saved to a file "
         "whose path rides in the result.\n\n"
         f"{cwd_note}\n\n"
-        "Built-in helpers (no import): json_parse(text) — tolerant "
+        "Helpers: `from hermes_tools import json_parse, shell_quote, retry`. "
+        "json_parse(text) — tolerant "
         "json.loads for terminal() output; shell_quote(s) — shlex.quote for "
         "dynamic shell args; retry(fn, max_attempts=3, delay=2) — "
         "exponential backoff."
