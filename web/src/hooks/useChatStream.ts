@@ -1216,43 +1216,18 @@ export function useChatStream(
     try {
       // Read the run AFTER history: completion between these reads is replayed
       // from the same ledger, never from a stale history snapshot.
-      let missing = false;
       let resp = await api.getSessionMessages(
         sessionId, profile || "default", controller.signal, { displayLimit: CHAT_HISTORY_PAGE, includeHistory: true },
       ).catch(error => {
-        if (error instanceof Error && /^404(?:\s|:)/.test(error.message)) {
-          missing = true;
-          return { messages: [] };
-        }
+        // An unposted first message has no server session yet. Preserve its
+        // outbox, but never apply this exception to persisted/bridge history.
+        const knownHistory = (cached?.messages ?? (sameSession ? stateRef.current.messages : []))
+          .some(message => message.historyId !== undefined);
+        if (error instanceof Error && /^404(?:\s|:)/.test(error.message) && !knownHistory &&
+          loadChatOutboxRecords(profile ?? "", sessionId).length > 0) return { messages: [] };
         throw error;
       });
       if (!current()) return;
-      // Новый чат, первое сообщение которого не дошло до сервера: сессии ещё
-      // нет, 404 закономерен. Это не пропавший разговор — открываем его с
-      // сохранённым сообщением и повтором, а не уводим в прошлый (четвёртое
-      // чистое ревью Astra, P1-2).
-      const knownHistory = (cached?.messages ?? (sameSession ? stateRef.current.messages : []))
-        .some(message => message.historyId !== undefined);
-      if (missing && !knownHistory && loadChatOutboxRecords(profile ?? "", sessionId).length > 0) missing = false;
-      if (missing) {
-        chatHistoryCache.delete(cacheKey);
-        forgetChatSelection(selectionKey);
-        dispatch({ type: "RESET" });
-        window.clearTimeout(historyTimer);
-        // Every way of opening a chat — a pick, a link from the notification,
-        // a remembered choice — lands on something real (Astra review P2-8).
-        // openLatest owns its outcome: it shows an error only when the lookup
-        // itself failed, and never touches a chat opened meanwhile.
-        const onMissing = options?.onMissing ?? (() => {
-          forgetChatSelection(selectionKey);
-          void openLatestRef.current?.();
-        });
-        const intent = openIntentRef.current;
-        queueMicrotask(() => {
-          if (mountedRef.current && scopeRef.current === selectionKey && openIntentRef.current === intent) onMissing();
-        });
-        return;
-      }
       let chatMessages = sessionMessagesToChat(sessionId, resp.messages as HistoryMessage[]);
       loadedWindow = historyWindow(resp);
       // Bridge a disjoint latest page before reconciliation. The previous
@@ -1414,6 +1389,28 @@ export function useChatStream(
       }
       void refreshChatRuns();
     } catch (err) {
+      // A deletion can race any page of the refresh, including the bridge.
+      // Ignore stale readers exactly as on a successful page response.
+      if (current() && err instanceof Error && /^404(?:\s|:)/.test(err.message)) {
+        chatHistoryCache.delete(cacheKey);
+        forgetChatSelection(selectionKey);
+        dispatch({ type: "RESET" });
+        window.clearTimeout(historyTimer);
+        // Every way of opening a chat — a pick, a link from the notification,
+        // a remembered choice — lands on something real (Astra review P2-8).
+        // openLatest owns its outcome: it shows an error only when the lookup
+        // itself failed, and never touches a chat opened meanwhile.
+        const onMissing = options?.onMissing ?? (() => {
+          forgetChatSelection(selectionKey);
+          void openLatestRef.current?.();
+        });
+        const intent = openIntentRef.current;
+        queueMicrotask(() => {
+          if (mountedRef.current && scopeRef.current === selectionKey && openIntentRef.current === intent) onMissing();
+        });
+        return;
+      }
+
       if (mountedRef.current && activeStreamIdRef.current === generation) {
         const pending = loadChatOutboxRecords(profile ?? "", sessionId)[0];
         if (pending) dispatch({ type: "MARK_DELIVERY", messageId: pending.messageId, delivery: "failed", error: outboxFailure(pending) });

@@ -2272,6 +2272,54 @@ describe("K21-203 unified compressed history", () => {
     expect(current.older.hasOlder).toBe(false);
     expect(history).toHaveBeenCalledTimes(3);
   });
+  it.each(["initial", "bridge"])("T4-07: %s history 404 forgets the selected window and calls onMissing", async phase => {
+    const history = vi.spyOn(api, "getSessionMessages").mockResolvedValueOnce(page(1, 70, null));
+    await act(async () => { await current.loadSession("compressed"); });
+    saveChatOutbox({ messageId: "missing-bridge-12345678", sessionId: "compressed", profile: "", text: "Unposted",
+      attachments: [], createdAt: 3, status: "failed" });
+    if (phase === "bridge") history.mockResolvedValueOnce(page(141, 210, "cursor-141"));
+    history.mockRejectedValueOnce(new Error("404: missing"));
+    const missing = vi.fn();
+    await act(async () => { await current.loadSession("compressed", { background: true, onMissing: missing }); });
+    expect(missing).toHaveBeenCalledOnce();
+    expect(current.sessionId).toBeNull();
+    expect(current.messages).toEqual([]);
+    expect(current.error).toBeNull();
+    expect(chatHistoryCache.get(JSON.stringify(["", "default", "compressed"]))).toBeUndefined();
+    expect(sessionStorage.getItem(`${chatViewKey()}:selected`)).toBeNull();
+    expect(loadChatOutboxRecords("", "compressed")).toHaveLength(1);
+  });
+  it("T4-07: a late bridge 404 cannot clear a newly opened chat or call its old onMissing", async () => {
+    const history = vi.spyOn(api, "getSessionMessages").mockResolvedValueOnce(page(1, 70, null));
+    await act(async () => { await current.loadSession("compressed"); });
+    let reject!: (error: Error) => void;
+    history.mockResolvedValueOnce(page(141, 210, "cursor-141"))
+      .mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
+    const missing = vi.fn();
+    let pending!: Promise<void>;
+    await act(async () => { pending = current.loadSession("compressed", { background: true, onMissing: missing }); });
+    history.mockResolvedValueOnce({ session_id: "other-chat", messages: rows(1, 2, 0) });
+    await act(async () => { await current.loadSession("other-chat"); });
+    const messages = current.messages;
+    await act(async () => { reject(new Error("404: missing")); await pending; });
+    expect(current.sessionId).toBe("other-chat");
+    expect(current.messages).toBe(messages);
+    expect(missing).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem(`${chatViewKey()}:selected`)).toBe("other-chat");
+  });
+  it("T4-07: a bridge network failure preserves the readable history without onMissing", async () => {
+    const history = vi.spyOn(api, "getSessionMessages").mockResolvedValueOnce(page(1, 70, null));
+    await act(async () => { await current.loadSession("compressed"); });
+    const messages = current.messages;
+    history.mockResolvedValueOnce(page(141, 210, "cursor-141"))
+      .mockRejectedValueOnce(new Error("Network unavailable"));
+    const missing = vi.fn();
+    await act(async () => { await current.loadSession("compressed", { background: true, onMissing: missing }); });
+    expect(current.sessionId).toBe("compressed");
+    expect(current.messages).toBe(messages);
+    expect(current.error).toBeTruthy();
+    expect(missing).not.toHaveBeenCalled();
+  });
   it("an archived physical row cannot claim an active run with the same row ID", async () => {
     const { getChatRuns } = await import("@/lib/chat-runs");
     vi.mocked(getChatRuns).mockResolvedValue([{
