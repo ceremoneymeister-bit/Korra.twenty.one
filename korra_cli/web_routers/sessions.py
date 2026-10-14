@@ -729,7 +729,14 @@ async def get_session_messages(
     display_limit: Optional[int] = Query(None, ge=1, le=100),
     before_id: Optional[int] = Query(None, ge=1),
     archive: bool = Query(False),
+    include_history: bool = Query(False),
+    before_cursor: Optional[str] = Query(None, max_length=2048),
 ):
+    if before_cursor is not None and not include_history:
+        raise HTTPException(status_code=400, detail="before_cursor requires include_history")
+    if include_history and (archive or include_compacted or before_id is not None
+                            or offset or order is not None or limit is not None):
+        raise HTTPException(status_code=400, detail="include_history requires display cursor pagination")
     if order not in (None, "oldest", "latest"):
         raise HTTPException(
             status_code=400,
@@ -754,7 +761,24 @@ async def get_session_messages(
             sid = _resolve_session_id(db, session_id)
             if not sid:
                 return None
-            sid = db.resolve_resume_session_id(sid)
+            if not include_history:
+                sid = db.resolve_resume_session_id(sid)
+            if include_history:
+                from korra_state_history import HistoryCursorError, HistoryUnavailableError
+
+                page_limit = display_limit or 70
+                try:
+                    sid, rows, cursor, has_more = db.get_history_display_page(
+                        sid, limit=page_limit, before_cursor=before_cursor,
+                    )
+                except HistoryCursorError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc)) from exc
+                except HistoryUnavailableError as exc:
+                    raise HTTPException(status_code=409, detail=str(exc)) from exc
+                return sid, page_limit, _light_tool_results(rows), {
+                    "include_history": True, "before_id": None,
+                    "next_cursor": cursor, "has_more": has_more, "archived_before": False,
+                }
             if archive:
                 # «Показать раннюю часть»: только чтение, от новых к старым.
                 page_limit = min(limit or 30, 100)

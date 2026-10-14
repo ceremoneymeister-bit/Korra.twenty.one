@@ -491,6 +491,16 @@ CREATE TABLE IF NOT EXISTS messages (
     display_metadata TEXT
 );
 
+-- Display-only copy provenance. Cascade with the generation's first row;
+-- rewind keeps the row (soft-delete), transcript replacement/delete removes it.
+CREATE TABLE IF NOT EXISTS display_compactions (
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    start_message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    pairs_json TEXT NOT NULL,
+    overflow INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (session_id, start_message_id)
+);
+
 CREATE TABLE IF NOT EXISTS session_model_usage (
     session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     model TEXT NOT NULL,

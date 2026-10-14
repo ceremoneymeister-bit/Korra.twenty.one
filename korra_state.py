@@ -7552,6 +7552,10 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                     )
             if not messages:
                 raise RuntimeError("Compression child handoff must not be empty")
+            history_tail = conn.execute(
+                "SELECT * FROM messages WHERE session_id=? AND active=1 "
+                "ORDER BY id DESC LIMIT 1002", (parent_session_id,),
+            ).fetchall()
             system_prompt_hash = self._store_system_prompt(conn, system_prompt)
 
             conn.execute(
@@ -7635,6 +7639,13 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                                 total_tool_calls += len(parsed) if isinstance(parsed, list) else 0
                             except (TypeError, ValueError):
                                 pass
+            from korra_state_history import record_compaction
+
+            new_start = conn.execute(
+                "SELECT MIN(id) FROM messages WHERE session_id=?", (child_session_id,),
+            ).fetchone()[0]
+            record_compaction(self, conn, old_tail=history_tail,
+                              session_id=child_session_id, new_start=new_start)
             conn.execute(
                 "UPDATE sessions SET message_count = ?, tool_call_count = ? WHERE id = ?",
                 (total_messages, total_tool_calls, child_session_id),
@@ -12422,6 +12433,10 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                         "commit; refusing to publish a stale compaction"
                     )
 
+            history_tail = conn.execute(
+                "SELECT * FROM messages WHERE session_id=? AND active=1 "
+                "ORDER BY id DESC LIMIT 1002", (session_id,),
+            ).fetchall()
             patched_model_config = None
             if model_config_patch is not None:
                 # on_missing="raise": a prune/compaction must not commit
@@ -12534,6 +12549,16 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                 )
                 inserted += len(tail_ids)
                 tool_calls_total += tail_tool_calls
+
+            if inserted:
+                from korra_state_history import record_compaction
+
+                new_start = conn.execute(
+                    "SELECT MIN(id) FROM messages WHERE session_id=? AND active=1",
+                    (session_id,),
+                ).fetchone()[0]
+                record_compaction(self, conn, old_tail=history_tail,
+                                  session_id=session_id, new_start=new_start)
 
             # message_count / tool_call_count reflect the LIVE (active) set —
             # the archived rows are still on disk but not part of the live count.
@@ -12859,6 +12884,18 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
             before_id=(selected[0]["id"] + 1),
         )
         return rows, start_id, has_more
+
+    def get_history_display_page(
+        self, session_id: str, *, limit: int,
+        before_cursor: Optional[str] = None, max_rows: int = 1000,
+    ) -> Tuple[str, List[Dict[str, Any]], Optional[str], bool]:
+        """Read-only continuous display history; model context stays live-only."""
+        from korra_state_history import get_history_page
+
+        return get_history_page(
+            self, session_id, limit=limit, before_cursor=before_cursor,
+            max_rows=max_rows,
+        )
 
     def has_history_before_live(self, session_id: str) -> bool:
         """Есть ли у разговора часть до живой истории: строки, сохранённые
