@@ -208,28 +208,16 @@ it("рост содержимого выше читаемого сообщени
   sessionStorage.clear();
 });
 
-it("тихо говорит о сжатой части разговора, только когда раньше страниц нет (решение Дмитрия 28.09)", async () => {
-  const load = vi.fn();
-  await renderPaged("Живая история", "m1", { hasOlder: false, loading: false, failed: false, archivedBefore: true, load } as never);
-  expect(host.textContent).toContain("Более ранняя часть этого разговора сохранена");
-  await renderPaged("Живая история", "m1", { hasOlder: true, loading: false, failed: false, archivedBefore: false, load } as never);
-  expect(host.textContent).not.toContain("Более ранняя часть этого разговора сохранена");
-});
-
-it("в строке сжатой части предлагает её прочитать, когда архив доступен (K21-203)", async () => {
-  const load = vi.fn();
-  const showArchive = vi.fn();
-  await renderPaged("Живая история", "m1", { hasOlder: false, loading: false, failed: false, archivedBefore: true, load, showArchive } as never);
-  const open = [...host.querySelectorAll("button")].find(item => item.textContent === "Показать раннюю часть")!;
-  await act(async () => open.click());
-  expect(showArchive).toHaveBeenCalledTimes(1);
-  await renderPaged("Живая история", "m1", { hasOlder: false, loading: false, failed: false, archivedBefore: false, load, showArchive } as never);
+it("K21-203: единая история не требует отдельной кнопки архива", async () => {
+  await renderPaged("Архив и живой хвост", "chat-d:origin", { hasOlder: false, loading: false, failed: false, archivedBefore: true, load: vi.fn() } as never);
+  expect(host.textContent).toContain("Архив и живой хвост");
+  expect(host.textContent).not.toContain("пока не показывается");
   expect([...host.querySelectorAll("button")].some(item => item.textContent === "Показать раннюю часть")).toBe(false);
 });
 
 async function renderKeyed(items: Array<[string, string?]>, older: { hasOlder: boolean; loading: boolean; failed: boolean; load: () => void }) {
   await act(async () => root.render(
-    <TranscriptViewport storageKey="chat:scroll" anchorKey={items[0]?.[0]} older={older}>
+    <TranscriptViewport storageKey="chat:scroll" anchorKey={items[0]?.[0]} historyReady={items.length > 0} older={older}>
       {items.map(([id, key]) => <div key={id} data-chat-message={id} data-chat-key={key}>{id}</div>)}
     </TranscriptViewport>,
   ));
@@ -311,4 +299,56 @@ it("K21-207 round 2: loading keeps the same older button in layout and places st
   await renderPaged("Messages", "c-h181", idle);
   expect(button.disabled).toBe(false);
   expect(getComputedStyle(button).visibility).not.toBe("hidden");
+});
+
+it("K21-203: восстанавливает архивный якорь с непрозрачной identity через несколько страниц", async () => {
+  sessionStorage.setItem("chat:scroll", JSON.stringify({ id: "chat-d:ancestor:9", offset: 10 }));
+  const load = vi.fn();
+  const older = { hasOlder: true, loading: false, failed: false, load };
+  await renderKeyed([["chat-d:live:1"]], older);
+  expect(load).toHaveBeenCalledTimes(1);
+  await renderKeyed([["chat-d:parent:99"], ["chat-d:live:1"]], older);
+  expect(load).toHaveBeenCalledTimes(2);
+  const viewport = await renderKeyed([["chat-d:ancestor:9"], ["chat-d:parent:99"], ["chat-d:live:1"]], { ...older, hasOlder: false });
+  expect(viewport.scrollTop).toBe(10);
+  expect(load).toHaveBeenCalledTimes(2);
+});
+
+it("K21-203 round 2: upward wheel yields to native scrolling before its scroll event arrives", async () => {
+  const load = vi.fn();
+  const older = { hasOlder: false, loading: false, failed: false, load };
+  const viewport = await renderStored(["c-h61", "c-h62", "c-h63"], older);
+  placeMessages(viewport, { "c-h61": 0, "c-h62": 300, "c-h63": 600 });
+  await scroll(viewport, 600);
+  await act(async () => {
+    viewport.dispatchEvent(new WheelEvent("wheel", { deltaY: -250, bubbles: true }));
+    // WebKit applies native movement before delivering the scroll event;
+    // an SSE render or ResizeObserver may arrive in between.
+    viewport.scrollTop = 350;
+  });
+  height = 1200;
+  await renderStored(["c-h61", "c-h62", "c-h63"], older);
+  await act(async () => resized());
+  expect(viewport.scrollTop).toBe(350);
+  await scroll(viewport, 350);
+  expect(JSON.parse(sessionStorage.getItem("chat:scroll") ?? "null")).toEqual({ id: "c-h62", offset: 50 });
+  height = 1500;
+  await act(async () => resized());
+  expect(viewport.scrollTop).toBe(350);
+});
+
+it("K21-203 round 2: ResizeObserver does not overwrite movement with the pre-wheel reading anchor", async () => {
+  const load = vi.fn();
+  const viewport = await renderStored(["c-h61", "c-h62", "c-h63"], { hasOlder: false, loading: false, failed: false, load });
+  placeMessages(viewport, { "c-h61": 0, "c-h62": 300, "c-h63": 600 });
+  await scroll(viewport, 350);
+  await act(async () => {
+    viewport.dispatchEvent(new WheelEvent("wheel", { deltaY: -150, bubbles: true }));
+    viewport.scrollTop = 200;
+    resized();
+  });
+  expect(viewport.scrollTop).toBe(200);
+  await scroll(viewport, 200);
+  await act(async () => resized());
+  expect(viewport.scrollTop).toBe(200);
 });

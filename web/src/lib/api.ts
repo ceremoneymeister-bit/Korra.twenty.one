@@ -778,33 +778,19 @@ export const api = {
   },
   /** Без `page` — последние 500 строк базы, как раньше. С `page` — лента чата:
    *  последние `displayLimit` сообщений (реплика или целый ход агента) до
-   *  строки `beforeId`. */
+   *  строки `beforeId`. `includeHistory` включает архив сжатий; его страницы
+   *  продолжаются только непрозрачным `beforeCursor`. */
   getSessionMessages: (
     id: string,
     profile = getManagementProfile(),
     signal?: AbortSignal,
-    page?: { displayLimit: number; beforeId?: number | null },
+    page?: { displayLimit: number; beforeId?: number | null; includeHistory?: boolean; beforeCursor?: string | null },
   ) =>
     fetchJSON<SessionMessagesResponse>(
       appendProfileParam(
         page
-          ? `/api/sessions/${encodeURIComponent(id)}/messages?display_limit=${page.displayLimit}${page.beforeId ? `&before_id=${page.beforeId}` : ""}`
+          ? `/api/sessions/${encodeURIComponent(id)}/messages?display_limit=${page.displayLimit}${page.includeHistory ? `&include_history=true${page.beforeCursor ? `&before_cursor=${encodeURIComponent(page.beforeCursor)}` : ""}` : page.beforeId ? `&before_id=${page.beforeId}` : ""}`
           : `/api/sessions/${encodeURIComponent(id)}/messages?limit=500&order=latest`,
-        profile,
-      ),
-      signal ? { signal } : undefined,
-    ),
-  /** Часть разговора до живой ленты, только чтение: страница от новых к
-   *  старым, `offset` — сколько сообщений с конца архива уже получено. */
-  getSessionArchive: (
-    id: string,
-    profile: string,
-    signal: AbortSignal | undefined,
-    page: { limit: number; offset: number },
-  ) =>
-    fetchJSON<SessionMessagesResponse>(
-      appendProfileParam(
-        `/api/sessions/${encodeURIComponent(id)}/messages?archive=true&limit=${page.limit}&offset=${page.offset}`,
         profile,
       ),
       signal ? { signal } : undefined,
@@ -2982,6 +2968,12 @@ export interface WhatsAppOnboardingApplyResponse {
 }
 
 export interface SessionMessage {
+  /** Устойчивая идентичность и физический источник единой истории. */
+  display_id?: string;
+  source_session_id?: string;
+  origin_session_id?: string;
+  session_id?: string;
+  read_only?: boolean;
   /** id строки в базе сессии: курсор страниц ленты. */
   id?: number;
   role: "user" | "assistant" | "system" | "tool";
@@ -3015,6 +3007,8 @@ export interface SessionMessagesResponse {
     display_limit?: number;
     /** Курсор следующей, более ранней страницы. */
     before_id?: number | null;
+    include_history?: boolean;
+    next_cursor?: string | null;
     has_more?: boolean;
     /** Раньше живой истории есть сжатая часть, которую лента пока не показывает. */
     archived_before?: boolean;

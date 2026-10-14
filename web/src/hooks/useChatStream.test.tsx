@@ -4,7 +4,8 @@ import { act, StrictMode, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api, type SessionMessage } from "@/lib/api";
+import realCompression from "./fixtures/compression-history.json";
+import { api, type SessionMessage, type SessionMessagesResponse } from "@/lib/api";
 import { chatViewKey, writeChatSelection } from "@/lib/chat-view-state";
 import { loadChatOutbox, loadChatOutboxRecords, saveChatOutbox } from "@/lib/chat-outbox";
 import { chatHistoryCache } from "@/lib/chat-history-cache";
@@ -971,7 +972,7 @@ describe("K21-117 activation reconciliation", () => {
     await act(async () => root.render(<Probe active onValue={onValue} />));
 
     expect(refreshChatRuns).toHaveBeenCalled();
-    expect(history).toHaveBeenCalledWith("chosen", "default", expect.any(AbortSignal), { displayLimit: 70 });
+    expect(history).toHaveBeenCalledWith("chosen", "default", expect.any(AbortSignal), { displayLimit: 70, includeHistory: true });
   });
 });
 
@@ -1180,7 +1181,7 @@ describe("opening an agent continues its conversation (Бирюкова, 28.09)"
       session_id: "latest", messages: [{ role: "assistant", content: "Готово" }] as SessionMessage[],
     });
     await mount("nyura");
-    expect(history).toHaveBeenCalledWith("latest", "nyura", expect.any(AbortSignal), { displayLimit: 70 });
+    expect(history).toHaveBeenCalledWith("latest", "nyura", expect.any(AbortSignal), { displayLimit: 70, includeHistory: true });
     expect(current.sessionId).toBe("latest");
   });
 
@@ -1192,7 +1193,7 @@ describe("opening an agent continues its conversation (Бирюкова, 28.09)"
       return { session_id: id, messages: [{ role: "assistant", content: "Макет" }] as SessionMessage[] };
     });
     await mount("designer");
-    expect(history).toHaveBeenCalledWith("latest", "designer", expect.any(AbortSignal), { displayLimit: 70 });
+    expect(history).toHaveBeenCalledWith("latest", "designer", expect.any(AbortSignal), { displayLimit: 70, includeHistory: true });
     expect(current.sessionId).toBe("latest");
     expect(localStorage.getItem(key("designer"))).toBe("latest");
   });
@@ -1339,7 +1340,7 @@ describe("фоновые вкладки агентов (0.21.15 Astra review)", 
 
     await act(async () => root.render(<Probe profile="rop" active onValue={onValue} />));
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
-    expect(history).toHaveBeenCalledWith("latest", "rop", expect.any(AbortSignal), { displayLimit: 70 });
+    expect(history).toHaveBeenCalledWith("latest", "rop", expect.any(AbortSignal), { displayLimit: 70, includeHistory: true });
     expect(current.sessionId).toBe("latest");
   });
 });
@@ -1364,10 +1365,10 @@ describe("лента грузится видимыми страницами", ()
         ? { session_id: "long", messages: page(0, 5), pagination: { order: "latest", returned: 10, before_id: 1, has_more: false } }
         : { session_id: "long", messages: page(5, 20), pagination: { order: "latest", returned: 30, before_id: 11, has_more: true } });
     await act(async () => { await current.loadSession("long"); });
-    expect(history).toHaveBeenLastCalledWith("long", "default", expect.any(AbortSignal), { displayLimit: 70 });
+    expect(history).toHaveBeenLastCalledWith("long", "default", expect.any(AbortSignal), { displayLimit: 70, includeHistory: true });
     expect(current.messages).toHaveLength(30);
     expect(current.messages[0]?.content).toBe("вопрос 5");
-    expect(current.older).toEqual({ hasOlder: true, loading: false, failed: false, archivedBefore: false });
+    expect(current.older).toEqual({ hasOlder: true, loading: false, failed: false });
 
     await act(async () => { await current.loadOlder(); });
     expect(history).toHaveBeenLastCalledWith("long", "default", expect.any(AbortSignal), { displayLimit: 70, beforeId: 11 });
@@ -1392,7 +1393,7 @@ describe("лента грузится видимыми страницами", ()
     await act(async () => { await current.loadSession("long"); });
     await act(async () => { await current.loadOlder(); });
     expect(current.messages).toHaveLength(30);
-    expect(current.older).toEqual({ hasOlder: true, loading: false, failed: true, archivedBefore: false });
+    expect(current.older).toEqual({ hasOlder: true, loading: false, failed: true });
   });
 
   it("идущий ход находится по своей реплике, а не по номеру из другой загрузки", async () => {
@@ -1594,7 +1595,7 @@ it("промежуточный снимок хода не выдаётся за 
   expect(current.messages.at(-1)?.content).toContain("FINAL VERIFIED ANSWER");
 });
 
-it("урезанный сервером результат инструмента идёт в превью как есть; сжатая часть отмечается", async () => {
+it("урезанный сервером результат инструмента идёт в превью как есть", async () => {
   const { getChatRuns } = await import("@/lib/chat-runs");
   vi.mocked(getChatRuns).mockResolvedValue([]);
   vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ approvals: [] }))));
@@ -1607,7 +1608,7 @@ it("урезанный сервером результат инструмент�
   await act(async () => { await current.loadSession("light"); });
   const turn = current.messages.find(m => m.role === "assistant")!;
   expect(turn.toolCalls?.[0]?.summary).toBe("{\"output\": \"не парсить\"}");
-  expect(current.older).toEqual({ hasOlder: false, loading: false, failed: false, archivedBefore: true });
+  expect(current.older).toEqual({ hasOlder: false, loading: false, failed: false });
 });
 
 it("новый чат с сорвавшимся первым сообщением после F5 открывается с ним, а не уводит в прошлый (четвёртое чистое ревью Astra, P1-2)", async () => {
@@ -2020,7 +2021,7 @@ describe("K21-207 round 2: reconciliation after compaction", () => {
     ], pagination: { order: "latest", returned: 2, ...pagination, archived_before: true } });
     await act(async () => { await current.loadSession("r2-compact"); });
     expect(current.messages.map(message => message.historyId)).toEqual([101, 102]);
-    expect(current.older).toMatchObject({ hasOlder: false, archivedBefore: true });
+    expect(current.older).toMatchObject({ hasOlder: false });
   });
   it("a non-progressing bridge keeps the existing window and reports the failed refresh", async () => {
     const history = vi.spyOn(api, "getSessionMessages").mockResolvedValueOnce({ session_id: "r2-stuck", messages: [
@@ -2175,4 +2176,110 @@ it("K21-207 round 2: a stale 404 cannot forget or overwrite the newly opened con
   expect(current.messages).toBe(messages);
   expect(current.sessionId).toBe("r2-stale-404-b");
   expect(sessionStorage.getItem(`${chatViewKey()}:selected`)).toBe("r2-stale-404-b");
+});
+
+describe("K21-203 unified compressed history", () => {
+  const rows = (first: number, last: number, archivedThrough = 98): SessionMessage[] =>
+    Array.from({ length: last - first + 1 }, (_, i) => {
+      const n = first + i;
+      return { id: n <= archivedThrough ? 1000 - n : n, role: n % 2 ? "user" : "assistant", content: `visible ${n}`,
+        display_id: `origin:${n}`, source_session_id: n <= archivedThrough ? "ancestor" : "compressed",
+        read_only: n <= archivedThrough } as SessionMessage;
+    });
+  const page = (first: number, last: number, cursor: string | null, archivedThrough = 98) => ({
+    session_id: "compressed", messages: rows(first, last, archivedThrough),
+    pagination: { order: "latest" as const, returned: last - first + 1, include_history: true, next_cursor: cursor, has_more: cursor !== null },
+  });
+  beforeEach(async () => {
+    const { getChatRuns } = await import("@/lib/chat-runs");
+    vi.mocked(getChatRuns).mockReset().mockResolvedValue([]);
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ approvals: [] })));
+  });
+  it("opens seventy visible messages across compression and pages by cursor without sorting physical IDs", async () => {
+    const history = vi.spyOn(api, "getSessionMessages").mockResolvedValueOnce(page(31, 100, "older:31"))
+      .mockResolvedValueOnce(page(1, 30, null));
+    await act(async () => { await current.loadSession("compressed"); });
+    expect(history.mock.calls[0]?.[3]).toEqual({ displayLimit: 70, includeHistory: true });
+    expect(current.messages).toHaveLength(70);
+    expect(current.messages.filter(message => message.readOnly)).toHaveLength(68);
+    const ids = current.messages.map(message => message.id);
+    await act(async () => { await current.loadOlder(); });
+    expect(history.mock.calls[1]?.[3]).toEqual({ displayLimit: 70, includeHistory: true, beforeCursor: "older:31" });
+    expect(current.messages.map(message => message.content)).toEqual(rows(1, 100).map(row => row.content));
+    expect(new Set(current.messages.map(message => message.id)).size).toBe(100);
+    expect(current.messages.slice(-70).map(message => message.id)).toEqual(ids);
+    expect(current.older.hasOlder).toBe(false);
+  });
+  it("refreshes loaded cached permissions after compaction without gaps or duplicate bubbles", async () => {
+    const history = vi.spyOn(api, "getSessionMessages").mockResolvedValueOnce(page(31, 100, "old:31", 0))
+      .mockResolvedValueOnce(page(1, 30, null, 0));
+    await act(async () => { await current.loadSession("compressed"); });
+    await act(async () => { await current.loadOlder(); });
+    const ids = current.messages.map(message => message.id);
+    history.mockResolvedValueOnce(page(31, 100, "new:31"))
+      .mockResolvedValueOnce(page(1, 30, null));
+    await act(async () => { await current.loadSession("compressed", { background: true }); });
+    expect(current.messages.map(message => message.id)).toEqual(ids);
+    expect(current.messages.filter(message => message.readOnly)).toHaveLength(98);
+    expect(current.messages.slice(-2).every(message => !message.readOnly)).toBe(true);
+  });
+  it("reconciles stable bubble identities and permissions from two real archive_and_compact calls", async () => {
+    const fixture = realCompression as unknown as Record<string, SessionMessagesResponse>;
+    const history = vi.spyOn(api, "getSessionMessages").mockResolvedValueOnce(fixture.initial!)
+      .mockResolvedValueOnce(fixture.initialOlder!);
+    await act(async () => { await current.loadSession("real-compressed"); });
+    await act(async () => { await current.loadOlder(); });
+    const ids = current.messages.map(message => message.id);
+    expect(ids).toHaveLength(80);
+    history.mockResolvedValueOnce(fixture.latest!).mockResolvedValueOnce(fixture.older!);
+    await act(async () => { await current.loadSession("real-compressed", { background: true }); });
+    expect(current.messages.map(message => message.content)).toEqual(Array.from({ length: 84 }, (_, i) => `Real visible ${i + 1}`));
+    expect(current.messages.slice(0, 80).map(message => message.id)).toEqual(ids);
+    expect(current.messages.filter(message => message.readOnly)).toHaveLength(78);
+    expect(new Set(current.messages.map(message => message.id)).size).toBe(84);
+    const loaded = current.messages;
+    history.mockResolvedValueOnce(fixture.latest!);
+    await act(async () => { await current.loadSession("real-compressed", { background: true }); });
+    expect(current.messages).toBe(loaded);
+    expect(history).toHaveBeenCalledTimes(5);
+  });
+  it("bridges disjoint opaque pages to the cached window without losing loaded archives", async () => {
+    const history = vi.spyOn(api, "getSessionMessages").mockResolvedValueOnce(page(1, 70, null))
+      .mockResolvedValueOnce(page(101, 170, "cursor-101"))
+      .mockResolvedValueOnce(page(31, 100, "cursor-31"));
+    await act(async () => { await current.loadSession("compressed"); });
+    await act(async () => { await current.loadSession("compressed", { background: true }); });
+    expect(current.messages.map(message => message.content)).toEqual(rows(1, 170).map(row => row.content));
+    expect(current.older.hasOlder).toBe(false);
+    expect(history).toHaveBeenCalledTimes(3);
+  });
+  it("an archived physical row cannot claim an active run with the same row ID", async () => {
+    const { getChatRuns } = await import("@/lib/chat-runs");
+    vi.mocked(getChatRuns).mockResolvedValue([{
+      message_id: "active-repeated-12345", session_id: "compressed", profile: "", status: "completed", updated_at: 500,
+      history_count: 2, history_row_id: 969, turn_tracked: true, user_message: { role: "user", content: "visible 31" },
+    }]);
+    vi.spyOn(api, "getSessionMessages").mockResolvedValue(page(31, 100, "older:31"));
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => String(input).includes("/stream")
+      ? sseResponse('data: {"choices":[{"delta":{"content":"ACTIVE ANSWER"}}]}\n\n', 'data: [DONE]\n\n')
+      : Response.json({ approvals: [] })));
+    await act(async () => { await current.loadSession("compressed"); });
+    expect(current.messages.filter(message => message.content === "visible 31")).toHaveLength(2);
+    expect(current.messages.at(-1)?.content).toBe("ACTIVE ANSWER");
+    expect(current.messages[0]?.readOnly).toBe(true);
+  });
+  it("does not put archive text into the completion request or replay an archived row as the active run", async () => {
+    vi.spyOn(api, "getSessionMessages").mockResolvedValue(page(31, 100, "older:31"));
+    await act(async () => { await current.loadSession("compressed"); });
+    let body: { messages: Array<{ content: string }> } | undefined;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes("/chat/completions")) {
+        body = JSON.parse(String(init?.body));
+        return sseResponse('data: {"choices":[{"delta":{"content":"answer"}}]}\n\n', 'data: [DONE]\n\n');
+      }
+      return Response.json({ approvals: [] });
+    }));
+    await act(async () => { await current.send("new question"); });
+    expect(body?.messages.map(message => message.content)).toEqual(["visible 99", "visible 100", "new question"]);
+  });
 });
