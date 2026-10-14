@@ -313,3 +313,42 @@ it("K21-203: восстанавливает архивный якорь с не�
   expect(viewport.scrollTop).toBe(10);
   expect(load).toHaveBeenCalledTimes(2);
 });
+
+it("K21-203 round 2: upward wheel yields to native scrolling before its scroll event arrives", async () => {
+  const load = vi.fn();
+  const older = { hasOlder: false, loading: false, failed: false, load };
+  const viewport = await renderStored(["c-h61", "c-h62", "c-h63"], older);
+  placeMessages(viewport, { "c-h61": 0, "c-h62": 300, "c-h63": 600 });
+  await scroll(viewport, 600);
+  await act(async () => {
+    viewport.dispatchEvent(new WheelEvent("wheel", { deltaY: -250, bubbles: true }));
+    // WebKit applies native movement before delivering the scroll event;
+    // an SSE render or ResizeObserver may arrive in between.
+    viewport.scrollTop = 350;
+  });
+  height = 1200;
+  await renderStored(["c-h61", "c-h62", "c-h63"], older);
+  await act(async () => resized());
+  expect(viewport.scrollTop).toBe(350);
+  await scroll(viewport, 350);
+  expect(JSON.parse(sessionStorage.getItem("chat:scroll") ?? "null")).toEqual({ id: "c-h62", offset: 50 });
+  height = 1500;
+  await act(async () => resized());
+  expect(viewport.scrollTop).toBe(350);
+});
+
+it("K21-203 round 2: ResizeObserver does not overwrite movement with the pre-wheel reading anchor", async () => {
+  const load = vi.fn();
+  const viewport = await renderStored(["c-h61", "c-h62", "c-h63"], { hasOlder: false, loading: false, failed: false, load });
+  placeMessages(viewport, { "c-h61": 0, "c-h62": 300, "c-h63": 600 });
+  await scroll(viewport, 350);
+  await act(async () => {
+    viewport.dispatchEvent(new WheelEvent("wheel", { deltaY: -150, bubbles: true }));
+    viewport.scrollTop = 200;
+    resized();
+  });
+  expect(viewport.scrollTop).toBe(200);
+  await scroll(viewport, 200);
+  await act(async () => resized());
+  expect(viewport.scrollTop).toBe(200);
+});
