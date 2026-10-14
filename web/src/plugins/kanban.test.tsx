@@ -225,6 +225,26 @@ describe("Доска поручений", () => {
     expect(url).toContain("/tasks/task-1/request-changes");
     expect(JSON.parse(options.body)).toMatchObject({ version: 99, comment: "Добавь четвёртый вариант" });
   });
+  it("возвращает готовую карточку с замечанием через тот же переход и повторяет запрос без второго комментария", async () => {
+    boardTasks = [{ ...task, status: "done", submitted_version: 77, result: "Прежний результат" }];
+    await renderPage(); await click(host.querySelector('[data-task-id]')!);
+    expect(host.textContent).toContain("Прежний результат");
+    await click(button("Доработать"));
+    expect(button("Вернуть агенту").hasAttribute("disabled")).toBe(true);
+    await change(field("Что исправить"), "Исправь исходные данные");
+    fetchJSON.mockRejectedValueOnce(new Error("503: сбой"));
+    await click(button("Вернуть агенту"));
+    await click(button("Вернуть агенту"));
+    expect(writes()).toHaveLength(2);
+    const [first, second] = writes().map(([url, options]) => {
+      expect(url).toContain("/tasks/task-1/request-changes");
+      expect(options.method).toBe("POST");
+      return JSON.parse(options.body);
+    });
+    expect(first).toMatchObject({ version: 77, comment: "Исправь исходные данные" });
+    expect(second.request_id).toBe(first.request_id);
+    expect(writes().some(([url]) => url.includes("/comments"))).toBe(false);
+  });
   it("кнопка «Принять» отправляет приёмку с версией", async () => {
     boardTasks = [{ ...task, status: "review", acceptance: "owner", owner_attention: "accept", submitted_version: 5, result: "Итог" }];
     await renderPage(); await click(host.querySelector('[data-task-id]')!);

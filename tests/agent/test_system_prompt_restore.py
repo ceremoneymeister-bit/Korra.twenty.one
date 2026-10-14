@@ -449,3 +449,21 @@ class TestPerResponseSessionWritePath:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def test_new_continuity_guidance_does_not_upgrade_an_existing_conversation():
+    from agent.prompt_builder import OPENAI_MODEL_EXECUTION_GUIDANCE
+
+    stored = 'Existing system prefix from before correction-continuity guidance'
+    db = MagicMock()
+    db.get_session.return_value = {'system_prompt': stored}
+    agent = _make_agent(session_db=db, prebuilt_prompt=OPENAI_MODEL_EXECUTION_GUIDANCE)
+    history = [
+        {'role': 'user', 'content': 'Produce the original result'},
+        {'role': 'assistant', 'content': 'Checking inputs'},
+        {'role': 'user', 'content': 'Correct the inputs; also answer a side question'},
+    ]
+    _restore_or_build_system_prompt(agent, None, history)
+    assert agent._cached_system_prompt == stored
+    agent._build_system_prompt.assert_not_called()
+    db.update_system_prompt.assert_not_called()

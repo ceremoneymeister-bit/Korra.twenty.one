@@ -825,7 +825,7 @@ def _handle_show(args: dict, **kw) -> str:
                 "block_revision": kb.block_revision(conn, task.id) if waiting else None,
                 "needs_approval": waiting and task.block_kind == kb.APPROVAL_BLOCK_KIND,
                 "acceptance": task.acceptance,
-                "submitted_version": kb.submitted_version(conn, task.id) if owner_review else None,
+                "submitted_version": kb.submitted_version(conn, task.id) if owner_review or task.status == "done" else None,
                 "actor_kind": task.actor_kind,
                 "plan_id": task.plan_id,
                 "plan_title": task.plan_title,
@@ -1353,7 +1353,7 @@ def _handle_request_review(args: dict, **kw) -> str:
 
 
 def _handle_request_changes(args: dict, **kw) -> str:
-    """Return a reviewer-owned running task to its implementer."""
+    """Return an owner result or a reviewer-owned run for rework."""
     delegated_err = _reject_delegated_child_mutation("kanban_request_changes")
     if delegated_err:
         return delegated_err
@@ -1373,6 +1373,14 @@ def _handle_request_changes(args: dict, **kw) -> str:
     try:
         kb, conn = _connect(board=board)
         try:
+            if not _dispatcher_worker_turn():
+                outcome = kb.return_for_rework(
+                    conn, tid, comment=reason, author="Владелец",
+                    version=args.get("version"), request_id=args.get("request_id"),
+                )
+                if not outcome["ok"]:
+                    return tool_error(f"could not return {tid} for rework: {outcome['reason']}")
+                return _ok(task_id=tid, **outcome)
             ok, detail = kb.request_changes(
                 conn,
                 tid,
@@ -2618,11 +2626,13 @@ KANBAN_REQUEST_REVIEW_SCHEMA = {
 KANBAN_REQUEST_CHANGES_SCHEMA = {
     "name": "kanban_request_changes",
     "description": (
-        "Reviewer verdict: return the current review run to the original "
+        "In the owner chat, return a submitted or done card for rework under "
+        "the same ID with reason, version from show, and a request_id for retries. "
+        "Only do this when the owner requests rework. In a worker review run: "
+        "return the current review run to the original "
         "implementer with concrete required changes. This closes the review "
         "run, reapplies parent dependency gating, and requeues the task without "
-        "using block-loop accounting. Only use from a task claimed from the "
-        "review column; use kanban_block only for a genuine external blocker."
+        "using block-loop accounting. Workers may only return their own review run."
     ),
     "parameters": {
         "type": "object",
@@ -2637,6 +2647,14 @@ KANBAN_REQUEST_CHANGES_SCHEMA = {
                     "Specific, actionable changes the implementer must make "
                     "before requesting another review."
                 ),
+            },
+            "version": {
+                "type": "integer",
+                "description": "Owner rework: submitted_version returned by kanban_show.",
+            },
+            "request_id": {
+                "type": "string",
+                "description": "Owner rework: reuse this ID when retrying the same request.",
             },
             "board": _board_schema_prop(),
         },

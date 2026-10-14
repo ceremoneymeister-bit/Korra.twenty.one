@@ -665,6 +665,14 @@ def build_parser(parent_subparsers: argparse._SubParsersAction) -> argparse.Argu
         "reason", nargs="+", help='Конкретные доработки перед повторной проверкой',
     )
 
+    p_rework = sub.add_parser(
+        "return-for-rework", help='Вернуть готовый результат владельцу на доработку под тем же ID',
+    )
+    p_rework.add_argument("task_id")
+    p_rework.add_argument("--reason", required=True, help='Что исправить')
+    p_rework.add_argument("--version", type=int, required=True, help='submitted_version из show --json')
+    p_rework.add_argument("--request-id", default=None, help='Одинаковый ключ при повторе запроса')
+
     p_reopen_review = sub.add_parser(
         "reopen-review",
         help='Вернуть проверяемые задачи на доработку: review → ready/todo',
@@ -1082,6 +1090,7 @@ def kanban_command(args: argparse.Namespace) -> int:
             "request-review": _cmd_request_review,
             "request-changes": _cmd_request_changes,
             "reopen-review":  _cmd_reopen_review,
+            "return-for-rework": _cmd_return_for_rework,
             "promote":  _cmd_promote,
             "archive":  _cmd_archive,
             "tail":     _cmd_tail,
@@ -1130,6 +1139,7 @@ def _profile_author() -> str:
 
 
 _DELEGATED_CHILD_DENIED_ACTIONS: frozenset[str] = frozenset({
+    "return-for-rework",
     "init",
     "create",
     "swarm",
@@ -1710,6 +1720,7 @@ def _cmd_show(args: argparse.Namespace) -> int:
         # ``result=``. Surfacing the latest summary here keeps ``show`` from
         # looking like a no-op when the worker actually did real work.
         latest_summary = kb.latest_summary(conn, args.task_id)
+        result_version = kb.submitted_version(conn, args.task_id)
         if not getattr(args, "json", False):
             graph = kb.task_graph_context(conn, task.id)
 
@@ -1717,6 +1728,7 @@ def _cmd_show(args: argparse.Namespace) -> int:
         payload = {
             "task": _task_to_dict(task),
             "latest_summary": latest_summary,
+            "submitted_version": result_version,
             "parents": parents,
             "children": children,
             "comments": [
@@ -2487,6 +2499,22 @@ def _cmd_request_changes(args: argparse.Namespace) -> int:
             f'Запрошены изменения для {tid}'
             + (f'; направлено к {detail}' if detail else "")
         )
+    return 0
+
+
+def _cmd_return_for_rework(args: argparse.Namespace) -> int:
+    if korra_env("KORRA_KANBAN_TASK"):
+        print('Возврат результата доступен владельцу, а не исполнителю задачи', file=sys.stderr)
+        return 1
+    with kb.connect_closing() as conn:
+        outcome = kb.return_for_rework(
+            conn, args.task_id, comment=str(kb.redact_review_value(args.reason)),
+            author=_profile_author(), version=args.version, request_id=args.request_id,
+        )
+    if not outcome["ok"]:
+        print(f"Не удалось вернуть {args.task_id}: {outcome['reason']}", file=sys.stderr)
+        return 1
+    print(f"Возвращено в работу: {args.task_id} ({outcome['status']})")
     return 0
 
 

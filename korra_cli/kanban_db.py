@@ -7569,17 +7569,26 @@ def respond_to_block(
 
 
 def submitted_version(conn: sqlite3.Connection, task_id: str) -> Optional[int]:
-    """Identity of the result currently waiting for the owner's acceptance.
+    """Identity of the latest submitted/completed result the owner saw.
 
-    The id of the latest ``submitted`` event; the owner accepts or returns
-    exactly the version they saw.
+    Keep the existing version token for rework of completed cards too. A
+    backfill of the result is a new version; unrelated edits are not.
     """
-    row = conn.execute(
-        "SELECT id FROM task_events WHERE task_id = ? AND kind = 'submitted' "
-        "ORDER BY id DESC LIMIT 1",
+    rows = conn.execute(
+        "SELECT id, kind, payload FROM task_events WHERE task_id = ? "
+        "AND kind IN ('submitted', 'completed', 'edited') ORDER BY id DESC",
         (task_id,),
-    ).fetchone()
-    return int(row["id"]) if row else None
+    )
+    for row in rows:
+        if row["kind"] == "edited":
+            try:
+                payload = json.loads(row["payload"] or "{}")
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(payload, dict) or "result" not in payload.get("fields", []):
+                continue
+        return int(row["id"])
+    return None
 
 
 def _replayed_owner_action(conn, task_id: str, kinds: tuple, request_id: Optional[str]):
@@ -7600,13 +7609,15 @@ def _replayed_owner_action(conn, task_id: str, kinds: tuple, request_id: Optiona
     return None
 
 
-def _owner_review_gate(conn, task_id: str, version: Optional[int]) -> tuple[Optional[str], Optional[int]]:
+def _owner_review_gate(conn, task_id: str, version: Optional[int], *, allow_done: bool = False) -> tuple[Optional[str], Optional[int]]:
     row = conn.execute(
         "SELECT status, acceptance FROM tasks WHERE id = ?", (task_id,),
     ).fetchone()
     if row is None:
         return "not_found", None
-    if row["status"] != "review" or row["acceptance"] != "owner":
+    if not (allow_done and row["status"] == "done") and (
+        row["status"] != "review" or row["acceptance"] != "owner"
+    ):
         return "not_waiting", None
     current = submitted_version(conn, task_id)
     if version is None or current != int(version):
@@ -7689,32 +7700,43 @@ def return_for_rework(
     version: Optional[int] = None,
     request_id: Optional[str] = None,
 ) -> dict[str, Any]:
-    """The owner returns the submitted result with a remark.
+    """The owner returns a submitted or completed result with a remark.
 
     Saves the remark as a comment the worker reads on its next run and sends
     the task back to its assignee (``ready``, or ``todo`` if a parent was
-    reopened). The previous result stays in the run history.
+    reopened). The previous result stays in history; the new one waits for
+    owner acceptance. Status change and descendant invalidation are atomic.
     """
     text = (comment or "").strip()
     if not text:
         raise ValueError("comment is required to return a result")
+    terminations = []
     with write_txn(conn):
         replay = _replayed_owner_action(conn, task_id, ("owner_changes_requested",), request_id)
         if replay is not None:
             return {"ok": True, "duplicate": True, "reason": None, "status": replay.get("status")}
-        reason, current = _owner_review_gate(conn, task_id, version)
+        reason, current = _owner_review_gate(conn, task_id, version, allow_done=True)
         if reason:
             return {"ok": False, "duplicate": False, "reason": reason, "status": None}
-        assignee = conn.execute("SELECT assignee FROM tasks WHERE id=?", (task_id,)).fetchone()
-        if not assignee or not assignee["assignee"]:
-            return {"ok": False, "duplicate": False, "reason": "assignee_required", "status": "review"}
+        previous = conn.execute(
+            "SELECT status, assignee, result, acceptance FROM tasks WHERE id=?", (task_id,),
+        ).fetchone()
+        if not previous["assignee"]:
+            return {"ok": False, "duplicate": False, "reason": "assignee_required", "status": previous["status"]}
+        _reclaim_dangling_run(
+            conn, task_id, statuses=("review", "done"), now=int(time.time()),
+            note="owner returned result for rework",
+        )
         add_comment(conn, task_id, author, text)
         landing = _landing_status_after_parents(conn, task_id)
         cur = conn.execute(
             "UPDATE tasks SET status = ?, current_run_id = NULL, "
+            "result = NULL, completed_at = NULL, acceptance = 'owner', "
+            "claim_lock = NULL, claim_expires = NULL, worker_pid = NULL, "
+            "started_at = NULL, last_heartbeat_at = NULL, "
             "consecutive_failures = 0, last_failure_error = NULL "
-            "WHERE id = ? AND status = 'review'",
-            (landing, task_id),
+            "WHERE id = ? AND status = ?",
+            (landing, task_id, previous["status"]),
         )
         if cur.rowcount != 1:
             return {"ok": False, "duplicate": False, "reason": "not_waiting", "status": None}
@@ -7723,7 +7745,19 @@ def return_for_rework(
             "version": current,
             "status": landing,
             "author": author,
+            "previous_status": previous["status"],
+            "previous_result": previous["result"],
         })
+        if previous["acceptance"] != "owner":
+            _append_event(conn, task_id, "owner_review_enabled", {"reason": "returned_by_owner"})
+        if previous["status"] == "done":
+            _append_event(conn, task_id, "status", {"status": landing, "author": author})
+            invalidation = invalidate_descendants_for_parent_reopen(conn, task_id, author=author)
+            terminations.extend(invalidation["terminations"])
+        if exact_dispatch_requests_enabled():
+            _request_exact_in_txn(conn, task_id, source="owner_rework")
+    for pid, claim_lock in terminations:
+        _terminate_reclaimed_worker(pid, claim_lock)
     return {"ok": True, "duplicate": False, "reason": None, "status": landing}
 
 
@@ -7904,13 +7938,9 @@ def invalidate_descendants_for_parent_reopen(
     When a ``done`` (or ``archived``) ancestor is reopened, every descendant
     whose state assumed the ancestor's result — ``ready``, ``review``,
     ``running`` or ``done`` — is building on a retracted premise, so it is
-    demoted to ``todo`` and re-gated on the graph. The CLI deliberately has
-    NO done-reopen verb on this branch (``reopen-review`` only handles the
-    review-phase transition via :func:`reopen_review_task`), so every surface
-    that reopens a done task (dashboard drag-drop / PATCH — single and bulk —
-    via ``_set_status_direct``) must route through this function; keeping the
-    implementation here means a future CLI or tool reopen verb inherits
-    identical semantics for free.
+    demoted to ``todo`` and re-gated on the graph. Owner rework and dashboard
+    status moves share this implementation so no surface leaves descendants
+    building on a retracted result.
 
     Transactionality: composes under the caller's already-open transaction
     via ``write_txn(conn, allow_nested=True)`` — the dashboard's status
@@ -10569,7 +10599,7 @@ def check_respawn_guard(
         requeued_after = conn.execute(
             "SELECT 1 FROM task_events "
             "WHERE task_id = ? AND created_at >= ? "
-            "AND kind IN ('status', 'promoted', 'unblocked', 'reclaimed') "
+            "AND kind IN ('status', 'promoted', 'unblocked', 'reclaimed', 'owner_changes_requested') "
             "LIMIT 1",
             (task_id, completed_at),
         ).fetchone()
