@@ -159,7 +159,7 @@ class TestCronStatusMissingHeartbeat:
         import korra_cli.cron as cron_cli
         from cron.jobs import create_job
 
-        create_job(prompt="Test", schedule="every 1h")
+        create_job(prompt="Test", schedule="every 1h", model="test-model")
 
         out = io.StringIO()
         with (
@@ -187,7 +187,7 @@ class TestCronStatusMissingHeartbeat:
         import korra_cli.cron as cron_cli
         from cron.jobs import create_job
 
-        create_job(prompt="Test", schedule="every 1h")
+        create_job(prompt="Test", schedule="every 1h", model="test-model")
 
         now = time.time()
         out = io.StringIO()
