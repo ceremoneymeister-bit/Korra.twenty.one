@@ -394,7 +394,6 @@ def _is_runtime_ipc_file(path: Path) -> bool:
     return stat.S_ISSOCK(mode) or stat.S_ISFIFO(mode)
 
 
-_SQLITE_SUFFIXES = (".db", ".sqlite", ".sqlite3")
 _SQLITE_MAGIC = b"SQLite format 3\x00"
 
 
@@ -402,20 +401,39 @@ def _is_sqlite_database(path: Path) -> bool:
     """True when *path* must be snapshotted through the SQLite backup API.
 
     ``*.db`` always goes through ``_safe_copy_db`` (a zeroed or broken one must
-    fail loudly, not be copied byte-for-byte). ``*.sqlite``/``*.sqlite3`` are
-    taken only with the SQLite header, so an unrelated file with that suffix is
-    archived as an ordinary file.
+    fail loudly, not be copied byte-for-byte). Any other name is recognised by
+    the ``SQLite format 3`` header, whatever its extension (``*.sqlite3``,
+    ``*.session``, extensionless plugin databases): a WAL-mode database copied
+    byte-for-byte loses everything that is only in its WAL.
     """
-    suffix = path.suffix.lower()
-    if suffix == ".db":
+    if path.suffix.lower() == ".db":
         return True
-    if suffix not in _SQLITE_SUFFIXES:
-        return False
     try:
         with path.open("rb") as stream:
             return stream.read(len(_SQLITE_MAGIC)) == _SQLITE_MAGIC
     except OSError:
         return False
+
+
+_SQLITE_SIDECAR_TAILS = ("-wal", "-shm", "-journal")
+
+
+def _drop_sqlite_sidecars(entries: list, path_of=lambda entry: entry[0]) -> list:
+    """Remove ``-wal/-shm/-journal`` entries that belong to a SQLite database.
+
+    The database itself goes into the archive as a consistent snapshot, so a
+    live sidecar next to it (even of ``*.session`` or an extensionless file)
+    would only leak or contradict that snapshot.
+    """
+    kept = []
+    for entry in entries:
+        path = path_of(entry)
+        name = path.name
+        tail = next((t for t in _SQLITE_SIDECAR_TAILS if name.endswith(t) and len(name) > len(t)), None)
+        if tail is not None and _is_sqlite_database(path.with_name(name[: -len(tail)])):
+            continue
+        kept.append(entry)
+    return kept
 
 
 def _should_skip_backup_file(abs_path: Path, rel_path: Path, out_path: Optional[Path]) -> bool:
@@ -938,7 +956,7 @@ def _scan_backup_files(
                 continue
 
             files_to_add.append((fpath, rel))
-    return files_to_add, skipped_dirs
+    return _drop_sqlite_sidecars(files_to_add), skipped_dirs
 
 
 def _scan_external_files() -> tuple[list[tuple[Path, str]], list[str]]:
@@ -967,7 +985,7 @@ def _scan_external_files() -> tuple[list[tuple[Path, str]], list[str]]:
                 continue
             arcname = _EXTERNAL_PREFIX + rel_to_home.as_posix()
             external_to_add.append((fpath, arcname))
-    return external_to_add, skipped_external
+    return _drop_sqlite_sidecars(external_to_add), skipped_external
 
 
 def _write_backup_member(
@@ -2713,6 +2731,7 @@ def _write_full_zip_backup_locked(out_path: Path, hermes_root: Path) -> Optional
         logger.warning("Full-zip backup: walk failed: %s", exc)
         return None
 
+    files_to_add = _drop_sqlite_sidecars(files_to_add)
     if not files_to_add:
         return None
 
