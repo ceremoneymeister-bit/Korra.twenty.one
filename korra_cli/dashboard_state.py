@@ -1688,6 +1688,8 @@ def _delivery_items(agents: list[Agent], *, now: float) -> list[dict[str, Any]]:
 
 
 def _cron_items(agents: list[Agent], *, now: float, tz: Optional[tzinfo]) -> list[dict[str, Any]]:
+    from cron.incidents import subscription_provider, subscription_notice, is_transient_service_failure
+
     since = now - 7 * 86400
     items: list[dict[str, Any]] = []
     for agent in agents:
@@ -1700,7 +1702,7 @@ def _cron_items(agents: list[Agent], *, now: float, tz: Optional[tzinfo]) -> lis
             loose = _local(since - 86400, tz).isoformat()
             rows = conn.execute(
                 "SELECT id, job_id, failure_type, last_seen_at, error FROM cron_incidents "
-                "WHERE state != 'closed' AND last_seen_at >= ? "
+                "WHERE state IN ('detected', 'alerted') AND (last_seen_at >= ? OR failure_type LIKE 'subscription:%') "
                 "ORDER BY last_seen_at DESC LIMIT 20",
                 (loose,),
             ).fetchall()
@@ -1712,7 +1714,25 @@ def _cron_items(agents: list[Agent], *, now: float, tz: Optional[tzinfo]) -> lis
             jobs = {}
         for row in rows:
             seen = _parse_iso(row["last_seen_at"], tz)
-            if seen is None or seen.timestamp() < since:
+            provider = subscription_provider(row["error"])
+            if is_transient_service_failure(row["error"]):
+                continue
+            if seen is None or (seen.timestamp() < since and not provider):
+                continue
+            if provider:
+                items.append({
+                    "id": f"provider:{provider}:{agent.profile or 'default'}",
+                    "source": "cron",
+                    "kind": "provider_refused",
+                    "severity": "problem",
+                    "title": subscription_notice(provider).split(". ")[0],
+                    "detail": "Откройте «Модели» и подключите подписку заново или выполните `korra model` в этом профиле.",
+                    "agent": agent.label,
+                    "profile": agent.profile,
+                    "href": "/models",
+                    "action": "Подключить",
+                    "at": seen.timestamp(),
+                })
                 continue
             job = jobs.get(str(row["job_id"]))
             # A deleted or paused job's old failure asks nothing of the owner.
@@ -1743,7 +1763,7 @@ def _provider_items(agents: list[Agent]) -> list[dict[str, Any]]:
     the agents.
     """
     seen_files: set[str] = set()
-    status: dict[str, dict[str, Any]] = {}
+    status: dict[tuple[str, str], dict[str, Any]] = {}
     for agent in agents:
         path = agent.home / "auth.json"
         try:
@@ -1760,7 +1780,7 @@ def _provider_items(agents: list[Agent]) -> list[dict[str, Any]]:
         for provider, entries in pool.items():
             if not isinstance(entries, list):
                 continue
-            bucket = status.setdefault(str(provider), {"dead": 0, "usable": 0, "at": 0.0, "reason": ""})
+            bucket = status.setdefault((str(provider), agent.profile or "default"), {"dead": 0, "usable": 0, "at": 0.0, "reason": "", "agent": agent.label, "profile": agent.profile})
             for entry in entries:
                 if not isinstance(entry, dict):
                     continue
@@ -1779,19 +1799,19 @@ def _provider_items(agents: list[Agent]) -> list[dict[str, Any]]:
                 elif state in (None, "ok"):
                     bucket["usable"] += 1
     items = []
-    for provider, bucket in sorted(status.items()):
+    for (provider, profile), bucket in sorted(status.items()):
         if not bucket["dead"] or bucket["usable"]:
             continue
         label = _PROVIDER_LABELS.get(provider, provider)
         items.append({
-            "id": f"provider:{provider}",
+            "id": f"provider:{provider}:{profile}",
             "source": "provider",
             "kind": "provider_refused",
             "severity": "problem",
             "title": f"{label}: доступ отозван",
             "detail": "Провайдер больше не принимает вход. Подключите его заново, чтобы агенты продолжили отвечать.",
-            "agent": None,
-            "profile": None,
+            "agent": bucket["agent"],
+            "profile": bucket["profile"],
             "href": "/models",
             "action": "Подключить",
             "at": bucket["at"] or None,
@@ -1921,7 +1941,11 @@ def attention_section(
         if produced is None:
             return
         checked.append(source)
-        items.extend(produced)
+        known = {item["id"] for item in items}
+        for item in produced:
+            if item["id"] not in known:
+                items.append(item)
+                known.add(item["id"])
 
     def _kanban() -> Optional[list[dict[str, Any]]]:
         result = _kanban_items(agents)

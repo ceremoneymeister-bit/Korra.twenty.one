@@ -4,6 +4,8 @@ A recurring job whose run fails on a transient network/DNS error before ANY mode
 completed (tunnel or VPN down, sleep/wake) used to sit out a whole period: a daily report
 was simply lost. Now ``mark_job_run`` pulls ``next_run_at`` earlier along a 5/15/30-minute
 ladder, and the scheduler holds the failure notice while a re-run is pending.
+Provider congestion (429/503/capacity) before a completed call uses the same
+bounded ladder and does not ask the owner to reconnect a healthy login.
 
 Deliberately narrow: zero completed API calls means the MODEL did nothing and cost nothing,
 but a job's own script (``script``) and monitor source (``monitor_script``/``monitor_url``,
@@ -55,6 +57,10 @@ def is_model_unreachable_failure(exc: BaseException, agent: Any = None) -> bool:
     completed a model call."""
     if int(getattr(agent, "session_api_calls", 0) or 0) > 0:
         return False
+    from cron.incidents import is_transient_service_failure
+
+    if is_transient_service_failure(exc):
+        return True
     from cron.scheduler import _is_transient_provider_resolve_error
 
     if _is_transient_provider_resolve_error(exc):

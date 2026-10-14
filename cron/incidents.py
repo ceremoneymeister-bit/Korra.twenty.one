@@ -4,6 +4,8 @@ The executions ledger (``cron.executions``) records every attempt; this module
 groups the *failures* into durable incidents keyed by ``(job_id, error
 signature)`` so the same job failing with the same error does not re-ping the
 operator every run once they have acknowledged it.
+Subscription login failures are grouped by provider within the profile instead
+of by job: one broken grant can block many jobs, but asks for one owner action.
 
 Lifecycle: ``detected`` → ``alerted`` → ``closed``. Closing
 (acking) an incident is per-signature: the same job + same normalized error
@@ -52,6 +54,59 @@ MAX_ERROR_CHARS = 500
 _MAX_SIGNATURE_ERROR_CHARS = 200
 
 _lock = threading.RLock()
+
+
+def is_transient_service_failure(error: Any) -> bool:
+    """Service congestion needs a retry, never a new subscription login."""
+    text = str(error or "").lower()
+    return bool(re.search(r"\b(?:429|503|529)\b", text)) or any(
+        word in text for word in (
+            "rate limit", "rate_limit", "codex_rate_limited", "capacity",
+            "overloaded", "overload", "service unavailable", "temporarily unavailable",
+            "перегруз", "достигнут лимит",
+        )
+    )
+
+
+def subscription_provider(error: Any, provider: str = "") -> Optional[str]:
+    """Recognize terminal subscription auth failures, including saved error text.
+
+    A bare 401 or an absent API key is insufficient to call it a subscription.
+    Prefer AuthError's relogin verdict; runtime SDK failures carry OAuth wording.
+    """
+    if is_transient_service_failure(error):
+        return None
+    text = str(error or "").lower()
+    subscription_hint = provider
+    provider = str(getattr(error, "provider", "") or provider).lower()
+    if "codex" in text or "chatgpt" in text:
+        provider = "openai-codex"
+    elif "claude" in text or "anthropic" in text:
+        provider = "anthropic"
+    if provider not in ("openai-codex", "anthropic"):
+        return None
+    terminal = getattr(error, "relogin_required", False) or any(
+        word in text for word in (
+            "invalid_grant", "invalid_token", "refresh_token_reused", "token_revoked",
+            "token expired", "token has expired", "token is expired", "token has been revoked",
+            "token revoked", "invalid token", "token_invalidated", "token is no longer valid",
+            "missing access_token", "access_token missing", "missing_access_token",
+            "вход в подписку", "данные входа codex не сохранены", "недействител",
+            "истёк", "истек", "вход codex заверш", "вход codex вышел",
+        )
+    )
+    if (provider == "openai-codex" or subscription_hint == "anthropic") and re.search(r"\b(?:401|403)\b", text):
+        terminal = True
+    return provider if terminal else None
+
+
+def subscription_notice(provider: str) -> str:
+    label = "ChatGPT (Codex)" if provider == "openai-codex" else "Claude"
+    return (
+        f"Вход в подписку {label} вышел — агенты этого профиля не могут работать. "
+        "Откройте в панели «Модели» и подключите подписку заново "
+        "или выполните `korra model` в этом профиле."
+    )
 
 
 def _connect() -> sqlite3.Connection:
@@ -191,7 +246,9 @@ def upsert_incident(
 ) -> tuple[str, bool]:
     """Record (or refresh) the incident for ``job_id`` + ``error``.
 
-    Returns ``(incident_id, is_new)``. A row for the same signature already
+    Subscription auth failures share one provider incident per profile; all
+    other failures remain job-scoped. Returns ``(incident_id, is_new)``.
+    A row for the same signature already
     existing refreshes ``last_seen_at``/``error``/``output_file`` and keeps its
     current state — a ``closed`` (acked) incident stays closed for the same
     signature. A ``resolved`` one (the job recovered, then broke the same way again)
@@ -199,11 +256,16 @@ def upsert_incident(
     new incident automatically.
     """
     job_id = str(job_id or "")
-    sig = _error_signature(job_id, error)
+    provider = subscription_provider(error)
+    # The same subscription blocks many jobs in this profile. Keep one incident
+    # in the existing ledger, with the triggering job retained for diagnostics.
+    signature_job = f"subscription:{provider}" if provider else job_id
+    signature_error = "subscription login unavailable" if provider else error
+    sig = _error_signature(signature_job, signature_error)
     stored_error = _redact_error(error)
-    incident_id = _incident_id(job_id, sig)
+    incident_id = _incident_id(signature_job, sig)
     now = _hermes_now().isoformat()
-    failure_type = failure_type or _classify_failure_type(error)
+    failure_type = f"subscription:{provider}" if provider else (failure_type or _classify_failure_type(error))
     output_file = str(output_file) if output_file is not None else None
 
     with _transaction() as conn:
@@ -281,9 +343,11 @@ def ack_incident(incident_id: str) -> bool:
     return set_incident_state(incident_id, "closed")
 
 
-def close_incidents_for_recovered_job(job_id: str) -> int:
+def close_incidents_for_recovered_job(job_id: str, *, provider: Optional[str] = None) -> int:
     """Mark the job's open incidents ``resolved`` after a successful run; returns how many.
 
+    With a successfully used subscription provider, resolve its shared incident
+    too. A healthy fallback or unrelated job does not prove that login recovered.
     Unlike the owner's ``closed`` ack, ``resolved`` is re-opened by the same error
     (see ``upsert_incident``), so a job that broke a second time alerts again.
     """
@@ -291,10 +355,27 @@ def close_incidents_for_recovered_job(job_id: str) -> int:
     with _transaction() as conn:
         cursor = conn.execute(
             """UPDATE cron_incidents SET state='resolved', closed_at=?
-               WHERE job_id=? AND state IN ('detected', 'alerted')""",
-            (now, str(job_id or "")),
+               WHERE ((job_id=? AND failure_type NOT LIKE 'subscription:%')
+                      OR failure_type=?) AND state IN ('detected', 'alerted')""",
+            (now, str(job_id or ""), f"subscription:{provider}" if provider else ""),
         )
-        return int(cursor.rowcount or 0)
+        resolved = int(cursor.rowcount or 0)
+        if provider:
+            # Upgrade compatibility: older ledgers kept a separate auth row
+            # for each job/error. Those ask for the same login, so recovery
+            # must clear them too, even when another job proved it healthy.
+            legacy = conn.execute(
+                "SELECT id, error FROM cron_incidents WHERE state IN ('detected', 'alerted') "
+                "AND failure_type NOT LIKE 'subscription:%'"
+            ).fetchall()
+            for row in legacy:
+                if subscription_provider(row["error"]) == provider:
+                    conn.execute(
+                        "UPDATE cron_incidents SET state='resolved', closed_at=? WHERE id=?",
+                        (now, row["id"]),
+                    )
+                    resolved += 1
+        return resolved
 
 
 def list_incidents(state: Optional[str] = None) -> List[Dict[str, Any]]:

@@ -255,7 +255,7 @@ def test_failure_notice_with_only_third_party_recipients_is_not_sent():
     job = {"id": "greetings", "name": "Поздравления", "deliver": "telegram:999",
            "created_by_owner": True}
     result, sent_to, queue = _deliver(job, "Сбой", failure_notice=True)
-    assert result is None and sent_to == []
+    assert "личный канал владельца" in result and sent_to == []
     queue.assert_not_called()
 
 

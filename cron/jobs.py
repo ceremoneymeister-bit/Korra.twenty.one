@@ -3101,8 +3101,7 @@ def _set_alert_flag(job_id: str, field: str, value: bool) -> bool:
     job's condition, so the scheduler alerts exactly once and stays silent
     on subsequent ticks until the condition heals (same alert-once shape as
     the dead-pin auto-pause in #73506). Persisted on the job record so the
-    dedup survives gateway restarts. Fields: ``preflight_alerted`` (blocked
-    config, T1-26) and ``drift_alerted`` (#44585 drift-guard skip).
+    dedup survives gateway restarts: ``drift_alerted`` (#44585 drift-guard skip).
     """
     with _jobs_lock():
         jobs = load_jobs()
@@ -3118,21 +3117,6 @@ def _set_alert_flag(job_id: str, field: str, value: bool) -> bool:
                     save_jobs(jobs)
                 return prior
     return False
-
-
-def _set_preflight_alerted(job_id: str, value: bool) -> bool:
-    """Set/clear the preflight alert-dedup marker; return the PRIOR value."""
-    return _set_alert_flag(job_id, "preflight_alerted", value)
-
-
-def mark_preflight_alerted(job_id: str) -> bool:
-    """Mark the job as preflight-alerted; return True if it already was."""
-    return _set_preflight_alerted(job_id, True)
-
-
-def clear_preflight_alerted(job_id: str) -> None:
-    """Clear the preflight alert-dedup marker (config validates again)."""
-    _set_preflight_alerted(job_id, False)
 
 
 def mark_drift_alerted(job_id: str) -> bool:
