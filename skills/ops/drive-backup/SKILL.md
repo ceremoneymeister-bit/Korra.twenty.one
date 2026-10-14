@@ -1,6 +1,6 @@
 ---
 name: drive-backup
-description: "Резервная копия Korra на Google Диск владельца: по просьбе и по расписанию."
+description: "Копия Korra на Google Диск: по фразе и по расписанию."
 version: 1.0.0
 author: Korra
 license: MIT
