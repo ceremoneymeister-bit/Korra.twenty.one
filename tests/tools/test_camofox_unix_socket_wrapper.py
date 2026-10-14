@@ -16,7 +16,21 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 WRAPPER = ROOT / "docker" / "camofox" / "unix-socket.mjs"
 
-pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="нужен node")
+@pytest.fixture(scope="module", autouse=True)
+def require_node_register_hooks():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("нужен Node.js с node:module.registerHooks")
+    probe = subprocess.run(
+        [node, "--input-type=module", "-e",
+         "import { registerHooks } from 'node:module'; registerHooks({}).deregister();"],
+        capture_output=True, text=True, timeout=10,
+    )
+    if probe.returncode:
+        pytest.skip(
+            "локальный Node.js не поддерживает node:module.registerHooks "
+            "(нужен Node 22.15+, 23.5+ или 24+): " + probe.stderr.strip()
+        )
 
 FAKE_SERVER = """
 import http from 'node:http';

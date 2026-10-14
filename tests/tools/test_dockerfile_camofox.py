@@ -17,6 +17,20 @@ def _block() -> str:
     return text[start:end]
 
 
+def test_image_node_supports_synchronous_module_hooks() -> None:
+    text = DOCKERFILE.read_text()
+    source = re.search(
+        r"^FROM node:(\d+)(?:\.(\d+)(?:\.(\d+))?)?[^\s]* AS node_source$",
+        text, re.MULTILINE,
+    )
+    assert source, "образ должен закреплять версию Node для node_source"
+    version = tuple(int(part or 0) for part in source.groups())
+    # https://nodejs.org/api/module.html#moduleregisterhooksoptions
+    # Added in 22.15.0 / 23.5.0; a major-only 22 or 23 tag gives no floor.
+    assert (version[0] == 22 and version >= (22, 15, 0)) or version >= (23, 5, 0)
+    assert re.search(r"^COPY\s+[^\n]*--from=node_source\s+/usr/local/bin/node\s", text, re.MULTILINE)
+
+
 def test_camofox_layer_precedes_the_source_copy_and_frontend() -> None:
     text = DOCKERFILE.read_text()
     layer = text.index("ARG CAMOUFOX_RELEASE=")
