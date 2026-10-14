@@ -1754,7 +1754,7 @@ def _cron_items(agents: list[Agent], *, now: float, tz: Optional[tzinfo]) -> lis
                 "source": "cron",
                 "kind": "cron_incident",
                 "severity": "problem",
-                "title": (f"Результат задачи «{_trim(job.get('name'), 60)}» не доставлен"
+                "title": (f"Проверьте доставку задачи «{_trim(job.get('name'), 60)}»"
                           if delivery_failure else f"Задача «{_trim(job.get('name'), 60)}» не выполнилась"),
                 "detail": detail or "Запуск завершился ошибкой.",
                 "agent": agent.label,

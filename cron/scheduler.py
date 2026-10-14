@@ -5854,10 +5854,14 @@ def cron_delivery_warning(job: dict, *, profile_home: Optional[Path] = None) -> 
     # owner's warning, while leaving runtime implementation details in logs.
     channel = re.search(r"delivery platform '([^']+)'", problem)
     label = channel.group(1) if channel else "выбранный канал"
+    reason = (
+        f"канал «{label}» не подключён в выбранном профиле"
+        if _is_known_delivery_platform(label) else f"указан неизвестный канал «{label}»"
+    )
     return (
-        f"Задача сохранена, но результат не будет доставлен: канал «{label}» "
-        "недоступен в этом профиле. Подключите его в разделе «Каналы» "
-        "или измените доставку задачи на подключённый канал либо внутренний чат."
+        f"Задача сохранена, но результат не будет доставлен: {reason}. "
+        "Откройте «Каналы» именно выбранного профиля и подключите нужный канал "
+        "или выберите другую доставку."
     )
 
 
@@ -8285,10 +8289,18 @@ def _run_one_job_body(
                 job, delivery_recovered=delivery_outcome == "delivered" or normalized_deliver == "local"
             )
         if delivery_error:
+            if delivery_unknown:
+                description = (
+                    "Доставка результата не подтверждена. " if success else
+                    "Доставка уведомления о сбое не подтверждена. "
+                ) + "Проверьте получателя перед повторной отправкой. Причина: "
+            else:
+                description = (
+                    "Результат вычислен, но не доставлен. Причина: " if success else
+                    "Уведомление о сбое не доставлено. Причина: "
+                )
             _upsert_incident_for_failure(
-                job,
-                ("Результат вычислен, но не доставлен. Причина: " if success else
-                 "Уведомление о сбое не доставлено. Причина: ") + delivery_error,
+                job, description + delivery_error,
                 output_file=output_file,
                 failure_type="delivery",
             )
@@ -8385,6 +8397,9 @@ def _run_one_job_body(
                     ):
                         delivery_waiting_decision = True
                         delivery_error = None
+                    elif delivery_error and delivery_error.startswith(_DELIVERY_UNKNOWN_PREFIX):
+                        delivery_unknown = True
+                        delivery_error = delivery_error[len(_DELIVERY_UNKNOWN_PREFIX):]
                 except Exception as delivery_exc:
                     delivery_error = str(delivery_exc)
                     logger.error(
@@ -8394,6 +8409,8 @@ def _run_one_job_body(
                     unresolved_origin = not _resolve_delivery_targets(notice_job)
                 if delivery_waiting_decision:
                     delivery_outcome = "waiting_decision"
+                elif delivery_unknown:
+                    delivery_outcome = "unknown"
                 elif delivery_error:
                     from cron.result_validity import EXPIRED_DELIVERY
                     delivery_outcome = "expired" if delivery_error == EXPIRED_DELIVERY else "failed"
@@ -8404,8 +8421,13 @@ def _run_one_job_body(
                 if delivery_outcome == "delivered":
                     _mark_incident_alerted(failure_incident_id)
         if delivery_error:
+            description = (
+                "Доставка уведомления о сбое не подтверждена. "
+                "Проверьте получателя перед повторной отправкой. Причина: "
+                if delivery_unknown else "Уведомление о сбое не доставлено. Причина: "
+            )
             _upsert_incident_for_failure(
-                job, "Уведомление о сбое не доставлено. Причина: " + delivery_error,
+                job, description + delivery_error,
                 failure_type="delivery",
             )
         try:
