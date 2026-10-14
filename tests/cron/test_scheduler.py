@@ -380,40 +380,77 @@ class TestDeliverResultWrapping:
         assert "Here is today's summary." in sent_content
         assert "изменить расписание" in sent_content
 
-    def test_cron_external_delivery_waits_for_exact_durable_decision(self):
-        """off/yolo/cron never bypasses the immutable external-effect gate."""
-        from gateway.config import Platform
+    @pytest.mark.parametrize("origin_change,job_change,deliver,waits", [
+        ({}, {}, "origin", False),  # unstamped legacy reply to the same private chat
+        ({}, {}, "telegram:999", True),  # somebody else
+        ({"chat_id": "-100123"}, {}, "origin", True),  # group
+        ({"chat_type": "group"}, {}, "origin", True),  # contradictory chat metadata
+        ({"user_id": "999"}, {}, "origin", True),
+        ({"user_id": ""}, {}, "origin", True),
+        ({"user_id": None}, {}, "origin", True),
+        ({"owner": False}, {}, "origin", True),
+        ({"owner": None}, {}, "origin", True),
+        ({}, {"created_by_owner": False}, "origin", True),
+        ({}, {"created_by_owner": None}, "origin", True),
+    ])
+    def test_cron_delivery_decision_preserves_legacy_private_reply_boundary(
+        self, tmp_path, monkeypatch, origin_change, job_change, deliver, waits,
+    ):
+        """Own legacy replies send; other targets/unknown modern identities wait."""
+        from cron.scheduler import _delivery_decision_session
+        from gateway.config import GatewayConfig, Platform, PlatformConfig
+        from tools import effect_decisions
 
-        pconfig = MagicMock(enabled=True)
-        mock_cfg = MagicMock()
-        mock_cfg.platforms = {Platform.TELEGRAM: pconfig}
-        queue = MagicMock(return_value={"id": "effect_cron_exact"})
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setenv("KORRA_HOME", str(tmp_path))
+        monkeypatch.setattr("cron.scheduler._hermes_home", None)
+        config = GatewayConfig(platforms={
+            Platform.TELEGRAM: PlatformConfig(enabled=True, token="fixture-token"),
+        })
         send = AsyncMock(return_value={"success": True})
         job = {
             "id": "daily-1",
             "name": "daily-report",
-            "deliver": "origin",
-            "origin": {"platform": "telegram", "chat_id": "123"},
+            "deliver": deliver,
+            "origin": {"platform": "telegram", "chat_id": "123", **origin_change},
+            **job_change,
         }
+        session = _delivery_decision_session(job, "run-7")
+        # Legacy compatibility does not give the creator owner authority.
+        assert session == "cron:daily-1:run-7"
 
         with (
-            patch("gateway.config.load_gateway_config", return_value=mock_cfg),
-            patch("tools.send_message_tool._queue_outbound_decision", queue),
+            patch("gateway.config.load_gateway_config", return_value=config),
             patch("tools.send_message_tool._send_to_platform", new=send),
             patch("korra_cli.profiles.get_active_profile_name", return_value="sales"),
         ):
             result = _deliver_result(
-                job,
-                "Here is today's summary.",
-                decision_session_id="cron:daily-1:run-7",
+                job, "Here is today's summary.", decision_session_id=session,
             )
 
-        assert result == "waiting_decision:effect_cron_exact"
+        pending = effect_decisions.list_profile_decisions()
+        if not waits:
+            assert result is None
+            send.assert_awaited_once()
+            assert send.await_args.args[2] == "123"
+            assert "Результат задачи: daily-report" in send.await_args.args[3]
+            assert pending == []
+            return
+
         send.assert_not_awaited()
-        assert queue.call_args.kwargs["source_session_id"] == "cron:daily-1:run-7"
-        assert queue.call_args.kwargs["source_session_key"] == "cron:daily-1:run-7"
-        assert queue.call_args.kwargs["source_label"] == "cron"
-        assert "Результат задачи: daily-report" in queue.call_args.kwargs["cleaned_message"]
+        decision, = pending
+        assert result == f"waiting_decision:{decision['id']}"
+        assert decision["status"] == "pending"
+        assert decision["source_session_id"] == session
+        assert decision["source_session_key"] == session
+        assert decision["profile"] == "sales"
+        payload = decision["payload"]
+        assert payload["source_label"] == "cron"
+        expected_chat = "999" if deliver == "telegram:999" else job["origin"]["chat_id"]
+        assert payload["chat_id"] == expected_chat
+        assert "Результат задачи: daily-report" in payload["message"]
+        assert "Here is today's summary." in payload["message"]
+        assert payload["message"] == payload["tool_args"]["message"]
 
 
     def test_relay_fronted_home_uses_relay_config_and_live_adapter(self, monkeypatch, tmp_path):
