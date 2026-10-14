@@ -125,8 +125,8 @@ def test_run_one_job_records_waiting_decision_without_delivery_failure(monkeypat
 
 
 @pytest.mark.parametrize("owner", [True, False])
-def test_run_one_job_congestion_stays_silent(monkeypatch, owner):
-    """Congestion is recorded without an outbound owner alert or approval."""
+def test_run_one_job_final_congestion_uses_authorized_failure_delivery(monkeypatch, owner):
+    """Without a planned retry, congestion follows the ordinary failure path."""
     delivered = []
     marked = []
     finished = []
@@ -166,8 +166,9 @@ def test_run_one_job_congestion_stays_silent(monkeypatch, owner):
     ok = s.run_one_job({"id": "j3", "name": "morning", "deliver": "telegram", "created_by_owner": owner})
 
     assert ok is False
-    assert decision_sessions == []
-    assert delivered == []
+    assert decision_sessions == ["" if owner else "cron:j3:exec-j3"]
+    assert len(delivered) == 1 and delivered[0][0] == "j3"
+    assert "503" in delivered[0][1]
     assert marked == [
         (("j3", False, "Gemini HTTP 503 (UNAVAILABLE)"), {"delivery_error": None})
     ]
@@ -177,7 +178,7 @@ def test_run_one_job_congestion_stays_silent(monkeypatch, owner):
             {
                 "success": False,
                 "error": "Gemini HTTP 503 (UNAVAILABLE)",
-                "delivery_outcome": "suppressed",
+                "delivery_outcome": "delivered",
                 "delivery_error": None,
             },
         )

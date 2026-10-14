@@ -7960,11 +7960,10 @@ def _run_one_job_body(
                     error = file_error
                     delivery_error = file_error
 
-            from cron.incidents import subscription_provider, subscription_notice, is_transient_service_failure
+            from cron.incidents import subscription_provider, subscription_notice
 
             blocked_config = bool(error) and str(error).startswith("[blocked_config")
             subscription = subscription_provider(error, job.get("_resolved_subscription_provider", "")) if not success else None
-            transient_service = not success and is_transient_service_failure(error)
             if subscription:
                 _subscription_notice_lock.acquire()
                 subscription_notice_locked = True
@@ -8041,7 +8040,7 @@ def _run_one_job_body(
             # responses: do not deliver a blank message, and let the
             # empty-response guard below mark the run as a soft failure.
             should_deliver = bool(deliver_content.strip())
-            if drift_skip_silent or (not success and incident_acked and not drift_skip) or transient_service:
+            if drift_skip_silent or (not success and incident_acked and not drift_skip):
                 should_deliver = False
             if should_deliver and not success and job.get("_model_unreachable"):
                 from cron.unreachable_retry import will_retry
@@ -8244,7 +8243,8 @@ def _run_one_job_body(
             _err_text,
             exc_info=(type(e), e, e.__traceback__),
         )
-        from cron.incidents import subscription_provider, subscription_notice, is_transient_service_failure
+        from cron.incidents import subscription_provider, subscription_notice
+        from cron.unreachable_retry import will_retry
 
         subscription = subscription_provider(e, job.get("_resolved_subscription_provider", ""))
         if subscription:
@@ -8276,7 +8276,7 @@ def _run_one_job_body(
             )
             if incident_acked:
                 delivery_outcome = "suppressed_acked"
-            elif is_transient_service_failure(e):
+            elif job.get("_model_unreachable") and will_retry(job):
                 delivery_outcome = "suppressed"
             else:
                 try:
@@ -8329,6 +8329,8 @@ def _run_one_job_body(
                     mark_kwargs["expected_fire_owner"] = fire_owner
                 if isinstance(e, Exception):
                     mark_kwargs["delivery_error"] = delivery_error
+                    if job.pop("_model_unreachable", False):
+                        mark_kwargs["model_unreachable"] = True
                 mark_job_run(job["id"], False, _err_text, **mark_kwargs)
         except Exception as record_err:
             # Never let bookkeeping mask the original interruption.

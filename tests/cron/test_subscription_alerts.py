@@ -142,7 +142,7 @@ def test_shared_notice_repeats_only_after_existing_pause(home, monkeypatch):
     RuntimeError("Claude capacity exhausted"),
     RuntimeError("529 overloaded"),
 ])
-def test_congestion_never_blocks_config_or_alerts_owner(home, error):
+def test_congestion_stays_quiet_while_automatic_retry_is_pending(home, error):
     job = make_job()
     send = AsyncMock(return_value={"success": True})
     with patch("korra_cli.runtime_provider.resolve_runtime_provider", side_effect=error), \
@@ -155,6 +155,76 @@ def test_congestion_never_blocks_config_or_alerts_owner(home, error):
     assert send.await_count == 0
     assert attention(home) == []
     assert incidents.list_incidents()[0]["state"] == "detected"
+
+
+@pytest.mark.parametrize("error", ["HTTP 429 rate limit", "HTTP 503 service unavailable", "Claude capacity exhausted"])
+@pytest.mark.parametrize("mode", ["exhausted", "oneshot", "disabled", "after_call"])
+def test_congestion_without_retry_notifies_owner_and_dashboard(home, mode, error):
+    if mode == "oneshot":
+        job = jobs.create_job(
+            prompt="report", schedule="in 3h", model="gpt-test", provider="openai-codex",
+            deliver="origin", origin={"platform": "telegram", "chat_id": "42", "user_id": "42", "chat_type": "dm"},
+        )
+    else:
+        job = make_job()
+    if mode == "exhausted":
+        job["unreachable_retry"] = {"attempt": 3}
+        jobs.save_jobs([job])
+    if mode == "disabled":
+        with (home / "config.yaml").open("a") as config:
+            config.write("  retry_unreachable: false\n")
+    send = AsyncMock(return_value={"success": True})
+    runtime = {"provider": "openai-codex", "api_key": "fake", "base_url": "https://example.invalid", "api_mode": "codex_responses"}
+    with patch("korra_cli.runtime_provider.resolve_runtime_provider", return_value=runtime), \
+         patch("run_agent.AIAgent") as cls, patch("tools.send_message_tool._send_to_platform", send):
+        cls.return_value.session_api_calls = 1 if mode == "after_call" else 0
+        cls.return_value.run_conversation.side_effect = RuntimeError(error)
+        tick(job)
+    assert not jobs.get_job(job["id"]).get("unreachable_retry")
+    assert send.await_count == 1
+    assert "Вход в подписку" not in send.call_args.args[3]
+    assert executions.latest_execution(job["id"])["delivery_outcome"] == "delivered"
+    assert any(item["kind"] == "cron_incident" for item in attention(home))
+    assert not any(item["kind"] == "provider_refused" for item in attention(home))
+
+
+def test_congestion_notifies_after_the_last_automatic_retry(home):
+    job = make_job()
+    send = AsyncMock(return_value={"success": True})
+    with patch("korra_cli.runtime_provider.resolve_runtime_provider", side_effect=AuthError("Codex HTTP 503", provider="openai-codex")), \
+         patch("tools.send_message_tool._send_to_platform", send):
+        for attempt in range(1, 4):
+            tick(job)
+            assert jobs.get_job(job["id"])["unreachable_retry"]["attempt"] == attempt
+            assert send.await_count == 0
+            assert attention(home) == []
+        tick(job)
+    assert not jobs.get_job(job["id"]).get("unreachable_retry")
+    assert send.await_count == 1
+    assert any(item["kind"] == "cron_incident" for item in attention(home))
+
+
+def test_outer_congestion_without_planned_retry_notifies_owner(home):
+    job = make_job()
+    send = AsyncMock(return_value={"success": True})
+    with patch.object(scheduler, "run_job", side_effect=RuntimeError("HTTP 503 service unavailable")), \
+         patch("tools.send_message_tool._send_to_platform", send):
+        assert scheduler.run_one_job(jobs.get_job(job["id"])) is False
+    assert not jobs.get_job(job["id"]).get("unreachable_retry")
+    assert send.await_count == 1
+    assert any(item["kind"] == "cron_incident" for item in attention(home))
+
+
+def test_outer_failure_preserves_an_eligible_automatic_retry(home):
+    job = make_job()
+    send = AsyncMock(return_value={"success": True})
+    with patch("korra_cli.runtime_provider.resolve_runtime_provider", side_effect=AuthError("Codex HTTP 503", provider="openai-codex")), \
+         patch.object(scheduler, "save_job_output", side_effect=RuntimeError("HTTP 503 service unavailable")), \
+         patch("tools.send_message_tool._send_to_platform", send):
+        assert scheduler.run_one_job(jobs.get_job(job["id"])) is False
+    assert jobs.get_job(job["id"])["unreachable_retry"]["attempt"] == 1
+    assert send.await_count == 0
+    assert attention(home) == []
 
 
 @pytest.mark.parametrize("provider, error", [
