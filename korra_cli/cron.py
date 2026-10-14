@@ -33,6 +33,7 @@ def _status_label(value) -> str:
     return {
         "ok": "успешно", "success": "успешно", "succeeded": "успешно",
         "error": "ошибка", "failed": "ошибка", "failure": "ошибка",
+        "delivery_failed": "результат не доставлен",
         "running": "выполняется", "queued": "в очереди", "pending": "ожидает",
         "claimed": "принята к выполнению", "completed": "завершена",
         "cancelled": "отменена", "interrupted": "прервана",
@@ -234,7 +235,8 @@ def cron_list(show_all: bool = False):
             if last_status == "ok":
                 status_display = color("успешно", Colors.GREEN)
             else:
-                status_display = color(f"{_status_label(last_status)}: {job.get('last_error', '?')}", Colors.RED)
+                reason = job.get("last_delivery_error") if last_status == "delivery_failed" else job.get("last_error")
+                status_display = color(f"{_status_label(last_status)}: {reason or '?'}", Colors.RED)
                 streak = int(job.get("failure_streak") or 0)
                 if streak >= 2:
                     status_display += color(f'  (ошибок подряд: {streak})', Colors.RED)
@@ -613,7 +615,7 @@ def _cron_doctor_issues_for_job(job: Dict[str, Any]) -> List[str]:
     issues: List[str] = []
 
     last_status = str(job.get("last_status") or "").strip().lower()
-    if last_status and last_status != "ok":
+    if last_status and last_status not in {"ok", "delivery_failed"}:
         err = str(job.get("last_error") or 'неизвестная ошибка').strip()
         issues.append(f'последний запуск завершился с ошибкой: {err}')
 

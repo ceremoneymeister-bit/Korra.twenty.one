@@ -3199,7 +3199,9 @@ def _mark_job_run_locked(
                 # The transient manual-run context is single-fire: whatever
                 # run just completed consumed it (or superseded it).
                 job.pop("manual_run_prompt", None)
-                job["last_status"] = status or ("ok" if success else "error")
+                job["last_status"] = status or (
+                    "error" if not success else "delivery_failed" if delivery_error else "ok"
+                )
                 job["last_error"] = error if not success else None
                 # A healthy run means the configuration validates again — drop
                 # the preflight alert-dedup marker so a FUTURE config break

@@ -92,3 +92,74 @@ def test_web_chat_delivery_needs_no_recipient_confirmation(store):
     assert _is_creator_private_chat(job, "api_server", "web-chat-1") is True
     assert _is_creator_private_chat(job, "api_server", "another-chat") is False
     assert _is_creator_private_chat({"origin": None}, "api_server", "web-chat-1") is False
+
+
+def test_delivery_failure_is_visible_without_counting_as_agent_failure(store):
+    from cron.jobs import create_job, get_job, mark_job_run
+
+    job = create_job(prompt="Report", schedule="every 1h", deliver="origin", origin=WEB_CHAT)
+    mark_job_run(job["id"], True, delivery_error="Чат удалён")
+    saved = get_job(job["id"])
+    assert saved["last_status"] == "delivery_failed"
+    assert saved["last_error"] is None
+    assert saved["failure_streak"] == 0
+    mark_job_run(job["id"], True)
+    assert get_job(job["id"])["last_status"] == "ok"
+
+
+def test_delivery_is_visible_but_does_not_mutate_cached_model_history(store):
+    from cron.scheduler import _deliver_result
+    from korra_state import SessionDB
+
+    _make_chat("web-chat-1")
+    with SessionDB() as db:
+        db.append_message("web-chat-1", "user", "Привет")
+        db.append_message("web-chat-1", "assistant", "Здравствуйте")
+        before = db.get_messages_as_conversation("web-chat-1")
+    job = {"id": "report", "name": "Report", "deliver": "origin", "origin": WEB_CHAT}
+    assert _deliver_result(job, "Готов отчёт") is None
+    with SessionDB() as db:
+        assert db.get_messages_as_conversation("web-chat-1") == before
+        model, display = db.get_resume_conversations("web-chat-1")
+        assert [(m["role"], m["content"]) for m in model] == [(m["role"], m["content"]) for m in before]
+        assert display[-1]["display_kind"] == "cron_delivery"
+        assert "Готов отчёт" in display[-1]["content"]
+
+
+def test_delivery_follows_compression_tip(store):
+    from cron.scheduler import _deliver_result
+    from korra_state import SessionDB
+
+    _make_chat("web-chat-1")
+    with SessionDB() as db:
+        db.end_session("web-chat-1", end_reason="compression")
+        db.create_session(session_id="compressed-chat", source="api_server", parent_session_id="web-chat-1")
+    job = {"id": "report", "name": "Report", "deliver": "origin", "origin": WEB_CHAT}
+    assert _deliver_result(job, "Готов отчёт") is None
+    assert not _messages("web-chat-1")
+    assert "Готов отчёт" in _messages("compressed-chat")[-1]["content"]
+
+
+@pytest.mark.parametrize("chat_exists", [True, False])
+def test_real_scheduler_records_web_delivery_outcome(store, chat_exists):
+    from cron.jobs import create_job, get_job
+    from cron.scheduler import run_one_job
+
+    if chat_exists:
+        _make_chat("web-chat-1")
+    job = create_job(prompt=None, reminder="Позвонить", schedule="every 1h", deliver="origin", origin=WEB_CHAT)
+    assert run_one_job(job) is True
+    saved = get_job(job["id"])
+    assert saved["last_status"] == ("ok" if chat_exists else "delivery_failed")
+    assert bool(saved["last_delivery_error"]) is not chat_exists
+    assert saved["failure_streak"] == 0
+
+
+def test_immediate_run_reports_delivery_failure_to_the_caller(store):
+    from cron.jobs import create_job
+    from tools.cronjob_tools import _execute_job_now
+
+    job = create_job(prompt=None, reminder="Позвонить", schedule="every 1h", deliver="origin", origin=WEB_CHAT)
+    result = _execute_job_now(job)
+    assert result["success"] is False
+    assert "чат кабинета" in result["error"]

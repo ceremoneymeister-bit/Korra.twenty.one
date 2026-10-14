@@ -1403,7 +1403,7 @@ def _run_claimed_job(
         return {
             "claimed": True,
             "success": bool(processed and ok),
-            "error": refreshed.get("last_error"),
+            "error": refreshed.get("last_error") or refreshed.get("last_delivery_error"),
         }
 
     except Exception as e:
