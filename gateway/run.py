@@ -27215,12 +27215,17 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # (staging incident 2026-08-09, second occurrence). Resolve through
         # the shared transport resolver — native adapter wins; relay is
         # eligible only when it advertises fronting the logical platform.
-        adapter = None
+        adapter = self._registered_transport_adapter(source)
+        if adapter is None and getattr(source, "_transport_adapter_ref", None) is not None:
+            # The known ingress transport is disconnected. Do not replace it
+            # with another profile's bot; leave the completion retryable.
+            return False
         delivery_adapters = self.adapters
-        if (
+        profile_delivery = bool(
             getattr(getattr(self, "config", None), "multiplex_profiles", False)
             and source.profile and source.profile != "default"
-        ):
+        )
+        if profile_delivery:
             delivery_adapters = dict(
                 (getattr(self, "_profile_adapters", None) or {}).get(source.profile, {})
             )
@@ -27228,11 +27233,20 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             for shared in (Platform.API_SERVER, Platform.RELAY):
                 if shared in self.adapters:
                     delivery_adapters.setdefault(shared, self.adapters[shared])
+            # Restored/reconstructed sources have no in-process adapter ref.
+            # A matching served profile route authorizes the primary bot for
+            # this chat, even when the runtime profile has no bot of its own.
+            if (
+                source.platform not in delivery_adapters
+                and self._profile_name_for_source(source) == source.profile
+                and source.platform in self.adapters
+            ):
+                delivery_adapters[source.platform] = self.adapters[source.platform]
         try:
             _platform_enum = Platform(platform_name)
         except (ValueError, KeyError):
             _platform_enum = None
-        if _platform_enum is not None:
+        if _platform_enum is not None and adapter is None:
             try:
                 _transport = resolve_delivery_transport(
                     _platform_enum, self.config, delivery_adapters,
@@ -27250,7 +27264,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     adapter = a
                     break
         if not adapter:
-            return None
+            return False if profile_delivery else None
         from gateway.wake import adapter_supports_push as _wake_push_ok
         if not _wake_push_ok(adapter):
             # Non-push adapter (api_server) resolved WITH routing metadata:
