@@ -108,6 +108,32 @@ export async function downloadWorkspaceFile(path: string, name: string, chat = f
   if (objectUrl) window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
+/** Mirrors MEDIA_DELIVERY_EXTS in gateway/platforms/base.py. */
+export const MEDIA_DELIVERY_EXTS: readonly string[] = [
+  "png", "jpg", "jpeg", "gif", "webp", "bmp", "tiff", "svg",
+  "mp4", "mov", "avi", "mkv", "webm", "3gp",
+  "mp3", "m2a", "wav", "ogg", "opus", "m4a", "flac",
+  "pdf", "docx", "doc", "odt", "rtf", "txt", "md", "epub",
+  "xlsx", "xls", "ods", "csv", "tsv", "json", "xml", "yaml", "yml",
+  "kmz", "kml", "geojson", "gpx",
+  "pptx", "ppt", "odp", "key",
+  "zip", "tar", "gz", "tgz", "bz2", "xz", "7z", "rar", "apk", "ipa",
+  "html", "htm",
+];
+
+// Same shape as MEDIA_TAG_CLEANUP_RE on the server: a bare path may contain
+// spaces, runs from "/" or "~/" to the nearest known extension, and ends at a
+// boundary (whitespace, closing punctuation, the next "MEDIA:", or a final dot).
+// Never scan across the next directive, even when this path has an unknown
+// extension: otherwise we merge files and rescan every remaining tag.
+const MEDIA_BARE_PATH = String.raw`((?:~/|/)(?:(?!MEDIA:)\S)+?(?:[^\S\n]+(?:(?!MEDIA:)\S)+?)*?\.(?:${
+  [...MEDIA_DELIVERY_EXTS].sort((a, b) => b.length - a.length).join("|")
+})(?=[\s\x60"'*_,;:)\]}\[（）〈〉《》：，。；！？、“”‘’【】]|MEDIA:|\.(?:\s|$)|$))`;
+const MEDIA_TAG_RE = new RegExp(
+  String.raw`[\x60"'*_]{0,3}MEDIA:\s*(?:"([^"\n]+)"|'([^'\n]+)'|${MEDIA_BARE_PATH}|((?:(?!MEDIA:)[^\s\x60])+))[\x60"'*_]{0,3}\.?`,
+  "gi",
+);
+
 /** Parse at render time so original MEDIA references remain durable in history. */
 export function splitFileReferences(content: string): { text: string; paths: string[] } {
   const protectedText: string[] = [];
@@ -124,8 +150,9 @@ export function splitFileReferences(content: string): { text: string; paths: str
   };
   text = text.replace(/!?\[[^\]\n]*\]\((<[^>\n]+>|(?:[^()\n]|\([^()\n]*\))+)\)/g,
     (full, reference: string) => take(full, reference));
-  text = text.replace(/`?MEDIA:\s*(?:"([^"\n]+)"|'([^'\n]+)'|([^\s`]+))`?/g,
-    (full, double: string, single: string, bare: string) => take(full, double || single || bare.replace(/[.,;:!?)]+$/, "")));
+  text = text.replace(MEDIA_TAG_RE,
+    (full, double: string, single: string, spaced: string, bare: string) =>
+      take(full, double || single || spaced || bare.replace(/[.,;:!?)*_"']+$/, "")));
   text = text.replace(/^\s*((?:sandbox:|file:\/\/)?\/[^\n]*\.[\p{L}\d]{1,12})\s*$/gmu,
     (full, path: string) => take(full, path));
   // Null delimiters cannot occur in a filesystem path; these placeholders
