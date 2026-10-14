@@ -6200,6 +6200,7 @@ async def get_status(profile: Optional[str] = None):
             "gateway_exit_reason": gateway_exit_reason,
             "gateway_updated_at": gateway_updated_at,
             "active_agents": active_agents,
+            "active_agent_counts": (runtime or {}).get("active_agent_counts"),
             "gateway_busy": gateway_busy,
             "gateway_drainable": gateway_drainable,
             "restart_drain_timeout": restart_drain_timeout,

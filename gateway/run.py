@@ -9209,11 +9209,15 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
     def _active_work_count(self) -> int:
         """All agent work the gateway must expose and drain as one total."""
-        return (
-            self._running_agent_count()
-            + self._active_cron_job_count()
-            + self._active_api_run_count()
-        )
+        return sum(self._active_work_counts().values())
+
+    def _active_work_counts(self) -> Dict[str, int]:
+        """The sources of the total, sampled together for status diagnostics."""
+        return {
+            "messaging": self._running_agent_count(),
+            "cron": self._active_cron_job_count(),
+            "api": self._active_api_run_count(),
+        }
 
     def _active_cron_job_count(self) -> int:
         """Count of cron jobs currently executing, from the cron scheduler's
@@ -9764,16 +9768,18 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
     def _update_runtime_status(self, gateway_state: Optional[str] = None, exit_reason: Optional[str] = None) -> None:
         try:
             from gateway.status import write_runtime_status
+            counts = self._active_work_counts()
             write_runtime_status(
                 gateway_state=gateway_state,
                 exit_reason=exit_reason,
                 restart_requested=self._restart_requested,
-                active_agents=self._active_work_count(),
+                active_agents=sum(counts.values()),
+                active_agent_counts=counts,
             )
         except Exception:
             pass
 
-    def _persist_active_agents(self) -> None:
+    def _persist_active_agents(self) -> bool:
         """Persist the live in-flight agent count to ``gateway_state.json``.
 
         Called at every turn boundary (a running-agent slot is claimed or
@@ -9783,7 +9789,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         between transitions is stale (a turn could start and finish without the
         file ever moving).
 
-        Deliberately passes ONLY ``active_agents`` — ``gateway_state`` and the
+        Passes only the total and its sources — ``gateway_state`` and the
         other fields stay ``_UNSET`` so ``write_runtime_status``'s
         read-merge-write preserves the current lifecycle state (``running`` /
         ``draining`` / …).  Passing ``gateway_state=None`` here would clobber it.
@@ -9791,9 +9797,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         """
         try:
             from gateway.status import write_runtime_status
-            write_runtime_status(active_agents=self._active_work_count())
+            counts = self._active_work_counts()
+            write_runtime_status(active_agents=sum(counts.values()), active_agent_counts=counts)
+            return True
         except Exception:
-            pass
+            return False
 
     # ------------------------------------------------------------------
     # External drain control (NAS-driven quiesce-without-restart, Phase 2).
@@ -9869,17 +9877,21 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         """
         from gateway.drain_control import drain_requested
 
+        last_counts = None
         while self._running:
             try:
                 if drain_requested():
                     if self._enter_external_drain():
                         await self._pause_platform_intake()
-                    # API and cron work live outside messaging's
-                    # _running_agents map. Refresh the aggregate while an
-                    # external caller polls this reversible drain state.
-                    self._persist_active_agents()
                 elif self._exit_external_drain():
                     await self._resume_platform_intake()
+                # API/cron completions do not pass through messaging turn
+                # boundaries. Reconcile their real counts even when no drain
+                # marker exists, or a persisted busy snapshot can live forever.
+                counts = self._active_work_counts()
+                if counts != last_counts:
+                    if self._persist_active_agents():
+                        last_counts = counts
             except asyncio.CancelledError:
                 raise
             except Exception as exc:

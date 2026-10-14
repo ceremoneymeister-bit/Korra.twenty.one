@@ -3707,6 +3707,7 @@ class APIServerAdapter(BasePlatformAdapter):
             "gateway_state": gw_state,
             "platforms": runtime.get("platforms", {}),
             "active_agents": gw_active,
+            "active_agent_counts": runtime.get("active_agent_counts"),
             "gateway_busy": derive_gateway_busy(
                 gateway_running=True,
                 gateway_state=gw_state,
@@ -6436,9 +6437,9 @@ class APIServerAdapter(BasePlatformAdapter):
         if gateway_session_key:
             sse_headers["X-Hermes-Session-Key"] = gateway_session_key
         response = web.StreamResponse(status=200, headers=sse_headers)
-        await response.prepare(request)
 
         try:
+            await response.prepare(request)
             last_activity = time.monotonic()
 
             # Role chunk
@@ -6630,6 +6631,17 @@ class APIServerAdapter(BasePlatformAdapter):
                 except (asyncio.CancelledError, Exception):
                     pass
             logger.info("SSE client disconnected; interrupted agent task %s", completion_id)
+        except asyncio.CancelledError:
+            agent = agent_ref[0] if agent_ref else None
+            if agent is not None:
+                try:
+                    request_hard_interrupt(agent, "SSE task cancelled")
+                except Exception:
+                    pass
+                _reap_disconnected_agent_processes(agent, source="api_server_sse_cancelled")
+            if not agent_task.done():
+                agent_task.cancel()
+            raise
         except Exception as _exc:
             # Agent crashed mid-stream.  Try to emit an error chunk
             # so the client gets a proper response instead of a
@@ -6708,7 +6720,6 @@ class APIServerAdapter(BasePlatformAdapter):
         if gateway_session_key:
             sse_headers["X-Hermes-Session-Key"] = gateway_session_key
         response = web.StreamResponse(status=200, headers=sse_headers)
-        await response.prepare(request)
 
         # State accumulated during the stream
         final_text_parts: List[str] = []
@@ -6754,6 +6765,7 @@ class APIServerAdapter(BasePlatformAdapter):
         agent_error: Optional[str] = None
         usage: Dict[str, int] = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
         terminal_snapshot_persisted = False
+        _batch_timer: Optional[asyncio.Task] = None
 
         def _persist_response_snapshot(
             response_env: Dict[str, Any],
@@ -6810,6 +6822,7 @@ class APIServerAdapter(BasePlatformAdapter):
             )
 
         try:
+            await response.prepare(request)
             # response.created — initial envelope, status=in_progress
             created_env = _envelope("in_progress")
             created_env["output"] = []
@@ -6989,8 +7002,6 @@ class APIServerAdapter(BasePlatformAdapter):
 
             # ── Batching state ──
             _batch_buf: List[str] = []
-            _batch_timer: Optional[asyncio.Task] = None
-            _batch_lock = asyncio.Lock()
 
             async def _batch_flush_after(delay: float) -> None:
                 """Wait delay seconds, then flush accumulated text deltas."""
@@ -6998,20 +7009,19 @@ class APIServerAdapter(BasePlatformAdapter):
                     await asyncio.sleep(delay)
                 except asyncio.CancelledError:
                     return
-                # Clear timer reference BEFORE flush so new deltas
-                # can start a fresh timer while we emit
-                nonlocal _batch_buf, _batch_timer
+                nonlocal _batch_timer
                 _batch_timer = None
-                await _flush_batch()
+                # The request task owns every write and its disconnect handler.
+                # Writing here strands exceptions on this detached timer task.
+                stream_q.put_nowait(("__flush__", None))
 
             async def _flush_batch() -> None:
                 """Emit a single SSE delta for all accumulated text."""
                 nonlocal _batch_buf
-                async with _batch_lock:
-                    if _batch_buf:
-                        combined = "".join(_batch_buf)
-                        _batch_buf = []
-                        await _emit_text_delta(combined)
+                if _batch_buf:
+                    combined = "".join(_batch_buf)
+                    _batch_buf = []
+                    await _emit_text_delta(combined)
 
             while True:
                 try:
@@ -7253,6 +7263,9 @@ class APIServerAdapter(BasePlatformAdapter):
             except Exception:
                 pass
             logger.error("Agent crashed mid-stream for %s: %s", response_id, str(agent_error)[:300])
+        finally:
+            if _batch_timer and not _batch_timer.done():
+                _batch_timer.cancel()
 
         return response
 
@@ -8515,9 +8528,20 @@ class APIServerAdapter(BasePlatformAdapter):
         self._activate_admitted_request()
         self._inflight_agent_runs += 1
         try:
-            return await loop.run_in_executor(None, _run)
-        finally:
+            work = loop.run_in_executor(None, _run)
+        except BaseException:
             self._inflight_agent_runs -= 1
+            raise
+
+        def _settled(future):
+            # Cancelling the request cannot stop an executor thread. Retire
+            # work only when that thread actually returns, so drain stays safe.
+            self._inflight_agent_runs -= 1
+            if not future.cancelled():
+                future.exception()  # consume failures after a disconnected request
+
+        work.add_done_callback(_settled)
+        return await asyncio.shield(work)
 
     # ------------------------------------------------------------------
     # /v1/runs — structured event streaming
