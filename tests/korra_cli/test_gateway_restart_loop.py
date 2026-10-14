@@ -363,6 +363,7 @@ class TestCronCreateLifecycleBlock:
             cron_command="create",
             schedule="30m",
             prompt="Upgrade hermes then run hermes gateway restart",
+            model="test-model",
             name=None,
             deliver=None,
             repeat=None,
@@ -1712,12 +1713,12 @@ class TestCreateJobBlocksLifecycleCommands:
         from cron.jobs import create_job
         from cron.lifecycle_guard import GatewayLifecycleBlocked
         with pytest.raises(GatewayLifecycleBlocked):
-            create_job(prompt="then run hermes gateway restart", schedule="30m")
+            create_job(prompt="then run hermes gateway restart", schedule="30m", model="test-model")
 
     def test_create_job_allows_benign_prompt(self):
         from cron.jobs import create_job
         job = create_job(prompt="summarize the API gateway logs and note restart events",
-                         schedule="30m")
+                         schedule="30m", model="test-model")
         assert job["id"]
 
     def test_cronjob_tool_surfaces_block_as_error(self, tmp_path, monkeypatch):
@@ -1729,6 +1730,7 @@ class TestCreateJobBlocksLifecycleCommands:
         result = json.loads(cronjob(
             action="create", schedule="0 9 * * *",
             prompt="please run hermes gateway restart nightly",
+            model="test-model",
         ))
         assert result.get("success") is False
         assert "#30719" in result.get("error", "")

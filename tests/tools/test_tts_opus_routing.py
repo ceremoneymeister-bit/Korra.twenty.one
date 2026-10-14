@@ -49,9 +49,12 @@ def test_edge_telegram_converts_to_opus_voice(tmp_path, monkeypatch):
     opus = tmp_path / "speech.ogg"
 
     def fake_convert(path: str) -> str:
-        assert path == str(out)
-        opus.write_bytes(b"ogg")
-        return str(opus)
+        source = Path(path)
+        assert source.read_bytes() == b"mp3"
+        assert source.parent != out.parent
+        staged_opus = source.with_suffix(".ogg")
+        staged_opus.write_bytes(b"ogg")
+        return str(staged_opus)
 
     convert = Mock(side_effect=fake_convert)
 
@@ -67,7 +70,9 @@ def test_edge_telegram_converts_to_opus_voice(tmp_path, monkeypatch):
     assert result["file_path"] == str(opus)
     assert result["voice_compatible"] is True
     assert result["media_tag"] == f"[[audio_as_voice]]\nMEDIA:{opus}"
-    convert.assert_called_once_with(str(out))
+    convert.assert_called_once()
+    assert not Path(convert.call_args.args[0]).exists()
+    assert opus.read_bytes() == b"ogg"
 
 
 def test_edge_matrix_converts_to_opus_voice(tmp_path, monkeypatch):
@@ -76,9 +81,12 @@ def test_edge_matrix_converts_to_opus_voice(tmp_path, monkeypatch):
     opus = tmp_path / "speech.ogg"
 
     def fake_convert(path: str) -> str:
-        assert path == str(out)
-        opus.write_bytes(b"ogg")
-        return str(opus)
+        source = Path(path)
+        assert source.read_bytes() == b"mp3"
+        assert source.parent != out.parent
+        staged_opus = source.with_suffix(".ogg")
+        staged_opus.write_bytes(b"ogg")
+        return str(staged_opus)
 
     convert = Mock(side_effect=fake_convert)
 
@@ -94,4 +102,6 @@ def test_edge_matrix_converts_to_opus_voice(tmp_path, monkeypatch):
     assert result["file_path"] == str(opus)
     assert result["voice_compatible"] is True
     assert result["media_tag"] == f"[[audio_as_voice]]\nMEDIA:{opus}"
-    convert.assert_called_once_with(str(out))
+    convert.assert_called_once()
+    assert not Path(convert.call_args.args[0]).exists()
+    assert opus.read_bytes() == b"ogg"

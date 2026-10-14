@@ -585,7 +585,7 @@ class TestCronRunSend:
             (home / ".env").write_text("API_SERVER_KEY=" + keys[name] + "\n")
             with _profile_runtime_scope(home):
                 jobs.ensure_dirs()
-                job = jobs.create_job(prompt="Поздравления", schedule="every 1h", deliver="local",
+                job = jobs.create_job(prompt="Поздравления", schedule="every 1h", deliver="local", model="test-model",
                                       name="run-send-" + name, recipients_policy=1,
                                       recipients_confirmed={"targets": ["telegram:555"]})
                 execution = executions.create_execution(job["id"], source="scheduled")
@@ -668,7 +668,7 @@ class TestCronRunSend:
         (tmp_path / ".env").write_text("API_SERVER_KEY=" + key + "\n")
         with _profile_runtime_scope(tmp_path):
             jobs.ensure_dirs()
-            job = jobs.create_job(prompt="Поздравления", schedule="every 1h", deliver="local",
+            job = jobs.create_job(prompt="Поздравления", schedule="every 1h", deliver="local", model="test-model",
                                   name="run-send-once", recipients_policy=1,
                                   recipients_confirmed={"targets": ["telegram:555", "telegram:556"]})
             execution = executions.create_execution(job["id"], source="scheduled")
