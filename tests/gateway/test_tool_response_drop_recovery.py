@@ -21,12 +21,15 @@ Salvaged and de-scoped from the superseded Discord-only PR #33842.
 
 import asyncio
 import logging
+from unittest.mock import AsyncMock
+from urllib.parse import quote
 
 import pytest
 
 from gateway.config import Platform, PlatformConfig
 from gateway.platforms.base import (
     BasePlatformAdapter,
+    MEDIA_DELIVERY_FAILURE_NOTICE,
     MessageEvent,
     SendResult,
 )
@@ -132,29 +135,37 @@ class TestRecoveryDoesNotLeakMediaFragments:
     extract_media's real regex matches paths WITH SPACES; if the recovery
     sanitizes the raw pre-extract snapshot with a weaker MEDIA regex (one that
     stops at the first space), a spaced path whose file gets filtered out leaks
-    a fragment like 'vacation photo.png'.  The recovery must instead use the
-    post-extract_media `response`, which the strong regex already cleaned.
+    a fragment like 'vacation photo.png'. The real extraction must preserve
+    existing attachments and surface a safe notice for unavailable ones.
     """
 
     @pytest.mark.asyncio
-    async def test_spaced_media_path_does_not_leak_fragment(self, monkeypatch, caplog):
+    @pytest.mark.parametrize("exists", [False, True])
+    @pytest.mark.parametrize("quoted", [False, True])
+    @pytest.mark.parametrize("extension", ["png", "pdf"])
+    async def test_spaced_media_path_does_not_leak_fragment(
+        self, tmp_path, monkeypatch, caplog, exists, quoted, extension,
+    ):
         adapter = _DummyAdapter(Platform.DISCORD)
         adapter._keep_typing = _hold_typing
+        adapter.send_multiple_images = AsyncMock(return_value=SendResult(success=True))
+        adapter.send_document = AsyncMock(return_value=SendResult(success=True))
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setenv("KORRA_HOME", str(tmp_path))
+        monkeypatch.setenv("HERMES_MEDIA_DELIVERY_STRICT", "1")
+        monkeypatch.setenv("HERMES_MEDIA_TRUST_RECENT_FILES", "0")
+        media_root = tmp_path / "cache" / "documents"
+        media_root.mkdir(parents=True)
+        monkeypatch.setattr("gateway.platforms.base.MEDIA_DELIVERY_SAFE_ROOTS", (media_root,))
+        media_path = media_root / f"my vacation photo.{extension}"
+        if exists:
+            media_path.write_bytes(b"test attachment")
 
         async def handler(_event):
-            # Spaced path with a valid extension — matched in full by the real
-            # extract_media regex, then removed from the body.
-            return "MEDIA: /tmp/nope_dir_zzz/my vacation photo.png"
+            path = f'"{media_path}"' if quoted else str(media_path)
+            return f"MEDIA: {path}"
 
         adapter.set_message_handler(handler)
-        # Use the REAL extract_media (so the strong regex cleans `response`),
-        # but force the path to be filtered out (unsafe/nonexistent) so we hit
-        # the empty-text + no-attachment recovery branch deterministically.
-        monkeypatch.setattr(
-            type(adapter),
-            "filter_media_delivery_paths",
-            staticmethod(lambda m, session_key="": []),
-        )
 
         event = _make_event(Platform.DISCORD)
         with caplog.at_level(logging.ERROR, logger="gateway.platforms.base"):
@@ -168,11 +179,23 @@ class TestRecoveryDoesNotLeakMediaFragments:
             if "vacation" in s["content"] or "photo" in s["content"] or "MEDIA" in s["content"]
         ]
         assert leaked == [], f"media-path fragment leaked to user: {leaked}"
-        # The genuinely-undeliverable response is logged loudly, not silent.
-        assert any(
-            "response_delivery_dropped" in r.getMessage()
-            for r in caplog.records if r.levelno == logging.ERROR
-        ), [r.getMessage() for r in caplog.records]
+        assert not any("response_delivery_dropped" in r.getMessage() for r in caplog.records)
+        if not exists:
+            # A delivered failure notice is visible to the user, not a drop.
+            assert [s["content"] for s in adapter.sent] == [MEDIA_DELIVERY_FAILURE_NOTICE]
+            adapter.send_multiple_images.assert_not_awaited()
+            adapter.send_document.assert_not_awaited()
+        else:
+            assert adapter.sent == []
+            if extension == "png":
+                adapter.send_multiple_images.assert_awaited_once()
+                images = adapter.send_multiple_images.await_args.kwargs["images"]
+                assert images == [(f"file://{quote(str(media_path))}", "")]
+                adapter.send_document.assert_not_awaited()
+            else:
+                adapter.send_document.assert_awaited_once()
+                assert adapter.send_document.await_args.kwargs["file_path"] == str(media_path)
+                adapter.send_multiple_images.assert_not_awaited()
 
 
 class TestUnrecoverableDropIsLoud:
