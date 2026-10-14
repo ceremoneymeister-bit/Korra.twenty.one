@@ -173,6 +173,8 @@ def _installed() -> dict[str, Any]:
         "pause": note.pause if note else "",
         "image": "",
     }
+    if note and note.screenshot:
+        found["screenshot"] = note.screenshot
     try:
         from korra_cli.image_provenance import read_image_provenance
 
@@ -207,8 +209,8 @@ def _clean_text(value: Any, limit: int = 400) -> str:
     return value.strip()[:limit] if isinstance(value, str) else ""
 
 
-def _clean_items(raw: Any, limit: int = 24) -> list[dict[str, str]]:
-    found: list[dict[str, str]] = []
+def _clean_items(raw: Any, limit: int = 24) -> list[dict[str, Any]]:
+    found: list[dict[str, Any]] = []
     if not isinstance(raw, list):
         return found
     for item in raw[:limit]:
@@ -219,7 +221,11 @@ def _clean_items(raw: Any, limit: int = 24) -> list[dict[str, str]]:
         else:
             continue
         if title:
-            found.append({"title": title, "detail": detail})
+            cleaned: dict[str, Any] = {"title": title, "detail": detail}
+            screenshot = _notes.clean_screenshot(item.get("screenshot")) if isinstance(item, dict) else None
+            if screenshot:
+                cleaned["screenshot"] = screenshot
+            found.append(cleaned)
     return found
 
 
@@ -251,6 +257,7 @@ def _available() -> Optional[dict[str, Any]]:
         "published_at": _clean_text(raw.get("published_at"), 40),
         "summary": _clean_text(raw.get("summary"), 800),
         "sections": _clean_sections(raw.get("sections")),
+        **({"screenshot": picture} if (picture := _notes.clean_screenshot(raw.get("screenshot"))) else {}),
         "pause": _clean_text(raw.get("pause"), 80) or "около минуты",
         "announced_at": raw.get("announced_at") if isinstance(raw.get("announced_at"), (int, float)) else None,
         # Право нажать «Обновить» выдаёт кабинет и только поимённо. Нет поля —
@@ -326,6 +333,7 @@ async def updates_state() -> dict[str, Any]:
     same = bool(available and available["release_id"] == installed.get("release_id"))
     return {
         "installed": installed,
+        "history": [note.to_dict() for note in _notes.read_release_notes()[1:]],
         "available": None if same else available,
         "up_to_date": same or available is None,
         "managed_externally": _managed_externally(),

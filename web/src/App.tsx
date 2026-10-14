@@ -1,3 +1,4 @@
+import { ReleaseNotice } from "@/components/ReleaseNotice";
 import { themeColorScheme } from "@/themes/color";
 import {
   lazy,
@@ -1006,6 +1007,7 @@ export default function App() {
             >
               <PluginSlot name="pre-main" />
               <StaleBuildNotice build={sidebarStatus?.build} />
+              <ReleaseNotice />
               <div
                 className={cn(
                   "w-full min-w-0",

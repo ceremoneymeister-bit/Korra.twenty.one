@@ -20,9 +20,12 @@
 
     Одно предложение о том, что изменилось.
 
+    ![Дашборд](/releases/K21-2026.09.08/overview.webp)
+
     ### Что нового
 
     - **Короткий заголовок.** Пояснение обычными словами.
+      ![Пункт в интерфейсе](/releases/K21-2026.09.08/feature.webp)
 
 Разбор намеренно снисходительный: пропущенная метадата или лишний раздел не
 должны ломать экран обновления — человек увидит меньше подробностей, но не
@@ -89,9 +92,13 @@ class NoteItem:
 
     title: str
     detail: str = ""
+    screenshot: Optional[dict[str, str]] = None
 
-    def to_dict(self) -> dict[str, str]:
-        return asdict(self)
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        if self.screenshot is None:
+            data.pop("screenshot")
+        return data
 
 
 @dataclass
@@ -117,19 +124,22 @@ class ReleaseNote:
     image: str = ""
     summary: str = ""
     sections: list[NoteSection] = field(default_factory=list)
+    screenshot: Optional[dict[str, str]] = None
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["sections"] = [section.to_dict() for section in self.sections]
+        if self.screenshot is None:
+            data.pop("screenshot")
         return data
 
-    def highlights(self, limit: int = 4) -> list[dict[str, str]]:
+    def highlights(self, limit: int = 4) -> list[dict[str, Any]]:
         """Короткая выжимка для карточки: первые пункты первого раздела.
 
         Карточка выпуска в панели и в кабинете показывает не весь текст, а
         несколько строк — остальное человек раскрывает сам.
         """
-        found: list[dict[str, str]] = []
+        found: list[dict[str, Any]] = []
         for section in self.sections:
             for item in section.items:
                 found.append(item.to_dict())
@@ -165,6 +175,18 @@ def _split_item(body: str) -> NoteItem:
     return NoteItem(title=plain)
 
 
+def clean_screenshot(raw: Any) -> Optional[dict[str, str]]:
+    """Снимки — только статика панели с описанием, без внешних адресов."""
+    if not isinstance(raw, dict):
+        return None
+    src, alt = raw.get("src"), raw.get("alt")
+    if not isinstance(src, str) or not isinstance(alt, str) or not alt.strip():
+        return None
+    if not re.fullmatch(r"/releases/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*/)+[A-Za-z0-9_-][A-Za-z0-9._-]*\.(?:webp|png|jpe?g)", src):
+        return None
+    return {"src": src, "alt": alt.strip()[:400]}
+
+
 def parse_release_notes(text: str) -> list[ReleaseNote]:
     """Разобрать текст `RELEASE_NOTES.md`. Порядок записей сохраняется."""
     releases: list[ReleaseNote] = []
@@ -185,6 +207,15 @@ def parse_release_notes(text: str) -> list[ReleaseNote]:
             in_meta = True
             continue
         if current is None:
+            continue
+
+        picture = re.fullmatch(r"\s*!\[(?P<alt>[^\]]+)\]\((?P<src>[^\s)]+)\)\s*", line)
+        if picture:
+            screenshot = clean_screenshot(picture.groupdict())
+            if section is None:
+                current.screenshot = screenshot
+            elif section.items:
+                section.items[-1].screenshot = screenshot
             continue
 
         sub = _SECTION_HEADING.match(line)

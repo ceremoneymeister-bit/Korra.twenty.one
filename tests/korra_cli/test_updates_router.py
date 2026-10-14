@@ -275,3 +275,54 @@ def test_progress_without_a_timestamp_is_not_called_stale(home, client, auth):
     (directory / "progress.json").write_text(
         json.dumps({"status": "running", "phase": "backup"}), encoding="utf-8")
     assert state(client, auth)["progress"]["stale"] is False
+
+
+def test_state_delivers_release_and_item_screenshots_and_collapsed_history(home, client, auth, monkeypatch, tmp_path):
+    notes = tmp_path / 'notes.md'
+    notes.write_text('''## K21-new · Новый выпуск
+
+Описание.
+![Дашборд](/releases/new/dashboard.webp)
+### Что нового
+- **Браузер.** Открывает сайт.
+  ![Открытый сайт](/releases/new/browser.webp)
+
+## K21-old · Старый выпуск
+### Что нового
+- **Прежний пункт.** Без снимка.
+''')
+    monkeypatch.setattr(updates_routes._notes, 'RELEASE_NOTES_PATH', notes)
+    body = state(client, auth)
+    assert body['installed']['screenshot']['src'] == '/releases/new/dashboard.webp'
+    assert body['installed']['sections'][0]['items'][0]['screenshot']['alt'] == 'Открытый сайт'
+    assert body['history'][0]['release_id'] == 'K21-old'
+    assert 'screenshot' not in body['history'][0]
+    assert 'screenshot' not in body['history'][0]['sections'][0]['items'][0]
+
+
+def test_announced_screenshots_are_optional_and_only_use_release_assets(home, client, auth):
+    picture = {'src': '/releases/next/browser.webp', 'alt': 'Сайт в браузере'}
+    release = {**RELEASE, 'screenshot': picture, 'sections': [{'heading': 'Что нового', 'items': [
+        {'title': 'Браузер', 'detail': 'Открывается.', 'screenshot': picture},
+        {'title': 'Чужая картинка', 'screenshot': {'src': 'https://outside.invalid/photo.webp', 'alt': 'Чужая'}},
+    ]}]}
+    announce(client, auth, release=release)
+    available = state(client, auth)['available']
+    assert available['screenshot'] == picture
+    assert available['sections'][0]['items'][0]['screenshot'] == picture
+    assert 'screenshot' not in available['sections'][0]['items'][1]
+
+
+def test_release_static_asset_is_served_with_and_without_cabinet_prefix(home, client, auth, monkeypatch, tmp_path):
+    dist = tmp_path / 'panel'
+    asset = dist / 'releases' / 'demo' / 'browser.webp'
+    asset.parent.mkdir(parents=True)
+    # Static serving must preserve bytes and the MIME type, never fall back to HTML.
+    payload = b'RIFF\x04\x00\x00\x00WEBP'
+    asset.write_bytes(payload)
+    monkeypatch.setattr(web_server, 'WEB_DIST', dist)
+    for prefix in ('', '/c/sandbox21'):
+        response = client.get('/releases/demo/browser.webp', headers={**auth, 'X-Forwarded-Prefix': prefix})
+        assert response.status_code == 200
+        assert response.content == payload
+        assert response.headers['content-type'] == 'image/webp'
