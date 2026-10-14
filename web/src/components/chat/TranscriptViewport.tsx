@@ -142,6 +142,7 @@ export function TranscriptViewport({ children, followKey, awaitingApproval, stor
       const first = historyRow(anchorKey);
       if (target) {
         el.scrollTop = messageTop(el, target) + saved.offset;
+        reading.current = saved;
         place.current = null;
       } else if ((wanted === null ? Boolean(saved.key) : first !== null && wanted < first) && older?.hasOlder && !older.failed
         && restorePages.current < MAX_RESTORE_PAGES) {
@@ -230,17 +231,21 @@ export function TranscriptViewport({ children, followKey, awaitingApproval, stor
           )}
           {older?.hasOlder && (
             <div className="flex justify-center px-4 pt-4">
-              {older.loading ? (
-                <p role="status" className="py-3 text-xs text-[var(--neo-text-secondary)]">Загружаем более ранние сообщения…</p>
-              ) : (
+              <div className="relative flex">
                 <button
                   type="button"
                   onClick={older.load}
+                  disabled={older.loading}
+                  aria-hidden={older.loading || undefined}
+                  style={{ visibility: older.loading ? "hidden" : undefined }}
                   className="min-h-[44px] rounded-full border-0 bg-[var(--neo-surface)] px-4 py-2 text-xs text-[var(--neo-text-primary)] shadow-[var(--neo-depth-2)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--neo-accent-line)]"
                 >
                   {older.failed ? "Не удалось загрузить более ранние сообщения — повторить" : "Показать более ранние сообщения"}
                 </button>
-              )}
+                {older.loading && (
+                  <p role="status" style={{ position: "absolute", inset: 0 }} className="flex items-center justify-center text-center text-xs text-[var(--neo-text-secondary)]">Загружаем более ранние сообщения…</p>
+                )}
+              </div>
             </div>
           )}
           {children}
