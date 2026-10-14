@@ -6079,6 +6079,7 @@ def _run_job_inner(
     """
     job_id = job["id"]
     job_name = str(job.get("name") or job.get("prompt") or job_id or "cron job")
+    job.pop("_resolved_subscription_provider", None)
 
     if job.get("reminder") is not None:
         from cron.reminders import reminder_text
@@ -6815,7 +6816,6 @@ def _run_job_inner(
             if runtime is None:
                 raise RuntimeError(format_runtime_provider_error(resolve_exc)) from resolve_exc
 
-        job.pop("_resolved_subscription_provider", None)
         if runtime.get("provider") == "openai-codex" or (
             runtime.get("provider") == "anthropic"
             and str(runtime.get("api_key") or "").startswith("sk-ant-oat")
@@ -6921,6 +6921,7 @@ def _run_job_inner(
 
         fallback_model = get_fallback_chain(_cfg) or None
         credential_pool = None
+        runtime_credential_id = None
         runtime_provider = str(runtime.get("provider") or "").strip().lower()
         if runtime_provider:
             try:
@@ -6928,6 +6929,7 @@ def _run_job_inner(
                 pool = load_pool(runtime_provider)
                 if pool.has_credentials():
                     credential_pool = pool
+                    runtime_credential_id = pool.entry_id_for_api_key(runtime.get("api_key"))
                     logger.info(
                         "Job '%s': loaded credential pool for provider %s with %d entries",
                         job_id,
@@ -7245,6 +7247,21 @@ def _run_job_inner(
                 "delivering the response instead of failing the cron run",
                 job_name,
             )
+
+        # Resolution is only an auth hint until the call succeeds. Fallback
+        # and credential rotation can change both provider and account inside
+        # the agent; their success must not clear the original login signal.
+        subscription = job.pop("_resolved_subscription_provider", None)
+        if subscription and agent.provider == subscription and int(agent.session_api_calls or 0) > 0:
+            same_credential = (
+                runtime_credential_id == getattr(agent, "_credential_pool_entry_id", None)
+                if runtime_credential_id else agent.api_key == runtime.get("api_key")
+            )
+            if same_credential and (
+                subscription == "openai-codex"
+                or str(agent.api_key or "").startswith("sk-ant-oat")
+            ):
+                job["_resolved_subscription_provider"] = subscription
 
         final_response = result.get("final_response", "") or ""
         # Recover model-mangled computer_use screenshot paths before delivery
@@ -7960,11 +7977,10 @@ def _run_one_job_body(
                     error = file_error
                     delivery_error = file_error
 
-            from cron.incidents import subscription_provider, subscription_notice, is_transient_service_failure
+            from cron.incidents import subscription_provider, subscription_notice
 
             blocked_config = bool(error) and str(error).startswith("[blocked_config")
             subscription = subscription_provider(error, job.get("_resolved_subscription_provider", "")) if not success else None
-            transient_service = not success and is_transient_service_failure(error)
             if subscription:
                 _subscription_notice_lock.acquire()
                 subscription_notice_locked = True
@@ -8041,7 +8057,7 @@ def _run_one_job_body(
             # responses: do not deliver a blank message, and let the
             # empty-response guard below mark the run as a soft failure.
             should_deliver = bool(deliver_content.strip())
-            if drift_skip_silent or (not success and incident_acked and not drift_skip) or transient_service:
+            if drift_skip_silent or (not success and incident_acked and not drift_skip):
                 should_deliver = False
             if should_deliver and not success and job.get("_model_unreachable"):
                 from cron.unreachable_retry import will_retry
@@ -8244,7 +8260,8 @@ def _run_one_job_body(
             _err_text,
             exc_info=(type(e), e, e.__traceback__),
         )
-        from cron.incidents import subscription_provider, subscription_notice, is_transient_service_failure
+        from cron.incidents import subscription_provider, subscription_notice
+        from cron.unreachable_retry import will_retry
 
         subscription = subscription_provider(e, job.get("_resolved_subscription_provider", ""))
         if subscription:
@@ -8276,7 +8293,7 @@ def _run_one_job_body(
             )
             if incident_acked:
                 delivery_outcome = "suppressed_acked"
-            elif is_transient_service_failure(e):
+            elif job.get("_model_unreachable") and will_retry(job):
                 delivery_outcome = "suppressed"
             else:
                 try:
@@ -8329,6 +8346,8 @@ def _run_one_job_body(
                     mark_kwargs["expected_fire_owner"] = fire_owner
                 if isinstance(e, Exception):
                     mark_kwargs["delivery_error"] = delivery_error
+                    if job.pop("_model_unreachable", False):
+                        mark_kwargs["model_unreachable"] = True
                 mark_job_run(job["id"], False, _err_text, **mark_kwargs)
         except Exception as record_err:
             # Never let bookkeeping mask the original interruption.

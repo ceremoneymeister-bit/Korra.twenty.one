@@ -1689,6 +1689,7 @@ def _delivery_items(agents: list[Agent], *, now: float) -> list[dict[str, Any]]:
 
 def _cron_items(agents: list[Agent], *, now: float, tz: Optional[tzinfo]) -> list[dict[str, Any]]:
     from cron.incidents import subscription_provider, subscription_notice, is_transient_service_failure
+    from cron.unreachable_retry import is_retry_fire
 
     since = now - 7 * 86400
     items: list[dict[str, Any]] = []
@@ -1715,7 +1716,9 @@ def _cron_items(agents: list[Agent], *, now: float, tz: Optional[tzinfo]) -> lis
         for row in rows:
             seen = _parse_iso(row["last_seen_at"], tz)
             provider = subscription_provider(row["error"])
-            if is_transient_service_failure(row["error"]):
+            job = jobs.get(str(row["job_id"]))
+            transient_service = is_transient_service_failure(row["error"])
+            if transient_service and job and is_retry_fire(job, job.get("next_run_at")):
                 continue
             if seen is None or (seen.timestamp() < since and not provider):
                 continue
@@ -1734,9 +1737,13 @@ def _cron_items(agents: list[Agent], *, now: float, tz: Optional[tzinfo]) -> lis
                     "at": seen.timestamp(),
                 })
                 continue
-            job = jobs.get(str(row["job_id"]))
-            # A deleted or paused job's old failure asks nothing of the owner.
-            if job is None or not _job_runnable(job):
+            # A final congestion failure still needs attention, including a
+            # one-shot whose dispatch was consumed. Pending retries stay quiet.
+            final_congestion = (
+                transient_service and job and job.get("state") == "completed"
+                and job.get("last_status") == "error"
+            )
+            if job is None or (not _job_runnable(job) and not final_congestion):
                 continue
             detail = _FAILURE_TEXT.get(str(row["failure_type"] or ""), "") or _trim(row["error"], 120)
             items.append({

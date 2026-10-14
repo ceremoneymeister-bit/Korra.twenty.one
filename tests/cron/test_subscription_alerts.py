@@ -4,6 +4,7 @@ import json
 from datetime import timedelta
 from unittest.mock import AsyncMock, patch
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -85,6 +86,17 @@ def test_missing_login_real_resolution_one_notice_and_recovery(home, deliver):
     }}}}))
     with patch("run_agent.AIAgent") as cls, patch("tools.send_message_tool._send_to_platform", send):
         cls.return_value.run_conversation.return_value = {"final_response": "[SILENT]"}
+
+        def create_agent(**kwargs):
+            agent = cls.return_value
+            agent.provider = kwargs["provider"]
+            agent.api_key = kwargs["api_key"]
+            agent.session_api_calls = 1
+            pool = kwargs["credential_pool"]
+            agent._credential_pool_entry_id = pool.entry_id_for_api_key(agent.api_key) if pool else None
+            return agent
+
+        cls.side_effect = create_agent
         tick(second)
     assert incidents.list_incidents()[0]["state"] == "resolved"
     assert not [item for item in attention(home) if item["kind"] == "provider_refused"]
@@ -142,7 +154,7 @@ def test_shared_notice_repeats_only_after_existing_pause(home, monkeypatch):
     RuntimeError("Claude capacity exhausted"),
     RuntimeError("529 overloaded"),
 ])
-def test_congestion_never_blocks_config_or_alerts_owner(home, error):
+def test_congestion_stays_quiet_while_automatic_retry_is_pending(home, error):
     job = make_job()
     send = AsyncMock(return_value={"success": True})
     with patch("korra_cli.runtime_provider.resolve_runtime_provider", side_effect=error), \
@@ -155,6 +167,195 @@ def test_congestion_never_blocks_config_or_alerts_owner(home, error):
     assert send.await_count == 0
     assert attention(home) == []
     assert incidents.list_incidents()[0]["state"] == "detected"
+
+
+@pytest.mark.parametrize("error", ["HTTP 429 rate limit", "HTTP 503 service unavailable", "Claude capacity exhausted"])
+@pytest.mark.parametrize("mode", ["exhausted", "oneshot", "disabled", "after_call"])
+def test_congestion_without_retry_notifies_owner_and_dashboard(home, mode, error):
+    if mode == "oneshot":
+        job = jobs.create_job(
+            prompt="report", schedule="in 3h", model="gpt-test", provider="openai-codex",
+            deliver="origin", origin={"platform": "telegram", "chat_id": "42", "user_id": "42", "chat_type": "dm"},
+        )
+    else:
+        job = make_job()
+    if mode == "exhausted":
+        job["unreachable_retry"] = {"attempt": 3}
+        jobs.save_jobs([job])
+    if mode == "disabled":
+        with (home / "config.yaml").open("a") as config:
+            config.write("  retry_unreachable: false\n")
+    send = AsyncMock(return_value={"success": True})
+    runtime = {"provider": "openai-codex", "api_key": "fake", "base_url": "https://example.invalid", "api_mode": "codex_responses"}
+    with patch("korra_cli.runtime_provider.resolve_runtime_provider", return_value=runtime), \
+         patch("run_agent.AIAgent") as cls, patch("tools.send_message_tool._send_to_platform", send):
+        cls.return_value.session_api_calls = 1 if mode == "after_call" else 0
+        cls.return_value.run_conversation.side_effect = RuntimeError(error)
+        tick(job)
+    assert not jobs.get_job(job["id"]).get("unreachable_retry")
+    assert send.await_count == 1
+    assert "Вход в подписку" not in send.call_args.args[3]
+    assert executions.latest_execution(job["id"])["delivery_outcome"] == "delivered"
+    assert any(item["kind"] == "cron_incident" for item in attention(home))
+    assert not any(item["kind"] == "provider_refused" for item in attention(home))
+
+
+def test_congestion_notifies_after_the_last_automatic_retry(home):
+    job = make_job()
+    send = AsyncMock(return_value={"success": True})
+    with patch("korra_cli.runtime_provider.resolve_runtime_provider", side_effect=AuthError("Codex HTTP 503", provider="openai-codex")), \
+         patch("tools.send_message_tool._send_to_platform", send):
+        for attempt in range(1, 4):
+            tick(job)
+            assert jobs.get_job(job["id"])["unreachable_retry"]["attempt"] == attempt
+            assert send.await_count == 0
+            assert attention(home) == []
+        tick(job)
+    assert not jobs.get_job(job["id"]).get("unreachable_retry")
+    assert send.await_count == 1
+    assert any(item["kind"] == "cron_incident" for item in attention(home))
+
+
+def test_outer_congestion_without_planned_retry_notifies_owner(home):
+    job = make_job()
+    send = AsyncMock(return_value={"success": True})
+    with patch.object(scheduler, "run_job", side_effect=RuntimeError("HTTP 503 service unavailable")), \
+         patch("tools.send_message_tool._send_to_platform", send):
+        assert scheduler.run_one_job(jobs.get_job(job["id"])) is False
+    assert not jobs.get_job(job["id"]).get("unreachable_retry")
+    assert send.await_count == 1
+    assert any(item["kind"] == "cron_incident" for item in attention(home))
+
+
+def test_outer_failure_preserves_an_eligible_automatic_retry(home):
+    job = make_job()
+    send = AsyncMock(return_value={"success": True})
+    with patch("korra_cli.runtime_provider.resolve_runtime_provider", side_effect=AuthError("Codex HTTP 503", provider="openai-codex")), \
+         patch.object(scheduler, "save_job_output", side_effect=RuntimeError("HTTP 503 service unavailable")), \
+         patch("tools.send_message_tool._send_to_platform", send):
+        assert scheduler.run_one_job(jobs.get_job(job["id"])) is False
+    assert jobs.get_job(job["id"])["unreachable_retry"]["attempt"] == 1
+    assert send.await_count == 0
+    assert attention(home) == []
+
+
+@pytest.mark.parametrize("provider, key, fallback_provider, fallback_key", [
+    ("openai-codex", "fake-codex", "openrouter", "fake-router"),
+    ("anthropic", "sk-ant-oat-fake", "openrouter", "fake-router"),
+    ("anthropic", "sk-ant-oat-fake", "anthropic", "sk-ant-api-fake"),
+    ("openai-codex", "fake-account-a", "openai-codex", "fake-account-b"),
+])
+def test_runtime_fallback_success_keeps_primary_subscription_signal(home, provider, key, fallback_provider, fallback_key):
+    job = make_job()
+    error = incidents.subscription_notice(provider)
+    incident, _ = incidents.upsert_incident("different-job", error)
+    incidents.set_incident_state(incident, "alerted")
+    alerted_at = incidents.get_incident(incident)["alerted_at"]
+    stamp = now().isoformat()
+    with incidents._transaction() as conn:
+        for index, job_id in enumerate((job["id"], "different-job")):
+            conn.execute(
+                "INSERT INTO cron_incidents (id, job_id, error_sig, state, failure_type, first_seen_at, last_seen_at, error) "
+                "VALUES (?, ?, 'old-sig', 'detected', 'auth', ?, ?, ?)",
+                (f"legacy-{index}", job_id, stamp, stamp, error),
+            )
+    runtime = {"provider": provider, "api_key": key, "base_url": "https://example.invalid", "api_mode": "chat_completions"}
+    send = AsyncMock(return_value={"success": True})
+    with patch("korra_cli.runtime_provider.resolve_runtime_provider", return_value=runtime), \
+         patch("run_agent.AIAgent") as cls, patch("tools.send_message_tool._send_to_platform", send):
+        agent = cls.return_value
+        agent.provider = provider
+        agent.api_key = key
+        agent.model = "gpt-test"
+        agent.base_url = "https://example.invalid"
+        agent._fallback_index = 0
+        agent._fallback_chain = [{"provider": fallback_provider, "model": "fallback-test", "api_mode": "chat_completions"}]
+        agent._unavailable_fallback_keys = set()
+        agent._credential_pool = None
+        agent._credential_pool_entry_id = None
+        agent.context_compressor = None
+        agent._custom_providers = []
+        agent.request_overrides = {}
+        agent._cached_system_prompt = None
+        agent._anthropic_prompt_cache_policy.return_value = (False, False)
+        agent._try_activate_fallback.return_value = False
+
+        def finish_on_fallback(*args, **kwargs):
+            from agent.chat_completion_helpers import try_activate_fallback
+
+            client = SimpleNamespace(base_url="https://example.invalid/v1", api_key=fallback_key, _custom_headers=None, default_headers=None)
+            with patch("agent.auxiliary_client.resolve_provider_client", return_value=(client, "fallback-test")):
+                assert try_activate_fallback(agent) is True
+            assert agent.provider == fallback_provider and agent.api_key == fallback_key
+            agent.session_api_calls = 1
+            return {"final_response": "[SILENT]", "completed": True}
+
+        agent.run_conversation.side_effect = finish_on_fallback
+        tick(job)
+        assert jobs.get_job(job["id"])["last_status"] == "ok"
+        assert incidents.get_incident(incident)["state"] == "alerted"
+        assert incidents.get_incident(incident)["alerted_at"] == alerted_at
+        assert all(incidents.get_incident(f"legacy-{index}")["state"] == "detected" for index in (0, 1))
+        assert any(item["kind"] == "provider_refused" for item in attention(home))
+
+        # Fallback must not reset the existing six-hour notice pause.
+        agent.run_conversation.side_effect = RuntimeError(error)
+        tick(job)
+    assert send.await_count == 0
+
+
+@pytest.mark.parametrize("provider, key", [("openai-codex", "fake-codex"), ("anthropic", "sk-ant-oat-fake")])
+def test_subscription_recovery_requires_a_completed_call_on_the_selected_account(home, provider, key):
+    job = make_job()
+    incident, _ = incidents.upsert_incident("different-job", incidents.subscription_notice(provider))
+    runtime = {"provider": provider, "api_key": key, "base_url": "https://example.invalid", "api_mode": "chat_completions"}
+    with patch("korra_cli.runtime_provider.resolve_runtime_provider", return_value=runtime), patch("run_agent.AIAgent") as cls:
+        agent = cls.return_value
+        agent.provider = provider
+        agent.api_key = key
+        agent._credential_pool_entry_id = None
+        agent.run_conversation.return_value = {"final_response": "[SILENT]", "completed": True}
+        agent.session_api_calls = 0
+        tick(job)
+        assert incidents.get_incident(incident)["state"] == "detected"
+        agent.session_api_calls = 1
+        tick(job)
+    assert incidents.get_incident(incident)["state"] == "resolved"
+    assert not any(item["kind"] == "provider_refused" for item in attention(home))
+
+
+@pytest.mark.parametrize("same_account", [True, False])
+def test_subscription_recovery_uses_the_call_credential_not_the_shared_pool_cursor(home, same_account):
+    job = make_job()
+    incident, _ = incidents.upsert_incident("different-job", incidents.subscription_notice("openai-codex"))
+    (home / "auth.json").write_text(json.dumps({"credential_pool": {"openai-codex": [
+        {"id": "account-a", "auth_type": "oauth", "access_token": "fake-account-a"},
+        {"id": "account-b", "auth_type": "oauth", "access_token": "fake-account-b"},
+    ]}}))
+    runtime = {"provider": "openai-codex", "api_key": "fake-account-a", "base_url": "https://example.invalid", "api_mode": "codex_responses"}
+    with patch("korra_cli.runtime_provider.resolve_runtime_provider", return_value=runtime), patch("run_agent.AIAgent") as cls:
+        agent = cls.return_value
+        agent.provider = "openai-codex"
+        agent.api_key = "fake-account-a"
+        agent._credential_pool_entry_id = "account-a"
+
+        def complete(*args, **kwargs):
+            pool = cls.call_args.kwargs["credential_pool"]
+            assert pool.entry_id_for_api_key(agent.api_key) == "account-a"
+            # A concurrent caller can advance the pool cursor to another login.
+            pool.acquire_lease("account-b")
+            pool.release_lease("account-b")
+            if same_account:
+                agent.api_key = "fake-refreshed-account-a"
+            else:
+                agent.api_key = "fake-account-b"
+                agent._credential_pool_entry_id = "account-b"
+            agent.session_api_calls = 1
+            return {"final_response": "[SILENT]", "completed": True}
+
+        agent.run_conversation.side_effect = complete
+        tick(job)
+    assert incidents.get_incident(incident)["state"] == ("resolved" if same_account else "detected")
 
 
 @pytest.mark.parametrize("provider, error", [
@@ -329,14 +530,16 @@ def test_recovery_clears_legacy_per_job_subscription_signals(home):
     job = make_job()
     stamp = now().isoformat()
     with incidents._transaction() as conn:
-        for index, error in enumerate(("Codex access token expired", "Codex refresh_token_reused")):
+        for index, error in enumerate(("Codex access token expired", "Codex refresh_token_reused", "Codex 401 unauthorized")):
             conn.execute(
                 "INSERT INTO cron_incidents (id, job_id, error_sig, state, failure_type, first_seen_at, last_seen_at, error) "
                 "VALUES (?, ?, 'old-sig', 'detected', 'auth', ?, ?, ?)",
-                (f"legacy-{index}", f"old-job-{index}", stamp, stamp, error),
+                (f"legacy-{index}", job["id"] if index == 2 else f"old-job-{index}", stamp, stamp, error),
             )
     assert len([item for item in attention(home) if item["kind"] == "provider_refused"]) == 1
     incidents.close_incidents_for_recovered_job(job["id"], provider="anthropic")
+    assert all(row["state"] == "detected" for row in incidents.list_incidents())
+    assert incidents.close_incidents_for_recovered_job(job["id"]) == 0
     assert len([item for item in attention(home) if item["kind"] == "provider_refused"]) == 1
-    assert incidents.close_incidents_for_recovered_job(job["id"], provider="openai-codex") == 2
+    assert incidents.close_incidents_for_recovered_job(job["id"], provider="openai-codex") == 3
     assert not [item for item in attention(home) if item["kind"] == "provider_refused"]
