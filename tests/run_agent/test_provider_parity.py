@@ -760,15 +760,36 @@ class TestBuildAssistantMessage:
 class TestAuxiliaryClientProviderPriority:
     """Verify auxiliary client resolution doesn't break for any provider."""
 
-    def test_openrouter_always_wins(self, monkeypatch):
-        monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
-        from agent.auxiliary_client import _OPENROUTER_MODEL, get_text_auxiliary_client
-        with patch("agent.auxiliary_client.OpenAI") as mock:
-            client, model = get_text_auxiliary_client()
-        assert model == _OPENROUTER_MODEL
-        assert "openrouter" in str(mock.call_args.kwargs["base_url"]).lower()
+    def test_subscription_wins_over_ambient_openrouter_by_default(self, monkeypatch, tmp_path):
+        from agent.auxiliary_client import get_text_auxiliary_client, resolve_provider_client
 
-    def test_nous_when_no_openrouter(self, monkeypatch):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
+        (tmp_path / "config.yaml").write_text(
+            "model:\n  provider: openai-codex\n  default: subscription-model\n"
+        )
+        subscription_client = SimpleNamespace()
+
+        def resolve_subscription(provider, model=None, **kwargs):
+            if provider == "auto":
+                return resolve_provider_client(provider, model, **kwargs)
+            assert (provider, model) == ("openai-codex", "subscription-model")
+            return subscription_client, model
+
+        with patch("agent.auxiliary_client.resolve_provider_client",
+                   side_effect=resolve_subscription) as resolve, \
+             patch("agent.auxiliary_client._get_provider_chain") as discovery, \
+             patch("agent.auxiliary_client.OpenAI") as api_client:
+            client, model = get_text_auxiliary_client()
+        assert client is subscription_client
+        assert model == "subscription-model"
+        assert resolve.call_args.args[:2] == ("openai-codex", "subscription-model")
+        discovery.assert_not_called()
+        api_client.assert_not_called()
+
+    def test_nous_when_no_openrouter_and_discovery_enabled(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        (tmp_path / "config.yaml").write_text("auxiliary:\n  free_only: false\n")
         monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
         from agent.auxiliary_client import _NOUS_MODEL, get_text_auxiliary_client
         nous_auth = {
@@ -781,13 +802,15 @@ class TestAuxiliaryClientProviderPriority:
             client, model = get_text_auxiliary_client()
         assert model == _NOUS_MODEL
 
-    def test_custom_endpoint_when_no_nous(self, monkeypatch):
-        """Custom endpoint is used when no OpenRouter/Nous keys are available.
+    def test_custom_endpoint_when_no_nous_and_discovery_enabled(self, monkeypatch, tmp_path):
+        """Opted-in discovery uses custom when no OpenRouter/Nous keys exist.
 
         Since the March 2026 config refactor, OPENAI_BASE_URL env var is no
         longer consulted — base_url comes from config.yaml via
         resolve_runtime_provider.  Mock _resolve_custom_runtime directly.
         """
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        (tmp_path / "config.yaml").write_text("auxiliary:\n  free_only: false\n")
         monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
         monkeypatch.setenv("OPENAI_API_KEY", "local-key")
         from agent.auxiliary_client import get_text_auxiliary_client

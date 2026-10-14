@@ -96,7 +96,10 @@ def test_dispatch_spawn_fires_worker_spawned(
     assert "board" in kw
     assert pid_at_fire_time == [4242]
 
-def test_crash_reclaim_fires_worker_exited(kanban_home, captured_hooks, monkeypatch):
+@pytest.mark.parametrize("dispatcher_start_offset", [-0.5, 0.5])
+def test_crash_reclaim_fires_worker_exited(
+    kanban_home, captured_hooks, monkeypatch, dispatcher_start_offset,
+):
     """A dead-PID reclaim fires the exit observer with the exit facts."""
     conn = kb.connect()
     try:
@@ -104,6 +107,15 @@ def test_crash_reclaim_fires_worker_exited(kanban_home, captured_hooks, monkeypa
         kb.claim_task(conn, tid)
         kb._set_worker_pid(conn, tid, 98765)
         monkeypatch.setattr(kb, "_pid_alive", lambda pid: False)
+        monkeypatch.setattr(kb, "_recent_worker_exits", {})
+        monkeypatch.setattr(
+            kb, "_DISPATCHER_PROCESS_STARTED_AT",
+            kb.get_task(conn, tid).started_at + dispatcher_start_offset,
+        )
+        # Unknown exits can belong to a dispatcher restart. This worker
+        # crashed with a known status on either side of its startup epoch.
+        kb._record_worker_exit(98765, 1 << 8)
+        assert kb._classify_worker_exit(98765) == ("nonzero_exit", 1)
         assert kb.detect_crashed_workers(conn) == [tid]
     finally:
         conn.close()
@@ -114,8 +126,8 @@ def test_crash_reclaim_fires_worker_exited(kanban_home, captured_hooks, monkeypa
     assert kw["task_id"] == tid
     assert kw["assignee"] == "worker"
     assert kw["worker_pid"] == 98765
-    assert kw["exit_kind"] == "unknown"
-    assert kw["exit_code"] is None
+    assert kw["exit_kind"] == "nonzero_exit"
+    assert kw["exit_code"] == 1
     assert kw["outcome"] == "crashed"
     assert kw["retry_status"] == "ready"
     assert kw["run_id"] is not None
@@ -169,6 +181,8 @@ def test_raising_callbacks_never_break_worker_lifecycle(
             assert any(row[0] == tid for row in result.spawned)
 
             monkeypatch.setattr(kb, "_pid_alive", lambda pid: False)
+            monkeypatch.setattr(kb, "_recent_worker_exits", {})
+            kb._record_worker_exit(111, 1 << 8)
             assert kb.detect_crashed_workers(conn) == [tid]
 
             kb.claim_task(conn, tid)

@@ -415,7 +415,7 @@ def health(timeout: float = 2.0) -> bool:
 
 def _profile_setting(profile_dir: Path, env_name: str, config_keys: tuple) -> str:
     """Значение из .env или config.yaml другого профиля (удаляемого), без переключения HERMES_HOME."""
-    from korra_cli.config import _parse_env_value
+    from korra_cli.config import _parse_env_value, read_user_config_raw
 
     try:
         for line in (profile_dir / ".env").read_text(encoding="utf-8-sig").splitlines():
@@ -427,9 +427,9 @@ def _profile_setting(profile_dir: Path, env_name: str, config_keys: tuple) -> st
     if not config_keys:
         return ""
     try:
-        import yaml
-
-        node = yaml.safe_load((profile_dir / "config.yaml").read_text(encoding="utf-8")) or {}
+        # Проверяем явный выбор удаляемого профиля, а не настройки активного
+        # профиля или значения по умолчанию (как в profiles._read_config_model).
+        node = read_user_config_raw(profile_dir / "config.yaml")
         for key in config_keys:
             node = node.get(key) if isinstance(node, dict) else None
         return str(node or "").strip()
