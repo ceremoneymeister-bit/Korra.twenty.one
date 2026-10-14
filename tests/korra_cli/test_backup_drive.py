@@ -385,8 +385,7 @@ def test_full_cycle_with_interrupted_upload(tmp_path, monkeypatch, home, drive, 
                 for value in SECRET_VALUES:
                     assert value.encode() not in content, name
         assert ".env" not in zf.namelist() and "profiles/work/.env" not in zf.namelist()
-        assert "config.yaml" not in zf.namelist()  # inline bot token -> sealed
-        assert "profiles/work/config.yaml" in zf.namelist()
+        assert "config.yaml" not in zf.namelist() and "profiles/work/config.yaml" not in zf.namelist()
         assert "plugins/jev/ancient.txt" in zf.namelist()
         assert not [n for n in zf.namelist() if n.endswith(("-wal", "-shm"))]
     assert not list(tmp_path.rglob("*.zip"))  # nothing written to disk
@@ -417,6 +416,7 @@ def test_full_cycle_with_interrupted_upload(tmp_path, monkeypatch, home, drive, 
     restored = _snapshot(dst)
     assert ".env" not in restored and "auth.json" not in restored
     assert "profiles/work/.env" not in restored and "google-workspace/token.json" not in restored
+    assert "config.yaml" not in restored and "profiles/work/config.yaml" not in restored
     assert restored["profiles/work/memories/MEMORY.md"] == source["profiles/work/memories/MEMORY.md"]
     assert restored["data/blob.bin"] == source["data/blob.bin"]
     assert "skip-secrets" in capsys.readouterr().out
@@ -431,6 +431,8 @@ def test_full_cycle_with_interrupted_upload(tmp_path, monkeypatch, home, drive, 
     for rel, data in expected.items():
         assert restored.get(rel) == data, rel
     assert (dst / ".env").read_text() == "OPENROUTER_API_KEY=sk-SECRET-ROOT-ENV-1111\n"
+    assert restored["config.yaml"] == source["config.yaml"]
+    assert restored["profiles/work/config.yaml"] == source["profiles/work/config.yaml"]
     assert os.stat(dst / ".env").st_mode & 0o077 == 0
     assert os.path.getmtime(dst / "plugins" / "jev" / "ancient.txt") >= 0
     assert not (dst / "state" / "delivery.sqlite3-wal").exists()

@@ -94,13 +94,15 @@ def test_default_key_parses_and_pem_and_raw_private_keys_load(tmp_path):
     "home/.config/gh/hosts.yml", "whatsapp/session/creds.json", "platforms/matrix/store/crypto.db",
     "keys/server.pem", "keys/server.key", "slack_tokens.json", "webhook_subscriptions.json",
     "crm-connection/connection.json", "_external/.honcho/config.json", "myapp_api_key.json",
+    "config.yaml", "profiles/work/config.yaml", "config.yaml.bak", "gateway.json", "mcp.json",
+    "profiles/work/mcp.json",
 ])
 def test_secret_paths(rel):
     assert is_secret(rel)
 
 
 @pytest.mark.parametrize("rel", [
-    "config.yaml", "state.db", "skills/ops/token_utils.py", "memories/MEMORY.md", "notes/idea.txt",
+    "state.db", "skills/ops/token_utils.py", "memories/MEMORY.md", "notes/idea.txt",
     "platforms/whatsapp_cloud/media/photo.jpg", "plugins/jev/README.md", "_external/.honcho/data.db",
 ])
 def test_open_paths(rel, tmp_path):
@@ -108,10 +110,10 @@ def test_open_paths(rel, tmp_path):
 
 
 def test_inline_keys_in_settings_make_the_file_secret(tmp_path):
-    cfg = tmp_path / "config.yaml"
+    cfg = tmp_path / "settings.yaml"
     cfg.write_text("model: x\nmax_tokens: 4096\napi_key: ''\nkey_env: ${OPENAI_API_KEY}\n")
     assert not has_inline_secret(cfg)
-    assert not is_secret("config.yaml", cfg)
+    assert not is_secret("plugins/p/settings.yaml", cfg)
     cfg.write_text("telegram:\n  bot_token: '123456:ABCdefGhIjK'\n")
     assert has_inline_secret(cfg)
-    assert is_secret("profiles/p/config.yaml", cfg)
+    assert is_secret("plugins/p/settings.yaml", cfg)

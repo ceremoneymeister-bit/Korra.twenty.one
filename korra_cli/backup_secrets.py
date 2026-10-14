@@ -51,6 +51,7 @@ _SECRET_FILE_PATTERNS = (
     "id_rsa*", "id_ed25519*", "id_ecdsa*", "id_dsa*", "authorized_keys",
     "*.session", "*.session-journal", "*.session-wal", "*.session-shm",
     "honcho.json", "plugin_toolset_keys.json",
+    "gateway.json", "mcp.json", ".mcp.json",
 )
 
 _SECRET_NAME_PARTS = (
@@ -78,13 +79,6 @@ _INLINE_SECRET_RE = re.compile(
     r"""[ \t]*[:=][ \t]*["']?([^\s"'#,}\]]{8,})""",
     re.IGNORECASE,
 )
-# mcp_servers.<name>.headers / .env carry the authorization of a remote or local MCP server.
-_MCP_AUTH_BLOCK_RE = re.compile(r"""^[ \t-]*["']?(?:headers|env)["']?[ \t]*:""", re.IGNORECASE | re.MULTILINE)
-_AUTH_HEADER_RE = re.compile(
-    r"""["']?(?:proxy-authorization|authorization|x-api-key|x-auth-token|x-access-token|api-key|cookie)["']?"""
-    r"""[ \t]*[:=][ \t]*([^\r\n]+)""",
-    re.IGNORECASE,
-)
 _BEARER_RE = re.compile(r"\bBearer[ \t]+(?!\$)[A-Za-z0-9._~+/=-]{12,}", re.IGNORECASE)
 _TOKEN_LITERAL_RE = re.compile(
     r"\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}"
@@ -97,11 +91,24 @@ _NOT_A_SECRET_VALUE = re.compile(r"^(?:[\d._-]+|\$\{.*|\$[A-Z_]+|true|false|null
 _EXTERNAL_PREFIX = "_external/"
 
 
+def _is_engine_config(parts: tuple[str, ...]) -> bool:
+    """config.yaml of the root or of a profile: MCP/platform connections live there."""
+    if len(parts) == 1:
+        name = parts[0]
+    elif len(parts) == 3 and parts[0] == "profiles":
+        name = parts[2]
+    else:
+        return False
+    return name == "config.yaml" or name.startswith("config.yaml.")
+
+
 def _secret_by_path(rel: str) -> bool:
     path = PurePosixPath(rel.lower())
     parts = path.parts
     if not parts:
         return False
+    if _is_engine_config(parts):
+        return True
     name = parts[-1]
     dirs = parts[:-1]
     if any(part in _SECRET_DIR_NAMES for part in dirs):
@@ -145,13 +152,7 @@ def has_inline_secret(path: Path) -> bool:
 
 
 def _holds_connection_credentials(text: str) -> bool:
-    """MCP/HTTP connection settings, authorization headers, token-shaped literals."""
-    if "mcp_servers" in text and _MCP_AUTH_BLOCK_RE.search(text):
-        return True
-    for match in _AUTH_HEADER_RE.finditer(text):
-        value = match.group(1).strip().strip("\"',{}[] ")
-        if len(value) >= 6 and not value.startswith("$"):
-            return True
+    """Bearer tokens, token-shaped literals and passwords in URLs."""
     return bool(_BEARER_RE.search(text) or _TOKEN_LITERAL_RE.search(text) or _URL_CREDENTIALS_RE.search(text))
 
 
