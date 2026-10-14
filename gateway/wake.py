@@ -99,7 +99,7 @@ async def _self_post_chat_completion(
 ) -> None:
     """POST the wake text to the in-pod API server as a normal session turn.
 
-    Uses the adapter's own bind host/port/key (``ApiServerAdapter.__init__``).
+    Uses the adapter's bind host/port and the URL-selected profile's key.
     Session continuation via ``X-Hermes-Session-Id`` is 403-gated on
     ``API_SERVER_KEY`` being configured, so a missing key is a hard error —
     raise loudly rather than run the wake in a fresh fingerprint-derived
@@ -112,7 +112,22 @@ async def _self_post_chat_completion(
         # Wildcard bind address — connect over loopback.
         host = "127.0.0.1"
     port = int(getattr(adapter, "_port", 0) or 8642)
-    api_key = str(getattr(adapter, "_api_key", "") or "")
+    from korra_cli.profiles import get_active_profile_name
+    from urllib.parse import quote
+
+    profile = get_active_profile_name()
+    named_profile = profile not in ("default", "custom")
+    if named_profile:
+        # The shared listener's key belongs to its owner, not this profile.
+        # Match APIServerAdapter._expected_api_key's scoped, fail-closed read.
+        from agent.secret_scope import get_secret
+        from korra_cli.auth import has_usable_secret
+
+        api_key = get_secret("API_SERVER_KEY", "") or ""
+        if not has_usable_secret(api_key, min_length=16):
+            raise RuntimeError("wake self-post requires a usable profile-scoped API_SERVER_KEY")
+    else:
+        api_key = str(getattr(adapter, "_api_key", "") or "")
     if not api_key:
         raise RuntimeError(
             "wake self-post requires API_SERVER_KEY: session continuation via "
@@ -122,11 +137,7 @@ async def _self_post_chat_completion(
 
     if ":" in host and not host.startswith("["):
         host = f"[{host}]"  # bare IPv6 literal
-    from korra_cli.profiles import get_active_profile_name
-    from urllib.parse import quote
-
-    profile = get_active_profile_name()
-    prefix = f"/p/{quote(profile, safe='')}" if profile not in ("default", "custom") else ""
+    prefix = f"/p/{quote(profile, safe='')}" if named_profile else ""
     url = f"http://{host}:{port}{prefix}/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {api_key}",
