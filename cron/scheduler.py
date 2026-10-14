@@ -3227,9 +3227,21 @@ def _is_creator_private_chat(job: dict, platform_name: str, chat_id) -> bool:
             and str(origin.get("chat_id") or "").strip() == str(chat_id).strip()
         )
     chat = _private_telegram_chat(platform_name, chat_id)
-    return bool(chat) and (
-        str(origin.get("platform") or "").strip().lower() == "telegram"
-        and str(origin.get("user_id") or "").strip() == chat
+    if not chat or str(origin.get("platform") or "").strip().lower() != "telegram":
+        return False
+    if "user_id" in origin:
+        return str(origin.get("user_id") or "").strip() == chat
+    # Old Telegram jobs recorded only the originating chat. A positive chat
+    # id identifies that same private recipient, so a delayed reply adds no
+    # reach. Only this unstamped legacy form qualifies: missing/contradictory
+    # identity on a newer job must not become a compatibility bypass. This
+    # grants no owner rights and never applies to another target or a group.
+    return (
+        "owner" not in origin
+        and "created_by_owner" not in job
+        and chat != "0"
+        and str(origin.get("chat_id") or "").strip() == chat
+        and str(origin.get("chat_type") or "").strip().lower() in ("", "dm", "private")
     )
 
 
