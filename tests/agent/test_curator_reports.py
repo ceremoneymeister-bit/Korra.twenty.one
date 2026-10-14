@@ -148,6 +148,7 @@ def test_curator_rewrites_cron_skills_when_skill_consolidated(curator_env_with_c
         schedule="every 1h",
         skills=["foo"],
         name="foo-watcher",
+        model="test-model",
     )
 
     # Simulate a curator pass that consolidated `foo` → `foo-umbrella`

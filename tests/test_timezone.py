@@ -314,7 +314,7 @@ class TestCronTimezone:
         _reset_hermes_time_cache()
 
         from cron.jobs import create_job, load_jobs, save_jobs, get_due_jobs
-        create_job(prompt="Cross-tz job", schedule="every 1h")
+        create_job(prompt="Cross-tz job", schedule="every 1h", model="test-model")
         jobs = load_jobs()
 
         # Force a naive past timestamp (system-local wall time, 10 min ago)
@@ -338,7 +338,7 @@ class TestCronTimezone:
         _reset_hermes_time_cache()
 
         from cron.jobs import create_job
-        job = create_job(prompt="TZ test", schedule="every 2h")
+        job = create_job(prompt="TZ test", schedule="every 2h", model="test-model")
 
         created = datetime.fromisoformat(job["created_at"])
         assert created.tzinfo is not None
