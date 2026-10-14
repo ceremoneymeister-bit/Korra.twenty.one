@@ -9877,7 +9877,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         """
         from gateway.drain_control import drain_requested
 
-        last_counts = None
         while self._running:
             try:
                 if drain_requested():
@@ -9888,10 +9887,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 # API/cron completions do not pass through messaging turn
                 # boundaries. Reconcile their real counts even when no drain
                 # marker exists, or a persisted busy snapshot can live forever.
-                counts = self._active_work_counts()
-                if counts != last_counts:
-                    if self._persist_active_agents():
-                        last_counts = counts
+                # Other writers can change the file between ticks, even if
+                # our live counts are unchanged. Sample once in the writer.
+                self._persist_active_agents()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
