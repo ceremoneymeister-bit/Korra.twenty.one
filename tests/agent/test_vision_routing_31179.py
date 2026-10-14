@@ -249,6 +249,8 @@ auxiliary:
 model:
   provider: openrouter
   default: anthropic/claude-sonnet-4
+auxiliary:
+  free_only: false
 """)
         monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
         _fresh_modules()
