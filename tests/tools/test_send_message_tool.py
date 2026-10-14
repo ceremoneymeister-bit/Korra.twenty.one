@@ -311,16 +311,9 @@ class TestSendMessageTool:
                 )
             )
 
-        assert result["success"] is True
-        send_mock.assert_awaited_once_with(
-            Platform.TELEGRAM,
-            telegram_cfg,
-            "12345",
-            "hello",
-            thread_id=None,
-            media_files=[],
-            force_document=False,
-        )
+        assert result["success"] is False
+        assert result["refused_before_send"] is True
+        send_mock.assert_not_awaited()
 
     def test_top_level_send_failure_redacts_query_token(self):
         config, _telegram_cfg = _make_config()

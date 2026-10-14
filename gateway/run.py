@@ -24301,9 +24301,12 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             # send_multiple_images (Telegram sendPhoto recompresses to ~1280px).
             force_document_attachments = "[[as_document]]" in response
 
-            from gateway.platforms.base import BasePlatformAdapter, should_send_media_as_audio
+            from gateway.platforms.base import (
+                BasePlatformAdapter, MEDIA_DELIVERY_FAILURE_NOTICE, should_send_media_as_audio,
+            )
 
             media_files, cleaned = adapter.extract_media(response)
+            requested_media_count = len(media_files)
             media_files = BasePlatformAdapter.filter_media_delivery_paths(media_files)
             # Do NOT deduplicate explicit MEDIA tags against prior turns here
             # (#73771). This rescan is already EXPLICIT-ONLY (see docstring):
@@ -24328,6 +24331,13 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     self._reply_anchor_for_event(event),
                 )
             )
+
+            if len(media_files) < requested_media_count:
+                await adapter.send(
+                    chat_id=event.source.chat_id,
+                    content=MEDIA_DELIVERY_FAILURE_NOTICE,
+                    metadata=_thread_meta,
+                )
 
             _VIDEO_EXTS = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.3gp'}
             _IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.webp', '.gif'}
@@ -24652,8 +24662,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             # Extract media files from the response
             if response:
                 media_files, response = adapter.extract_media(response)
-                from gateway.platforms.base import BasePlatformAdapter
+                from gateway.platforms.base import BasePlatformAdapter, MEDIA_DELIVERY_FAILURE_NOTICE
+                requested_media_count = len(media_files)
                 media_files = BasePlatformAdapter.filter_media_delivery_paths(media_files)
+                if len(media_files) < requested_media_count:
+                    response = f"{response}\n\n{MEDIA_DELIVERY_FAILURE_NOTICE}".strip()
                 images, text_content = adapter.extract_images(response)
 
                 preview = prompt[:60] + ("..." if len(prompt) > 60 else "")
