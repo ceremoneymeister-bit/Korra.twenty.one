@@ -1262,6 +1262,8 @@ class PluginRegistration:
     # uninstall) and evicted on force re-discovery when the plugin no longer
     # re-registers it.
     persistent: bool = False
+    # Hook attribution reuses the ownership ledger, including disposal/reload.
+    _hook_callback: Optional[Callable] = field(default=None, init=False, repr=False)
     _disposed: bool = field(default=False, init=False, repr=False)
     _on_dispose: Optional[Callable[["PluginRegistration"], None]] = field(
         default=None, init=False, repr=False
@@ -3420,6 +3422,7 @@ class PluginContext:
                 self._manager._hooks, hook_name, callback
             ),
         )
+        handle._hook_callback = callback
         logger.debug("Plugin %s registered hook: %s", self.manifest.name, hook_name)
         return handle
 
@@ -3749,6 +3752,19 @@ def _pre_tool_call_timeout_block() -> Dict[str, str]:
 # PluginManager
 # ---------------------------------------------------------------------------
 
+@dataclass
+class _HookCallbackRun:
+    """One worker's state; never share loop-local completion/result cells."""
+
+    started_at: float = field(default_factory=time.monotonic)
+    done: threading.Event = field(default_factory=threading.Event)
+    value: Any = None
+    failure: Optional[Exception] = None
+    timed_out: bool = False
+    skipped: int = 0
+    next_skip_warning: float = 0.0
+
+
 class PluginManager:
     """Central manager that discovers, loads, and invokes plugins."""
 
@@ -3804,7 +3820,7 @@ class PluginManager:
         # In-flight / recently-timed-out hook callbacks. Keyed by
         # (hook_name, id(cb)) so a stuck policy hook cannot spawn a new
         # abandoned daemon thread on every subsequent fire.
-        self._hook_running_callbacks: Dict[tuple, object] = {}
+        self._hook_running_callbacks: Dict[tuple, _HookCallbackRun] = {}
         self._hook_timeout_suppressed_until: Dict[tuple, float] = {}
         self._hook_timeout_lock = threading.Lock()
         self._hook_timeout_suppression_seconds = _HOOK_TIMEOUT_SUPPRESSION_SECONDS
@@ -5626,59 +5642,85 @@ class PluginManager:
         timeout = _resolve_hook_callback_timeout()
         use_timeout = _hook_uses_callback_timeout(hook_name, timeout)
         fail_closed = hook_name in _HOOK_TIMEOUT_FAIL_CLOSED_HOOKS
+        # Resolve owners from the existing ledger, not from module names (two
+        # plugins may both register `_on_post_tool_call`). Manual/core hooks
+        # have no plugin registration and are explicitly labelled unregistered.
+        owners: Dict[int, List[str]] = {}
+        for registration in tuple(self._registration_order):
+            if (
+                registration.active
+                and registration.kind == "hook"
+                and registration.key == hook_name
+            ):
+                owners.setdefault(id(registration._hook_callback), []).append(
+                    registration.plugin_key
+                )
 
         for cb in callbacks:
-            callback_name = getattr(cb, "__name__", repr(cb))
+            callback_name = getattr(cb, "__qualname__", type(cb).__qualname__)
             callback_key = (hook_name, id(cb))
+            label = (
+                hook_name, callback_name,
+                ",".join(owners.get(id(cb), [])) or "unregistered", self.scope_key,
+            )
+            log_prefix = "Hook '%s' callback %s plugin=%s profile=%s"
             try:
                 if use_timeout:
-                    token = object()
                     now = time.monotonic()
                     with self._hook_timeout_lock:
                         suppressed_until = self._hook_timeout_suppressed_until.get(
                             callback_key
                         )
-                        running = callback_key in self._hook_running_callbacks
+                        running = self._hook_running_callbacks.get(callback_key)
                         if (
                             suppressed_until is not None and suppressed_until > now
                         ) or running:
-                            logger.warning(
-                                "Hook '%s' callback %s skipped after previous "
-                                "timeout or while still running",
-                                hook_name,
-                                callback_name,
-                            )
+                            if running is not None:
+                                running.skipped += 1
+                                if now >= running.next_skip_warning:
+                                    logger.warning(
+                                        log_prefix + " skipped while still running "
+                                        "elapsed=%.3fs skipped=%d",
+                                        *label, now - running.started_at, running.skipped,
+                                    )
+                                    running.next_skip_warning = (
+                                        now + self._hook_timeout_suppression_seconds
+                                    )
                             if fail_closed:
                                 results.append(_pre_tool_call_timeout_block())
                             continue
                         if suppressed_until is not None:
                             self._hook_timeout_suppressed_until.pop(callback_key, None)
-                        self._hook_running_callbacks[callback_key] = token
+                            logger.info(log_prefix + " resumed after timeout cooldown", *label)
+                        run = _HookCallbackRun()
+                        self._hook_running_callbacks[callback_key] = run
 
                     context = contextvars.copy_context()
-                    done = threading.Event()
-                    outcome: Dict[str, Any] = {}
-                    failure: Dict[str, Exception] = {}
 
                     def _runner(
                         _cb: Callable[..., Any] = cb,
                         _key: tuple = callback_key,
-                        _token: object = token,
+                        _run: _HookCallbackRun = run,
+                        _context: contextvars.Context = context,
+                        _payload: Dict[str, Any] = kwargs,
+                        _label: tuple = label,
                     ) -> None:
                         try:
                             # Route through _invoke_hook_callback so the
                             # additive-payload signature filtering (narrow
                             # legacy callbacks) applies on the worker too.
-                            outcome["value"] = context.run(
-                                self._invoke_hook_callback, _cb, kwargs
+                            _run.value = _context.run(
+                                self._invoke_hook_callback, _cb, _payload
                             )
                         except Exception as exc:
-                            failure["exc"] = exc
+                            _run.failure = exc
                         finally:
                             with self._hook_timeout_lock:
-                                if self._hook_running_callbacks.get(_key) is _token:
+                                if self._hook_running_callbacks.get(_key) is _run:
                                     self._hook_running_callbacks.pop(_key, None)
-                            done.set()
+                                if _run.timed_out:
+                                    self._log_hook_recovery(_label, _run)
+                                _run.done.set()
 
                     thread = threading.Thread(
                         target=_runner,
@@ -5686,37 +5728,48 @@ class PluginManager:
                         daemon=True,
                     )
                     thread.start()
-                    if not done.wait(timeout=timeout):
+                    if not run.done.wait(timeout=timeout):
                         # Do not join — that would reintroduce the #6622 hang.
                         with self._hook_timeout_lock:
+                            run.timed_out = True
                             self._hook_timeout_suppressed_until[callback_key] = (
                                 time.monotonic()
                                 + self._hook_timeout_suppression_seconds
                             )
-                        logger.warning(
-                            "Hook '%s' callback %s timed out after %gs — skipping",
-                            hook_name,
-                            callback_name,
-                            timeout,
-                        )
+                            logger.warning(
+                                log_prefix + " timed out after %gs elapsed=%.3fs — skipping",
+                                *label, timeout, time.monotonic() - run.started_at,
+                            )
+                            # Completion can win the lock after wait() returns
+                            # False but before timeout accounting. Emit recovery
+                            # here in that case; otherwise the worker owns it.
+                            if run.done.is_set():
+                                self._log_hook_recovery(label, run)
                         if fail_closed:
                             results.append(_pre_tool_call_timeout_block())
                         continue
-                    if "exc" in failure:
-                        raise failure["exc"]
-                    ret = outcome.get("value")
+                    if run.failure is not None:
+                        raise run.failure
+                    ret = run.value
                 else:
                     ret = self._invoke_hook_callback(cb, kwargs)
                 if ret is not None:
                     results.append(ret)
             except Exception as exc:
                 logger.warning(
-                    "Hook '%s' callback %s raised: %s",
-                    hook_name,
-                    callback_name,
-                    exc,
+                    log_prefix + " raised: %s",
+                    *label, type(exc).__name__,
                 )
         return results
+
+    @staticmethod
+    def _log_hook_recovery(label: tuple, run: _HookCallbackRun) -> None:
+        logger.info(
+            "Hook '%s' callback %s plugin=%s profile=%s finished after timeout "
+            "elapsed=%.3fs skipped=%d outcome=%s",
+            *label, time.monotonic() - run.started_at, run.skipped,
+            type(run.failure).__name__ if run.failure is not None else "completed",
+        )
 
     def _subscribe_event(
         self,
