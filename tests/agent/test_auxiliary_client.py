@@ -83,6 +83,13 @@ def _clean_env(monkeypatch):
 
 
 @pytest.fixture
+def owner_api_policy():
+    """These legacy API-path tests deliberately opt into the owner's route."""
+    with patch("agent.auxiliary_client._aux_openrouter_settings", return_value=(False, _OPENROUTER_MODEL)):
+        yield
+
+
+@pytest.fixture
 def codex_auth_dir(tmp_path, monkeypatch):
     """Provide a writable ~/.codex/ directory with a valid auth.json."""
     codex_dir = tmp_path / ".codex"
@@ -892,11 +899,11 @@ class TestExpiredCodexFallback:
             mock_build.return_value = MagicMock()
             from agent.auxiliary_client import _resolve_auto
             client, model = _resolve_auto()
-            # Should NOT be Codex, should be Anthropic (or another available provider)
-            assert not isinstance(client, type(None)), "Should find a provider after expired Codex"
+            # Neither an expired token nor an ambient API key selects a route.
+            assert client is None, "Without a selected subscription, default auto must degrade"
 
 
-    def test_expired_codex_openrouter_wins(self, tmp_path, monkeypatch):
+    def test_expired_codex_openrouter_wins(self, owner_api_policy, tmp_path, monkeypatch):
         """With expired Codex + OpenRouter key, OpenRouter should win (1st in chain)."""
         import base64
         import time as _time
@@ -972,7 +979,7 @@ class TestExplicitProviderRouting:
 
 
 
-    def test_try_openrouter_pool_exhausted_falls_back_to_env(self, monkeypatch):
+    def test_try_openrouter_pool_exhausted_falls_back_to_env(self, owner_api_policy, monkeypatch):
         """Pool present but exhausted → fall through to OPENROUTER_API_KEY env var."""
         monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-env-fallback")
         with patch("agent.auxiliary_client._select_pool_entry", return_value=(True, None)), \
@@ -1023,7 +1030,7 @@ class TestOpenRouterPaidLaneGuard:
         monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
         with patch("agent.auxiliary_client._select_pool_entry", return_value=(False, None)), \
              patch("korra_cli.config.load_config_readonly",
-                   return_value={"auxiliary": {"openrouter_model": "some/vendor-model"}}), \
+                   return_value={"auxiliary": {"free_only": False, "openrouter_model": "some/vendor-model"}}), \
              patch("agent.auxiliary_client.OpenAI") as mock_openai:
             mock_client = MagicMock(name="openrouter_client")
             mock_openai.return_value = mock_client
@@ -1094,7 +1101,7 @@ class TestOpenRouterPaidLaneGuard:
         _paid_lane_warned.discard(_OPENROUTER_MODEL)
         monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
         with patch("agent.auxiliary_client._select_pool_entry", return_value=(False, None)), \
-             patch("korra_cli.config.load_config_readonly", return_value={"auxiliary": {}}), \
+             patch("korra_cli.config.load_config_readonly", return_value={"auxiliary": {"free_only": False}}), \
              patch("agent.auxiliary_client.OpenAI") as mock_openai:
             mock_client = MagicMock(name="openrouter_client")
             mock_openai.return_value = mock_client
@@ -1105,7 +1112,7 @@ class TestOpenRouterPaidLaneGuard:
         assert any("PAID lane engaged" in r.getMessage() for r in caplog.records)
         # Second call logs nothing new.
         with patch("agent.auxiliary_client._select_pool_entry", return_value=(False, None)), \
-             patch("korra_cli.config.load_config_readonly", return_value={"auxiliary": {}}), \
+             patch("korra_cli.config.load_config_readonly", return_value={"auxiliary": {"free_only": False}}), \
              patch("agent.auxiliary_client.OpenAI") as mock_openai:
             caplog.clear()
             with caplog.at_level(logging.WARNING, logger="agent.auxiliary_client"):
@@ -1164,7 +1171,7 @@ class TestGetTextAuxiliaryClient:
         assert client is None
         assert model is None
 
-    def test_custom_endpoint_uses_codex_wrapper_when_runtime_requests_responses_api(self):
+    def test_custom_endpoint_uses_codex_wrapper_when_runtime_requests_responses_api(self, owner_api_policy):
         with patch("agent.auxiliary_client._resolve_custom_runtime",
                    return_value=("https://api.openai.com/v1", "sk-test", "codex_responses")), \
              patch("agent.auxiliary_client._read_nous_auth", return_value=None), \
@@ -1559,7 +1566,7 @@ class TestTryPaymentFallback:
         _aux_unhealthy_until.clear()
         _aux_unhealthy_logged_at.clear()
 
-    def test_skips_failed_provider(self):
+    def test_skips_failed_provider(self, owner_api_policy):
         """Discovery walks only when no concrete main provider was selected."""
         mock_client = MagicMock()
         with patch("agent.auxiliary_client._try_openrouter", return_value=(None, None)), \
@@ -3145,8 +3152,8 @@ class TestVisionAutoSkipsKimiCoding:
     on every request (#17076).
     """
 
-    def test_kimi_coding_skipped_falls_through_to_openrouter(self, monkeypatch):
-        """kimi-coding as main + vision auto → OpenRouter (not kimi)."""
+    def test_kimi_coding_without_vision_degrades_without_openrouter(self, monkeypatch):
+        """A text-only selected model must not enable an automatic API fallback."""
         fake_or_client = MagicMock(name="openrouter_client")
 
         monkeypatch.setattr(
@@ -3180,9 +3187,8 @@ class TestVisionAutoSkipsKimiCoding:
         )
 
         provider, client, model = resolve_vision_provider_client()
-        assert provider == "openrouter"
-        assert client is fake_or_client
-        assert model == "google/gemini-3-flash-preview"
+        assert (provider, client, model) == (None, None, None)
+        rpc_mock.assert_not_called()
 
 
 
@@ -3764,7 +3770,7 @@ class TestOpenRouterExplicitApiKey:
     """Test that explicit_api_key is correctly propagated to _try_openrouter()."""
 
     def test_resolve_provider_client_passes_explicit_api_key_to_openrouter(
-        self, monkeypatch
+        self, monkeypatch, owner_api_policy
     ):
         """
         When resolve_provider_client() is called with explicit_api_key for OpenRouter,
@@ -3797,7 +3803,7 @@ class TestOpenRouterExplicitApiKey:
             )
 
     def test_resolve_provider_client_without_explicit_api_key_falls_back_to_env(
-        self, monkeypatch
+        self, monkeypatch, owner_api_policy
     ):
         """
         When resolve_provider_client() is called WITHOUT explicit_api_key for OpenRouter,
@@ -3926,7 +3932,7 @@ class TestAuxUnhealthyCache:
 
 
 
-    def test_payment_fallback_skips_unhealthy(self):
+    def test_payment_fallback_skips_unhealthy(self, owner_api_policy):
         """_try_payment_fallback also consults the unhealthy cache so a 402
         on OpenRouter doesn't cause a second OR call within the same chain
         iteration if it gets re-entered."""
@@ -4061,7 +4067,7 @@ class TestCompressionFallbackContextFilter:
 
     # ── L2: configured fallback chain ─────────────────────────────────
 
-    def test_configured_chain_skips_too_small_candidate_for_compression(self, monkeypatch):
+    def test_configured_chain_skips_too_small_candidate_for_compression(self, owner_api_policy, monkeypatch):
         """When entry[0] is reachable but too small and entry[1] is large enough,
         _try_configured_fallback_chain must return entry[1], not entry[0]."""
         from agent.auxiliary_client import (
@@ -4399,7 +4405,7 @@ class TestSynchronousFallbackCachePlans:
         )
         return client, resolved_calls, tools
 
-    def test_direct_anthropic_fallback_uses_entry_destination_for_tool_marker(self, monkeypatch):
+    def test_direct_anthropic_fallback_uses_entry_destination_for_tool_marker(self, owner_api_policy, monkeypatch):
         client, resolved_calls, tools = self._run_configured_fallback(monkeypatch, {
             "provider": "anthropic",
             "model": "claude-sonnet-4-6",
@@ -4420,7 +4426,7 @@ class TestSynchronousFallbackCachePlans:
         assert "cache_control" in wire_tools[-1]
         assert "cache_control" not in tools[-1]
 
-    def test_third_party_anthropic_fallback_keeps_message_markers_without_tool_marker(self, monkeypatch):
+    def test_third_party_anthropic_fallback_keeps_message_markers_without_tool_marker(self, owner_api_policy, monkeypatch):
         client, resolved_calls, tools = self._run_configured_fallback(monkeypatch, {
             "provider": "custom",
             "model": "claude-sonnet-4-6",
@@ -4443,7 +4449,7 @@ class TestSynchronousFallbackCachePlans:
 
 class TestAsynchronousFallbackCachePlans:
     @pytest.mark.asyncio
-    async def test_async_fallback_replans_cache_sections_like_sync(self, monkeypatch):
+    async def test_async_fallback_replans_cache_sections_like_sync(self, owner_api_policy, monkeypatch):
         """Async mirror parity: per-destination cache replan, not verbatim pass-through."""
         from agent.auxiliary_client import (
             _call_fallback_candidate_async,

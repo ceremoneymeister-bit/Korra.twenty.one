@@ -147,7 +147,8 @@ class TestResolveProviderClientModelNormalization:
         assert model == "glm-5.1"
 
 
-    def test_aggregator_vendor_slug_is_preserved(self, monkeypatch):
+    def test_aggregator_vendor_slug_is_preserved(self, tmp_path, monkeypatch):
+        _write_config(tmp_path, {"auxiliary": {"free_only": False}})
         monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
         with patch("agent.auxiliary_client.OpenAI") as mock_openai:
             mock_openai.return_value = MagicMock()

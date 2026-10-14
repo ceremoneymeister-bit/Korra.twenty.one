@@ -1,47 +1,12 @@
-"""Shared auxiliary client router for side tasks.
+"""Shared auxiliary router for compression, titles, search, extraction and vision.
 
-Provides a single resolution chain so every consumer (context compression,
-session search, web extraction, vision analysis, browser vision) picks up
-the best available backend without duplicating fallback logic.
+Auto uses the selected main model. Without a live main runtime it resolves the
+active ChatGPT/Codex or Claude subscription of the profile. Missing credentials
+or capabilities degrade without discovering external API accounts.
 
-Resolution order for text tasks (auto mode):
-  1. User's main provider + main model (used regardless of provider type —
-     aggregators, direct API-key providers, native Anthropic, Codex, etc.)
-  2. OpenRouter  (OPENROUTER_API_KEY)
-  3. Nous Portal (~/.hermes/auth.json active provider)
-  4. Custom endpoint (config.yaml model.base_url + OPENAI_API_KEY)
-  5. Native Anthropic
-  6. Direct API-key providers (z.ai/GLM, Kimi/Moonshot, MiniMax, MiniMax-CN)
-  7. None
-
-OpenRouter fallback cost guard: ``auxiliary.free_only: true`` restricts the
-step-2 fallback to ``:free`` SKUs; ``auxiliary.openrouter_model`` overrides
-the default. A one-time WARNING is logged for non-``:free`` models.
-
-Resolution order for vision/multimodal tasks (auto mode):
-  1. Selected main provider, if it is one of the supported vision backends below
-  2. OpenRouter
-  3. Nous Portal
-  4. Native Anthropic
-  5. Custom endpoint (for local vision models: Qwen-VL, LLaVA, Pixtral, etc.)
-  6. None
-
-Codex OAuth (ChatGPT-account auth) is intentionally NOT in either
-fallback chain: OpenAI gates this endpoint behind an undocumented,
-shifting model allow-list, so "just try Codex with a hardcoded model"
-rots on its own.  Codex is used only when the user's main provider *is*
-openai-codex (Step 1 above) or when a caller explicitly requests it with
-a model (auxiliary.<task>.provider + auxiliary.<task>.model).
-
-Per-task overrides are configured in config.yaml under the ``auxiliary:`` section
-(e.g. ``auxiliary.vision.provider``, ``auxiliary.compression.model``).
-Default "auto" follows the chains above.
-
-Payment / credit exhaustion fallback:
-  When a resolved provider returns HTTP 402 or a credit-related error,
-  call_llm() automatically retries with the next available provider in the
-  auto-detection chain.  This handles the common case where a user depletes
-  their OpenRouter balance but has Codex OAuth or another provider available.
+Korra defaults to auxiliary.free_only: true. Owners can explicitly configure
+per-task providers/endpoints and set free_only: false for their own API route.
+The historical discovery chain remains available under that explicit opt-in.
 """
 
 import contextlib
@@ -3127,19 +3092,19 @@ def _is_free_model(model: Optional[str]) -> bool:
 def _aux_openrouter_settings() -> Tuple[bool, str]:
     """Read free_only and openrouter_model from config in one pass.
 
-    Returns (free_only, model) — defaults (False, _OPENROUTER_MODEL) on any
+    Returns (free_only, model) — defaults (True, _OPENROUTER_MODEL) on any
     config-read failure.
     """
     try:
         from korra_cli.config import cfg_get, load_config_readonly
 
         cfg = load_config_readonly()
-        free_only = bool(cfg_get(cfg, "auxiliary", "free_only", default=False))
+        free_only = cfg_get(cfg, "auxiliary", "free_only", default=True) is not False
         val = cfg_get(cfg, "auxiliary", "openrouter_model")
         model = val.strip() if isinstance(val, str) and val.strip() else _OPENROUTER_MODEL
         return free_only, model
     except Exception:
-        return False, _OPENROUTER_MODEL
+        return True, _OPENROUTER_MODEL
 
 
 def _warn_paid_lane_once(model: str) -> None:
@@ -3170,15 +3135,14 @@ def _try_openrouter(explicit_api_key: str = None, model: str = None) -> Tuple[Op
             or_model,
         )
         return None, None
-    if not _is_free_model(or_model):
-        _warn_paid_lane_once(or_model)
-
     pool_present, entry = _select_pool_entry("openrouter")
     if pool_present:
         or_key = explicit_api_key or _pool_runtime_api_key(entry)
         if or_key:
             base_url = _pool_runtime_base_url(entry, OPENROUTER_BASE_URL) or OPENROUTER_BASE_URL
             logger.debug("Auxiliary client: OpenRouter via pool")
+            if not _is_free_model(or_model):
+                _warn_paid_lane_once(or_model)
             return _create_openai_client(api_key=or_key, base_url=base_url,
                            default_headers=build_or_headers()), or_model
         # Pool exists but is exhausted (no usable runtime key) — fall through to
@@ -3187,8 +3151,9 @@ def _try_openrouter(explicit_api_key: str = None, model: str = None) -> Tuple[Op
 
     or_key = explicit_api_key or _scoped_key_env("OPENROUTER_API_KEY")
     if not or_key:
-        _mark_provider_unhealthy("openrouter", ttl=60)
         return None, None
+    if not _is_free_model(or_model):
+        _warn_paid_lane_once(or_model)
     logger.debug("Auxiliary client: OpenRouter")
     return _create_openai_client(api_key=or_key, base_url=OPENROUTER_BASE_URL,
                    default_headers=build_or_headers()), or_model
@@ -4344,6 +4309,37 @@ def _effective_selected_provider(
     return (_read_main_provider() or runtime_provider).strip().lower()
 
 
+def _auto_main_runtime(main_runtime: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Recover an unbound side task's selected profile subscription.
+
+    Main-session snapshots and concrete config choices always win. An unbound
+    ``auto`` caller must not discover an API account before the installed OAuth
+    provider, as the general provider detector historically does.
+    """
+    runtime = _normalize_main_runtime(main_runtime)
+    if _effective_selected_provider(runtime) not in {"", "auto"}:
+        return runtime
+    if not _aux_openrouter_settings()[0]:
+        return runtime  # Owner opted into the historical discovery policy.
+    try:
+        from korra_cli.auth import get_active_provider
+        from korra_cli.runtime_provider import resolve_runtime_provider
+
+        active = get_active_provider()
+        if active not in {"openai-codex", "anthropic"}:
+            return runtime
+        model = str(runtime.get("model") or _read_main_model() or "")
+        if not model:
+            return runtime  # Never guess an OAuth model allow-list.
+        selected = resolve_runtime_provider(requested=active, target_model=model)
+        selected = {**selected, "model": model}
+        if _runtime_uses_subscription(selected):
+            return _normalize_main_runtime(selected)
+    except Exception:
+        logger.warning("Вспомогательная задача: подписка профиля недоступна; проверьте вход через korra model.")
+    return runtime
+
+
 def _runtime_uses_subscription(
     main_runtime: Optional[Dict[str, Any]] = None,
 ) -> bool:
@@ -4384,7 +4380,11 @@ def _subscription_fallback_entry_may_resolve(
     checked again after resolution because its ambient pool can contain either
     OAuth or API-key credentials.
     """
-    if not _runtime_uses_subscription(main_runtime):
+    subscription_only = _runtime_uses_subscription(main_runtime) or (
+        _aux_openrouter_settings()[0]
+        and _effective_selected_provider(main_runtime) in {"", "auto"}
+    )
+    if not subscription_only:
         return True
     provider = _normalize_aux_provider(str(entry.get("provider") or ""))
     if provider in {"openai-codex", "codex"}:
@@ -4400,7 +4400,11 @@ def _subscription_fallback_client_allowed(
     main_runtime: Optional[Dict[str, Any]],
 ) -> bool:
     """Verify that a resolved fallback still uses subscription credentials."""
-    if not _runtime_uses_subscription(main_runtime):
+    subscription_only = _runtime_uses_subscription(main_runtime) or (
+        _aux_openrouter_settings()[0]
+        and _effective_selected_provider(main_runtime) in {"", "auto"}
+    )
+    if not subscription_only:
         return True
     normalized = _normalize_aux_provider(provider)
     if normalized in {"openai-codex", "codex"}:
@@ -5959,7 +5963,14 @@ def _discovery_chain_allowed(
     that can silently move background work onto another paid account.
     """
     if (main_provider or "").strip().lower() in {"", "auto"}:
-        return True
+        if not _aux_openrouter_settings()[0]:
+            return True
+        logger.warning(
+            "Вспомогательная задача %s: подписочный маршрут не найден; "
+            "задача пропущена без вызова внешнего API. Проверьте вход и модель через korra model.",
+            task or "call",
+        )
+        return False
     logger.warning(
         "Auxiliary %s: main provider %s is unavailable and no fallback_chain / "
         "fallback_providers is configured — refusing to guess another logged-in "
@@ -6491,7 +6502,7 @@ def _resolve_auto_route(
     """
     global auxiliary_is_nous, _stale_base_url_warned
     auxiliary_is_nous = False  # Reset — _try_nous() will set True if it wins
-    runtime = _normalize_main_runtime(main_runtime)
+    runtime = _auto_main_runtime(main_runtime)
     runtime_provider = runtime.get("provider", "")
     runtime_model = str(runtime.get("model") or "")
     runtime_base_url = str(runtime.get("base_url") or "")
@@ -7846,6 +7857,9 @@ def get_available_vision_backends() -> List[str]:
     source of truth for setup, tool gating, and runtime auto-routing of
     vision tasks.
     """
+    if _aux_openrouter_settings()[0]:
+        provider, client, _ = resolve_vision_provider_client()
+        return [provider] if provider and client is not None else []
     available: List[str] = []
     # 1. Active provider — if the user configured a provider, try it first.
     main_provider = _read_main_provider()
@@ -7913,6 +7927,7 @@ def resolve_vision_provider_client(
         return provider_for_base_override, client, final_model
 
     if requested == "auto":
+        runtime = _auto_main_runtime(main_runtime)
         # Vision auto-detection order:
         #   1. User's main provider + main model (including aggregators).
         #      _PROVIDER_VISION_MODELS provides per-provider vision model
@@ -8015,8 +8030,8 @@ def resolve_vision_provider_client(
                 # endpoint that ``set_runtime_main()`` recorded for this turn so
                 # Step 1 can build a working client.
                 rpc_base_url = None
-                rpc_api_key = None
-                rpc_api_mode = resolved_api_mode
+                rpc_api_key = runtime.get("api_key") or None
+                rpc_api_mode = resolved_api_mode or runtime.get("api_mode") or None
                 if main_provider == "custom" or main_provider.startswith("custom:"):
                     runtime_base_url = runtime.get("base_url")
                     if runtime_base_url:
@@ -8050,8 +8065,11 @@ def resolve_vision_provider_client(
                     return _finalize(
                         main_provider, rpc_client, rpc_model or vision_model)
 
-        # Fall back through aggregators (uses their dedicated vision model,
-        # not the user's main model) when main provider has no client.
+        # Vision has its own resolver but must share the text cost policy.
+        if not _discovery_chain_allowed(main_provider, "vision"):
+            logger.warning("Распознавание изображения недоступно через выбранную модель; внешний API не вызван.")
+            return None, None, None
+        # Owner opted into discovery with no selected main provider.
         for candidate in _VISION_AUTO_PROVIDER_ORDER:
             if candidate == main_provider:
                 continue  # already tried above
