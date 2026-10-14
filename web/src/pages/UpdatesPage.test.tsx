@@ -345,3 +345,39 @@ describe('снимки и прошлые выпуски', () => {
     expect(container.querySelector('img')).toBeNull();
   });
 });
+
+it('снимок открывается кнопкой, сохраняет адрес и подпись и закрывается', async () => {
+  const picture = { src: '/releases/current/browser.webp', alt: 'Поиск товаров в браузере агента' };
+  calls.getUpdatesState.mockResolvedValue(state({ installed: { ...INSTALLED, screenshot: picture } }));
+  // jsdom не реализует нативный модальный диалог; реальные клавиши и фокус
+  // дополнительно проверяются в собранной панели Chromium и WebKit.
+  const show = vi.fn(function (this: HTMLDialogElement) {
+    this.open = true;
+  });
+  const close = vi.fn(function (this: HTMLDialogElement) {
+    this.open = false;
+    this.dispatchEvent(new Event('close'));
+  });
+  Object.defineProperties(HTMLDialogElement.prototype, {
+    showModal: { value: show, configurable: true },
+    close: { value: close, configurable: true },
+  });
+  await render();
+  const trigger = container.querySelector('button[aria-haspopup="dialog"]');
+  expect(trigger).not.toBeNull();
+  expect(trigger?.getAttribute('aria-label')).toContain(picture.alt);
+  await click(trigger);
+  const dialog = container.querySelector('dialog');
+  expect(show).toHaveBeenCalledOnce();
+  expect(dialog?.open).toBe(true);
+  expect(dialog?.querySelector('img')?.src).toContain('/c/demo' + picture.src);
+  expect(dialog?.textContent).toContain(picture.alt);
+  await click(dialog?.querySelector('button') ?? null);
+  expect(close).toHaveBeenCalledOnce();
+  expect(dialog?.open).toBe(false);
+  await click(trigger);
+  await click(dialog);
+  expect(dialog?.open).toBe(false);
+  Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
+  Reflect.deleteProperty(HTMLDialogElement.prototype, 'close');
+});

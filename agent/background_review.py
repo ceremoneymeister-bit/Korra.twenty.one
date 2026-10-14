@@ -2032,6 +2032,29 @@ def _run_review_in_thread(
             pass
 
 
+def _skill_access_prompt() -> str:
+    """Resolve the review's editable surface before the model makes a plan."""
+    from tools.skill_manager_tool import background_review_editable_skills
+
+    try:
+        names = [row["name"] for row in background_review_editable_skills()]
+    except Exception:
+        logger.warning("Could not resolve editable review skills", exc_info=True)
+        names = []
+    return (
+        "\n\nSkill write access for this review (complete existing-skill allowlist):\n"
+        + "Editable existing skills: " + (", ".join(names) or "none") + ".\n"
+        "All other existing skills are read-only to this review: bundled, "
+        "hub-installed, external, pinned, and user-owned skills. Do not plan "
+        "edits to them or use them as consolidation destinations. You may "
+        "read them. Read-before-write still applies to editable skills. "
+        "A new skill is allowed only for a missing class of task; never create "
+        "a shadow copy or replacement of a read-only built-in to save its "
+        "lesson. If the fitting skill is read-only and no editable target "
+        "fits, leave that lesson unsaved."
+    )
+
+
 def spawn_background_review_thread(
     agent: Any,
     messages_snapshot: List[Dict],
@@ -2071,6 +2094,8 @@ def spawn_background_review_thread(
             prompt = build_event_review_prompt(
                 trigger, review_memory, review_skills, excerpt
             )
+            if review_skills:
+                prompt += _skill_access_prompt()
 
             def _event_target() -> None:
                 _run_review_in_thread(
@@ -2104,6 +2129,8 @@ def spawn_background_review_thread(
             f"focus — prioritize it over the general instructions above:\n"
             f"{focus}"
         )
+    if review_skills:
+        prompt += _skill_access_prompt()
 
     def _target() -> None:
         _run_review_in_thread(
