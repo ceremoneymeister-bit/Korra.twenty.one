@@ -26,6 +26,7 @@ _SECRET_DIR_NAMES = frozenset({
     "mcp-tokens", "pairing", "crm-connection", "icloud-calendar",
     "google-workspace", "google",
     "weixin", "proxy",
+    "browser_auth",
 })
 
 # Two consecutive components that make a subtree secret.
@@ -48,7 +49,7 @@ _SECRET_FILE_PATTERNS = (
     ".git-credentials", ".netrc", "_netrc", ".npmrc", ".pypirc", ".pgpass", ".my.cnf",
     "*.pem", "*.key", "*.p12", "*.pfx", "*.jks", "*.keystore", "*.ppk", "*.kdbx",
     "id_rsa*", "id_ed25519*", "id_ecdsa*", "id_dsa*", "authorized_keys",
-    "*.session", "*.session-journal",
+    "*.session", "*.session-journal", "*.session-wal", "*.session-shm",
     "honcho.json", "plugin_toolset_keys.json",
 )
 
@@ -77,6 +78,20 @@ _INLINE_SECRET_RE = re.compile(
     r"""[ \t]*[:=][ \t]*["']?([^\s"'#,}\]]{8,})""",
     re.IGNORECASE,
 )
+# mcp_servers.<name>.headers / .env carry the authorization of a remote or local MCP server.
+_MCP_AUTH_BLOCK_RE = re.compile(r"""^[ \t-]*["']?(?:headers|env)["']?[ \t]*:""", re.IGNORECASE | re.MULTILINE)
+_AUTH_HEADER_RE = re.compile(
+    r"""["']?(?:proxy-authorization|authorization|x-api-key|x-auth-token|x-access-token|api-key|cookie)["']?"""
+    r"""[ \t]*[:=][ \t]*([^\r\n]+)""",
+    re.IGNORECASE,
+)
+_BEARER_RE = re.compile(r"\bBearer[ \t]+(?!\$)[A-Za-z0-9._~+/=-]{12,}", re.IGNORECASE)
+_TOKEN_LITERAL_RE = re.compile(
+    r"\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}"
+    r"|xox[abprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{30,}|AKIA[0-9A-Z]{16}"
+    r"|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}|\d{8,10}:[A-Za-z0-9_-]{35})\b"
+)
+_URL_CREDENTIALS_RE = re.compile(r"://[^/\s:@]+:[^/\s@]{3,}@")
 _NOT_A_SECRET_VALUE = re.compile(r"^(?:[\d._-]+|\$\{.*|\$[A-Z_]+|true|false|null|none)$", re.IGNORECASE)
 
 _EXTERNAL_PREFIX = "_external/"
@@ -115,16 +130,29 @@ def _may_hold_inline_secret(rel: str) -> bool:
 
 
 def has_inline_secret(path: Path) -> bool:
-    """True if a small settings file contains a literal key/token/password value."""
+    """True if a small settings file holds a credential or a connection to one."""
     try:
         if path.stat().st_size > _SNIFF_MAX_BYTES:
             return False
         text = path.read_text(encoding="utf-8", errors="ignore")
     except OSError:
         return False
+    if _holds_connection_credentials(text):
+        return True
     return any(
         not _NOT_A_SECRET_VALUE.match(match.group(1)) for match in _INLINE_SECRET_RE.finditer(text)
     )
+
+
+def _holds_connection_credentials(text: str) -> bool:
+    """MCP/HTTP connection settings, authorization headers, token-shaped literals."""
+    if "mcp_servers" in text and _MCP_AUTH_BLOCK_RE.search(text):
+        return True
+    for match in _AUTH_HEADER_RE.finditer(text):
+        value = match.group(1).strip().strip("\"',{}[] ")
+        if len(value) >= 6 and not value.startswith("$"):
+            return True
+    return bool(_BEARER_RE.search(text) or _TOKEN_LITERAL_RE.search(text) or _URL_CREDENTIALS_RE.search(text))
 
 
 def is_secret(rel: str, abs_path: Path | None = None) -> bool:
