@@ -414,3 +414,20 @@ def test_board_like_borisss_keeps_pending_requests_and_old_cards(home, monkeypat
         for tid in backlog + [finished]:
             assert kb.get_task(conn, tid).status == "ready"
         assert len(_events(conn, finished, "dispatch_request_lapsed")) == 1
+
+
+@pytest.mark.parametrize("offset, expected", [(0.0, "crashed"), (0.9, "crashed"), (1.5, "interrupted")])
+def test_unknown_exit_in_the_dispatcher_start_second_is_a_crash(home, monkeypatch, offset, expected):
+    """K21-346: целые секунды карточки против дробного старта dispatcher."""
+    monkeypatch.setattr(kb, "_pid_alive", lambda _pid: False)
+    monkeypatch.setattr(kb, "_recent_worker_exits", {})
+    with kb.connect_closing() as conn:
+        tid = _card(conn)
+        kb.claim_task(conn, tid)
+        conn.execute("UPDATE tasks SET worker_pid = 91235 WHERE id = ?", (tid,))
+        conn.commit()
+        started = kb.get_task(conn, tid).started_at
+        monkeypatch.setattr(kb, "_DISPATCHER_PROCESS_STARTED_AT", started + offset)
+        monkeypatch.setattr(kb, "_resolve_crash_grace_seconds", lambda: 0)
+        crashed = kb.detect_crashed_workers(conn)
+        assert (tid in crashed) is (expected == "crashed")

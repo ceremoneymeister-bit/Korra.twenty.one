@@ -9881,7 +9881,10 @@ def detect_crashed_workers(conn: sqlite3.Connection) -> list[str]:
             if (
                 kind == "unknown"
                 and started_at is not None
-                and started_at < _DISPATCHER_PROCESS_STARTED_AT
+                # started_at хранится целыми секундами, старт процесса — дробный:
+                # карточка, взятая в ту же секунду, принадлежит текущему процессу
+                # (K21-346 — иначе её сбой считался рестартом, тесты мигали).
+                and started_at < int(_DISPATCHER_PROCESS_STARTED_AT)
             ):
                 # The worker belongs to a previous dispatcher process: the
                 # restart/drain took it with it. Not the card's fault.
