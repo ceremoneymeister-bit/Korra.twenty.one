@@ -42,7 +42,7 @@ def isolated_profiles(tmp_path, monkeypatch, _isolate_hermes_home):
     worker_home = profiles_root / "worker_alpha"
     for home in (default_home, worker_home):
         (home / "skills").mkdir(parents=True, exist_ok=True)
-        (home / "config.yaml").write_text("{}\n", encoding="utf-8")
+        (home / "config.yaml").write_text("model:\n  default: test-model\n", encoding="utf-8")
 
     _write_skill(default_home / "skills", "dashboard-skill")
     _write_skill(worker_home / "skills", "worker-skill")
