@@ -53,6 +53,39 @@ def test_adapter_supports_push_default_true():
     assert adapter_supports_push(ApiServerLikeAdapter()) is False
 
 
+def test_named_profile_wake_self_posts_to_profile_route(tmp_path, monkeypatch):
+    """The shared API listener must resume the profile, even for a raw id."""
+    web = pytest.importorskip("aiohttp.web")
+    from gateway.run import _profile_runtime_scope
+
+    root = tmp_path / "hermes"
+    profile = root / "profiles" / "worker"
+    profile.mkdir(parents=True)
+    monkeypatch.setenv("HERMES_HOME", str(root))
+    seen = []
+
+    async def handler(request):
+        seen.append((request.path, request.headers.get("X-Hermes-Session-Id")))
+        return web.json_response({"choices": []})
+
+    async def run():
+        app = web.Application()
+        app.router.add_post("/p/worker/v1/chat/completions", handler)
+        http = web.AppRunner(app)
+        await http.setup()
+        site = web.TCPSite(http, "127.0.0.1", 0)
+        await site.start()
+        try:
+            adapter = ApiServerLikeAdapter(port=site._server.sockets[0].getsockname()[1])
+            with _profile_runtime_scope(profile):
+                await deliver_wake(adapter, text="test result", session_id="parent")
+        finally:
+            await http.cleanup()
+
+    asyncio.run(run())
+    assert seen == [("/p/worker/v1/chat/completions", "parent")]
+
+
 async def _serve(handler):
     """Spin an in-process aiohttp server on an ephemeral loopback port."""
     from aiohttp import web
