@@ -44,7 +44,7 @@
 .upd-notes-group > p { font-size: 0.8125rem; color: var(--neo-text-secondary); margin-bottom: 0.75rem; }
 .upd-notes ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.9rem; }
 .upd-notes li { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 0.85rem; align-items: start; }
-.upd-notes li > svg { margin-top: 0.25rem; color: var(--neo-text-secondary); }
+.upd-list-mark { width: 6px; height: 6px; margin: 0.65rem 0 0 0.5rem; border-radius: 50%; background: var(--neo-text-secondary); }
 .upd-notes li p { margin-top: 0.25rem; font-size: 0.875rem; color: var(--neo-text-secondary); }
 .upd-more { display: inline-flex; align-items: center; gap: 0.5rem; min-height: 44px; margin-top: 1rem; padding: 0.5rem 0.9rem; border-radius: var(--neo-radius-control); background: transparent; font-size: 0.8125rem; color: var(--neo-text-secondary); }
 .upd-more:hover { background: var(--neo-surface); box-shadow: var(--neo-inset-compact); }
@@ -88,14 +88,23 @@
 .upd-picture figcaption { margin-top: 0.5rem; color: var(--neo-text-secondary); font-size: 0.75rem; line-height: 1.5; }
 .upd-notes li.upd-feature { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 1.5rem; align-items: center; margin: 0.75rem 0; }
 .upd-feature .upd-picture { margin: 0; }
-.upd-card > .upd-picture img { max-height: 420px; object-fit: contain; }
+.upd-card > .upd-picture > button img { max-height: 420px; object-fit: contain; }
 .upd-history details { margin-top: 1rem; }
 .upd-history summary { cursor: pointer; min-height: 44px; padding: 0.75rem 1rem; border-radius: var(--neo-radius-control); background: var(--neo-surface); box-shadow: var(--neo-depth-1); font-weight: 600; }
 .upd-history summary span { display: block; color: var(--neo-text-secondary); font-size: 0.8125rem; font-weight: 400; }
 .upd-history .upd-card { margin-top: 1rem; }
-.korra-updates :is(button, summary):focus-visible { outline: 2px solid var(--neo-text-primary); outline-offset: 3px; }
+.korra-updates :is(button, summary, .upd-picture-scroll):focus-visible { outline: 2px solid var(--neo-text-primary); outline-offset: 3px; }
 @media (max-width: 720px) {
   .upd-notes li.upd-feature { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
   .upd-actions > p { min-width: 0; }
   .upd-card-head > div:first-child { flex-basis: 100%; }
 }
+
+.upd-picture-open { position: relative; display: block; width: 100%; padding: 0; border-radius: var(--neo-radius-control); background: var(--neo-surface); cursor: zoom-in; }
+.upd-picture-hint { position: absolute; right: 0.5rem; bottom: 0.5rem; padding: 0.2rem 0.6rem; border-radius: var(--neo-radius-control); background: var(--neo-surface); color: var(--neo-text-primary); box-shadow: var(--neo-depth-1); font-size: 0.75rem; }
+.upd-picture-dialog { width: min(1200px, calc(100% - 2rem)); max-width: none; max-height: calc(100dvh - 2rem); margin: auto; padding: 1rem; border: 0; border-radius: var(--neo-radius-card); background: var(--neo-surface); color: var(--neo-text-primary); box-shadow: var(--neo-depth-3); }
+.upd-picture-dialog::backdrop { background: rgb(0 0 0 / 65%); }
+.upd-picture-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 0.5rem; }
+.upd-picture-header .upd-button { flex-shrink: 0; min-height: 44px; padding: 0.5rem 1rem; }
+.upd-picture-scroll { overflow: auto; max-height: 70dvh; margin-top: 0.75rem; overscroll-behavior: contain; }
+.upd-picture-scroll img { width: auto; max-width: none; min-width: 100%; }
