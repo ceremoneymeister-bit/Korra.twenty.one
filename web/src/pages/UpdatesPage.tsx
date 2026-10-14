@@ -13,7 +13,7 @@
  * состояния не проходит. Пока идёт известное нам обновление, обрыв связи здесь
  * не ошибка, а ожидаемый шаг, и написан он именно так.
  */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   ArrowRight,
@@ -23,7 +23,6 @@ import {
   Download,
   Info,
   RotateCcw,
-  Sparkles,
 } from "lucide-react";
 import { usePageHeader } from "@/contexts/usePageHeader";
 import { api, withBasePath } from "@/lib/api";
@@ -88,7 +87,7 @@ function ReleaseSections({ sections, expanded }: { sections: ReleaseNoteSection[
             <ul>
               {items.map((item) => (
                 <li key={item.title} className={item.screenshot ? "upd-feature" : undefined}>
-                  {item.screenshot ? <Screenshot picture={item.screenshot} /> : <Sparkles size={16} aria-hidden />}
+                  {item.screenshot ? <Screenshot picture={item.screenshot} /> : <span className="upd-list-mark" aria-hidden />}
                   <div>
                     <h4>{item.title}</h4>
                     {item.detail && <p>{item.detail}</p>}
@@ -104,10 +103,41 @@ function ReleaseSections({ sections, expanded }: { sections: ReleaseNoteSection[
 }
 
 function Screenshot({ picture }: { picture: ReleaseScreenshot }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const captionId = useId();
+  const [open, setOpen] = useState(false);
+  const src = withBasePath(picture.src);
   return (
     <figure className="upd-picture">
-      <img src={withBasePath(picture.src)} alt={picture.alt} loading="lazy" decoding="async" />
+      <button
+        type="button"
+        className="upd-picture-open"
+        aria-label={`Увеличить снимок: ${picture.alt}`}
+        aria-haspopup="dialog"
+        onClick={() => { setOpen(true); dialog.current?.showModal(); }}
+      >
+        <img src={src} alt={picture.alt} loading="lazy" decoding="async" />
+        <span className="upd-picture-hint">Увеличить</span>
+      </button>
       <figcaption>{picture.alt}</figcaption>
+      <dialog
+        ref={dialog}
+        className="upd-picture-dialog"
+        aria-labelledby={captionId}
+        onClose={() => setOpen(false)}
+        onClick={event => { if (event.target === event.currentTarget) dialog.current?.close(); }}
+      >
+        <div className="upd-picture-header">
+          <p id={captionId}>{picture.alt}</p>
+          <button type="button" className="upd-button" aria-label="Закрыть снимок" onClick={() => dialog.current?.close()}>
+            Закрыть
+          </button>
+        </div>
+        <p className="upd-small upd-muted">Снимок можно прокручивать. Esc — закрыть.</p>
+        <div className="upd-picture-scroll" tabIndex={0} role="region" aria-label="Увеличенный снимок">
+          {open && <img src={src} alt={picture.alt} decoding="async" />}
+        </div>
+      </dialog>
     </figure>
   );
 }
