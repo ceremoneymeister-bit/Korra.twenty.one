@@ -2429,7 +2429,7 @@ def _current_max_iterations() -> int:
     return _resolve_turn_limit(korra_env("KORRA_MAX_ITERATIONS"))
 
 
-from contextlib import contextmanager as _contextmanager
+from contextlib import contextmanager as _contextmanager, nullcontext
 
 
 # Platforms that bind a host TCP port (HTTP/webhook listeners). In a profile
@@ -4272,9 +4272,10 @@ def _parse_session_key(session_key: str) -> "dict | None":
     """Parse a session key into its component parts.
 
     Session keys follow the format
-    ``agent:main:{platform}:{chat_type}:{chat_id}[:{extra}...]``.
+    ``agent:{main_or_profile}:{platform}:{chat_type}:{chat_id}[:{extra}...]``.
     Returns a dict with ``platform``, ``chat_type``, ``chat_id``, and
-    optionally ``thread_id`` keys, or None if the key doesn't match.
+    optionally ``thread_id`` and named ``profile`` keys, or None if the key
+    doesn't match.
 
     The 6th element is only returned as ``thread_id`` for chat types where
     it is unambiguous (``dm`` and ``thread``).  For group/channel sessions
@@ -4282,12 +4283,14 @@ def _parse_session_key(session_key: str) -> "dict | None":
     thread_id, so we leave ``thread_id`` out to avoid mis-routing.
     """
     parts = session_key.split(":")
-    if len(parts) >= 5 and parts[0] == "agent" and parts[1] == "main":
+    if len(parts) >= 5 and parts[0] == "agent" and parts[1]:
         result = {
             "platform": parts[2],
             "chat_type": parts[3],
             "chat_id": parts[4],
         }
+        if parts[1] != "main":
+            result["profile"] = parts[1]
         if len(parts) > 5 and parts[3] in {"dm", "thread"}:
             result["thread_id"] = parts[5]
         return result
@@ -24301,9 +24304,12 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             # send_multiple_images (Telegram sendPhoto recompresses to ~1280px).
             force_document_attachments = "[[as_document]]" in response
 
-            from gateway.platforms.base import BasePlatformAdapter, should_send_media_as_audio
+            from gateway.platforms.base import (
+                BasePlatformAdapter, MEDIA_DELIVERY_FAILURE_NOTICE, should_send_media_as_audio,
+            )
 
             media_files, cleaned = adapter.extract_media(response)
+            requested_media_count = len(media_files)
             media_files = BasePlatformAdapter.filter_media_delivery_paths(media_files)
             # Do NOT deduplicate explicit MEDIA tags against prior turns here
             # (#73771). This rescan is already EXPLICIT-ONLY (see docstring):
@@ -24328,6 +24334,13 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     self._reply_anchor_for_event(event),
                 )
             )
+
+            if len(media_files) < requested_media_count:
+                await adapter.send(
+                    chat_id=event.source.chat_id,
+                    content=MEDIA_DELIVERY_FAILURE_NOTICE,
+                    metadata=_thread_meta,
+                )
 
             _VIDEO_EXTS = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.3gp'}
             _IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.webp', '.gif'}
@@ -24652,8 +24665,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             # Extract media files from the response
             if response:
                 media_files, response = adapter.extract_media(response)
-                from gateway.platforms.base import BasePlatformAdapter
+                from gateway.platforms.base import BasePlatformAdapter, MEDIA_DELIVERY_FAILURE_NOTICE
+                requested_media_count = len(media_files)
                 media_files = BasePlatformAdapter.filter_media_delivery_paths(media_files)
+                if len(media_files) < requested_media_count:
+                    response = f"{response}\n\n{MEDIA_DELIVERY_FAILURE_NOTICE}".strip()
                 images, text_content = adapter.extract_images(response)
 
                 preview = prompt[:60] + ("..." if len(prompt) > 60 else "")
@@ -27031,6 +27047,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         derived_platform = ""
         derived_chat_type = ""
         derived_chat_id = ""
+        derived_profile = ""
 
         if session_key:
             try:
@@ -27054,6 +27071,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 derived_platform = _parsed["platform"]
                 derived_chat_type = _parsed["chat_type"]
                 derived_chat_id = _parsed["chat_id"]
+                derived_profile = _parsed.get("profile", "")
 
         platform_name = str(evt.get("platform") or derived_platform or "").strip().lower()
         chat_type = str(evt.get("chat_type") or derived_chat_type or "").strip().lower()
@@ -27110,6 +27128,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             user_id=str(evt.get("user_id") or "").strip() or None,
             user_name=str(evt.get("user_name") or "").strip() or None,
             scope_id=scope_id,
+            profile=str(evt.get("origin_profile") or derived_profile or "") or None,
         )
 
     async def _drain_watch_notifications(self, completion_queue) -> None:
@@ -27197,6 +27216,18 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # the shared transport resolver — native adapter wins; relay is
         # eligible only when it advertises fronting the logical platform.
         adapter = None
+        delivery_adapters = self.adapters
+        if (
+            getattr(getattr(self, "config", None), "multiplex_profiles", False)
+            and source.profile and source.profile != "default"
+        ):
+            delivery_adapters = dict(
+                (getattr(self, "_profile_adapters", None) or {}).get(source.profile, {})
+            )
+            # Port-binding API and relay transports are shared by all profiles.
+            for shared in (Platform.API_SERVER, Platform.RELAY):
+                if shared in self.adapters:
+                    delivery_adapters.setdefault(shared, self.adapters[shared])
         try:
             _platform_enum = Platform(platform_name)
         except (ValueError, KeyError):
@@ -27204,7 +27235,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         if _platform_enum is not None:
             try:
                 _transport = resolve_delivery_transport(
-                    _platform_enum, self.config, self.adapters,
+                    _platform_enum, self.config, delivery_adapters,
                 )
             except Exception:
                 _transport = None
@@ -27214,7 +27245,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             # Legacy literal scan — still correct for native adapters, and
             # keeps minimal runner stubs (tests) and exotic platform strings
             # working when the resolver can't run.
-            for p, a in self.adapters.items():
+            for p, a in delivery_adapters.items():
                 if p.value == platform_name:
                     adapter = a
                     break
@@ -27750,6 +27781,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             "chat_id",
             "thread_id",
             "user_id",
+            "origin_profile",
         ))
 
     @staticmethod
@@ -27788,12 +27820,16 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         from tools.process_registry import process_registry as _pr
 
         deliverable: list[tuple[dict, str]] = []
+        seen = set()
         for evt in group:
             synth_text = _format_gateway_process_notification(evt)
             if not synth_text:
                 continue
             identity = self._completion_delivery_identity(evt)
             if identity is not None:
+                if identity in seen:
+                    continue
+                seen.add(identity)
                 with self._completion_delivery_lock:
                     if (
                         identity in self._completion_deliveries_inflight
@@ -27885,8 +27921,36 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         """
         await asyncio.sleep(3)  # let platforms finish connecting
         from tools.process_registry import process_registry as _pr
+        from tools.async_delegation import restore_undelivered_completions
+        import queue
+
+        restored_homes = set()
         while self._running:
             try:
+                profile_homes = {}
+                if getattr(getattr(self, "config", None), "multiplex_profiles", False):
+                    profile_homes = dict(_multiplex_profile_homes(self.config))
+                    for name, home in profile_homes.items():
+                        if name == "default" or home in restored_homes:
+                            continue
+                        # Registry startup restores only the process's root
+                        # store. Recover each served secondary store once too,
+                        # stamping legacy payloads with their known owner.
+                        restored = queue.Queue()
+                        try:
+                            with _profile_runtime_scope(home):
+                                restore_undelivered_completions(restored)
+                        except Exception as exc:
+                            logger.warning(
+                                "Could not restore async completions for profile %s: %s",
+                                name, exc,
+                            )
+                            continue
+                        while not restored.empty():
+                            evt = restored.get_nowait()
+                            evt["origin_profile"] = name
+                            _pr.completion_queue.put(evt)
+                        restored_homes.add(home)
                 # Peek the queue for async-delegation events. We must NOT
                 # consume watch/completion events here (other drains own them),
                 # so requeue anything that isn't ours.
@@ -27913,6 +27977,10 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 group_order: list[tuple[str, ...]] = []
                 for evt in async_events:
                     self._enrich_async_delegation_routing(evt)
+                    if not evt.get("origin_profile"):
+                        parsed = _parse_session_key(evt.get("session_key", "") or "")
+                        if parsed and parsed.get("profile"):
+                            evt["origin_profile"] = parsed["profile"]
                     key = self._async_delegation_group_key(evt)
                     if key not in groups:
                         groups[key] = []
@@ -27921,7 +27989,16 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 for key in group_order:
                     group = groups[key]
                     try:
-                        delivered = await self._deliver_async_delegation_group(group)
+                        profile = group[0].get("origin_profile")
+                        if profile_homes and profile and profile not in profile_homes:
+                            # Removed/unserved profiles cannot borrow the root
+                            # store or bot. Leave their results recoverable.
+                            for evt in group:
+                                _pr.completion_queue.put(evt)
+                            continue
+                        home = profile_homes.get(profile) if profile != "default" else None
+                        with _profile_runtime_scope(home) if home else nullcontext():
+                            delivered = await self._deliver_async_delegation_group(group)
                         if delivered is False:
                             for evt in group:
                                 _pr.completion_queue.put(evt)

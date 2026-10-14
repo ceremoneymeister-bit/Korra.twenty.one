@@ -15180,6 +15180,14 @@ def _call_cron_for_profile(target_profile: Optional[str], func_name: str, *args,
                 result = accept_owner_form_edit(*args, **kwargs)
             else:
                 result = getattr(cron_jobs, func_name)(*args, **kwargs)
+            if isinstance(result, dict) and func_name in {
+                "create_job", "update_job", "accept_owner_form_edit",
+            }:
+                from cron.scheduler import cron_delivery_warning
+
+                warning = cron_delivery_warning(result, profile_home=home)
+                if warning:
+                    result = {**result, "warning": warning}
     finally:
         reset_hermes_home_override(token)
 

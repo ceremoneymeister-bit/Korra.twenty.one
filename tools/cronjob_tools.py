@@ -1980,6 +1980,11 @@ def cronjob(
                 "message": _create_message,
                 **_gateway_liveness_notice(),
             }
+            from cron.scheduler import cron_delivery_warning
+
+            _warning = cron_delivery_warning(job)
+            if _warning:
+                _result["warning"] = " ".join(filter(None, [_result.get("warning"), _warning]))
             # Mode-specific guidance rides in the create response (once, when
             # relevant) instead of in the schema (every API call). See
             # _mode_guidance_notes.
@@ -2366,6 +2371,11 @@ def cronjob(
                 _upd_recipients = _show_recipients_card(updated, _card)
             _notify_provider_jobs_changed_safe()
             _upd_result: Dict[str, Any] = {"success": True, "job": _format_job(updated)}
+            from cron.scheduler import cron_delivery_warning
+
+            _warning = cron_delivery_warning(updated)
+            if _warning:
+                _upd_result["warning"] = _warning
             # An update can switch a job into monitor / no_agent mode or
             # change its delivery — echo the same mode guidance as create.
             _upd_notes = _mode_guidance_notes(updated, _normalize_deliver_param(deliver))

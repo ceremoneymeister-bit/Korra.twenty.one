@@ -1975,6 +1975,11 @@ def validate_media_delivery_path(path: str, session_key: str = "") -> Optional[s
 # can't forge a second log line. Truncated to keep records bounded.
 _LOG_UNSAFE_CHARS = re.compile(r"[\x00-\x1f\x7f\x85\u2028\u2029]")
 
+MEDIA_DELIVERY_FAILURE_NOTICE = (
+    "⚠️ Не удалось прикрепить один или несколько файлов: файл недоступен или его отправка "
+    "не разрешена. Попросите агента найти или пересоздать файл и отправить его заново."
+)
+
 
 def _log_safe_path(path: str) -> str:
     """Return a single-line, length-bounded path for log output."""
@@ -5110,9 +5115,12 @@ class BasePlatformAdapter(ABC):
         return validate_media_delivery_path(path, session_key=session_key)
 
     @staticmethod
-    def filter_media_delivery_paths(media_files, session_key: str = "") -> List[Tuple[str, bool]]:
-        """Drop unsafe MEDIA paths and normalize accepted paths."""
+    def filter_media_delivery_paths(
+        media_files, session_key: str = "", *, require_all: bool = False,
+    ) -> List[Tuple[str, bool]]:
+        """Normalize safe paths; optionally refuse the whole outbound payload."""
         safe_media: List[Tuple[str, bool]] = []
+        rejected: List[str] = []
         for media_path, is_voice in media_files or []:
             raw = str(media_path)
             safe_path = validate_media_delivery_path(raw, session_key=session_key)
@@ -5120,6 +5128,14 @@ class BasePlatformAdapter(ABC):
                 safe_media.append((safe_path, bool(is_voice)))
             else:
                 logger.warning("Skipping unsafe MEDIA directive path: %s", _log_safe_path(raw))
+                rejected.append(_log_safe_path(raw))
+        if require_all and rejected:
+            raise ValueError(
+                "MEDIA attachments unavailable or disallowed: "
+                + "; ".join(rejected[:3])
+                + ". Nothing sent. Check an existing absolute file path in the active "
+                "profile and terminal workspace; find or recreate the file before retrying."
+            )
         return safe_media
 
     @staticmethod
@@ -6811,7 +6827,10 @@ class BasePlatformAdapter(ABC):
 
                 # Extract MEDIA:<path> tags (from TTS tool) before other processing
                 media_files, response = self.extract_media(response)
+                requested_media_count = len(media_files)
                 media_files = self.filter_media_delivery_paths(media_files, session_key=session_key)
+                if len(media_files) < requested_media_count:
+                    response = f"{response}\n\n{MEDIA_DELIVERY_FAILURE_NOTICE}".strip()
 
                 # Extract image URLs and send them as native platform attachments
                 images, text_content = self.extract_images(response)

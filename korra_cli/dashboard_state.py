@@ -1715,10 +1715,11 @@ def _cron_items(agents: list[Agent], *, now: float, tz: Optional[tzinfo]) -> lis
             jobs = {}
         for row in rows:
             seen = _parse_iso(row["last_seen_at"], tz)
-            provider = subscription_provider(row["error"])
+            delivery_failure = row["failure_type"] == "delivery"
+            provider = None if delivery_failure else subscription_provider(row["error"])
             job = jobs.get(str(row["job_id"]))
             transient_service = is_transient_service_failure(row["error"])
-            if transient_service and job and is_retry_fire(job, job.get("next_run_at")):
+            if not delivery_failure and transient_service and job and is_retry_fire(job, job.get("next_run_at")):
                 continue
             if seen is None or (seen.timestamp() < since and not provider):
                 continue
@@ -1743,15 +1744,18 @@ def _cron_items(agents: list[Agent], *, now: float, tz: Optional[tzinfo]) -> lis
                 transient_service and job and job.get("state") == "completed"
                 and job.get("last_status") == "error"
             )
-            if job is None or (not _job_runnable(job) and not final_congestion):
+            if job is None or (not _job_runnable(job) and not final_congestion and not delivery_failure):
                 continue
-            detail = _FAILURE_TEXT.get(str(row["failure_type"] or ""), "") or _trim(row["error"], 120)
+            detail = _trim(row["error"], 240) if delivery_failure else (
+                _FAILURE_TEXT.get(str(row["failure_type"] or ""), "") or _trim(row["error"], 120)
+            )
             items.append({
                 "id": f"cron:{agent.profile or 'default'}:{row['id']}",
                 "source": "cron",
                 "kind": "cron_incident",
                 "severity": "problem",
-                "title": f"Задача «{_trim(job.get('name'), 60)}» не выполнилась",
+                "title": (f"Проверьте доставку задачи «{_trim(job.get('name'), 60)}»"
+                          if delivery_failure else f"Задача «{_trim(job.get('name'), 60)}» не выполнилась"),
                 "detail": detail or "Запуск завершился ошибкой.",
                 "agent": agent.label,
                 "profile": agent.profile,

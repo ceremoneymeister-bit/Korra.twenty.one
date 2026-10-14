@@ -498,7 +498,8 @@ def _repeat_alert_withheld(incident: dict) -> bool:
 
 
 def _upsert_incident_for_failure(
-    job: dict, error: str, *, output_file: Optional[Any] = None
+    job: dict, error: str, *, output_file: Optional[Any] = None,
+    failure_type: Optional[str] = None,
 ) -> tuple[bool, Optional[str]]:
     """Record a durable failure incident for this run.
 
@@ -523,6 +524,7 @@ def _upsert_incident_for_failure(
             str(error or ""),
             job_name=job.get("name"),
             output_file=output_file,
+            failure_type=failure_type,
         )
         incident = get_incident(incident_id)
         state = incident.get("state") if incident else None
@@ -536,13 +538,14 @@ def _upsert_incident_for_failure(
         return False, None
 
 
-def _resolve_incidents_for_recovered_job(job: dict) -> None:
+def _resolve_incidents_for_recovered_job(job: dict, *, delivery_recovered: bool = True) -> None:
     """Best-effort: a successful run marks the job's open incidents ``resolved``."""
     try:
         from cron.incidents import close_incidents_for_recovered_job
 
         close_incidents_for_recovered_job(
-            job["id"], provider=job.get("_resolved_subscription_provider")
+            job["id"], provider=job.get("_resolved_subscription_provider"),
+            delivery_recovered=delivery_recovered,
         )
     except Exception as exc:
         logger.debug("Incident store unavailable for job %s (delivery unaffected): %s", job["id"], exc)
@@ -3227,9 +3230,21 @@ def _is_creator_private_chat(job: dict, platform_name: str, chat_id) -> bool:
             and str(origin.get("chat_id") or "").strip() == str(chat_id).strip()
         )
     chat = _private_telegram_chat(platform_name, chat_id)
-    return bool(chat) and (
-        str(origin.get("platform") or "").strip().lower() == "telegram"
-        and str(origin.get("user_id") or "").strip() == chat
+    if not chat or str(origin.get("platform") or "").strip().lower() != "telegram":
+        return False
+    if "user_id" in origin:
+        return str(origin.get("user_id") or "").strip() == chat
+    # Old Telegram jobs recorded only the originating chat. A positive chat
+    # id identifies that same private recipient, so a delayed reply adds no
+    # reach. Only this unstamped legacy form qualifies: missing/contradictory
+    # identity on a newer job must not become a compatibility bypass. This
+    # grants no owner rights and never applies to another target or a group.
+    return (
+        "owner" not in origin
+        and "created_by_owner" not in job
+        and chat != "0"
+        and str(origin.get("chat_id") or "").strip() == chat
+        and str(origin.get("chat_type") or "").strip().lower() in ("", "dm", "private")
     )
 
 
@@ -5811,6 +5826,57 @@ def _preflight_check_delivery(job: dict) -> Optional[str]:
     return None
 
 
+def cron_delivery_warning(job: dict, *, profile_home: Optional[Path] = None) -> Optional[str]:
+    """Warn on save using the same connectivity check as delivery preflight.
+
+    Web chat and Bot Chat use local delivery. A dashboard targeting another
+    profile must inspect that profile's secrets, never the process credentials.
+    The warning is response metadata, not persisted job state or a send attempt.
+    """
+    parts = []
+    for part in _normalize_deliver_value(job.get("deliver", "local")).split(","):
+        part = part.strip()
+        if part == "origin":
+            part = str((job.get("origin") or {}).get("platform") or "origin")
+        if part.split(":", 1)[0] == WEB_CHAT_PLATFORM:
+            continue
+        parts.append(part)
+    checked = {**job, "deliver": ",".join(parts) or "local"}
+    token = None
+    try:
+        if profile_home is not None:
+            from agent.secret_scope import (
+                _is_global_env, build_profile_secret_scope, set_secret_scope,
+            )
+
+            # Empty values mask process credentials even in a serve process
+            # where multiplex mode is off and scopes are otherwise overlays.
+            secrets = {key: "" for key in os.environ if not _is_global_env(key)}
+            secrets.update(build_profile_secret_scope(profile_home))
+            token = set_secret_scope(secrets)
+        problem = _preflight_check_delivery(checked)
+    finally:
+        if token is not None:
+            from agent.secret_scope import reset_secret_scope
+
+            reset_secret_scope(token)
+    if not problem:
+        return None
+    # Preflight diagnostics name the failing platform. Keep its name in the
+    # owner's warning, while leaving runtime implementation details in logs.
+    channel = re.search(r"delivery platform '([^']+)'", problem)
+    label = channel.group(1) if channel else "выбранный канал"
+    reason = (
+        f"канал «{label}» не подключён в выбранном профиле"
+        if _is_known_delivery_platform(label) else f"указан неизвестный канал «{label}»"
+    )
+    return (
+        f"Задача сохранена, но результат не будет доставлен: {reason}. "
+        "Откройте «Каналы» именно выбранного профиля и подключите нужный канал "
+        "или выберите другую доставку."
+    )
+
+
 def _preflight_check_skills(job: dict) -> Optional[str]:
     """Check attached skills report ready (no missing required env/commands).
 
@@ -8027,7 +8093,6 @@ def _run_one_job_body(
             else:
                 if success:
                     deliver_content = final_response
-                    _resolve_incidents_for_recovered_job(job)
                 else:
                     if incident_acked and not drift_skip:
                         deliver_content = ""
@@ -8228,6 +8293,29 @@ def _run_one_job_body(
             delivery_outcome = "suppressed_acked"
         else:
             delivery_outcome = "suppressed"
+        if success:
+            # Computation recovery cannot close a delivery incident until a
+            # result actually arrives. Silence / approval queues prove nothing
+            # about the previous failed delivery. Local is an explicit opt-out.
+            _resolve_incidents_for_recovered_job(
+                job, delivery_recovered=delivery_outcome == "delivered" or normalized_deliver == "local"
+            )
+        if delivery_error:
+            if delivery_unknown:
+                description = (
+                    "Доставка результата не подтверждена. " if success else
+                    "Доставка уведомления о сбое не подтверждена. "
+                ) + "Проверьте получателя перед повторной отправкой. Причина: "
+            else:
+                description = (
+                    "Результат вычислен, но не доставлен. Причина: " if success else
+                    "Уведомление о сбое не доставлено. Причина: "
+                )
+            _upsert_incident_for_failure(
+                job, description + delivery_error,
+                output_file=output_file,
+                failure_type="delivery",
+            )
         if delivery_outcome == "delivered" and not success:
             # The failure ping left the process — record it on the incident so the CLI
             # distinguishes "failure seen" from "operator was pinged".
@@ -8321,6 +8409,9 @@ def _run_one_job_body(
                     ):
                         delivery_waiting_decision = True
                         delivery_error = None
+                    elif delivery_error and delivery_error.startswith(_DELIVERY_UNKNOWN_PREFIX):
+                        delivery_unknown = True
+                        delivery_error = delivery_error[len(_DELIVERY_UNKNOWN_PREFIX):]
                 except Exception as delivery_exc:
                     delivery_error = str(delivery_exc)
                     logger.error(
@@ -8330,6 +8421,8 @@ def _run_one_job_body(
                     unresolved_origin = not _resolve_delivery_targets(notice_job)
                 if delivery_waiting_decision:
                     delivery_outcome = "waiting_decision"
+                elif delivery_unknown:
+                    delivery_outcome = "unknown"
                 elif delivery_error:
                     from cron.result_validity import EXPIRED_DELIVERY
                     delivery_outcome = "expired" if delivery_error == EXPIRED_DELIVERY else "failed"
@@ -8339,6 +8432,16 @@ def _run_one_job_body(
                     delivery_outcome = "delivered"
                 if delivery_outcome == "delivered":
                     _mark_incident_alerted(failure_incident_id)
+        if delivery_error:
+            description = (
+                "Доставка уведомления о сбое не подтверждена. "
+                "Проверьте получателя перед повторной отправкой. Причина: "
+                if delivery_unknown else "Уведомление о сбое не доставлено. Причина: "
+            )
+            _upsert_incident_for_failure(
+                job, description + delivery_error,
+                failure_type="delivery",
+            )
         try:
             if not _consume_interrupted_flag(job["id"], execution_token):
                 mark_kwargs = {}

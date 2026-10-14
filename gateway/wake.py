@@ -122,7 +122,12 @@ async def _self_post_chat_completion(
 
     if ":" in host and not host.startswith("["):
         host = f"[{host}]"  # bare IPv6 literal
-    url = f"http://{host}:{port}/v1/chat/completions"
+    from korra_cli.profiles import get_active_profile_name
+    from urllib.parse import quote
+
+    profile = get_active_profile_name()
+    prefix = f"/p/{quote(profile, safe='')}" if profile not in ("default", "custom") else ""
+    url = f"http://{host}:{port}{prefix}/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {api_key}",
         "X-Hermes-Session-Id": session_id,
