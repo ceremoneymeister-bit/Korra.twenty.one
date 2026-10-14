@@ -80,7 +80,7 @@ def test_reminder_store_execution_delivery_and_receipt(tmp_path, monkeypatch, ou
         receipt = executions.latest_execution(job["id"])
         assert receipt["status"] == "completed"
         assert receipt["delivery_outcome"] == outcome
-        assert jobs.get_job(job["id"])["last_status"] == "ok"
+        assert jobs.get_job(job["id"])["last_status"] == ("delivery_failed" if outcome == "failed" else "ok")
     assert not (tmp_path / "state.db").exists()
     if outcome == "waiting_decision":
         send.assert_not_called()

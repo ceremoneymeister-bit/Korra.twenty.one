@@ -526,6 +526,12 @@ def _get_session(task_id: Optional[str]) -> Dict[str, Any]:
     to the same persistent browser profile across restarts.
     """
     task_id = task_id or "default"
+    # Camofox bypasses agent-browser's _get_session_info; it still needs the
+    # same profile-aware inactivity/shutdown tracking as every other backend.
+    from tools.browser_tool import _start_browser_cleanup_thread, _update_session_activity
+
+    _update_session_activity(task_id)
+    _start_browser_cleanup_thread()
     with _sessions_lock:
         if task_id in _sessions:
             return _adopt_existing_tab(_sessions[task_id])

@@ -13143,6 +13143,10 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
             session_ids = self._session_lineage_root_to_tip(session_id)
 
         active_clause = "" if include_inactive else " AND active = 1"
+        # Scheduled web-chat results are visible notifications, not model turns.
+        # Keep the cached prefix and role alternation intact on live replay.
+        if not include_ancestors and not include_inactive:
+            active_clause += " AND COALESCE(display_kind, '') != 'cron_delivery'"
         with self._read_ctx() as conn:
             placeholders = ",".join("?" for _ in session_ids)
             rows = conn.execute(
@@ -13410,7 +13414,10 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
         # Tip rows are exactly the model-fed set (get_messages_as_conversation
         # with session_ids=[session_id]); filtering the lineage fetch preserves
         # their relative id order.
-        tip_rows = [r for r in rows if r["session_id"] == session_id]
+        tip_rows = [
+            r for r in rows
+            if r["session_id"] == session_id and r["display_kind"] != "cron_delivery"
+        ]
         model_history = self._rows_to_conversation(
             tip_rows,
             session_id=session_id,

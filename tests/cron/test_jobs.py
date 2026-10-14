@@ -676,7 +676,7 @@ class TestMarkJobRun:
         job = create_job(prompt="Report", schedule="every 1h")
         mark_job_run(job["id"], success=True, delivery_error="platform 'telegram' not configured")
         updated = get_job(job["id"])
-        assert updated["last_status"] == "ok"
+        assert updated["last_status"] == "delivery_failed"
         assert updated["last_error"] is None
         assert updated["last_delivery_error"] == "platform 'telegram' not configured"
 

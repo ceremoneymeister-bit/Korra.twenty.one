@@ -2695,7 +2695,8 @@ def _deliver_to_web_chat(chat_id, text: str) -> Optional[str]:
 
     У веб-чата нет канала отправки (HTTP запрос-ответ), поэтому результат
     записывается в сессию тем же способом, что и сообщение «Учёл»: строка видна
-    после обновления страницы и входит в историю для следующих ходов.
+    после обновления страницы. Это уведомление, а не новый ход модели: оно
+    не меняет кэшированный контекст и чередование ролей.
     """
     reason = web_chat_unreachable_reason(chat_id)
     if reason:
@@ -2705,7 +2706,8 @@ def _deliver_to_web_chat(chat_id, text: str) -> Optional[str]:
         from korra_state import SessionDB
 
         db = SessionDB()
-        db.append_message(str(chat_id).strip(), "assistant", text, display_kind="cron_delivery")
+        session_id = db.get_compression_tip(str(chat_id).strip()) or str(chat_id).strip()
+        db.append_message(session_id, "assistant", text, display_kind="cron_delivery")
         return None
     except Exception as exc:
         logger.warning("Cron delivery to the web chat %s failed: %s", chat_id, exc, exc_info=True)

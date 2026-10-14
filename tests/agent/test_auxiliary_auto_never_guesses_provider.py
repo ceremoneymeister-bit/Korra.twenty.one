@@ -221,9 +221,10 @@ def test_explicit_task_fallback_still_wins_before_discovery(foreign_api_route):
     discover.assert_not_called()
 
 
-def test_unconfigured_legacy_auto_mode_can_still_discover(foreign_api_route):
+def test_owner_can_explicitly_opt_into_legacy_auto_discovery(foreign_api_route):
     api_client, discover = foreign_api_route
-    with patch.object(aux, "_read_main_provider", return_value="auto"):
+    with patch.object(aux, "_read_main_provider", return_value="auto"), \
+         patch.object(aux, "_aux_openrouter_settings", return_value=(False, aux._OPENROUTER_MODEL)):
         client, model, provider = aux._resolve_auto_route(
             main_runtime={"provider": "auto"},
             task="compression",
