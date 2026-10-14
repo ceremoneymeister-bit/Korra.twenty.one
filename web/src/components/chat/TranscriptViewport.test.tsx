@@ -274,3 +274,41 @@ it("K21-207: F5 searches older pages for a live response key", async () => {
   expect(sessionStorage.getItem("chat:scroll")).toContain("older-client");
   sessionStorage.clear();
 });
+
+it("K21-207: immediately restored cached pages hold the reading anchor when an attachment grows", async () => {
+  sessionStorage.setItem("chat:scroll", JSON.stringify({ id: "c-h36", offset: 10 }));
+  let messageY = 500;
+  vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+    const viewport = host.querySelector<HTMLDivElement>('[aria-label="Переписка"]');
+    const top = this.getAttribute("data-chat-message") === "c-h36" ? messageY - (viewport?.scrollTop ?? 0) : 0;
+    return { top, bottom: top + 100, left: 0, right: 0, width: 0, height: 100, x: 0, y: top, toJSON() {} } as DOMRect;
+  });
+  const load = vi.fn();
+  const viewport = await renderStored(["c-h1", "c-h36", "c-h61"], { hasOlder: false, loading: false, failed: false, load });
+  expect(viewport.scrollTop).toBe(510);
+  expect(load).not.toHaveBeenCalled();
+  messageY += 200;
+  height += 200;
+  await act(async () => resized());
+  expect(viewport.scrollTop).toBe(710);
+  sessionStorage.removeItem("chat:scroll");
+});
+
+it("K21-207 round 2: loading keeps the same older button in layout and places status over it", async () => {
+  const load = vi.fn();
+  const idle = { hasOlder: true, loading: false, failed: false, load };
+  const viewport = await renderPaged("Messages", "c-h181", idle);
+  const button = [...host.querySelectorAll<HTMLButtonElement>("button")].find(item => item.textContent?.includes("Показать более ранние сообщения"))!;
+  await scroll(viewport, 0);
+  await renderPaged("Messages", "c-h181", { ...idle, loading: true });
+  expect(button.isConnected).toBe(true);
+  expect(button.disabled).toBe(true);
+  expect(getComputedStyle(button).visibility).toBe("hidden");
+  expect(button.getAttribute("aria-hidden")).toBe("true");
+  const status = host.querySelector<HTMLElement>('[role="status"]')!;
+  expect(status.parentElement).toBe(button.parentElement);
+  expect(getComputedStyle(status).position).toBe("absolute");
+  await renderPaged("Messages", "c-h181", idle);
+  expect(button.disabled).toBe(false);
+  expect(getComputedStyle(button).visibility).not.toBe("hidden");
+});
