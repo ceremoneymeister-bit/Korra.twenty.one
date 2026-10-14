@@ -950,12 +950,6 @@ export function useChatStream(
   const [state, dispatch] = useReducer(reducer, initialState);
   const stateRef = useRef(state);
   const scopeRef = useRef(selectionKey);
-  useLayoutEffect(() => {
-    stateRef.current = state;
-    // The ref also covers replay of an already completed run: that reader is
-    // busy even though its public isStreaming flag is false.
-    if (!streamingRef.current) rememberHistory(state);
-  }, [state]);
   const rememberCurrent = useCallback(() => {
     const current = stateRef.current;
     // RESET/DELETE have already cleared the selection before teardown. Never
@@ -991,6 +985,13 @@ export function useChatStream(
   // landing in a freshly-loaded thread or post-reset empty state.
   // (Codex stop-gate review #10.)
   const activeStreamIdRef = useRef<string | null>(null);
+
+  useLayoutEffect(() => {
+    stateRef.current = state;
+    // The ref also covers replay of an already completed run: that reader is
+    // busy even though its public isStreaming flag is false.
+    if (!streamingRef.current) rememberHistory(state);
+  }, [state]);
 
   useLayoutEffect(() => {
     mountedRef.current = true;
