@@ -480,3 +480,25 @@ def test_legacy_inplace_generations_without_summary_flag_are_discovered(client, 
     rows = [row for result in reversed(pages) for row in result['messages']]
     assert [row['content'] for row in rows] == [row['content'] for row in expected]
     assert len({row['display_id'] for row in rows}) == len(expected)
+
+
+def test_deletion_between_resolution_and_snapshot_returns_not_found(client, homes, monkeypatch):
+    """Another request can delete the chat after its public ID was resolved."""
+    from korra_cli.web_routers import sessions
+
+    with SessionDB(homes['default'] / 'state.db') as db:
+        db.create_session('chat', source='dashboard')
+        db.append_messages_batch('chat', turns(0, 2))
+    resolve = sessions._resolve_session_id
+
+    def resolve_then_delete(db, session_id):
+        resolved = resolve(db, session_id)
+        with SessionDB(db.db_path) as writer:
+            writer.delete_session(resolved)
+        return resolved
+
+    monkeypatch.setattr(sessions, '_resolve_session_id', resolve_then_delete)
+    response = client.get('/api/sessions/chat/messages', params={'include_history': 'true'})
+    assert response.status_code == 404
+    with SessionDB(homes['default'] / 'state.db') as db:
+        assert db.get_session('chat') is None

@@ -28,6 +28,10 @@ class HistoryUnavailableError(ValueError):
     """Damaged/too deep history or a cursor whose boundary was removed."""
 
 
+class HistoryNotFoundError(LookupError):
+    """The conversation was deleted before the read snapshot started."""
+
+
 @dataclass
 class Segment:
     session_id: str
@@ -205,6 +209,8 @@ def get_history_page(db, session_id, *, limit, before_cursor=None, max_rows=1000
     with _snapshot(db) as conn:
         session_id = _tip(conn, session_id)
         chain = _lineage(db, conn, session_id)
+        if not chain:
+            raise HistoryNotFoundError('Session not found')
         scope = hashlib.sha256(str(db.db_path.resolve()).encode()).hexdigest()[:24]
         root = chain[0]
         anchor = None

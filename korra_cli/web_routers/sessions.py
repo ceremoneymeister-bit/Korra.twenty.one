@@ -764,13 +764,15 @@ async def get_session_messages(
             if not include_history:
                 sid = db.resolve_resume_session_id(sid)
             if include_history:
-                from korra_state_history import HistoryCursorError, HistoryUnavailableError
+                from korra_state_history import HistoryCursorError, HistoryNotFoundError, HistoryUnavailableError
 
                 page_limit = display_limit or 70
                 try:
                     sid, rows, cursor, has_more = db.get_history_display_page(
                         sid, limit=page_limit, before_cursor=before_cursor,
                     )
+                except HistoryNotFoundError:
+                    return None
                 except HistoryCursorError as exc:
                     raise HTTPException(status_code=400, detail=str(exc)) from exc
                 except HistoryUnavailableError as exc:
