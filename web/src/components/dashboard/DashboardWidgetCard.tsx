@@ -68,7 +68,7 @@ export function DashboardWidgetCard({
           compact && "px-4 pt-2",
         )}
       >
-        <div className="flex items-center justify-between gap-2">
+        <div className="korra-dashboard__heading flex items-center justify-between gap-2">
           <h3
             className="min-w-0 truncate text-base font-semibold text-[var(--neo-text-primary)]"
             title={purpose}
