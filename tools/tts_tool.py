@@ -1426,7 +1426,7 @@ def _convert_to_opus(mp3_path: str) -> Optional[str]:
     if not _has_ffmpeg():
         return None
 
-    ogg_path = mp3_path.rsplit(".", 1)[0] + ".ogg"
+    ogg_path = str(Path(mp3_path).with_suffix(".ogg"))
     return _ffmpeg_transcode_to_opus(mp3_path, ogg_path)
 
 
@@ -2837,7 +2837,7 @@ def _generate_neutts(text: str, output_path: str, tts_config: Dict[str, Any]) ->
     # let the caller convert to the final format afterward.
     wav_path = output_path
     if not output_path.endswith(".wav"):
-        wav_path = output_path.rsplit(".", 1)[0] + ".wav"
+        wav_path = str(Path(output_path).with_suffix(".wav"))
 
     synth_script = str(Path(__file__).parent / "neutts_synth.py")
     cmd = [
@@ -3056,7 +3056,7 @@ def _generate_piper_tts(text: str, output_path: str, tts_config: Dict[str, Any])
     # Piper outputs WAV. Caller handles downstream MP3/Opus conversion.
     wav_path = output_path
     if not output_path.endswith(".wav"):
-        wav_path = output_path.rsplit(".", 1)[0] + ".wav"
+        wav_path = str(Path(output_path).with_suffix(".wav"))
 
     with wave.open(wav_path, "wb") as wav_file:
         if syn_config is not None:
@@ -3126,7 +3126,7 @@ def _generate_kittentts(text: str, output_path: str, tts_config: Dict[str, Any])
     import soundfile as sf
     wav_path = output_path
     if not output_path.endswith(".wav"):
-        wav_path = output_path.rsplit(".", 1)[0] + ".wav"
+        wav_path = str(Path(output_path).with_suffix(".wav"))
 
     sf.write(wav_path, audio, 24000)
 
