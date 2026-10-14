@@ -131,6 +131,24 @@ def test_connection_files_are_sealed_whole(isolated, rel):
         assert inner.read(rel) == content
 
 
+@pytest.mark.parametrize("rel", [".claude.json", "home/.claude.json", "profiles/work/home/.claude.json",
+                                 ".claude.json.backup", "home/.claude.json.backup.1760000000000"])
+@pytest.mark.parametrize("server", [
+    {"url": "https://mcp.invalid/mcp", "headers": {"Authorization": "Basic REVIEW-SYNTHETIC-CLAUDE-9d41"}},
+    {"command": "synthetic-mcp", "env": {"SVC": "REVIEW-SYNTHETIC-CLAUDE-9d41"}},
+])
+def test_claude_json_is_sealed_whole(isolated, rel, server):
+    import json
+    content = json.dumps({"mcpServers": {"synthetic": server}}).encode()
+    put(isolated, rel, content)
+    assert is_secret(rel)
+    private = X25519PrivateKey.generate()
+    archive = split(isolated, private)
+    assert open_members_containing(archive, b"REVIEW-SYNTHETIC-CLAUDE-9d41") == []
+    with secrets_zip(archive, private) as inner:
+        assert inner.read(rel) == content
+
+
 def test_camofox_state_directory_is_secret():
     assert is_secret("browser_auth/camofox/hermes_ab12/cookies.json")
     assert is_secret("profiles/work/browser_auth/camofox/state.bin")

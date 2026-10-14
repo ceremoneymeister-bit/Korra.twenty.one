@@ -52,6 +52,7 @@ _SECRET_FILE_PATTERNS = (
     "*.session", "*.session-journal", "*.session-wal", "*.session-shm",
     "honcho.json", "plugin_toolset_keys.json",
     "gateway.json", "mcp.json", ".mcp.json",
+    ".claude.json", ".claude.json.*",
 )
 
 _SECRET_NAME_PARTS = (

@@ -95,7 +95,7 @@ def test_default_key_parses_and_pem_and_raw_private_keys_load(tmp_path):
     "keys/server.pem", "keys/server.key", "slack_tokens.json", "webhook_subscriptions.json",
     "crm-connection/connection.json", "_external/.honcho/config.json", "myapp_api_key.json",
     "config.yaml", "profiles/work/config.yaml", "config.yaml.bak", "gateway.json", "mcp.json",
-    "profiles/work/mcp.json",
+    "profiles/work/mcp.json", ".claude.json", "home/.claude.json", "profiles/work/home/.claude.json.bak",
 ])
 def test_secret_paths(rel):
     assert is_secret(rel)
