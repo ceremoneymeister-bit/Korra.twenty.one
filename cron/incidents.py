@@ -353,28 +353,26 @@ def close_incidents_for_recovered_job(job_id: str, *, provider: Optional[str] = 
     """
     now = _hermes_now().isoformat()
     with _transaction() as conn:
-        cursor = conn.execute(
-            """UPDATE cron_incidents SET state='resolved', closed_at=?
-               WHERE ((job_id=? AND failure_type NOT LIKE 'subscription:%')
-                      OR failure_type=?) AND state IN ('detected', 'alerted')""",
-            (now, str(job_id or ""), f"subscription:{provider}" if provider else ""),
-        )
-        resolved = int(cursor.rowcount or 0)
-        if provider:
-            # Upgrade compatibility: older ledgers kept a separate auth row
-            # for each job/error. Those ask for the same login, so recovery
-            # must clear them too, even when another job proved it healthy.
-            legacy = conn.execute(
-                "SELECT id, error FROM cron_incidents WHERE state IN ('detected', 'alerted') "
-                "AND failure_type NOT LIKE 'subscription:%'"
-            ).fetchall()
-            for row in legacy:
-                if subscription_provider(row["error"]) == provider:
-                    conn.execute(
-                        "UPDATE cron_incidents SET state='resolved', closed_at=? WHERE id=?",
-                        (now, row["id"]),
-                    )
-                    resolved += 1
+        rows = conn.execute(
+            "SELECT id, job_id, failure_type, error FROM cron_incidents "
+            "WHERE state IN ('detected', 'alerted')"
+        ).fetchall()
+        resolved = 0
+        for row in rows:
+            # Legacy per-job auth rows obey the same provider check as the
+            # shared subscription signal, even on this job's own green run.
+            subscription = (
+                row["failure_type"].removeprefix("subscription:")
+                if row["failure_type"].startswith("subscription:")
+                else subscription_provider(row["error"])
+            )
+            recovered = subscription == provider if subscription else row["job_id"] == str(job_id or "")
+            if recovered:
+                conn.execute(
+                    "UPDATE cron_incidents SET state='resolved', closed_at=? WHERE id=?",
+                    (now, row["id"]),
+                )
+                resolved += 1
         return resolved
 
 
