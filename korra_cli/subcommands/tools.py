@@ -83,4 +83,19 @@ def build_tools_parser(subparsers, *, cmd_tools: Callable) -> None:
         metavar="KEY",
         help='Ключ установщика, например agent_browser, camofox или kittentts',
     )
+    # korra tools camofox {on,off,status}
+    tools_camofox_p = tools_sub.add_parser(
+        "camofox",
+        help='Включить, выключить или показать встроенный Camofox («Браузер с защитой от блокировок»)',
+        description=(
+            'Выключатель встроенного сервера Camofox на этой установке. По умолчанию он включён. '
+            'Выключенный сервер не запускает Node и браузер: профили без явного выбора работают через Chromium, '
+            'профили с явным выбором Camofox получают понятную ошибку. Контейнер пересоздавать не нужно.'
+        ),
+    )
+    tools_camofox_p.add_argument(
+        "camofox_action",
+        choices=["on", "off", "status"],
+        help='on — включить, off — выключить, status — показать состояние',
+    )
     tools_parser.set_defaults(func=cmd_tools)

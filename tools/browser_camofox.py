@@ -30,6 +30,7 @@ import json
 import logging
 import os
 import threading
+import time
 import uuid
 from typing import Any, Dict, Optional
 from urllib.parse import SplitResult, urlsplit, urlunsplit
@@ -81,17 +82,150 @@ def _get_command_timeout() -> int:
     return result
 
 
+def _explicit_camofox_url() -> str:
+    return (get_secret("CAMOFOX_URL", "") or "").rstrip("/")
+
+
+def _embedded_camofox_endpoint() -> str:
+    """Address of the Camofox server bundled in the Korra image, or ``""``.
+
+    The bundled server is the default browser of the image: it is used when
+    this profile selected Camofox, or never selected a browser at all, and no
+    explicit ``CAMOFOX_URL`` is set. Any other explicit choice (Chromium, a
+    cloud provider, a CDP address) keeps it out. Outside the image there is
+    nothing to use. If the installation switched the server off
+    (``korra tools camofox off``), a profile that never selected a browser
+    simply uses Chromium; a profile that selected Camofox explicitly keeps the
+    address and gets a clear error instead. The answer does not depend on
+    whether the server is running right now: the browser choice and the
+    profile's saved logins must not change with server availability (see
+    :func:`_embedded_unavailable` for the one place that reacts to a dead
+    server).
+    """
+    try:
+        from korra_cli import camofox_embedded
+        from tools.tool_backend_helpers import read_selection
+
+        endpoint = camofox_embedded.endpoint()
+        if not endpoint:
+            return ""
+        selected = read_selection("browser")
+        if selected == "camofox":
+            return endpoint
+        if selected is None and not camofox_embedded.is_disabled() and camofox_embedded.uses_default_browser():
+            return endpoint
+        return ""
+    except Exception:  # pragma: no cover — helpers are in-repo
+        return ""
+
+
+def _using_embedded_camofox() -> bool:
+    return not _explicit_camofox_url() and bool(_embedded_camofox_endpoint())
+
+
+_FALLBACK_NOTE = (
+    "Встроенный браузер с защитой от блокировок сейчас не отвечает, поэтому страница открыта обычным "
+    "Chromium (без сохранённых входов этого профиля). Если нужен именно он, подождите полминуты и повторите."
+)
+_HEALTH_TTL = 5.0
+_FAILURE_TTL = 30.0
+# (действует до, ключ сокета, сервер отвечает)
+_health_cache: tuple = (0.0, "", True)
+_health_lock = threading.Lock()
+
+
+def _remember_health(key: str, ok: bool, ttl: float) -> None:
+    global _health_cache
+    with _health_lock:
+        _health_cache = (time.monotonic() + ttl, key, ok)
+
+
+def _embedded_unavailable() -> bool:
+    """The bundled server is the active browser, but it does not answer.
+
+    Then the browser tools run through ordinary Chromium instead of failing:
+    a crash or a slow start of the bundled server must not leave agents
+    without a browser. The probe is the cheap ``/health`` over the socket
+    (it answers without launching Firefox) and its result is reused for a few
+    seconds. A call that finds the server unusable despite a good probe
+    (connection lost, no tab can be opened) calls :func:`_mark_embedded_down`,
+    which turns the cached answer to "unavailable" for longer. An explicit
+    external ``CAMOFOX_URL`` is never replaced, and a server switched off by
+    the owner is not a failure: explicit Camofox then gets a clear error.
+    """
+    if _explicit_camofox_url():
+        return False
+    try:
+        from korra_cli import camofox_embedded
+
+        if camofox_embedded.is_disabled():
+            return False
+        key = str(camofox_embedded.socket_path())
+        with _health_lock:
+            expires, cached_key, cached_ok = _health_cache
+            if cached_key == key and time.monotonic() < expires:
+                return not cached_ok
+        ok = camofox_embedded.health()
+        _remember_health(key, ok, _HEALTH_TTL)
+        return not ok
+    except Exception:  # pragma: no cover — helpers are in-repo
+        return False
+
+
+def _mark_embedded_down(ttl: float = _HEALTH_TTL) -> None:
+    """Forget a good probe: the server failed a real call, so the browser tools use Chromium for ``ttl`` seconds."""
+    try:
+        from korra_cli import camofox_embedded
+
+        _remember_health(str(camofox_embedded.socket_path()), False, ttl)
+    except Exception:  # pragma: no cover — helpers are in-repo
+        pass
+
+
+def embedded_fallback_note() -> str:
+    """Short note for the agent when this call went to Chromium for lack of the bundled server."""
+    if os.getenv("BROWSER_CDP_URL", "").strip() or _config_cdp_url():
+        return ""
+    if _using_embedded_camofox() and _embedded_unavailable():
+        return _FALLBACK_NOTE
+    return ""
+
+
+_unix_session: Optional[requests.Session] = None
+_unix_session_lock = threading.Lock()
+
+
+def _embedded_session() -> requests.Session:
+    """Shared session that reaches the bundled server over its Unix socket."""
+    global _unix_session
+    with _unix_session_lock:
+        if _unix_session is None:
+            from korra_cli import camofox_embedded
+
+            _unix_session = camofox_embedded.unix_session()
+        return _unix_session
+
+
 def _auth_headers() -> Dict[str, str]:
-    """Return Authorization header when CAMOFOX_API_KEY is set."""
-    key = (get_secret("CAMOFOX_API_KEY", "") or "").strip()
+    """Return the Authorization header for the Camofox server in use.
+
+    Bundled server: the per-installation access key. External server:
+    ``CAMOFOX_API_KEY`` when set.
+    """
+    if _using_embedded_camofox():
+        from korra_cli import camofox_embedded
+
+        key = camofox_embedded.access_key()
+    else:
+        key = (get_secret("CAMOFOX_API_KEY", "") or "").strip()
     if key:
         return {"Authorization": f"Bearer {key}"}
     return {}
 
 
 def get_camofox_url() -> str:
-    """Return the configured Camofox server URL, or empty string."""
-    return (get_secret("CAMOFOX_URL", "") or "").rstrip("/")
+    """Return the Camofox server URL (explicit, else bundled), or empty string."""
+    return _explicit_camofox_url() or _embedded_camofox_endpoint()
 
 
 def _config_cdp_url() -> str:
@@ -114,6 +248,10 @@ def _config_cdp_url() -> str:
 
 def is_camofox_mode() -> bool:
     """True when the Camofox backend is selected and no CDP override is active.
+
+    In the Korra image the bundled Camofox is also the default: a profile that
+    never selected a browser uses it. If the bundled server does not answer,
+    this is False for the call and the browser tools use Chromium instead.
 
     Camofox is a selection: ``browser.cloud_provider: camofox`` (set via
     ``hermes tools``). ``CAMOFOX_URL`` is the server ADDRESS only — its
@@ -140,13 +278,14 @@ def is_camofox_mode() -> bool:
         selected = read_selection("browser")
     except Exception:  # pragma: no cover — helpers are in-repo
         selected = None
-    if selected == "camofox":
-        return True
-    if selected is not None:
+    if selected is not None and selected != "camofox":
         # An explicit different browser selection wins: CAMOFOX_URL is just
         # an address, not a choice.
         return False
-    return bool(get_camofox_url())
+    if selected is None and not get_camofox_url():
+        return False
+    # Bundled server that does not answer: ordinary Chromium takes the call.
+    return not (_using_embedded_camofox() and _embedded_unavailable())
 
 
 def check_camofox_available() -> bool:
@@ -156,12 +295,12 @@ def check_camofox_available() -> bool:
     if not url:
         return False
     try:
-        resp = requests.get(f"{url}/health", timeout=5)
+        resp = _request("get", f"{url}/health", timeout=5)
         if resp.status_code == 200 and not _vnc_url_checked:
             try:
                 data = resp.json()
                 vnc_port = data.get("vncPort")
-                if isinstance(vnc_port, int) and 1 <= vnc_port <= 65535:
+                if isinstance(vnc_port, int) and 1 <= vnc_port <= 65535 and not _using_embedded_camofox():
                     from urllib.parse import urlparse
                     parsed = urlparse(url)
                     host = parsed.hostname or "localhost"
@@ -200,7 +339,12 @@ def _managed_persistence_enabled() -> bool:
 
     Controlled by ``browser.camofox.managed_persistence`` in config.yaml.
     """
-    return bool(_get_camofox_config().get("managed_persistence"))
+    return _persistence_for(_get_camofox_config())
+
+
+def _persistence_for(camofox_cfg: Dict[str, Any]) -> bool:
+    """Bundled server always keeps per-profile logins; otherwise follow config."""
+    return bool(camofox_cfg.get("managed_persistence")) or _using_embedded_camofox()
 
 
 def _camofox_identity_override(task_id: Optional[str], camofox_cfg: Dict[str, Any]) -> Optional[Dict[str, str]]:
@@ -386,6 +530,7 @@ def _get_session(task_id: Optional[str]) -> Dict[str, Any]:
         if task_id in _sessions:
             return _adopt_existing_tab(_sessions[task_id])
 
+        _require_embedded_ready()
         camofox_cfg = _get_camofox_config()
         identity_override = _camofox_identity_override(task_id, camofox_cfg)
         if identity_override:
@@ -396,7 +541,7 @@ def _get_session(task_id: Optional[str]) -> Dict[str, Any]:
                 "managed": True,
                 "adopt_existing_tab": _adopt_existing_tab_enabled(camofox_cfg),
             }
-        elif bool(camofox_cfg.get("managed_persistence")):
+        elif _persistence_for(camofox_cfg):
             identity = get_camofox_identity(task_id)
             session = {
                 "user_id": identity["user_id"],
@@ -423,20 +568,58 @@ def _ensure_tab(task_id: Optional[str], url: str = "about:blank") -> Dict[str, A
     if session["tab_id"]:
         return session
     base = get_camofox_url()
-    resp = requests.post(
-        f"{base}/tabs",
-        json={
-            "userId": session["user_id"],
-            "listItemId": session["session_key"],
-            "url": url,
-        },
-        timeout=_get_command_timeout(),
-        headers=_auth_headers(),
-    )
-    resp.raise_for_status()
+    try:
+        resp = _request(
+            "post",
+            f"{base}/tabs",
+            json={
+                "userId": session["user_id"],
+                "listItemId": session["session_key"],
+                "url": url,
+            },
+            timeout=_get_command_timeout(),
+            headers=_auth_headers(),
+        )
+        resp.raise_for_status()
+    except (requests.Timeout, requests.HTTPError) as exc:
+        if _using_embedded_camofox() and _server_cannot_open_tab(session, exc):
+            _mark_embedded_down(_FAILURE_TTL)
+            raise CamofoxCannotOpenTab(_CANNOT_OPEN_TAB_TEXT) from None
+        raise
     data = resp.json()
     session["tab_id"] = data.get("tabId")
     return session
+
+
+def _server_cannot_open_tab(session: Dict[str, Any], exc: Exception) -> bool:
+    """A 5xx or timeout while opening a tab: is the server broken, or was it the page?
+
+    The same request also navigates to the target URL, so a dead site looks the
+    same as a browser that does not start. A blank tab tells them apart: if it
+    opens, the server is fine and the original error stands.
+    """
+    if isinstance(exc, requests.HTTPError):
+        status = exc.response.status_code if exc.response is not None else 0
+        if status < 500:
+            return False
+    try:
+        probe = _request(
+            "post",
+            f"{get_camofox_url()}/tabs",
+            json={"userId": session["user_id"], "listItemId": session["session_key"], "url": "about:blank"},
+            timeout=15,
+            headers=_auth_headers(),
+        )
+        probe.raise_for_status()
+    except requests.RequestException:
+        return True
+    try:
+        tab_id = probe.json().get("tabId")
+        if tab_id:
+            _delete(f"/tabs/{tab_id}", {"userId": session["user_id"]}, timeout=10)
+    except Exception:
+        pass
+    return False
 
 
 def _drop_session(task_id: Optional[str]) -> Optional[Dict[str, Any]]:
@@ -456,7 +639,7 @@ def camofox_soft_cleanup(task_id: Optional[str] = None) -> bool:
     :func:`camofox_close`.
     """
     camofox_cfg = _get_camofox_config()
-    if bool(camofox_cfg.get("managed_persistence")) or _camofox_identity_override(task_id, camofox_cfg):
+    if _persistence_for(camofox_cfg) or _camofox_identity_override(task_id, camofox_cfg):
         _drop_session(task_id)
         logger.debug("Camofox soft cleanup for task %s (managed persistence)", task_id)
         return True
@@ -467,12 +650,58 @@ def camofox_soft_cleanup(task_id: Optional[str] = None) -> bool:
 # HTTP helpers
 # ---------------------------------------------------------------------------
 
+class CamofoxUnreachable(requests.ConnectionError):
+    """Bundled Camofox did not answer; the message is meant for the agent."""
+
+
+_CANNOT_OPEN_TAB_TEXT = (
+    "Браузер с защитой от блокировок отвечает, но не может открыть вкладку: вероятно, не запустился Firefox "
+    "или не хватает памяти. Подождите полминуты и повторите; если не проходит, попросите владельца "
+    "выполнить `korra doctor` и посмотреть лог контейнера или временно выбрать обычный браузер в `korra tools`."
+)
+
+
+class CamofoxCannotOpenTab(CamofoxUnreachable):
+    """The bundled server answers but cannot open a tab (browser did not start, out of memory)."""
+
+
+def _require_embedded_ready() -> None:
+    """Bundled Camofox selected but not answering: stop before any session exists.
+
+    The profile's login is tied to its identity, which the server keeps. If the
+    server is down the agent gets a plain explanation and a next step instead of
+    a session that would later fail or lose the saved login.
+    """
+    if not _using_embedded_camofox():
+        return
+    from korra_cli import camofox_embedded
+
+    if camofox_embedded.is_disabled():
+        raise CamofoxUnreachable(_connection_error_text())
+    if not camofox_embedded.health():
+        _mark_embedded_down()
+        raise CamofoxUnreachable(_connection_error_text())
+
+
+def _request(method: str, *args: Any, **kwargs: Any) -> requests.Response:
+    embedded = _using_embedded_camofox()
+    try:
+        if embedded:
+            return _embedded_session().request(method.upper(), *args, **kwargs)
+        return getattr(requests, method)(*args, **kwargs)
+    except requests.ConnectionError:
+        if embedded:
+            _mark_embedded_down()
+            raise CamofoxUnreachable(_connection_error_text()) from None
+        raise
+
+
 def _post(path: str, body: dict, timeout: Optional[int] = None) -> dict:
     """POST JSON to camofox and return parsed response."""
     if timeout is None:
         timeout = _get_command_timeout()
     url = f"{get_camofox_url()}{path}"
-    resp = requests.post(url, json=body, timeout=timeout, headers=_auth_headers())
+    resp = _request("post", url, json=body, timeout=timeout, headers=_auth_headers())
     resp.raise_for_status()
     return resp.json()
 
@@ -482,7 +711,7 @@ def _get(path: str, params: dict = None, timeout: Optional[int] = None) -> dict:
     if timeout is None:
         timeout = _get_command_timeout()
     url = f"{get_camofox_url()}{path}"
-    resp = requests.get(url, params=params, timeout=timeout, headers=_auth_headers())
+    resp = _request("get", url, params=params, timeout=timeout, headers=_auth_headers())
     resp.raise_for_status()
     return resp.json()
 
@@ -492,7 +721,7 @@ def _get_raw(path: str, params: dict = None, timeout: Optional[int] = None) -> r
     if timeout is None:
         timeout = _get_command_timeout()
     url = f"{get_camofox_url()}{path}"
-    resp = requests.get(url, params=params, timeout=timeout, headers=_auth_headers())
+    resp = _request("get", url, params=params, timeout=timeout, headers=_auth_headers())
     resp.raise_for_status()
     return resp
 
@@ -502,7 +731,7 @@ def _delete(path: str, body: dict = None, timeout: Optional[int] = None) -> dict
     if timeout is None:
         timeout = _get_command_timeout()
     url = f"{get_camofox_url()}{path}"
-    resp = requests.delete(url, json=body, timeout=timeout, headers=_auth_headers())
+    resp = _request("delete", url, json=body, timeout=timeout, headers=_auth_headers())
     resp.raise_for_status()
     return resp.json()
 
@@ -510,6 +739,31 @@ def _delete(path: str, body: dict = None, timeout: Optional[int] = None) -> dict
 # ---------------------------------------------------------------------------
 # Tool implementations
 # ---------------------------------------------------------------------------
+
+def _connection_error_text() -> str:
+    """Plain-words explanation for an unreachable Camofox server (no stack, no secrets)."""
+    if _using_embedded_camofox():
+        from korra_cli import camofox_embedded
+
+        if camofox_embedded.is_disabled():
+            return (
+                "Браузер с защитой от блокировок выбран, но его встроенный сервер выключен на этой установке. "
+                "Попросите владельца выполнить `korra tools camofox on` (вход на сайтах сохранится) "
+                "или выбрать обычный браузер в `korra tools`."
+            )
+        return (
+            "Браузер с защитой от блокировок не отвечает: встроенный сервер включён, "
+            "но не принимает соединения. Он мог ещё запускаться или упасть. "
+            "Подождите полминуты и повторите; если не проходит, попросите владельца "
+            "выполнить `korra doctor` (там указан следующий шаг) или временно выбрать "
+            "обычный браузер в `korra tools`."
+        )
+    return (
+        f"Cannot connect to Camofox at {get_camofox_url()}. "
+        "Is the server running? Start with: npm start (in camofox-browser dir) "
+        "or: docker run -p 9377:9377 -e CAMOFOX_PORT=9377 jo-inc/camofox-browser"
+    )
+
 
 def camofox_navigate(url: str, task_id: Optional[str] = None) -> str:
     """Navigate to a URL via Camofox."""
@@ -583,14 +837,35 @@ def camofox_navigate(url: str, task_id: Optional[str] = None) -> str:
     except requests.HTTPError as e:
         return tool_error(f"Navigation failed: {e}", success=False)
     except requests.ConnectionError:
+        fallback = _navigate_with_chromium(url, task_id)
+        if fallback is not None:
+            return fallback
         return json.dumps({
             "success": False,
-            "error": f"Cannot connect to Camofox at {get_camofox_url()}. "
-                     "Is the server running? Start with: npm start (in camofox-browser dir) "
-                     "or: docker run -p 9377:9377 -e CAMOFOX_PORT=9377 jo-inc/camofox-browser",
+            "error": _connection_error_text(),
         })
     except Exception as e:
         return tool_error(str(e), success=False)
+
+
+def _navigate_with_chromium(url: str, task_id: Optional[str]) -> Optional[str]:
+    """The bundled server failed this call: open the page in ordinary Chromium instead.
+
+    Only for a server that is on but broken (connection lost, no tab can be
+    opened). The failed call has already marked the server as down, so the
+    browser tools route to Chromium; the page open in Camofox is not carried
+    over. Returns ``None`` when the call must fail as before: external server,
+    server switched off by the owner (explicit Camofox then gets a clear error).
+    """
+    if not _using_embedded_camofox():
+        return None
+    from korra_cli import camofox_embedded
+
+    if camofox_embedded.is_disabled() or is_camofox_mode():
+        return None
+    from tools.browser_tool import _browser_navigate
+
+    return _browser_navigate(url, task_id)
 
 
 def _camofox_private_page_block(session: Dict[str, Any], task_id: Optional[str], action: str) -> Optional[str]:

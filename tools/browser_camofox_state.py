@@ -24,6 +24,13 @@ def get_camofox_state_dir() -> Path:
     return get_hermes_home() / CAMOFOX_STATE_DIR_NAME / CAMOFOX_STATE_SUBDIR
 
 
+def camofox_user_id(profile_home: Path) -> str:
+    """Stable Camofox userId of the profile whose home directory is ``profile_home``."""
+    scope_root = str(profile_home / CAMOFOX_STATE_DIR_NAME / CAMOFOX_STATE_SUBDIR)
+    digest = uuid.uuid5(uuid.NAMESPACE_URL, f"camofox-user:{scope_root}").hex[:10]
+    return f"hermes_{digest}"
+
+
 def get_camofox_identity(task_id: Optional[str] = None) -> Dict[str, str]:
     """Return the stable Hermes-managed Camofox identity for this profile.
 
@@ -33,15 +40,11 @@ def get_camofox_identity(task_id: Optional[str] = None) -> Dict[str, str]:
     """
     scope_root = str(get_camofox_state_dir())
     logical_scope = task_id or "default"
-    user_digest = uuid.uuid5(
-        uuid.NAMESPACE_URL,
-        f"camofox-user:{scope_root}",
-    ).hex[:10]
     session_digest = uuid.uuid5(
         uuid.NAMESPACE_URL,
         f"camofox-session:{scope_root}:{logical_scope}",
     ).hex[:16]
     return {
-        "user_id": f"hermes_{user_digest}",
+        "user_id": camofox_user_id(get_hermes_home()),
         "session_key": f"task_{session_digest}",
     }

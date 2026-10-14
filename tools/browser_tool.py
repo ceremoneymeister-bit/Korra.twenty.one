@@ -1027,8 +1027,19 @@ def _is_local_backend() -> bool:
     if _get_cdp_override_raw():
         return False
     if _is_camofox_mode():
-        return True
-    if _get_cloud_provider() is not None:
+        # Встроенный Camofox работает в том же контейнере, что и локальный
+        # Chromium, поэтому проверяется так же: терминал в другом контейнере
+        # не видит сетей, до которых дотянется браузер. Внешний сервер
+        # Camofox по-прежнему считается локальным.
+        try:
+            from tools.browser_camofox import _using_embedded_camofox
+
+            bundled = _using_embedded_camofox()
+        except Exception:
+            bundled = False
+        if not bundled:
+            return True
+    elif _get_cloud_provider() is not None:
         return False
     # When terminal runs in a container, browser on host can access
     # internal networks the terminal can't → treat as non-local.
@@ -4172,7 +4183,35 @@ def evaluate_url_safety(url: str) -> Optional[dict]:
     return None
 
 
+def _camofox_fallback_note() -> str:
+    """Пометка агенту: встроенный Camofox не ответил, вызов идёт через Chromium."""
+    try:
+        from tools.browser_camofox import embedded_fallback_note
+
+        return embedded_fallback_note()
+    except Exception:  # pragma: no cover — модуль в репозитории
+        return ""
+
+
 def browser_navigate(url: str, task_id: Optional[str] = None) -> str:
+    """Navigate to a URL; add a short note when Chromium replaced a silent bundled Camofox."""
+    note = _camofox_fallback_note()
+    result = _browser_navigate(url, task_id)
+    # Сервер мог отказать прямо в этом вызове: тогда страницу уже открыл Chromium.
+    note = note or _camofox_fallback_note()
+    if not note:
+        return result
+    try:
+        payload = json.loads(result)
+    except (TypeError, ValueError):
+        return result
+    if isinstance(payload, dict):
+        payload["note"] = note
+        return json.dumps(payload, ensure_ascii=False)
+    return result
+
+
+def _browser_navigate(url: str, task_id: Optional[str] = None) -> str:
     """
     Navigate to a URL in the browser.
 

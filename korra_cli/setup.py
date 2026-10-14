@@ -544,7 +544,7 @@ def _print_setup_summary(config: dict, hermes_home):
                 'выполните npm install -g agent-browser и укажите BROWSER_USE_API_KEY'
             )
         elif browser_provider == "Camofox":
-            missing_browser_hint = "CAMOFOX_URL"
+            missing_browser_hint = "выберите Camofox в korra tools или укажите CAMOFOX_URL"
         elif browser_provider == "Local browser":
             missing_browser_hint = (
                 "npm install -g agent-browser && agent-browser install --with-deps"

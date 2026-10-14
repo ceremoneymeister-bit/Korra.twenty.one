@@ -1,0 +1,609 @@
+"""Встроенный Camofox («Браузер с защитой от блокировок») в коробке Korra.
+
+Образ содержит Camofox в ``/opt/camofox`` (см. Dockerfile), а s6-сервис
+``camofox`` принадлежит установке и работает всегда, когда Camofox есть в
+образе. Браузер внутри ленивый: Firefox запускается первым запросом и
+закрывается после простоя, так что без запросов сервер держит только Node.
+Состояние живёт в ``<корень данных>/camofox`` и переживает пересоздание
+контейнера:
+
+* ``disabled`` — единственный выключатель установки: файл есть — сервер не
+  запускается (слабый сервер, поддержка). По умолчанию файла нет;
+* ``server.sock`` — Unix-сокет сервера (0600) в каталоге 0700;
+* ``access.key`` — ключ доступа этой установки (0600);
+* ``profiles/`` — профили браузера (вход на сайты).
+
+Сервер слушает Unix-сокет, а не TCP-порт: контейнеры работают с
+``--network host``, и любой порт на loopback виден всему хосту, так что чужой
+процесс мог бы занять адрес установки и получить её ключ. Сокет лежит в
+каталоге данных этой установки, и подключиться к нему может только её
+пользователь. Ключ доступа остаётся вторым рубежом.
+
+Camofox — браузер по умолчанию в образе: профиль, который не выбирал браузер
+явно, работает через него (:func:`uses_default_browser`). Явный выбор (обычный
+Chromium, облачный провайдер, ``browser.cdp_url``, внешний ``CAMOFOX_URL``)
+сохраняется. Выбор браузера профильный и влияет только на маршрутизацию
+вызовов профиля; сервер от него не зависит.
+
+Модуль не импортирует ничего тяжёлого на верхнем уровне: он нужен и клиенту
+браузера, и ``korra doctor``. Ключ нигде не печатается.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import http.client
+import os
+import secrets
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from typing import Dict, List, Optional
+
+from korra_constants import get_default_hermes_root
+
+LOOPBACK = "127.0.0.1"
+STATE_DIR_NAME = "camofox"
+SOCKET_NAME = "server.sock"
+S6_SERVICE_DIR = "/run/service/camofox"
+
+# Запросы идут по Unix-сокету, а имя хоста нужно только для заголовка Host и
+# адресов requests. Зона .invalid (RFC 2606) никогда не разрешается в DNS, так
+# что запрос, случайно ушедший мимо сокета, не дойдёт ни до какого сервера.
+UNIX_HOST = "camofox.invalid"
+BASE_URL = f"http://{UNIX_HOST}"
+
+# sun_path в Linux — 108 байт вместе с нулевым.
+MAX_SOCKET_PATH = 104
+
+_DEFAULT_HOME = "/opt/camofox"
+_SERVER_RELPATH = ("node_modules", "@askjo", "camofox-browser", "server.js")
+_LAUNCHER_NAME = "unix-socket.mjs"
+
+# Только эти переменные попадают в процесс сервера: токены агента, ключи
+# провайдеров и CAMOFOX_API_KEY внешнего сервера ему не нужны.
+_PASSTHROUGH_ENV = ("PATH", "HOME", "LANG", "LC_ALL", "TZ", "TMPDIR", "NODE_OPTIONS")
+
+
+def install_dir() -> Path:
+    return Path(os.environ.get("KORRA_CAMOFOX_HOME") or _DEFAULT_HOME)
+
+
+def server_script() -> Path:
+    return install_dir().joinpath(*_SERVER_RELPATH)
+
+
+def launcher_script() -> Path:
+    return install_dir() / _LAUNCHER_NAME
+
+
+def browser_dir() -> Path:
+    return install_dir() / "browser"
+
+
+def is_installed() -> bool:
+    """Образ содержит сервер и закреплённый бинарник Camoufox."""
+    return server_script().is_file() and (browser_dir() / "camoufox-bin").is_file()
+
+
+def state_dir() -> Path:
+    return get_default_hermes_root() / STATE_DIR_NAME
+
+
+def socket_path() -> Path:
+    return state_dir() / SOCKET_NAME
+
+
+def socket_path_problem() -> str:
+    """Пустая строка, если путь к сокету допустим; иначе причина."""
+    length = len(os.fsencode(str(socket_path())))
+    if length > MAX_SOCKET_PATH:
+        return (
+            f"путь к сокету ({length} байт) длиннее предела Unix-сокета ({MAX_SOCKET_PATH}); "
+            "каталог данных Korra нужно разместить ближе к корню"
+        )
+    return ""
+
+
+def _disabled_marker() -> Path:
+    return state_dir() / "disabled"
+
+
+def _key_file() -> Path:
+    return state_dir() / "access.key"
+
+
+def is_disabled() -> bool:
+    """Владелец или поддержка выключили сервер этой установки."""
+    return _disabled_marker().is_file()
+
+
+def is_enabled() -> bool:
+    """Сервер есть в образе и не выключен выключателем установки."""
+    return is_installed() and not is_disabled()
+
+
+def _ensure_dir() -> Path:
+    path = state_dir()
+    path.mkdir(parents=True, exist_ok=True)
+    try:
+        path.chmod(0o700)
+    except OSError:
+        pass
+    _match_data_owner(path)
+    return path
+
+
+def _match_data_owner(path: Path) -> None:
+    """Файлы, созданные root (docker exec), отдать владельцу каталога данных.
+
+    Сервис работает от hermes: ключ и маркер, принадлежащие root с правами 0600,
+    он бы не прочитал.
+    """
+    if not hasattr(os, "geteuid") or os.geteuid() != 0:
+        return
+    try:
+        owner = state_dir().parent.stat()
+        os.chown(path, owner.st_uid, owner.st_gid)
+    except OSError:
+        pass
+
+
+def _private_tmp(path: Path, text: str) -> Path:
+    """Записать ``text`` во временный файл рядом с ``path`` (0600, имя уникально)."""
+    fd, name = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
+    tmp = Path(name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        _match_data_owner(tmp)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    return tmp
+
+
+def _write_private(path: Path, text: str) -> None:
+    """Атомарно заменить файл: параллельные записи не мешают друг другу."""
+    tmp = _private_tmp(path, text)
+    try:
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def _create_once(path: Path, text: str) -> None:
+    """Создать файл, только если его ещё нет; читатель никогда не видит его неполным.
+
+    Содержимое записывается во временный файл и публикуется жёсткой ссылкой:
+    ``link`` атомарно проваливается, если файл уже создан соседом.
+    """
+    tmp = _private_tmp(path, text)
+    try:
+        os.link(tmp, path)
+    except FileExistsError:
+        pass
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def access_key() -> str:
+    """Ключ этой установки; пустая строка, если он ещё не создан."""
+    try:
+        return _key_file().read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def ensure_state() -> None:
+    """Создать каталог состояния и ключ; существующий ключ не меняется.
+
+    Первый ключ создаётся атомарно: одновременные включение и старт сервиса
+    всегда видят один и тот же ключ.
+    """
+    _ensure_dir()
+    if not access_key():
+        _create_once(_key_file(), secrets.token_urlsafe(32) + "\n")
+
+
+def endpoint() -> str:
+    """Адрес встроенного сервера для клиента (запросы идут по Unix-сокету).
+
+    Не зависит от того, запущен ли сервер сейчас: выбор встроенного режима и
+    постоянная идентичность профиля не должны меняться от доступности сервера.
+    """
+    return BASE_URL if is_installed() else ""
+
+
+def in_container() -> bool:
+    return Path(S6_SERVICE_DIR).exists()
+
+
+def _s6_svc(flag: str) -> None:
+    if not in_container():
+        return
+    binary = shutil.which("s6-svc") or "/command/s6-svc"
+    try:
+        subprocess.run(
+            [binary, flag, S6_SERVICE_DIR],
+            check=False,
+            timeout=10,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def enable() -> None:
+    """Снять выключатель: s6 заметит это за несколько секунд и запустит сервер."""
+    _disabled_marker().unlink(missing_ok=True)
+
+
+def disable(signal: bool = True) -> None:
+    """Поставить выключатель и остановить сервер (выбор браузера в профилях не меняется).
+
+    Пока файл ``disabled`` лежит, s6 держит сервис в ожидании без Node и
+    браузера. Контейнер пересоздавать не нужно.
+    """
+    _ensure_dir()
+    marker = _disabled_marker()
+    if not marker.is_file():
+        _write_private(marker, "1\n")
+    if signal:
+        _s6_svc("-t")
+
+
+def _dotenv_url() -> str:
+    from korra_cli.config import load_env
+
+    return (load_env().get("CAMOFOX_URL") or "").strip()
+
+
+def explicit_url() -> str:
+    """Явный внешний ``CAMOFOX_URL`` текущего профиля (пустая строка, если не задан)."""
+    own = _dotenv_url()
+    if own:
+        return own
+    try:
+        from agent.secret_scope import get_secret
+
+        return (get_secret("CAMOFOX_URL", "") or "").strip()
+    except Exception:
+        return (os.environ.get("CAMOFOX_URL") or "").strip()
+
+
+# ── Выбор браузера текущим профилем ────────────────────────────────────────
+
+
+def _chose_other_browser() -> bool:
+    """Текущий профиль уже определил браузер иначе, чем «ничего не выбрано».
+
+    Явный CDP-адрес, режим Browser Use, профиль настоящего браузера, не
+    автоматический движок или учётные данные облачного провайдера — это
+    решения владельца, и умолчание им не мешает. Если настройки не читаются,
+    считаем, что выбор мог быть, и остаёмся на прежнем поведении.
+    """
+    from korra_cli.config import read_raw_config_readonly
+
+    cfg = read_raw_config_readonly()
+    if getattr(cfg, "read_error", None) is not None:
+        return True
+    section = cfg.get("browser") if isinstance(cfg, dict) else None
+    section = section if isinstance(section, dict) else {}
+    if str(section.get("cdp_url") or "").strip():
+        return True
+    if (os.environ.get("BROWSER_CDP_URL") or "").strip():
+        return True
+    backend = section.get("backend")
+    if isinstance(backend, str) and backend.strip().lower() not in ("", "off"):
+        return True
+    if section.get("use_real_profile") is True:
+        return True
+    for engine in (section.get("engine"), os.environ.get("AGENT_BROWSER_ENGINE")):
+        if str(engine or "").strip().lower() not in ("", "auto"):
+            return True
+    try:
+        from plugins.browser.browser_use.provider import BrowserUseBrowserProvider
+        from plugins.browser.browserbase.provider import BrowserbaseBrowserProvider
+
+        return BrowserUseBrowserProvider().is_available() or BrowserbaseBrowserProvider().is_available()
+    except Exception:
+        return True
+
+
+def uses_default_browser() -> bool:
+    """В образе есть Camofox, и текущий профиль не выбирал браузер: работает умолчание.
+
+    Явный внешний ``CAMOFOX_URL`` здесь не учитывается: он решает, какой
+    сервер использовать (см. :func:`explicit_url`), а не выбирает ли профиль
+    Camofox.
+    """
+    if not is_installed():
+        return False
+    from tools.tool_backend_helpers import read_selection
+
+    if read_selection("browser") is not None:
+        return False
+    return not _chose_other_browser()
+
+
+# ── Состояние ──────────────────────────────────────────────────────────────
+
+
+class _UnixHTTPConnection(http.client.HTTPConnection):
+    def __init__(self, path: str, timeout: float) -> None:
+        super().__init__(UNIX_HOST, timeout=timeout)
+        self._socket_path = path
+
+    def connect(self) -> None:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(self.timeout)
+        try:
+            sock.connect(self._socket_path)
+        except BaseException:
+            sock.close()
+            raise
+        self.sock = sock
+
+
+def unix_session():
+    """``requests.Session``, который ходит на ``BASE_URL`` по Unix-сокету сервера.
+
+    Без новой зависимости: подменяется только способ открыть соединение. Адрес
+    сокета берётся при каждом подключении, прокси из окружения отключены.
+    """
+    import requests
+    from requests.adapters import BaseAdapter, HTTPAdapter
+    from urllib3.connection import HTTPConnection
+    from urllib3.connectionpool import HTTPConnectionPool
+
+    class _Connection(HTTPConnection):
+        def _new_conn(self):
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            timeout = self.timeout if isinstance(self.timeout, (int, float)) else None
+            sock.settimeout(timeout)
+            try:
+                sock.connect(str(socket_path()))
+            except BaseException:
+                sock.close()
+                raise
+            return sock
+
+    class _Pool(HTTPConnectionPool):
+        ConnectionCls = _Connection
+
+    class _Adapter(HTTPAdapter):
+        def init_poolmanager(self, *args, **kwargs):
+            super().init_poolmanager(*args, **kwargs)
+            self.poolmanager.pool_classes_by_scheme = {"http": _Pool, "https": _Pool}
+
+    class _Refuse(BaseAdapter):
+        # Всё, что не адрес сервера (например, редирект наружу), не отправляется:
+        # ключ доступа не должен уйти ни на какой TCP-адрес.
+        def send(self, request, **kwargs):
+            raise requests.ConnectionError("встроенный Camofox доступен только по Unix-сокету")
+
+        def close(self):
+            pass
+
+    session = requests.Session()
+    session.trust_env = False
+    session.mount("http://", _Refuse())
+    session.mount("https://", _Refuse())
+    session.mount(BASE_URL, _Adapter())
+    return session
+
+
+def health(timeout: float = 2.0) -> bool:
+    """Сервер отвечает на /health по сокету (маршрут открыт без ключа)."""
+    if socket_path_problem():
+        return False
+    conn = _UnixHTTPConnection(str(socket_path()), timeout)
+    try:
+        conn.request("GET", "/health")
+        return conn.getresponse().status == 200
+    except (OSError, http.client.HTTPException, ValueError):
+        return False
+    finally:
+        conn.close()
+
+
+def _profile_setting(profile_dir: Path, env_name: str, config_keys: tuple) -> str:
+    """Значение из .env или config.yaml другого профиля (удаляемого), без переключения HERMES_HOME."""
+    from korra_cli.config import _parse_env_value
+
+    try:
+        for line in (profile_dir / ".env").read_text(encoding="utf-8-sig").splitlines():
+            key, sep, value = line.strip().partition("=")
+            if sep and key.strip() == env_name and _parse_env_value(value):
+                return _parse_env_value(value)
+    except OSError:
+        pass
+    if not config_keys:
+        return ""
+    try:
+        import yaml
+
+        node = yaml.safe_load((profile_dir / "config.yaml").read_text(encoding="utf-8")) or {}
+        for key in config_keys:
+            node = node.get(key) if isinstance(node, dict) else None
+        return str(node or "").strip()
+    except Exception:
+        return ""
+
+
+def forget_profile_login(profile_dir: Path) -> str:
+    """Удалить сохранённый вход удаляемого профиля (cookie и состояние) во встроенном сервере.
+
+    Идентичность строится тем же способом, что в клиенте
+    (``tools.browser_camofox_state.camofox_user_id``). Внешний сервер
+    (``CAMOFOX_URL`` у профиля или установки) и общую идентичность,
+    заданную владельцем (``CAMOFOX_USER_ID``), не трогаем. Возвращает
+    удалённый каталог или пустую строку.
+    """
+    from tools.browser_camofox_state import camofox_user_id
+
+    if os.environ.get("CAMOFOX_URL", "").strip() or _profile_setting(profile_dir, "CAMOFOX_URL", ()):
+        return ""
+    if os.environ.get("CAMOFOX_USER_ID", "").strip() or _profile_setting(
+        profile_dir, "CAMOFOX_USER_ID", ("browser", "camofox", "user_id")
+    ):
+        return ""
+    user_id = camofox_user_id(profile_dir)
+    target = state_dir() / "profiles" / hashlib.sha256(user_id.encode()).hexdigest()[:32]
+    # Сначала закрываем сессию, даже если каталога ещё нет: у живой сессии сервер сохранит
+    # состояние сам (при закрытии пустой сессии, через минуты) и воскресит вход удалённого профиля.
+    if not socket_path_problem() and is_enabled():
+        conn = _UnixHTTPConnection(str(socket_path()), 5.0)
+        try:
+            conn.request("DELETE", f"/sessions/{user_id}", headers={"Authorization": f"Bearer {access_key()}"})
+            conn.getresponse().read()
+        except (OSError, http.client.HTTPException, ValueError):
+            pass
+        finally:
+            conn.close()
+    if not target.is_dir() or target.is_symlink():
+        return ""
+    shutil.rmtree(target, ignore_errors=True)
+    return "" if target.exists() else str(target)
+
+
+def status() -> Dict[str, object]:
+    """Состояние для doctor: ``state``, пояснение и следующий шаг.
+
+    state: ``not_installed`` (нет в образе), ``switched_off`` (выключатель
+    установки), ``running``, ``not_responding``.
+    """
+    if not is_installed():
+        return {
+            "state": "not_installed",
+            "detail": "в этой сборке нет встроенного Camofox",
+            "next": "используйте образ Korra с Camofox или внешний сервер (CAMOFOX_URL)",
+        }
+    if is_disabled():
+        return {
+            "state": "switched_off",
+            "detail": "выключен на этой установке",
+            "next": "включить: korra tools camofox on",
+        }
+    problem = socket_path_problem()
+    if problem:
+        return {"state": "not_responding", "detail": "не может запуститься", "next": problem}
+    if health():
+        return {"state": "running", "detail": "работает", "next": ""}
+    return {
+        "state": "not_responding",
+        "detail": "включён, но не отвечает",
+        "next": (
+            "подождите полминуты после запуска контейнера; если не проходит — запустите службу: "
+            "s6-svc -u /run/service/camofox (если она уже работала, перезапустите: "
+            "s6-svc -t /run/service/camofox), затем посмотрите лог контейнера (docker logs)"
+        ),
+    }
+
+
+def tools_command(action: str) -> int:
+    """``korra tools camofox {on|off|status}``: выключатель сервера этой установки."""
+    if not is_installed():
+        print("В этой сборке нет встроенного Camofox: переключать нечего.")
+        return 1
+    if action == "on":
+        enable()
+        print("Встроенный Camofox включён: сервер запустится в течение нескольких секунд.")
+        print("Проверить: korra doctor")
+        return 0
+    if action == "off":
+        disable()
+        print("Встроенный Camofox выключен на этой установке: Node и браузер остановлены.")
+        print("Профили без явного выбора браузера работают через Chromium без ошибок;")
+        print("профили, которые явно выбрали Camofox, получат понятную ошибку.")
+        print("Включить обратно: korra tools camofox on")
+        return 0
+    info = status()
+    print(f"Встроенный Camofox: {info['detail']}")
+    if info["next"]:
+        print(info["next"])
+    return 0 if info["state"] in ("running", "switched_off") else 1
+
+
+def server_env() -> Dict[str, str]:
+    """Окружение процесса сервера: белый список плюс настройки встроенного режима."""
+    env = {name: os.environ[name] for name in _PASSTHROUGH_ENV if os.environ.get(name)}
+    root = state_dir()
+    env.update(
+        {
+            "CAMOFOX_UNIX_SOCKET": str(socket_path()),
+            # Запасной рубеж: обёртка не даёт серверу открыть TCP, но если бы
+            # дала, он слушал бы только loopback.
+            "CAMOFOX_BIND_HOST": LOOPBACK,
+            "CAMOFOX_ACCESS_KEY": access_key(),
+            "CAMOFOX_CRASH_REPORT_ENABLED": "false",
+            "CAMOFOX_PROFILE_DIR": str(root / "profiles"),
+            "CAMOFOX_COOKIES_DIR": str(root / "cookies"),
+            "CAMOFOX_TRACES_DIR": str(root / "traces"),
+            "CAMOFOX_UPLOADS_DIR": str(root / "uploads"),
+            "CAMOUFOX_INSTALL_DIR": str(browser_dir()),
+            "NODE_ENV": "production",
+        }
+    )
+    idle = os.environ.get("KORRA_CAMOFOX_IDLE_TIMEOUT_MS", "").strip()
+    if idle.isdigit():
+        env["BROWSER_IDLE_TIMEOUT_MS"] = idle
+    return env
+
+
+def serve_command() -> List[str]:
+    return ["node", str(launcher_script()), str(server_script())]
+
+
+def serve() -> None:
+    """Заменить процесс на сервер Camofox (вызывается из run-скрипта s6)."""
+    if not is_installed() or not launcher_script().is_file():
+        print("[camofox] сервер не установлен в образ", file=sys.stderr)
+        raise SystemExit(1)
+    problem = socket_path_problem()
+    if problem:
+        print(f"[camofox] {problem}", file=sys.stderr)
+        raise SystemExit(1)
+    ensure_state()
+    env = server_env()
+    for sub in ("profiles", "cookies", "traces", "uploads"):
+        (state_dir() / sub).mkdir(parents=True, exist_ok=True)
+    # Устаревший сокет после аварийного завершения мешает bind.
+    try:
+        socket_path().unlink()
+    except FileNotFoundError:
+        pass
+    os.chdir(str(server_script().parent))
+    os.execvpe("node", serve_command(), env)
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    args = list(sys.argv[1:] if argv is None else argv)
+    command = args[0] if args else "status"
+    if command == "serve":
+        serve()
+        return 0
+    if command == "enable":
+        enable()
+        return 0
+    if command == "disable":
+        disable()
+        return 0
+    if command == "status":
+        info = status()
+        print(f"{info['state']}: {info['detail']}")
+        if info["next"]:
+            print(info["next"])
+        return 0 if info["state"] == "running" else 1
+    print("usage: python -m korra_cli.camofox_embedded {serve|enable|disable|status}", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,34 @@
+#!/command/with-contenv sh
+# shellcheck shell=sh
+# Встроенный Camofox («Браузер с защитой от блокировок», K21-336).
+#
+# Сервер принадлежит установке и работает всегда, когда Camofox есть в образе:
+# Camofox — браузер по умолчанию, и он нужен почти каждой установке. Сам браузер
+# ленивый (Firefox стартует первым запросом, прогрева нет), без запросов сервер
+# держит только Node. Единственный выключатель — файл <данные>/camofox/disabled
+# (korra tools camofox off|on): пока он лежит, процесс — обычный sh с sleep, то
+# есть ни Node, ни браузера. Выбор браузера профилями выключатель не трогает.
+# Не используем exit 125 из finish, как у dashboard: такой слот s6 больше не
+# перезапускает, а включить его обратно без root нельзя. Выключение останавливает
+# слот командой `s6-svc -t` (при следующем запуске он снова ждёт); остановленную
+# через -d службу поднимает `s6-svc -u`.
+
+data_root="${KORRA_HOME:-${HERMES_HOME:-/opt/data}}"
+switch="$data_root/camofox/disabled"
+server="${KORRA_CAMOFOX_HOME:-/opt/camofox}/node_modules/@askjo/camofox-browser/server.js"
+
+while [ -f "$switch" ] || [ ! -f "$server" ]; do
+    sleep 3
+done
+
+# with-contenv возвращает HOME=/root; профили и кэши должны лежать в /opt/data.
+export HOME=/opt/data
+cd /opt/data
+# shellcheck disable=SC1091
+. /opt/hermes/.venv/bin/activate
+
+# Unix-сокет (<данные>/camofox/server.sock, 0600), ключ доступа, выключенная
+# телеметрия и белый список окружения задаёт сам модуль; TCP-порта у сервера
+# нет, ключ в лог не попадает.
+[ "$(id -u)" = 0 ] || exec python -m korra_cli.camofox_embedded serve
+exec s6-setuidgid hermes python -m korra_cli.camofox_embedded serve
