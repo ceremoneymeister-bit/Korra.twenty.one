@@ -812,3 +812,15 @@ class TestFable51OperationalGuidance:
             "anthropic/claude-opus-5",
         ):
             assert FABLE_51_OPERATIONAL_GUIDANCE not in self._stable(model)
+
+
+def test_continuity_is_part_of_the_new_stable_completion_guidance():
+    stable = _stable_prompt(_make_agent(model="openai/gpt-5.5", _execution_guidance=True,
+                                        valid_tool_names=["terminal", "read_file"]))
+    assert "A correction changes the method" in stable
+    assert "Side requests add work" in stable
+    assert "then resume the unfinished original task" in stable
+    assert "every outstanding requested result is delivered and verified" in stable
+    assert "explicit cancellation, replacement or postponement" in stable
+    assert "<correction_continuity>" not in stable
+    assert "<task_obligation_continuity>" not in stable

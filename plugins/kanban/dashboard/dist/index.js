@@ -43,7 +43,7 @@
     const ownerReview = from === "review" && task.acceptance === "owner";
     if (target === "running" && from === "ready") return { explain: "Задача уже в очереди: агент возьмёт её в работу сам, как только освободится." };
     if (target === "ready" || target === "running") {
-      if (ownerReview) return { explain: "Результат ждёт вашей проверки. Верните его с замечанием кнопкой в этой карточке — так агент увидит, что исправить." };
+      if (ownerReview || (from === "done" && task.actor_kind !== "human")) return { explain: "Откройте результат. Верните его с замечанием кнопкой в этой карточке — так агент увидит, что исправить." };
       if (kind === "question") return { explain: "Агент ждёт вашего ответа. Ответьте в этой карточке — после ответа задача сама вернётся в очередь." };
       return { dialog: "ready" };
     }
@@ -453,6 +453,7 @@
 
   // Приёмка результата владельцем: принимается ровно та версия, которую он видит.
   function AcceptPanel({ task, board, runs, onDone }) {
+    const completed = task.status === "done";
     const [rework, setRework] = useState(false);
     const [remark, setRemark] = useState("");
     const [busy, setBusy] = useState(false);
@@ -469,15 +470,15 @@
       } catch (err) { setError(errorText(err)); } finally { setBusy(false); }
     }
     return h("div", { className: "k21-accept" },
-      h(ResultView, { task, runs, title: "Результат ждёт вашей проверки" }),
+      h(ResultView, { task, runs, title: completed ? "Результат" : "Результат ждёт вашей проверки" }),
       rework && h(Field, { label: "Что исправить" }, h("textarea", { value: remark, onChange: e => setRemark(e.target.value), rows: 4, placeholder: "Например: добавьте вариант со словом «помощник»" })),
       error && h("p", { role: "alert", className: "k21-error" }, error),
       task.submitted_version == null && h("p", { className: "k21-muted", role: "status" }, "Версия результата недоступна. Обновите карточку перед решением."),
       rework && !remark.trim() && h("p", { className: "k21-muted", role: "status" }, "Напишите, что исправить, чтобы вернуть результат агенту."),
       rework && !task.assignee && h("p", { className: "k21-muted", role: "status" }, "Исполнитель не назначен. Назначьте агента перед возвратом на доработку."),
       h("div", { className: "k21-actions" },
-        !rework && h(Button, { primary: true, disabled: busy || task.submitted_version == null, onClick: () => void send("/accept", {}, "Результат принят. Следующие шаги могут начаться.") }, busy ? "Сохраняем…" : "Принять"),
-        !rework && h(Button, { disabled: busy || task.submitted_version == null, onClick: () => { setRework(true); requestIdRef.current = null; } }, "Вернуть с замечанием"),
+        !completed && !rework && h(Button, { primary: true, disabled: busy || task.submitted_version == null, onClick: () => void send("/accept", {}, "Результат принят. Следующие шаги могут начаться.") }, busy ? "Сохраняем…" : "Принять"),
+        !rework && h(Button, { disabled: busy || task.submitted_version == null, onClick: () => { setRework(true); requestIdRef.current = null; } }, completed ? "Доработать" : "Вернуть с замечанием"),
         rework && h(Button, { primary: true, disabled: busy || !remark.trim() || !task.assignee || task.submitted_version == null, onClick: () => void send("/request-changes", { comment: remark.trim() }, "Вернули агенту с вашим замечанием.") }, busy ? "Сохраняем…" : "Вернуть агенту"),
         rework && h(Button, { disabled: busy, onClick: () => { setRework(false); setRemark(""); requestIdRef.current = null; } }, "Отмена")));
   }
@@ -558,12 +559,12 @@
           "Результат проверяете вы: агент пришлёт его на проверку, а «Готово» появится только после вашего «Принять»."),
         data.plan && h(PlanStrip, { plan: data.plan, current: task.id, onOpenTask }),
         (attention === "question" || attention === "paused" || attention === "problem") && h(DecisionPanel, { key: task.block_revision || attention, task, board, agentName, runs: data.runs, onDone: decided }),
-        attention === "accept" && h(AcceptPanel, { key: task.submitted_version || "accept", task, board, runs: data.runs, onDone: decided }),
+        (attention === "accept" || task.status === "done" && task.actor_kind !== "human") && h(AcceptPanel, { key: task.submitted_version || "accept", task, board, runs: data.runs, onDone: decided }),
         attention === "human_step" && h("section", { className: "k21-note k21-decision", "data-kind": "human_step" },
           h("h3", null, "Это ваш шаг"),
           h("p", null, "Агенты его не выполняют. Когда сделаете, отметьте шаг выполненным — следующие шаги плана смогут начаться."),
           h("div", { className: "k21-actions" }, h(Button, { primary: true, onClick: () => onMove(task, "done") }, "Отметить выполненным"))),
-        !["question", "paused", "problem", "accept"].includes(attention) && task.actor_kind !== "human" && h(ResultView, { task, runs: data.runs, title: finished ? "Результат" : "Последняя запись агента" }),
+        task.status !== "done" && !["question", "paused", "problem", "accept"].includes(attention) && task.actor_kind !== "human" && h(ResultView, { task, runs: data.runs, title: finished ? "Результат" : "Последняя запись агента" }),
         h(finished ? "details" : "section", null,
           h(finished ? "summary" : "h3", null, "Задание"),
           h(RichText, null, task.body || "Описание пока не добавлено. Уточните, какой результат нужен.")),
@@ -571,7 +572,6 @@
           ["todo", "triage", "scheduled"].includes(task.status) && task.actor_kind !== "human" && h(Button, { onClick: () => onMove(task, "ready") }, "Передать агенту"),
           legacyReview && h(Button, { onClick: () => onMove(task, "ready") }, "На доработку"),
           legacyReview && h(Button, { primary: true, onClick: () => onMove(task, "done") }, completionLabel(task)),
-          task.status === "done" && task.actor_kind !== "human" && h(Button, { onClick: () => onMove(task, "ready") }, "Доработать"),
           ["ready", "running", "blocked"].includes(task.status) && task.actor_kind !== "human" && h(Button, { onClick: () => onMove(task, "done") }, completionLabel(task)),
           (task.status === "ready" || task.status === "running" || task.status === "todo") && task.actor_kind !== "human" && h(Button, { onClick: () => onMove(task, "blocked") }, "Приостановить"),
           task.status !== "running" && h(Button, { onClick: () => onEdit(task) }, "Изменить задание"),

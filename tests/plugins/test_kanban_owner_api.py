@@ -372,3 +372,25 @@ def test_status_changes_and_manual_completion_name_the_owner(client):
     with kb.connect_closing() as conn:
         completed = [e for e in kb.list_events(conn, tid2) if e.kind == "completed"][-1]
     assert completed.payload["completed_by"] == "Владелец"
+
+
+def test_done_rework_api_is_versioned_atomic_and_idempotent(client):
+    tid = _plain_card(client)
+    assert _worker_submit(tid, 'old full result')
+    with kb.connect_closing() as conn:
+        child = kb.create_task(conn, title='dependent', assignee='worker', parents=[tid])
+    task = client.get(f'{API}/tasks/{tid}').json()['task']
+    assert isinstance(task['submitted_version'], int)
+    body = {'version': task['submitted_version'], 'request_id': 'done-rework', 'comment': 'Correct it'}
+    stale = client.post(f'{API}/tasks/{tid}/request-changes', json={**body, 'version': -1})
+    assert stale.status_code == 409 and stale.json()['detail']['code'] == 'result_changed'
+    first = client.post(f'{API}/tasks/{tid}/request-changes', json=body)
+    assert first.status_code == 200, first.text
+    assert first.json()['task']['id'] == tid and first.json()['task']['result'] is None
+    assert first.json()['task']['acceptance'] == 'owner'
+    again = client.post(f'{API}/tasks/{tid}/request-changes', json=body)
+    assert again.status_code == 200 and again.json()['duplicate']
+    with kb.connect_closing() as conn:
+        assert kb.get_task(conn, child).status == 'todo'
+        assert [c.body for c in kb.list_comments(conn, tid)] == ['Correct it']
+        assert kb.latest_run(conn, tid).result == 'old full result'

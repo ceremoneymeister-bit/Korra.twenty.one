@@ -626,7 +626,7 @@ def get_task(
             block_revision=kanban_db.block_revision(conn, task_id),
             submitted_version=(
                 kanban_db.submitted_version(conn, task_id)
-                if task.status == "review" and task.acceptance == "owner" else None
+                if task.status == "done" or (task.status == "review" and task.acceptance == "owner") else None
             ),
         )
         links = _links_for(conn, task_id)
@@ -1300,6 +1300,14 @@ def _set_status_direct(
     orphaned. ``running -> ready`` via drag-drop is the common case
     (user yanking a stuck worker back to the queue).
     """
+    previous = kanban_db.get_task(conn, task_id)
+    if (previous and previous.status == "done" and previous.assignee
+            and previous.actor_kind != "human" and new_status == "ready"):
+        return kanban_db.return_for_rework(
+            conn, task_id, comment="Возвращено владельцем на доработку",
+            author=author or "dashboard",
+            version=kanban_db.submitted_version(conn, task_id),
+        )["ok"]
     terminations: list[tuple[Optional[int], Optional[str]]] = []
     effective_status = new_status
     with kanban_db.write_txn(conn):

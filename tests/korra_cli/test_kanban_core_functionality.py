@@ -402,7 +402,8 @@ def test_migration_renames_legacy_event_kinds(tmp_path, monkeypatch):
 
 
 
-def test_stale_run_cannot_block_or_heartbeat_new_attempt(kanban_home, monkeypatch):
+@pytest.mark.parametrize("dispatcher_start_offset", [-0.5, 0.5])
+def test_stale_run_cannot_block_or_heartbeat_new_attempt(kanban_home, monkeypatch, dispatcher_start_offset):
     """Stale retry attempts cannot mutate the active run lifecycle."""
     import korra_cli.kanban_db as _kb
 
@@ -414,6 +415,16 @@ def test_stale_run_cannot_block_or_heartbeat_new_attempt(kanban_home, monkeypatc
         run1 = kb.latest_run(conn, tid)
         kb._set_worker_pid(conn, tid, 98765)
         monkeypatch.setattr(_kb, "_pid_alive", lambda pid: False)
+        monkeypatch.setattr(_kb, "_recent_worker_exits", {})
+        monkeypatch.setattr(
+            _kb, "_DISPATCHER_PROCESS_STARTED_AT",
+            kb.get_task(conn, tid).started_at + dispatcher_start_offset,
+        )
+        # Known nonzero exit is a crash on either side of the dispatcher's
+        # fractional startup epoch. An unknown exit may legitimately be a
+        # restart interruption; that is not the scenario this test asserts.
+        kb._record_worker_exit(98765, 1 << 8)
+        assert kb._classify_worker_exit(98765) == ("nonzero_exit", 1)
         assert kb.detect_crashed_workers(conn) == [tid]
 
         kb.claim_task(conn, tid)
