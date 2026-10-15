@@ -156,3 +156,31 @@ it("K21-203: архивный артефакт доступен для чтен�
   expect(bubbleTexts()).not.toContain("Что делаем с «archive.xlsx»");
   expect(bubbleTexts()).toContain("Что делаем с «live.xlsx»");
 });
+
+it("неоднозначный старый разговор открывает архив отдельно от живого хвоста", async () => {
+  const previous = live.older;
+  live.older = { hasOlder: false, loading: false, failed: false, archivedBefore: true, separateArchive: true } as typeof live.older;
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    const url = new URL(String(input), "http://korra.test");
+    requests.push({ url: `${url.pathname}${url.search}`, method: "GET" });
+    return Response.json(url.searchParams.has("archive") ? { messages: [
+      { id: 1, role: "user", content: "Давний вопрос" },
+      { id: 2, role: "assistant", content: "Давний ответ" },
+    ], pagination: { has_more: false } } : {});
+  }));
+  try {
+    await render(<BubbleChatPage agentProfile="lawyer" />);
+    expect(bubbleTexts()).toContain("Живой вопрос");
+    expect(bubbleTexts()).not.toContain("Давний вопрос");
+    await press("Показать раннюю часть");
+    expect(bubbleTexts()).toContain("Ранняя часть разговора — только чтение");
+    expect(bubbleTexts()).toContain("Давний вопрос");
+    expect(bubbleTexts()).not.toContain("Живой вопрос");
+    expect(requests.some(request => request.url.includes("archive=true") && request.url.includes("profile=lawyer"))).toBe(true);
+    await press("Вернуться к чату");
+    expect(bubbleTexts()).toContain("Живой вопрос");
+    expect(bubbleTexts()).not.toContain("Давний вопрос");
+  } finally {
+    live.older = previous;
+  }
+});

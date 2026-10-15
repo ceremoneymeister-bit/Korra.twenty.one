@@ -7552,10 +7552,12 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                     )
             if not messages:
                 raise RuntimeError("Compression child handoff must not be empty")
-            history_tail = conn.execute(
-                "SELECT * FROM messages WHERE session_id=? AND active=1 "
-                "ORDER BY id DESC LIMIT 1002", (parent_session_id,),
-            ).fetchall()
+            history_source_start = conn.execute(
+                "SELECT MIN(id) FROM messages WHERE session_id=? AND active=1",
+                (parent_session_id,),
+            ).fetchone()[0] or 0
+            history_source_ids = [msg.get("_row_id", msg.get("id")) for msg in messages]
+            history_cloned_pairs = []
             system_prompt_hash = self._store_system_prompt(conn, system_prompt)
 
             conn.execute(
@@ -7630,6 +7632,8 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                         f"WHERE id IN ({placeholders}) ORDER BY id",
                         [child_session_id, *tail_ids],
                     )
+                    cloned_end = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+                    history_cloned_pairs = list(zip(tail_ids, range(cloned_end-len(tail_ids)+1, cloned_end+1)))
                     total_messages += len(tail_ids)
                     for r in tail_rows:
                         raw = r["tool_calls"]
@@ -7644,8 +7648,10 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
             new_start = conn.execute(
                 "SELECT MIN(id) FROM messages WHERE session_id=?", (child_session_id,),
             ).fetchone()[0]
-            record_compaction(self, conn, old_tail=history_tail,
-                              session_id=child_session_id, new_start=new_start)
+            record_compaction(self, conn, source_session_id=parent_session_id,
+                              source_start=history_source_start, source_ids=history_source_ids, messages=messages,
+                              session_id=child_session_id, new_start=new_start,
+                              cloned_pairs=history_cloned_pairs)
             conn.execute(
                 "UPDATE sessions SET message_count = ?, tool_call_count = ? WHERE id = ?",
                 (total_messages, total_tool_calls, child_session_id),
@@ -12433,10 +12439,11 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                         "commit; refusing to publish a stale compaction"
                     )
 
-            history_tail = conn.execute(
-                "SELECT * FROM messages WHERE session_id=? AND active=1 "
-                "ORDER BY id DESC LIMIT 1002", (session_id,),
-            ).fetchall()
+            history_source_start = conn.execute(
+                "SELECT MIN(id) FROM messages WHERE session_id=? AND active=1", (session_id,),
+            ).fetchone()[0] or 0
+            history_source_ids = [msg.get("_row_id", msg.get("id")) for msg in compacted_messages]
+            history_cloned_pairs = []
             patched_model_config = None
             if model_config_patch is not None:
                 # on_missing="raise": a prune/compaction must not commit
@@ -12547,6 +12554,8 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                     f"WHERE id IN ({placeholders}) ORDER BY id",
                     tail_ids,
                 )
+                cloned_end = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+                history_cloned_pairs = list(zip(tail_ids, range(cloned_end-len(tail_ids)+1, cloned_end+1)))
                 inserted += len(tail_ids)
                 tool_calls_total += tail_tool_calls
 
@@ -12557,8 +12566,10 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                     "SELECT MIN(id) FROM messages WHERE session_id=? AND active=1",
                     (session_id,),
                 ).fetchone()[0]
-                record_compaction(self, conn, old_tail=history_tail,
-                                  session_id=session_id, new_start=new_start)
+                record_compaction(self, conn, source_session_id=session_id,
+                                  source_start=history_source_start, source_ids=history_source_ids, messages=compacted_messages,
+                                  session_id=session_id, new_start=new_start,
+                                  cloned_pairs=history_cloned_pairs)
 
             # message_count / tool_call_count reflect the LIVE (active) set —
             # the archived rows are still on disk but not part of the live count.
@@ -12790,10 +12801,20 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                 "AND (active = 1 OR compacted = 1) ORDER BY id ASC",
                 ids,
             ).fetchall()
-        archived = [
-            row for row in self._dedupe_display_rows(all_rows)
-            if not (row["active"] == 1 and row["session_id"] == session_id)
-        ]
+        from korra_state_history import HistoryAmbiguousError, HistoryNotFoundError, HistoryUnavailableError
+
+        try:
+            self.get_history_display_page(session_id, limit=1)
+        except HistoryAmbiguousError:
+            # Separate archive mode must preserve indistinguishable historical
+            # occurrences rather than erase them through global text dedupe.
+            rows = all_rows
+        except (HistoryUnavailableError, HistoryNotFoundError):
+            rows = self._dedupe_display_rows(all_rows)
+        else:
+            rows = self._dedupe_display_rows(all_rows)
+        archived = [row for row in rows
+                    if not (row["active"] == 1 and row["session_id"] == session_id)]
         total = len(archived)
         end = max(total - offset, 0)
         return self._decode_message_rows(archived[max(end - limit, 0):end]), total

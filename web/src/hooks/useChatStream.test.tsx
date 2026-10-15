@@ -2350,3 +2350,38 @@ describe("K21-203 unified compressed history", () => {
     expect(body?.messages.map(message => message.content)).toEqual(["visible 99", "visible 100", "new question"]);
   });
 });
+
+it("неоднозначный старый архив остаётся отдельно и вытесняет прежний общий кэш", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({ approvals: [] })));
+  const messages = vi.spyOn(api, "getSessionMessages");
+  messages.mockResolvedValueOnce({ session_id: "legacy", messages: [
+    { id: 1, role: "user", content: "Давний вопрос", display_id: "legacy:1", read_only: true },
+    { id: 2, role: "assistant", content: "Давний ответ", display_id: "legacy:2", read_only: true },
+  ] as SessionMessage[], pagination: { order: "latest", returned: 2, include_history: true, next_cursor: "old", has_more: false } });
+  await act(async () => { await current.loadSession("legacy"); });
+  expect(current.messages).toHaveLength(2);
+  messages.mockResolvedValue({ session_id: "legacy", messages: [
+    { id: 201, role: "user", content: "Живой вопрос" },
+    { id: 202, role: "assistant", content: "Живой ответ" },
+  ] as SessionMessage[], pagination: { order: "latest", returned: 2, include_history: false,
+    history_separate: true, before_id: 201, has_more: false, archived_before: true } });
+  await act(async () => { await current.loadSession("legacy", { background: true }); });
+  expect(current.messages.map(message => message.content)).toEqual(["Живой вопрос", "Живой ответ"]);
+  expect(current.older.separateArchive).toBe(true);
+  expect(current.messages.every(message => !message.readOnly)).toBe(true);
+});
+
+it("защищённое начало и архивная часть того же хода складываются по происхождению", async () => {
+  const { sessionMessagesToChat } = await import("./useChatStream");
+  const rows: SessionMessage[] = [
+    { id: 201, role: "assistant", content: "Проверяю", display_id: "root:2", origin_session_id: "root", source_session_id: "child", read_only: false,
+      tool_calls: [{ id: "call", function: { name: "terminal", arguments: "{}" } }] },
+    { id: 3, role: "tool", content: "результат", tool_call_id: "call", display_id: "root:3", origin_session_id: "root", source_session_id: "root", read_only: true },
+    { id: 4, role: "assistant", content: "Готово", display_id: "root:4", origin_session_id: "root", source_session_id: "root", read_only: true },
+  ];
+  const messages = sessionMessagesToChat("child", rows);
+  expect(messages).toHaveLength(1);
+  expect(messages[0]?.content).toBe("Проверяю\n\nГотово");
+  expect(messages[0]?.toolCalls?.[0]?.summary).toBe("результат");
+  expect(messages[0]?.readOnly).toBe(true);
+});

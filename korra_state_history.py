@@ -1,6 +1,6 @@
 """Read-only display paging across compaction generations.
 
-Copy recognition is restricted to the suffix/prefix at a compaction boundary.
+Copy provenance is captured at publication; copies occupy their original slots.
 It is occurrence preserving: equal messages elsewhere are never deduplicated.
 No model-facing reads or persisted transcript fields are changed.
 """
@@ -18,6 +18,8 @@ from agent.context_compressor import is_compaction_summary_message
 
 MAX_CHAIN = 256
 MAX_CARRIED_ROWS = 1000
+# Existing publication status column: 1 = oversized, 2 = unprovable copies.
+INCOMPLETE_PROVENANCE = 2
 
 
 class HistoryCursorError(ValueError):
@@ -26,6 +28,10 @@ class HistoryCursorError(ValueError):
 
 class HistoryUnavailableError(ValueError):
     """Damaged/too deep history or a cursor whose boundary was removed."""
+
+
+class HistoryAmbiguousError(HistoryUnavailableError):
+    """Legacy copies cannot be identified safely; use separate live/archive views."""
 
 
 class HistoryNotFoundError(LookupError):
@@ -51,8 +57,8 @@ def _display(db, raw):
 
 
 def _key(row):
-    # Timestamp alone is never identity; duplicate occurrences are matched
-    # one-to-one only inside a copied contiguous boundary tail.
+    # Only legacy reconstruction uses content/time as evidence. New live
+    # messages are identified by their durable source row, before reinsertion.
     content = row.get('display_content', row.get('content'))
     if row['role'] in ('user', 'assistant') and isinstance(content, str):
         from agent.memory_manager import sanitize_context
@@ -177,20 +183,42 @@ def _segments(db, conn, chain, records):
         # A long live suffix is never scanned
         # once its publication boundary has been recorded.
         starts = [0, *recorded_starts]
-        for raw in conn.execute(
+        for generation, raw in enumerate(conn.execute(
             "SELECT m.id FROM messages m WHERE m.session_id=? AND m.id<? "
             f"AND {summary_sql} AND COALESCE(("
             f"SELECT {previous_summary_sql} FROM messages previous "
             "WHERE previous.session_id=m.session_id AND previous.id<m.id "
             "ORDER BY previous.id DESC LIMIT 1),0)=0",
             (sid, metadata_end),
-        ):
-            starts.append(raw['id'])
+        )):
+            boundary = raw['id']
+            # The first compressor pass preserves the beginning BEFORE its
+            # summary. Recover that publication boundary, not the summary's
+            # position inside the new generation.
+            if generation == 0:
+                # protect_first_n decays after the first compression. Later
+                # summaries start their generations without a protected head.
+                head = _boundary_rows(db, conn, Segment(sid, 0, boundary), latest=False)
+                preceding = _boundary_rows(db, conn, Segment(sid, 0, boundary), latest=True)
+                count = _overlap(preceding, head)
+                if 0 < count < len(preceding):
+                    boundary = preceding[-count]['id']
+                elif preceding and count == len(preceding) and sid != chain[0]:
+                    # Distinguish a child's copied protected head (any size)
+                    # from genuine new activity before a later in-place pass.
+                    parent_sid = chain[chain.index(sid) - 1]
+                    parent_rows = _generation_rows(db, conn, Segment(parent_sid, 0, 2**63 - 1))
+                    if len(_legacy_pairs(parent_rows, preceding)) == len(preceding):
+                        boundary = 0
+            starts.append(boundary)
         active_start = conn.execute(
             'SELECT MIN(id) FROM messages WHERE session_id=? AND active=1 AND id<?',
             (sid, metadata_end),
         ).fetchone()[0]
         if active_start:
+            # A summary/carrier within the active handoff is not another
+            # publication; protected head + summary + tail is one generation.
+            starts = [start for start in starts if start < active_start]
             starts.append(active_start)
         starts = sorted(set(starts))
         if len(starts) > 1024:
@@ -223,8 +251,10 @@ def get_history_page(db, session_id, *, limit, before_cursor=None, max_rows=1000
                 version, cursor_scope, cursor_root, anchor = payload
                 if version != 1 or cursor_scope != scope or cursor_root != root:
                     raise ValueError
-                if not isinstance(anchor, int) or isinstance(anchor, bool) or anchor < 1:
-                    raise ValueError
+                if not isinstance(anchor, int) or isinstance(anchor, bool) or not 1 <= anchor <= 2**63 - 1:
+                    raise HistoryCursorError('Cursor anchor must be an integer from 1 to 9223372036854775807')
+            except HistoryCursorError:
+                raise
             except (ValueError, TypeError, UnicodeError):
                 raise HistoryCursorError('Cursor does not belong to this profile/conversation') from None
 
@@ -234,6 +264,8 @@ def get_history_page(db, session_id, *, limit, before_cursor=None, max_rows=1000
                 'SELECT start_message_id, pairs_json, overflow FROM display_compactions WHERE session_id=?',
                 (sid,),
             ):
+                if raw['overflow'] == INCOMPLETE_PROVENANCE:
+                    raise HistoryAmbiguousError('Compaction has no reliable message provenance')
                 if raw['overflow']:
                     raise HistoryUnavailableError('Copied compaction tail exceeds 1000 rows')
                 records[(sid, raw['start_message_id'])] = {'pairs': json.loads(raw['pairs_json'])}
@@ -242,47 +274,46 @@ def get_history_page(db, session_id, *, limit, before_cursor=None, max_rows=1000
         segments = _segments(db, conn, chain, records)
         if len(segments) > 1024:
             raise HistoryUnavailableError('Compaction history exceeds 1024 generations')
-        origins = {}  # newest physical row -> first durable occurrence
-        suppressed = set()
-        origin_sessions = {}
+        origins = {}  # physical copy -> original chronological slot
+        representatives = {}  # original slot -> newest physical copy
+        copies = set()
+        slots_by_session = {}
         for older, newer in zip(segments, segments[1:]):
             record = records.get((newer.session_id, newer.start))
             if record is not None:
                 pairs = record['pairs']
             else:
-                # Pre-journal installations/imports: infer only a contiguous
-                # suffix/prefix at a compression boundary, preserving repeats.
-                left = _boundary_rows(db, conn, older, latest=True)
+                left = _generation_rows(db, conn, older)
                 right = _boundary_rows(db, conn, newer, latest=False)
-                count = _overlap(left, right)
-                if count > MAX_CARRIED_ROWS:
-                    raise HistoryUnavailableError('Copied compaction tail exceeds 1000 rows')
-                pairs = [(old['id'], new['id']) for old, new in
-                         zip(left[len(left)-count:], right[:count])]
+                pairs = _legacy_pairs(left, right)
             for old_id, new_id in pairs:
                 origin = origins.get(old_id, old_id)
                 origins[new_id] = origin
-                origin_sessions[origin] = origin_sessions.get(origin, older.session_id)
-                suppressed.add(old_id)
+                representatives[origin] = new_id
+                copies.add(new_id)
+                if old_id not in origins:
+                    slots_by_session.setdefault(older.session_id, set()).add(old_id)
 
-        # Locate the durable anchor in the current generation. Physical clone
-        # ids can change during compaction; original display identity cannot.
+        # Cursors address the original chronological slot, which never moves
+        # when a protected head or tail is copied into a later generation.
         position = None
         if anchor is not None:
-            candidates = [physical for physical, origin in origins.items() if origin == anchor]
-            candidate = candidates[-1] if candidates else anchor
+            if anchor in representatives:
+                current = conn.execute('SELECT active,compacted FROM messages WHERE id=?',
+                                       (representatives[anchor],)).fetchone()
+                if current is None or not (current['active'] or current['compacted']):
+                    raise HistoryUnavailableError('History cursor boundary is no longer available')
             for index, segment in enumerate(segments):
                 raw = conn.execute(
-                    'SELECT id FROM messages WHERE session_id=? AND id=? '
-                    'AND id>=? AND id<? AND (active=1 OR compacted=1)',
-                    (segment.session_id, candidate, segment.start, segment.end),
+                    'SELECT id,active,compacted FROM messages WHERE session_id=? AND id=? '
+                    'AND id>=? AND id<?',
+                    (segment.session_id, anchor, segment.start, segment.end),
                 ).fetchone()
-                if raw and candidate not in suppressed:
-                    position = (index, candidate)
+                if raw and anchor not in copies and (
+                        raw['active'] or raw['compacted'] or anchor in representatives):
+                    position = (index, anchor)
                     break
             if position is None:
-                # Distinguish an alien physical id from a formerly valid
-                # boundary deleted by rewind/prune.
                 raw = conn.execute('SELECT session_id FROM messages WHERE id=?', (anchor,)).fetchone()
                 if raw and raw['session_id'] not in chain:
                     raise HistoryCursorError('Cursor row is outside this compaction chain')
@@ -297,14 +328,23 @@ def get_history_page(db, session_id, *, limit, before_cursor=None, max_rows=1000
             if position is not None and index > position[0]:
                 continue
             end = min(segment.end, position[1]) if position and index == position[0] else segment.end
+            slots = [slot for slot in slots_by_session.get(segment.session_id, ())
+                     if segment.start <= slot < end]
+            slot_clause = (' OR id IN (' + ','.join('?' for _ in slots) + ')') if slots else ''
             cursor = conn.execute(
                 'SELECT * FROM messages WHERE session_id=? AND id>=? AND id<? '
-                'AND (active=1 OR compacted=1) ORDER BY id DESC',
-                (segment.session_id, segment.start, end),
+                f'AND (active=1 OR compacted=1{slot_clause}) ORDER BY id DESC',
+                (segment.session_id, segment.start, end, *slots),
             )
             for raw in cursor:
-                if raw['id'] in suppressed:
+                if raw['id'] in copies:
                     continue
+                origin = raw['id']
+                if origin in representatives:
+                    raw = conn.execute('SELECT * FROM messages WHERE id=?',
+                                       (representatives[origin],)).fetchone()
+                    if raw is None or not (raw['active'] or raw['compacted']):
+                        continue
                 row = _display(db, raw)
                 if row is None:
                     continue
@@ -312,9 +352,8 @@ def get_history_page(db, session_id, *, limit, before_cursor=None, max_rows=1000
                     has_more = True
                     break
                 scanned += 1
-                origin = origins.get(row['id'], row['id'])
                 row.update(source_session_id=row['session_id'],
-                    origin_session_id=origin_sessions.get(origin, row['session_id']),
+                    origin_session_id=segment.session_id,
                     display_id=f'{root}:{origin}',
                     read_only=not (row['active'] == 1 and row['session_id'] == session_id))
                 selected.append(row)
@@ -344,21 +383,96 @@ def get_history_page(db, session_id, *, limit, before_cursor=None, max_rows=1000
         return session_id, selected, next_cursor, has_more
 
 
-def record_compaction(db, conn, *, old_tail, session_id, new_start):
-    """Record copy provenance at publication, before future appends can look
-    identical to a copied tail. Carries no model data and cascades on
-    transcript deletion. Runs inside the compaction transaction.
+def _generation_rows(db, conn, segment):
+    """Bounded windows include the protected beginning and the copied tail."""
+    head = _boundary_rows(db, conn, segment, latest=False)
+    tail = _boundary_rows(db, conn, segment, latest=True)
+    return sorted({row['id']: row for row in head + tail}.values(), key=lambda row: row['id'])
+
+
+def _legacy_key(row):
+    key = _key(row)
+    # A prune rewrites tool bodies but preserves the tool occurrence/call.
+    return (key[0], key[2], key[3], key[5]) if row['role'] == 'tool' else key
+
+
+def _legacy_pairs(left, right):
+    """Reconstruct an ordered handoff with durable timestamps/call identities.
+
+    Repeated indistinguishable occurrences or changed timestamps cannot prove
+    provenance. Never guess by text globally: the HTTP reader falls back to
+    the existing separate live and archive views in that case.
     """
-    left = [view for raw in reversed(old_tail) if (view := _display(db, raw)) is not None]
-    segment = Segment(session_id, new_start, 2**63 - 1)
-    right = _boundary_rows(db, conn, segment, latest=False)
-    count = _overlap(left, right)
-    pairs = [[old['id'], new['id']] for old, new in zip(left[len(left)-count:], right[:count])]
-    total = conn.execute(
-        'SELECT COUNT(*) FROM messages WHERE session_id=? AND id>=?',
-        (session_id, new_start),
-    ).fetchone()[0]
+    by_key = {}
+    # Text shared by distinct tool calls (including empty assistant call
+    # rows) is ordinary new activity, not evidence of a copied occurrence.
+    content_keys = {key[:2] + key[3:] for row in left if (key := _key(row))}
+    occurrence_keys = {(row['role'], row.get('timestamp'), row.get('tool_call_id')) for row in left}
+    for index, row in enumerate(left):
+        by_key.setdefault(_legacy_key(row), []).append(index)
+    pairs, previous = [], -1
+    for index, row in enumerate(right):
+        matches = by_key.get(_legacy_key(row), [])
+        if not matches:
+            if any((key := _key(later))[:2] + key[3:] in content_keys or
+                   (later['role'], later.get('timestamp'), later.get('tool_call_id')) in occurrence_keys
+                   for later in right[index:]):
+                raise HistoryAmbiguousError('Legacy compaction has no reliable message provenance')
+            break  # subsequent appends are not part of the handoff
+        if len(matches) != 1 or matches[0] <= previous:
+            raise HistoryAmbiguousError('Legacy compaction contains ambiguous repeated occurrences')
+        previous = matches[0]
+        pairs.append([left[previous]['id'], row['id']])
+    if len(pairs) > MAX_CARRIED_ROWS:
+        raise HistoryUnavailableError('Copied compaction tail exceeds 1000 rows')
+    return pairs
+
+
+def record_compaction(db, conn, *, source_session_id, source_start, source_ids, messages,
+                      session_id, new_start, cloned_pairs=()):
+    """Capture occurrence ids before the SQL writer overwrites _row_id.
+
+    Restored/legacy callers without ids use bounded, evidence-based matching.
+    No timestamps are used when the source occurrence is known. This runs in
+    the publication transaction, before future appends can resemble copies.
+    """
+    source_end = new_start if source_session_id == session_id else 2**63 - 1
+    ids = [value for value in source_ids if isinstance(value, int) and 0 < value < 2**63]
+    valid = {}
+    if ids:
+        placeholders = ','.join('?' for _ in ids)
+        valid = {row['id']: row['role'] for row in conn.execute(
+            f'SELECT id,role FROM messages WHERE session_id=? AND id>=? AND id<? AND id IN ({placeholders})',
+            (source_session_id, source_start, source_end, *ids))}
+    pairs = []
+    used = set()
+    for source, msg in zip(source_ids, messages):
+        if source in valid and source not in used and valid[source] == msg.get('role'):
+            # Standalone summaries do not represent an original message.
+            if project_compaction_message_for_display(msg) is not None:
+                pairs.append([source, msg['_row_id']])
+                used.add(source)
+    # Include protected head and rewritten rows for restored callers that
+    # intentionally omit ids. Their persisted timestamps still prove copies.
+    older = Segment(source_session_id, source_start, source_end)
+    left = _generation_rows(db, conn, older)
+    right = _boundary_rows(db, conn, Segment(session_id, new_start, 2**63-1), latest=False)
+    pairs.extend(cloned_pairs)
+    used.update(old for old, _ in cloned_pairs)
+    matched_new = {new for _, new in pairs}
+    ambiguous = False
+    try:
+        inferred = _legacy_pairs([row for row in left if row['id'] not in used],
+                                 [row for row in right if row['id'] not in matched_new])
+    except HistoryAmbiguousError:
+        inferred = []
+        ambiguous = True
+    except HistoryUnavailableError:
+        inferred = []
+    pairs.extend(inferred)
+    total = conn.execute('SELECT COUNT(*) FROM messages WHERE session_id=? AND id>=?',
+                         (session_id, new_start)).fetchone()[0]
     conn.execute(
         'INSERT INTO display_compactions(session_id,start_message_id,pairs_json,overflow) VALUES (?,?,?,?)',
-        (session_id, new_start, json.dumps(pairs), int(count > MAX_CARRIED_ROWS or total > MAX_CARRIED_ROWS + 2)),
+        (session_id, new_start, json.dumps(pairs), 1 if total > MAX_CARRIED_ROWS + 2 else INCOMPLETE_PROVENANCE if ambiguous else 0),
     )
