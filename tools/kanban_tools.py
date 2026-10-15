@@ -1980,16 +1980,15 @@ def _created_card_execution(kb: Any, conn: Any, task: Any, *, subscribed: bool) 
             paused = False
         if refused:
             out.update(state="start_refused", reason=refused)
-        elif general:
+        elif general or exact:
             running, note = _dispatcher_presence()
             out.update(
                 state="queued" if running else "no_dispatcher", will_start=running,
-                reason=("The dispatcher picks it up on its next check (about a minute)."
+                reason=(("Start requested; the dispatcher picks it up on its next check."
+                         if exact and not general else
+                         "The dispatcher picks it up on its next check (about a minute).")
                         if running else note or "No dispatcher is running."),
             )
-        elif exact:
-            out.update(state="queued", will_start=True,
-                       reason="Start requested; the dispatcher picks it up on its next check.")
         else:
             out.update(
                 state="no_dispatcher",
@@ -2003,7 +2002,7 @@ def _created_card_execution(kb: Any, conn: Any, task: Any, *, subscribed: bool) 
             # The request (exact mode) is kept now; the dispatcher picks the card
             # once its parents are done.
             out.update(state="waiting_for_parents",
-                       reason=f"Starts after its parent steps are done. {out['reason']}")
+                       reason=f"Waiting for its parent steps to finish. {out['reason']}")
     if not subscribed:
         out["reason"] = (out["reason"] + " " if out["reason"] else "") + (
             "This chat is not subscribed to the card: results will not arrive here; "

@@ -470,47 +470,72 @@ export async function transcribeRecording(
     throw new Error(AUDIO_TOO_LONG_MESSAGE);
   }
 
-  const dataUrl = await audioToDataUrl(blob);
-  const res = await authedFetch(
-    appendProfileParam("/api/audio/transcribe", profile),
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        data_url: dataUrl,
-        mime_type: mimeType || blob.type || undefined,
-        ...(recordedMs !== undefined ? { duration_ms: Math.round(recordedMs) } : {}),
-      }),
-    },
-  );
-
-  if (!res.ok) {
-    const raw = await res.text().catch(() => res.statusText);
-    let detail = raw;
-    try {
-      const parsed = JSON.parse(raw) as { detail?: unknown };
-      if (typeof parsed.detail === "string") detail = parsed.detail;
-    } catch {
-      // Сервер ответил простым текстом — разбирать нечего.
-    }
-    if (STT_NOT_CONFIGURED.test(detail)) throw new Error(STT_NOT_CONFIGURED_MESSAGE);
-    if (res.status === 413) throw new Error(AUDIO_TOO_LONG_MESSAGE);
-    throw new Error(
-      ownerFacingError(
-        `${res.status}: ${detail}`,
-        "Не удалось распознать речь. Повторите попытку.",
-      ),
+  // Probe + local conversion/command STT can take 60 + 300 + 300 seconds.
+  // Leave headroom for ordinary long recordings; this is a recovery deadline,
+  // not a speed target or a guarantee that a server worker stops on disconnect.
+  const controller = new AbortController();
+  let timer: number | undefined;
+  const expired = new Promise<never>((_, reject) => {
+    timer = window.setTimeout(() => {
+      // Reject first so even a transport that rejects synchronously on abort
+      // gives the owner the useful recovery message.
+      reject(new Error("Не удалось дождаться распознавания за 15 минут. Повторите распознавание или скачайте запись."));
+      controller.abort();
+    }, 15 * 60_000);
+  });
+  const read = async (): Promise<RecordingTranscription> => {
+    const dataUrl = await audioToDataUrl(blob);
+    // Do not upload a late FileReader result after the deadline.
+    if (controller.signal.aborted) throw new DOMException("Распознавание отменено", "AbortError");
+    const res = await authedFetch(
+      appendProfileParam("/api/audio/transcribe", profile),
+      {
+        signal: controller.signal,
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          data_url: dataUrl,
+          mime_type: mimeType || blob.type || undefined,
+          ...(recordedMs !== undefined ? { duration_ms: Math.round(recordedMs) } : {}),
+        }),
+      },
     );
-  }
 
-  const payload = (await res.json()) as AudioTranscriptionResponse;
-  return {
-    text: typeof payload?.transcript === "string" ? payload.transcript : "",
-    audioSeconds:
-      typeof payload?.audio_seconds === "number" && Number.isFinite(payload.audio_seconds)
-        ? payload.audio_seconds
-        : null,
+    if (!res.ok) {
+      const raw = await res.text().catch(() => res.statusText);
+      let detail = raw;
+      try {
+        const parsed = JSON.parse(raw) as { detail?: unknown };
+        if (typeof parsed.detail === "string") detail = parsed.detail;
+      } catch {
+        // Сервер ответил простым текстом — разбирать нечего.
+      }
+      if (STT_NOT_CONFIGURED.test(detail)) throw new Error(STT_NOT_CONFIGURED_MESSAGE);
+      if (res.status === 413) throw new Error(AUDIO_TOO_LONG_MESSAGE);
+      throw new Error(
+        ownerFacingError(
+          `${res.status}: ${detail}`,
+          "Не удалось распознать речь. Повторите попытку.",
+        ),
+      );
+    }
+
+    const payload = (await res.json()) as AudioTranscriptionResponse;
+    return {
+      text: typeof payload?.transcript === "string" ? payload.transcript : "",
+      audioSeconds:
+        typeof payload?.audio_seconds === "number" && Number.isFinite(payload.audio_seconds)
+          ? payload.audio_seconds
+          : null,
+    };
   };
+  try {
+    // The deadline includes encoding, upload and reading either response body.
+    // Racing also handles a stuck transport that never rejects on abort.
+    return await Promise.race([read(), expired]);
+  } finally {
+    window.clearTimeout(timer);
+  }
 }
 
 /** Итог контрольного сообщения новому агенту (см. `probeProfileChat`). */

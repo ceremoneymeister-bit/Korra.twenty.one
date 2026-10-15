@@ -74,6 +74,24 @@ def test_general_queue_without_a_running_dispatcher_says_nothing_will_start(env,
     assert "gateway is not running" in ex["reason"]
 
 
+@pytest.mark.parametrize("waiting_for_parent", [False, True])
+def test_exact_request_without_a_gateway_is_kept_without_promising_a_start(env, monkeypatch, waiting_for_parent):
+    from tools import kanban_tools as kt
+
+    _config(env, general=False, exact=True)
+    monkeypatch.setattr(kt, "_dispatcher_presence", lambda: (False, "The gateway is not running."))
+    parents = []
+    if waiting_for_parent:
+        with kb.connect_closing() as conn:
+            parents = [kb.create_task(conn, title="parent", assignee="pm")]
+    out = _create(parents=parents)
+    ex = out["execution"]
+    assert ex["state"] == ("waiting_for_parents" if waiting_for_parent else "no_dispatcher")
+    assert ex["will_start"] is False and ex["started"] is False
+    assert "gateway is not running" in ex["reason"]
+    assert len(_requests(out["task_id"])) == 1
+
+
 def test_both_queues_off_names_the_operator_command(env):
     _config(env, general=False, exact=False)
     out = _create()
