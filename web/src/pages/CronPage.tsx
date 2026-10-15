@@ -552,6 +552,7 @@ function getJobScheduleDisplay(
     job.schedule,
     asText(job.schedule_display) || asText(job.schedule?.display),
     strings,
+    formatTime,
   );
 }
 
@@ -1329,7 +1330,7 @@ export default function CronPage() {
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
                     <span className={clientMode ? "" : "font-mono-ui"}>
                       {getJobScheduleDisplay(job, scheduleDescribeStrings)}
-                      {clientMode && SCHEDULE_TIME_ZONE !== OWNER_TIME_ZONE
+                      {clientMode && job.schedule?.kind !== "once" && SCHEDULE_TIME_ZONE !== OWNER_TIME_ZONE
                         ? ` (${SCHEDULE_TIME_ZONE})`
                         : ""}
                     </span>
