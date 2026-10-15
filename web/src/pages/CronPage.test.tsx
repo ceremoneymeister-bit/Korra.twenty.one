@@ -18,6 +18,7 @@ import type { CronJob } from "@/lib/api";
 // KorraLoader оборачивает `window.matchMedia` прямо при импорте модуля, а в
 // jsdom его нет — ставим заглушку до того, как подтянется CronPage.
 vi.hoisted(() => {
+  window.__KORRA_OWNER_TIMEZONE__ = "Europe/Moscow";
   if (typeof window !== "undefined" && !window.matchMedia) {
     window.matchMedia = ((query: string) => ({
       addEventListener: () => {},
@@ -379,3 +380,20 @@ describe("CronPage в режиме клиента", () => {
     expect(dialog.textContent).not.toContain(absent);
   });
 });
+
+
+it.each(["2026-10-15T08:46:04.934175+03:00", "2026-10-14T22:46:04Z"])(
+  "разовое расписание и запуск показываются в поясе владельца: %s (A19R2-03)", async (runAt) => {
+    apiMocks.getCronJobs.mockResolvedValue([job({
+      schedule: { kind: "once", run_at: runAt }, last_run_at: runAt, next_run_at: runAt,
+    })]);
+    await renderPage();
+    const expected = new Date(runAt).toLocaleString("ru-RU", {
+      timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit",
+    });
+    expect(container.textContent).toContain(`Один раз ${expected}`);
+    expect(container.textContent?.split(expected)).toHaveLength(4);
+    expect(container.textContent).toContain("Europe/Moscow");
+    expect(container.textContent).not.toContain("(UTC)");
+  },
+);

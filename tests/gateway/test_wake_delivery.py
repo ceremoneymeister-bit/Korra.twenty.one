@@ -215,3 +215,118 @@ async def test_profile_wake_never_borrows_root_key(tmp_path, monkeypatch, key):
                            text="completed", session_id="parent")
 
 
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("internal", [False, True])
+async def test_web_wake_preserves_internal_marker_to_agent(tmp_path, monkeypatch, stream, internal):
+    """A19R2-02: real HTTP self-post/parser/agent wrapper; no model network."""
+    from unittest.mock import MagicMock, patch
+
+    from aiohttp import web
+    from aiohttp.test_utils import TestClient, TestServer
+    from gateway.config import PlatformConfig
+    from gateway.platforms.api_server import APIServerAdapter
+    from korra_state import SessionDB
+
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    text = "[ASYNC DELEGATION BATCH COMPLETE — test] api_calls=1 /opt/data/cache/delegation/test.log"
+    with SessionDB(tmp_path / "state.db") as db:
+        db.create_session("parent", source="dashboard")
+        db.append_message("parent", "user", "Проверь результат")
+        db.append_message("parent", "assistant", "Проверяю")
+        adapter = APIServerAdapter(PlatformConfig(enabled=True, extra={"key": "test-api-key"}))
+        adapter._session_db = db
+        agent = MagicMock()
+        agent.run_conversation.return_value = {"final_response": "Помощник закончил поручение"}
+        agent.session_prompt_tokens = agent.session_completion_tokens = agent.session_total_tokens = 0
+        app = web.Application()
+        app.router.add_post("/v1/chat/completions", adapter._handle_chat_completions)
+        with patch.object(adapter, "_create_agent", return_value=agent):
+            async with TestClient(TestServer(app)) as client:
+                adapter._host, adapter._port = "127.0.0.1", client.server.port
+                if internal and not stream:
+                    await deliver_wake(adapter, text=text, session_id="parent")
+                else:
+                    headers = {"Authorization": "Bearer test-api-key", "X-Hermes-Session-Id": "parent"}
+                    if internal:
+                        headers["X-Hermes-Internal-Notification"] = "1"
+                    response = await client.post("/v1/chat/completions", headers=headers,
+                        json={"messages": [{"role": "user", "content": text}], "stream": stream})
+                    assert response.status == 200, await response.text()
+                    await response.read()
+        kwargs = agent.run_conversation.call_args.kwargs
+        assert kwargs.get("persist_user_display_kind") == ("internal_notification" if internal else None)
+        assert kwargs["user_message"] == text
+        assert [(row["role"], row["content"]) for row in kwargs["conversation_history"]] == [
+            ("user", "Проверь результат"), ("assistant", "Проверяю"),
+        ]
+
+@pytest.mark.asyncio
+async def test_telegram_wake_is_internal_and_does_not_send_scaffolding():
+    adapter = PushAdapter()
+    text = "[ASYNC DELEGATION BATCH COMPLETE] Model: ? api_calls=1"
+    await deliver_wake(adapter, source=_source(), text=text)
+    event, = adapter.handled
+    assert event.internal is True
+    assert event.source.platform is Platform.TELEGRAM
+    assert event.text == text
+
+
+@pytest.mark.asyncio
+async def test_web_wake_real_agent_persists_marker_before_model_call(tmp_path, monkeypatch):
+    """Real HTTP -> agent -> SQLite -> history, replacing only the model call."""
+    from unittest.mock import patch
+
+    from aiohttp import web
+    from aiohttp.test_utils import TestClient, TestServer
+    from openai.types.chat import ChatCompletion
+    from gateway.config import PlatformConfig
+    from gateway.platforms.api_server import APIServerAdapter
+    from korra_state import SessionDB
+    from run_agent import AIAgent
+
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    text = "[ASYNC DELEGATION BATCH COMPLETE — test] api_calls=1 /opt/data/cache/delegation/test.log"
+    with SessionDB(tmp_path / "state.db") as db:
+        db.create_session("parent", source="dashboard")
+        db.append_message("parent", "user", "Поручи проверку")
+        db.append_message("parent", "assistant", "Поручение запущено")
+        agent = AIAgent(api_key="test-key", base_url="http://127.0.0.1:1/v1", model="gpt-4o-mini",
+                        provider="openai", quiet_mode=True, skip_context_files=True, skip_memory=True,
+                        skip_background_review=True, session_db=db, session_id="parent", enabled_toolsets=[])
+        agent._session_db_created = True
+        agent._cached_system_prompt = "SYSTEM"
+        agent._skip_mcp_refresh = True
+        agent._disable_streaming = True
+        seen = []
+
+        def model_call(kwargs):
+            # The synthetic input is typed even if the process crashes here.
+            row = db.get_messages_as_conversation("parent")[-1]
+            assert row["role"] == "user" and row["content"] == text
+            assert row.get("display_kind") == "internal_notification"
+            seen.append(kwargs["messages"])
+            return ChatCompletion(id="test", object="chat.completion", created=1, model="gpt-4o-mini",
+                choices=[{"index": 0, "message": {"role": "assistant", "content": "Проверка завершена"}, "finish_reason": "stop"}],
+                usage={"prompt_tokens": 10, "completion_tokens": 3, "total_tokens": 13})
+
+        monkeypatch.setattr(agent, "_interruptible_api_call", model_call)
+        adapter = APIServerAdapter(PlatformConfig(enabled=True, extra={"key": "test-api-key"}))
+        adapter._session_db = db
+        app = web.Application()
+        app.router.add_post("/v1/chat/completions", adapter._handle_chat_completions)
+        app.router.add_get("/api/sessions/{session_id}/messages", adapter._handle_session_messages)
+        with patch.object(adapter, "_create_agent", return_value=agent):
+            async with TestClient(TestServer(app)) as client:
+                adapter._host, adapter._port = "127.0.0.1", client.server.port
+                await deliver_wake(adapter, text=text, session_id="parent")
+                response = await client.get("/api/sessions/parent/messages", headers={"Authorization": "Bearer test-api-key"})
+                assert response.status == 200
+                rows = (await response.json())["data"]
+        assert seen, "wake never reached the model"
+        assert seen[0][-1]["role"] == "user" and seen[0][-1]["content"] == text
+        assert all("display_kind" not in row for row in seen[0])
+        assert rows[-2]["display_kind"] == "internal_notification"
+        assert rows[-1]["content"] == "Проверка завершена"
+        assert [row["role"] for row in rows] == ["user", "assistant", "user", "assistant"]

@@ -2385,3 +2385,37 @@ it("защищённое начало и архивная часть того ж
   expect(messages[0]?.toolCalls?.[0]?.summary).toBe("результат");
   expect(messages[0]?.readOnly).toBe(true);
 });
+
+
+it("служебные результаты помощников скрыты при открытии и фоновом обновлении чата (A19R2-02)", async () => {
+  const { getChatRuns } = await import("@/lib/chat-runs");
+  vi.mocked(getChatRuns).mockResolvedValue([]);
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ approvals: [] }))));
+  const rows: SessionMessage[] = [
+    { id: 1, role: "user", content: "Поручи помощнику проверку" },
+    { id: 2, role: "assistant", content: "Проверка началась" },
+    { id: 3, role: "user", content: "[ASYNC DELEGATION BATCH COMPLETE] api_calls=1 /opt/data/cache/delegation/task.log", display_kind: "internal_notification" },
+    { id: 4, role: "assistant", content: "Проверка завершена, ошибок нет" },
+  ];
+  vi.spyOn(api, "getSessionMessages").mockResolvedValue({ session_id: "delegation", messages: rows,
+    pagination: { order: "latest", returned: 4, before_id: 1, has_more: false } });
+  for (const background of [false, true]) {
+    await act(async () => { await current.loadSession("delegation", { background }); });
+    expect(current.messages.map(m => m.content)).toEqual([
+      "Поручи помощнику проверку", "Проверка началась", "Проверка завершена, ошибок нет",
+    ]);
+  }
+  expect(rows[2]?.content).toContain("ASYNC DELEGATION");
+});
+
+it("скрытое уведомление сохраняет границу двух ответов и не скрывает цитату человека", async () => {
+  const { sessionMessagesToChat } = await import("./useChatStream");
+  const quote = "[ASYNC DELEGATION BATCH COMPLETE] Что это значит?";
+  const messages = sessionMessagesToChat("delegation", [
+    { id: 1, role: "assistant", content: "Первый помощник готов" },
+    { id: 2, role: "user", content: "служебный результат", display_kind: "internal_notification" },
+    { id: 3, role: "assistant", content: "Второй помощник готов" },
+    { id: 4, role: "user", content: quote },
+  ]);
+  expect(messages.map(m => m.content)).toEqual(["Первый помощник готов", "Второй помощник готов", quote]);
+});
