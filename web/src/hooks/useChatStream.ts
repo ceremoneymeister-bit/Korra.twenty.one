@@ -850,6 +850,12 @@ export function sessionMessagesToChat(
     // Служебная сводка сжатия — не реплика человека; у составной строки
     // сервер отдаёт видимую часть отдельно (ревью Astra, раунд 6, P2-5).
     if (message.display_kind === "hidden") return;
+    // Background wakes carry full model instructions, not a human message.
+    // Keep the turn boundary while omitting their technical text from chat.
+    if (message.display_kind === "internal_notification") {
+      closeTurn();
+      return;
+    }
     const timestamp = message.timestamp ?? Date.now();
     const shownContent = typeof message.display_content === "string" ? message.display_content : message.content;
     const content = typeof shownContent === "string" ? shownContent : "";

@@ -142,6 +142,7 @@ async def _self_post_chat_completion(
     headers = {
         "Authorization": f"Bearer {api_key}",
         "X-Hermes-Session-Id": session_id,
+        "X-Hermes-Internal-Notification": "1",
     }
     payload = {
         "model": str(getattr(adapter, "_model_name", "") or "hermes-agent"),

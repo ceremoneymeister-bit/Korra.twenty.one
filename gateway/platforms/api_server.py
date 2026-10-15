@@ -6043,6 +6043,16 @@ class APIServerAdapter(BasePlatformAdapter):
         if _CLIENT_MESSAGE_ID_RE.fullmatch(client_message_id):
             browser_turn_metadata = {"client_message_id": client_message_id}
 
+        # Background wakes use the same authenticated session endpoint as
+        # human turns. Preserve their presentation type through the self-post;
+        # role/content must stay intact for the model and session replay.
+        internal_display_kind = (
+            "internal_notification"
+            if provided_session_id and self._api_key
+            and request.headers.get("X-Hermes-Internal-Notification") == "1"
+            else None
+        )
+
         completion_id = f"chatcmpl-{uuid.uuid4().hex[:29]}"
         model_name = body.get("model", self._model_name)
         created = int(time.time())
@@ -6245,6 +6255,7 @@ class APIServerAdapter(BasePlatformAdapter):
                     **agent_overrides,
                     route=route,
                     persist_user_display_metadata=browser_turn_metadata,
+                    persist_user_display_kind=internal_display_kind,
                 ))
                 agent_task.add_done_callback(_on_turn_finished)
             except BaseException:
@@ -6273,6 +6284,7 @@ class APIServerAdapter(BasePlatformAdapter):
                 **agent_overrides,
                 route=route,
                 persist_user_display_metadata=browser_turn_metadata,
+                persist_user_display_kind=internal_display_kind,
             )
 
         idempotency_key = request.headers.get("Idempotency-Key")
@@ -8234,6 +8246,7 @@ class APIServerAdapter(BasePlatformAdapter):
         route_source: str = "global",
         confirmed_runtime_lock: bool = False,
         persist_user_display_metadata: Optional[Dict[str, Any]] = None,
+        persist_user_display_kind: Optional[str] = None,
     ) -> tuple:
         """
         Create an agent and run a conversation in a thread executor.
@@ -8285,6 +8298,8 @@ class APIServerAdapter(BasePlatformAdapter):
             run_user_message = user_message
             run_history = conversation_history
             persist_message_kwargs: Dict[str, Any] = {}
+            if persist_user_display_kind:
+                persist_message_kwargs["persist_user_display_kind"] = persist_user_display_kind
             if learning_slash and learning_slash[0] == "learn":
                 from agent.learn_prompt import build_learn_prompt
 
