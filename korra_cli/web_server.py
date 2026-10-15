@@ -3585,27 +3585,110 @@ def _chat_profile_upstream(
     }
 
 
+def _chat_origin_chain(session_id: str, profile: Optional[str]) -> set[str]:
+    """Existing owner chats in this profile, including their reset/compression chain."""
+    from korra_cli import profiles
+    from korra_cli.kanban_decisions import _chat_chain, _NON_OWNER_SOURCES
+    from korra_state import SessionDB
+
+    origin = (profile or "").strip() or "default"
+    if not _CHAT_PROFILE_RE.fullmatch(origin):
+        raise HTTPException(status_code=400, detail="Некорректное имя профиля")
+    home = profiles.get_profile_dir(origin)
+    path = home / "state.db"
+    if not path.is_file():
+        return set()
+    try:
+        # The dashboard's normal opener can bootstrap/heal old stores. Routing
+        # must never migrate data while deciding which profile owns an effect.
+        with contextlib.closing(SessionDB(db_path=path, read_only=True)) as db:
+            row = db.get_session(session_id)
+            if (not row or (row.get("profile_name") or origin) != origin
+                    or row.get("source") in _NON_OWNER_SOURCES):
+                return set()
+            return {
+                sid for sid in _chat_chain(db, session_id)
+                if (member := db.get_session(sid))
+                and (member.get("profile_name") or origin) == origin
+                and member.get("source") not in _NON_OWNER_SOURCES
+            }
+    except Exception as exc:
+        _log.warning("chat approval origin unavailable for %s: %s", origin, exc)
+        raise HTTPException(status_code=503, detail="Не удалось проверить исходный чат") from exc
+
+
+def _chat_effect_ledger_routes(
+    session_id: str, profile: Optional[str], *, request_id: str = "",
+    chain: Optional[set[str]] = None,
+) -> list[tuple[str, str]]:
+    """Read only routing identities, never payloads or decision state transitions.
+
+    A direct cross-profile send has no Kanban card. Its physical sender ledger,
+    matching row.profile and verified origin chat together provide the link.
+    For an exact answer, inspect every existing ledger to reject ambiguity and
+    misplaced legacy rows before forwarding anything to the authenticated API.
+    """
+    import sqlite3
+    from korra_cli import profiles
+
+    origin = (profile or "").strip() or "default"
+    if chain is None:
+        chain = _chat_origin_chain(session_id, profile)
+    if not request_id and not chain:
+        return []
+    routes: list[tuple[str, str]] = []
+    for sender in profiles.list_profile_names():
+        path = profiles.get_profile_dir(sender) / "effect_decisions.sqlite3"
+        if not path.exists():
+            continue
+        try:
+            with contextlib.closing(sqlite3.connect(
+                path.resolve().as_uri() + "?mode=ro", uri=True, timeout=1,
+            )) as conn:
+                if request_id:
+                    rows = conn.execute(
+                        "SELECT id, source_session_id, profile FROM effect_decisions WHERE id = ?",
+                        (request_id,),
+                    ).fetchall()
+                else:
+                    marks = ",".join("?" for _ in chain)
+                    rows = conn.execute(
+                        "SELECT id, source_session_id, profile FROM effect_decisions "
+                        f"WHERE source_session_id IN ({marks})", tuple(chain),
+                    ).fetchall()
+        except (OSError, sqlite3.Error) as exc:
+            _log.warning("chat approval ledger unavailable for %s: %s", sender, exc)
+            raise HTTPException(status_code=503, detail="Не удалось проверить профиль запроса") from exc
+        for effect_id, source_session, stored_profile in rows:
+            belongs = source_session in chain or (sender == origin and source_session == session_id)
+            if stored_profile != sender or not belongs:
+                if request_id:
+                    raise HTTPException(status_code=409, detail="Запрос подтверждения не принадлежит этому чату или профилю")
+                continue
+            if str(effect_id).startswith("effect_"):
+                routes.append((sender, source_session))
+    if request_id and len(routes) > 1:
+        raise HTTPException(status_code=409, detail="Профиль запроса подтверждения неоднозначен")
+    return sorted(set(routes))
+
+
 def _chat_executor_links(session_id: str, profile: Optional[str]) -> list[tuple[str, str]]:
     """Executor profiles holding cards handed over from this chat.
 
     Returns ``(executor profile, card origin session)`` pairs. The link is the
-    card itself (origin session + assignee), followed along the chat's own
-    reset/compression chain; no other profile's ledger is scanned. Anything
-    unreadable yields no link: the chat then keeps only its own decisions.
+    card itself (origin session + assignee), or an exact direct-send ledger
+    binding, followed along this profile's verified reset/compression chain.
     """
     try:
         from korra_cli import kanban_db as _kb
         from korra_cli import profiles as profiles_mod
-        from korra_cli.kanban_decisions import session_ids as _chain
-        from korra_constants import get_hermes_home
-
         origin = (profile or "").strip() or "default"
-        home = (
-            Path(get_hermes_home()) if origin == "default"
-            else Path(profiles_mod.resolve_profile_env(origin))
-        )
-        chain = _chain(session_id, home=home)
-        links: list[tuple[str, str]] = []
+        chain = _chat_origin_chain(session_id, profile)
+        links = [
+            (sender, sid) for sender, sid in _chat_effect_ledger_routes(
+                session_id, profile, chain=chain,
+            ) if sender != origin
+        ]
         for executor, sessions in sorted(_kb.executors_for_sessions(chain).items()):
             if (
                 executor == origin
@@ -3614,7 +3697,9 @@ def _chat_executor_links(session_id: str, profile: Optional[str]) -> list[tuple[
             ):
                 continue
             links.extend((executor, sid) for sid in sorted(sessions))
-        return links[:16]
+        return list(dict.fromkeys(links))[:16]
+    except HTTPException:
+        raise
     except Exception as exc:
         _log.warning("chat executor links unavailable for %s: %s", session_id, exc)
         return []
@@ -3718,7 +3803,15 @@ async def chat_approval_proxy(
 
     target_profile, target_session = profile, payload.session_id
     if request_id.startswith("effect_"):
-        links = await run_in_threadpool(_chat_executor_links, payload.session_id, profile)
+        ledger_routes = await run_in_threadpool(
+            _chat_effect_ledger_routes, payload.session_id, profile, request_id=request_id,
+        )
+        if ledger_routes:
+            executor, target_session = ledger_routes[0]
+            target_profile = None if executor == "default" else executor
+            links = []
+        else:
+            links = await run_in_threadpool(_chat_executor_links, payload.session_id, profile)
         if links:
             try:
                 async with _httpx.AsyncClient(timeout=_httpx.Timeout(15.0)) as client:
