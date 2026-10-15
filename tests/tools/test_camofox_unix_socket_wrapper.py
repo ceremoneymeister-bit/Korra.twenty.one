@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import http.client
 import os
 import shutil
 import socket
@@ -9,6 +10,7 @@ import stat
 import subprocess
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -344,6 +346,93 @@ def test_watchdog_keeps_the_process_when_the_server_recovers_after_the_kill(run_
     assert code == 0
     assert "принудительное завершение Firefox" in err
     assert "перезапуск процесса" not in err
+
+
+CONTEXT_HEALTH_SERVER = """
+import http from 'node:http';
+let created = 0;
+let closed = 0;
+const hang = () => new Promise(() => {});
+const browser = process.env.FAKE_STAGE === 'idle' ? null : {
+  isConnected: () => true,
+  async newContext() {
+    created++;
+    if (process.env.FAKE_STAGE === 'context') return hang();
+    return {
+      async newPage() { if (process.env.FAKE_STAGE === 'page') return hang(); },
+      async close() { closed++; if (process.env.FAKE_STAGE === 'close') return hang(); },
+    };
+  },
+};
+let handler;
+const app = { get(route, fn) { handler = fn; } };
+app.get('/health', (req, res) => {
+  res.json({ ok: true, browserRunning: !!browser, created, closed });
+});
+http.createServer((req, res) => {
+  res.status = code => { res.statusCode = code; return res; };
+  res.json = data => res.end(JSON.stringify(data));
+  if (req.url === '/stats') return res.json({ created, closed });
+  handler(req, res);
+}).listen(9377);
+"""
+
+
+@pytest.mark.parametrize("stage", ["context", "page", "close", "healthy", "idle"])
+def test_health_checks_context_and_page_with_one_deadline_without_starting_idle_browser(run_dir, stage):
+    sock = run_dir / "server.sock"
+    script = run_dir / "server.js"
+    script.write_text(CONTEXT_HEALTH_SERVER)
+    proc = subprocess.Popen(
+        ["node", str(WRAPPER), str(script)], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        env={**os.environ, "CAMOFOX_UNIX_SOCKET": str(sock), "FAKE_STAGE": stage},
+    )
+
+    def health(route="/health"):
+        conn = http.client.HTTPConnection("camofox.invalid", timeout=8)
+        conn.sock = socket.socket(socket.AF_UNIX)
+        conn.sock.settimeout(8)
+        conn.sock.connect(str(sock))
+        try:
+            conn.request("GET", route)
+            response = conn.getresponse()
+            return response.status, json.loads(response.read())
+        finally:
+            conn.close()
+
+    try:
+        _wait_for(sock)
+        if stage == "context":
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                answers = list(pool.map(lambda _: health(), range(2)))
+            assert answers[0] == answers[1]
+            status, body = answers[0]
+            assert health("/stats")[1]["created"] == 1
+        else:
+            status, body = health()
+        if stage in ("healthy", "idle"):
+            assert status == 200 and body["ok"] is True
+            assert body["created"] == body["closed"] == (1 if stage == "healthy" else 0)
+        else:
+            assert status == 503 and body["ok"] is False
+            assert body["contextReady"] is False
+            # После таймаута не накапливаем новые зависшие фабрики.
+            assert health() == (status, body)
+    finally:
+        proc.kill()
+        proc.communicate(timeout=5)
+
+
+def test_changed_upstream_health_route_refuses_to_start_instead_of_reporting_false_readiness(run_dir):
+    script = run_dir / "node_modules" / "@askjo" / "camofox-browser" / "server.js"
+    script.parent.mkdir(parents=True)
+    script.write_text(CONTEXT_HEALTH_SERVER.replace("app.get('/health',", 'app.get("/health",'))
+    done = subprocess.run(
+        ["node", str(WRAPPER), str(script)], capture_output=True, text=True, timeout=10,
+        env={**os.environ, "CAMOFOX_UNIX_SOCKET": str(run_dir / "server.sock")},
+    )
+    assert done.returncode == 1
+    assert "проверка context/page не установлена" in done.stderr
 
 
 # Виртуальный экран: Xvfb из camoufox-js не должен слушать абстрактный сокет, который
