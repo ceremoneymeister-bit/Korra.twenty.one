@@ -311,6 +311,47 @@ describe("useDictation", () => {
     expect(current.kept?.message).toMatch(/^Не удалось связаться с сервером/);
   });
 
+  it("зависший настоящий запрос сохраняет аудио; Retry отправляет его без новой записи", async () => {
+    const realApi = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
+    apiMocks.transcribeRecording.mockImplementation(realApi.transcribeRecording);
+    vi.stubGlobal("FileReader", class {
+      result = "data:audio/webm;base64,AAAA";
+      onload: (() => void) | null = null;
+      readAsDataURL() { this.onload?.(); }
+    });
+    let lateResponse!: (response: Response) => void;
+    const fetcher = vi.fn()
+      .mockImplementationOnce(() => new Promise<Response>(resolve => { lateResponse = resolve; }))
+      .mockResolvedValueOnce(Response.json({ transcript: "сохранённая мысль" }));
+    vi.stubGlobal("fetch", fetcher);
+    vi.useFakeTimers();
+    const onText = vi.fn();
+    try {
+      await mount({ onText });
+      await press();
+      await press();
+      expect(current.state).toBe("transcribing");
+      await act(async () => { await vi.advanceTimersByTimeAsync(15 * 60_000); });
+      expect(current.state).toBe("idle");
+      expect(current.kept?.kind).toBe("failed");
+      expect(current.kept?.message).toContain("15 минут");
+      expect(fetcher.mock.calls[0][1].signal.aborted).toBe(true);
+      expect(track.stop).toHaveBeenCalled();
+      await act(async () => { current.retry(); });
+      expect(current.state).toBe("idle");
+      expect(current.kept).toBeNull();
+      expect(onText).toHaveBeenCalledExactlyOnceWith("сохранённая мысль");
+      expect(apiMocks.transcribeRecording.mock.calls[1][0]).toBe(apiMocks.transcribeRecording.mock.calls[0][0]);
+      expect(getUserMedia).toHaveBeenCalledTimes(1);
+      expect(FakeMediaRecorder.instances).toHaveLength(1);
+      await act(async () => { lateResponse(Response.json({ transcript: "старый поздний ответ" })); });
+      expect(onText).toHaveBeenCalledExactlyOnceWith("сохранённая мысль");
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("пока нераспознанная запись не разобрана, новая не начинается", async () => {
     apiMocks.transcribeRecording.mockRejectedValue(new TypeError("Failed to fetch"));
     await mount();
