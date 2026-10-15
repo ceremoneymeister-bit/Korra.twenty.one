@@ -139,9 +139,8 @@ def _check_dispatcher_presence(
 ) -> tuple[bool, str]:
     """Return ``(running, message)``.
 
-    - ``running=True``: a gateway is alive for this HERMES_HOME and its
-      config has ``kanban.dispatch_in_gateway`` on (default). Message
-      is a short status line.
+    - ``running=True``: a gateway is alive and the board owner's general
+      queue or exact start requests are enabled. Message is a short status line.
     - ``running=False``: either no gateway is running, or the gateway
       is running but the config flag is off. Message is human guidance
       explaining the next step.
@@ -152,8 +151,9 @@ def _check_dispatcher_presence(
     probe itself errors, we return ``(True, "")`` so we don't spam
     false warnings (better to miss a warning than to cry wolf).
 
-    ``hermes_home`` scopes the probe to a named profile's directory. The
-    dashboard plugin API passes it because the dashboard backend process can
+    By default probe the board owner's home, including when called from an
+    executor profile. ``hermes_home`` scopes the probe to a named profile's
+    directory. The dashboard plugin API passes it because the backend process can
     be running under a different HERMES_HOME than the profile the request
     targets, which otherwise produced a "no gateway is running" warning
     against a perfectly healthy profile gateway (#71211). CLI callers leave
@@ -170,7 +170,8 @@ def _check_dispatcher_presence(
         # CLI/create-time probe, not a polling loop, and it must observe the
         # gateway's state right now rather than a cached snapshot.
         liveness = resolve_gateway_liveness(
-            profile_dir=hermes_home, use_cache=False
+            profile_dir=hermes_home if hermes_home is not None else kb.kanban_home(),
+            use_cache=False,
         )
     except Exception:
         return (True, "")  # probe errored — silent
@@ -181,20 +182,23 @@ def _check_dispatcher_presence(
         return (True, "")
     pid = liveness.pid
 
-    # Even if the gateway is up, dispatch_in_gateway may be off.
+    # The board is shared: an executor's config must not override the owner's
+    # choice. An exact-only dispatcher is a valid path with the general queue off.
     try:
-        from korra_cli.config import load_config
-        cfg = load_config()
-        dispatch_on = bool(cfg.get("kanban", {}).get("dispatch_in_gateway", True))
+        settings = kb.owner_kanban_settings()
+        dispatch_on = settings.get("dispatch_in_gateway", True) is not False
+        exact_on = settings.get("dispatch_exact_requests") is True
     except Exception:
         dispatch_on = True  # can't tell — assume default
+        exact_on = False
 
-    if pid and dispatch_on:
-        return (True, f"gateway pid={pid}, dispatch enabled")
-    if pid and not dispatch_on:
+    if pid and (dispatch_on or exact_on):
+        mode = "general" if dispatch_on else "exact-only"
+        return (True, f"gateway pid={pid}, dispatch enabled ({mode})")
+    if pid:
         return (
             False,
-            'Шлюз работает, но диспетчер выключен: kanban.dispatch_in_gateway=false. Включите его в config.yaml и перезапустите шлюз либо запустите отдельный диспетчер через `korra kanban daemon --force`.'
+            'Шлюз работает, но диспетчер выключен: общая очередь и точечные запросы запуска отключены. Для одной карточки используйте `korra kanban dispatch --task-id <id>`; режим автоматического запуска выбирает владелец в config.yaml.',
         )
     return (
         False,
