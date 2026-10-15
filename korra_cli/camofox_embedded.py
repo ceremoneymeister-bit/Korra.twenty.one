@@ -33,6 +33,8 @@ from __future__ import annotations
 
 import hashlib
 import http.client
+import json
+import logging
 import os
 import secrets
 import shutil
@@ -40,6 +42,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -49,6 +52,9 @@ LOOPBACK = "127.0.0.1"
 STATE_DIR_NAME = "camofox"
 SOCKET_NAME = "server.sock"
 S6_SERVICE_DIR = "/run/service/camofox"
+_RESTART_COOLDOWN = 120.0
+_RESTART_WAIT = 30.0
+logger = logging.getLogger(__name__)
 
 # Запросы идут по Unix-сокету, а имя хоста нужно только для заголовка Host и
 # адресов requests. Зона .invalid (RFC 2606) никогда не разрешается в DNS, так
@@ -223,20 +229,21 @@ def in_container() -> bool:
     return Path(S6_SERVICE_DIR).exists()
 
 
-def _s6_svc(flag: str) -> None:
+def _s6_svc(flag: str) -> bool:
     if not in_container():
-        return
+        return False
     binary = shutil.which("s6-svc") or "/command/s6-svc"
     try:
-        subprocess.run(
+        result = subprocess.run(
             [binary, flag, S6_SERVICE_DIR],
             check=False,
             timeout=10,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
+        return result.returncode == 0
     except (OSError, subprocess.SubprocessError):
-        pass
+        return False
 
 
 def enable() -> None:
@@ -399,18 +406,86 @@ def unix_session():
     return session
 
 
-def health(timeout: float = 2.0) -> bool:
-    """Сервер отвечает на /health по сокету (маршрут открыт без ключа)."""
+def health(timeout: float = 7.0) -> bool:
+    """Readiness по сокету; обёртка проверяет context/page за ≤5 с без запуска спящего Firefox."""
     if socket_path_problem():
         return False
     conn = _UnixHTTPConnection(str(socket_path()), timeout)
     try:
         conn.request("GET", "/health")
-        return conn.getresponse().status == 200
+        response = conn.getresponse()
+        if response.status != 200:
+            return False
+        payload = json.loads(response.read())
+        return isinstance(payload, dict) and payload.get("ok") is True
     except (OSError, http.client.HTTPException, ValueError):
         return False
     finally:
         conn.close()
+
+
+def recover() -> bool:
+    """Перезапустить зависший сервер через s6, не чаще раза в две минуты на установку.
+
+    flock и отметка общие для всех процессов/профилей установки. Ждём новый
+    сокет и readiness: зелёный ответ старого Node ещё не означает перезапуск.
+    Сохранённые входы и ключ доступа не меняются.
+    """
+    if not is_enabled() or not in_container() or socket_path_problem():
+        return False
+    import fcntl
+
+    def generation():
+        try:
+            info = socket_path().stat()
+            return info.st_ino, info.st_mtime_ns
+        except OSError:
+            return None
+
+    deadline = time.monotonic() + _RESTART_WAIT
+    try:
+        _ensure_dir()
+        lock_path = state_dir() / "restart.lock"
+        _create_once(lock_path, "0\n")
+        with lock_path.open("r+") as lock:
+            while True:
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= deadline:
+                        return False
+                    time.sleep(0.1)
+            if is_disabled():
+                return False
+            now = time.monotonic()
+            try:
+                previous = float(lock.read().strip())
+            except ValueError:
+                previous = 0.0
+            if 0 < previous <= now and now - previous < _RESTART_COOLDOWN:
+                logger.warning("Camofox: повторный перезапуск ограничен (120 с на установку)")
+                return health()
+            old_socket = generation()
+            lock.seek(0)
+            lock.write(f"{now}\n")
+            lock.truncate()
+            lock.flush()
+            logger.warning("Camofox: создание контекста/вкладки недоступно; перезапуск службы через s6-svc -t")
+            if not _s6_svc("-t"):
+                logger.warning("Camofox: s6 не принял запрос перезапуска")
+                return False
+            while time.monotonic() < deadline and not is_disabled():
+                current = generation()
+                remaining = deadline - time.monotonic()
+                if current is not None and current != old_socket and remaining > 0 and health(timeout=min(7.0, remaining)):
+                    logger.warning("Camofox: служба восстановлена, повторяем запрос один раз")
+                    return True
+                time.sleep(0.2)
+            logger.warning("Camofox: служба не восстановилась за 30 с")
+    except OSError as exc:
+        logger.warning("Camofox: не удалось восстановить службу (%s)", type(exc).__name__)
+    return False
 
 
 def _profile_setting(profile_dir: Path, env_name: str, config_keys: tuple) -> str:

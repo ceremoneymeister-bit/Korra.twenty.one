@@ -3,6 +3,8 @@
 import os
 import shutil
 import stat
+import subprocess
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -190,7 +192,11 @@ def test_switching_off_works_on_a_clean_data_dir(install, data):
 
 def test_s6_is_nudged_only_inside_the_container_and_only_on_switch_off(install, data, monkeypatch):
     calls = []
-    monkeypatch.setattr(emb.subprocess, "run", lambda cmd, **kw: calls.append(cmd))
+    def run(cmd, **kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(emb.subprocess, "run", run)
     emb.disable()
     emb.enable()
     assert calls == []
@@ -204,7 +210,11 @@ def test_s6_is_nudged_only_inside_the_container_and_only_on_switch_off(install, 
 
 def test_switch_off_finds_s6_svc_outside_the_service_path(install, data, monkeypatch):
     calls = []
-    monkeypatch.setattr(emb.subprocess, "run", lambda cmd, **kw: calls.append(cmd))
+    def run(cmd, **kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(emb.subprocess, "run", run)
     monkeypatch.setattr(emb, "in_container", lambda: True)
     monkeypatch.setattr(emb.shutil, "which", lambda name: None)
     emb.disable()
@@ -240,6 +250,66 @@ def test_health_over_the_socket(install, data):
     with UnixServer(emb.socket_path()) as server:
         assert emb.health(timeout=2) is True
     assert server.seen[0]["path"] == "/health"
+
+
+@pytest.mark.parametrize("body", [b'{"ok":false}', b'{}', b'not json'])
+def test_health_rejects_a_green_http_status_with_an_unhealthy_body(install, data, body):
+    with UnixServer(emb.socket_path(), reply=body):
+        assert emb.health() is False
+
+
+def test_restart_cooldown_is_shared_between_processes_but_not_installations(install, data, monkeypatch, tmp_path):
+    # Настоящие subprocess + flock + s6-svc-заглушка; недоступный s6 тоже не
+    # должен получать шквал сигналов от разных процессов и профилей.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    counter = tmp_path / "signals"
+    binary = bin_dir / "s6-svc"
+    binary.write_text(f"#!/bin/sh\necho signal >> '{counter}'\nexit 1\n")
+    binary.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+    code = (
+        "from korra_cli import camofox_embedded as e; "
+        "e.in_container = lambda: True; "
+        "assert e.recover() is False"
+    )
+
+    def run():
+        return subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    processes = [run() for _ in range(3)]
+    for process in processes:
+        _, error = process.communicate(timeout=15)
+        assert process.returncode == 0, error.decode()
+    assert counter.read_text().splitlines() == ["signal"]
+    assert stat.S_IMODE((data / "camofox" / "restart.lock").stat().st_mode) == 0o600
+    # Другая установка на том же хосте имеет собственный cooldown.
+    other = use_root(monkeypatch, short_dir())
+    try:
+        process = run()
+        _, error = process.communicate(timeout=15)
+        assert process.returncode == 0, error.decode()
+        assert counter.read_text().splitlines() == ["signal", "signal"]
+    finally:
+        shutil.rmtree(other, ignore_errors=True)
+
+
+def test_recovery_does_not_accept_green_health_from_the_old_process(install, data, monkeypatch):
+    monkeypatch.setattr(emb, "in_container", lambda: True)
+    monkeypatch.setattr(emb, "_RESTART_WAIT", 0.1)
+    calls = []
+    monkeypatch.setattr(emb, "_s6_svc", lambda flag: calls.append(flag) or True)
+    with UnixServer(emb.socket_path()) as server:
+        assert emb.recover() is False
+        assert server.seen == []  # неизменившийся сокет не доказывает перезапуск
+    assert calls == ["-t"]
+
+
+def test_recovery_respects_the_owner_switch(install, data, monkeypatch):
+    emb.disable(signal=False)
+    monkeypatch.setattr(emb, "in_container", lambda: True)
+    monkeypatch.setattr(emb, "_s6_svc", lambda flag: pytest.fail("выключенный сервер перезапускается"))
+    assert emb.recover() is False
 
 
 def test_health_ignores_a_tcp_listener_squatting_on_loopback(install, data):

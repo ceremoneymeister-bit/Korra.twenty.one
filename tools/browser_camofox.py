@@ -125,7 +125,8 @@ def _using_embedded_camofox() -> bool:
 
 _FALLBACK_NOTE = (
     "Встроенный браузер с защитой от блокировок сейчас не отвечает, поэтому страница открыта обычным "
-    "Chromium (без сохранённых входов этого профиля). Если нужен именно он, подождите полминуты и повторите."
+    "Chromium (без сохранённых входов этого профиля). Автоматическое восстановление не помогло; "
+    "повторите позже или выполните `korra doctor`."
 )
 _HEALTH_TTL = 5.0
 _FAILURE_TTL = 30.0
@@ -145,8 +146,8 @@ def _embedded_unavailable() -> bool:
 
     Then the browser tools run through ordinary Chromium instead of failing:
     a crash or a slow start of the bundled server must not leave agents
-    without a browser. The probe is the cheap ``/health`` over the socket
-    (it answers without launching Firefox) and its result is reused for a few
+    without a browser. The probe is ``/health`` over the socket (it tests
+    context/page creation without launching an idle Firefox), reused for a few
     seconds. A call that finds the server unusable despite a good probe
     (connection lost, no tab can be opened) calls :func:`_mark_embedded_down`,
     which turns the cached answer to "unavailable" for longer. An explicit
@@ -165,8 +166,10 @@ def _embedded_unavailable() -> bool:
             expires, cached_key, cached_ok = _health_cache
             if cached_key == key and time.monotonic() < expires:
                 return not cached_ok
-        ok = camofox_embedded.health()
+        ok = camofox_embedded.health() or camofox_embedded.recover()
         _remember_health(key, ok, _HEALTH_TTL)
+        if not ok:
+            logger.warning("Camofox: readiness не восстановлена; используем Chromium без профильных входов")
         return not ok
     except Exception:  # pragma: no cover — helpers are in-repo
         return False
@@ -295,12 +298,17 @@ def check_camofox_available() -> bool:
     if not url:
         return False
     try:
-        resp = _request("get", f"{url}/health", timeout=5)
+        embedded = _using_embedded_camofox()
+        resp = _request("get", f"{url}/health", timeout=7 if embedded else 5)
+        if embedded:
+            _vnc_url_checked = True
+            data = resp.json()
+            return resp.status_code == 200 and isinstance(data, dict) and data.get("ok") is True
         if resp.status_code == 200 and not _vnc_url_checked:
             try:
                 data = resp.json()
                 vnc_port = data.get("vncPort")
-                if isinstance(vnc_port, int) and 1 <= vnc_port <= 65535 and not _using_embedded_camofox():
+                if isinstance(vnc_port, int) and 1 <= vnc_port <= 65535:
                     from urllib.parse import urlparse
                     parsed = urlparse(url)
                     host = parsed.hostname or "localhost"
@@ -574,24 +582,35 @@ def _ensure_tab(task_id: Optional[str], url: str = "about:blank") -> Dict[str, A
     if session["tab_id"]:
         return session
     base = get_camofox_url()
-    try:
-        resp = _request(
-            "post",
-            f"{base}/tabs",
-            json={
-                "userId": session["user_id"],
-                "listItemId": session["session_key"],
-                "url": url,
-            },
-            timeout=_get_command_timeout(),
-            headers=_auth_headers(),
-        )
-        resp.raise_for_status()
-    except (requests.Timeout, requests.HTTPError) as exc:
-        if _using_embedded_camofox() and _server_cannot_open_tab(session, exc):
+    for attempt in range(2):
+        try:
+            resp = _request(
+                "post",
+                f"{base}/tabs",
+                json={
+                    "userId": session["user_id"],
+                    "listItemId": session["session_key"],
+                    "url": url,
+                },
+                timeout=_get_command_timeout(),
+                headers=_auth_headers(),
+            )
+            resp.raise_for_status()
+            break
+        except (requests.Timeout, requests.HTTPError, requests.ConnectionError) as exc:
+            if not _using_embedded_camofox():
+                raise
+            if attempt == 0:
+                if not _server_cannot_open_tab(session, exc):
+                    raise
+                from korra_cli import camofox_embedded
+
+                if camofox_embedded.recover():
+                    _remember_health(str(camofox_embedded.socket_path()), True, _HEALTH_TTL)
+                    continue
+            logger.warning("Camofox: создание вкладки не восстановилось; используем Chromium без профильных входов")
             _mark_embedded_down(_FAILURE_TTL)
             raise CamofoxCannotOpenTab(_CANNOT_OPEN_TAB_TEXT) from None
-        raise
     data = resp.json()
     session["tab_id"] = data.get("tabId")
     return session
@@ -661,9 +680,9 @@ class CamofoxUnreachable(requests.ConnectionError):
 
 
 _CANNOT_OPEN_TAB_TEXT = (
-    "Браузер с защитой от блокировок отвечает, но не может открыть вкладку: вероятно, не запустился Firefox "
-    "или не хватает памяти. Подождите полминуты и повторите; если не проходит, попросите владельца "
-    "выполнить `korra doctor` и посмотреть лог контейнера или временно выбрать обычный браузер в `korra tools`."
+    "Браузер с защитой от блокировок не может открыть вкладку после попытки автоматического восстановления. "
+    "Повторите позже; если не проходит, выполните `korra doctor` и посмотрите лог контейнера "
+    "или временно выберите обычный браузер в `korra tools`."
 )
 
 
@@ -684,7 +703,7 @@ def _require_embedded_ready() -> None:
 
     if camofox_embedded.is_disabled():
         raise CamofoxUnreachable(_connection_error_text())
-    if not camofox_embedded.health():
+    if not (camofox_embedded.health() or camofox_embedded.recover()):
         _mark_embedded_down()
         raise CamofoxUnreachable(_connection_error_text())
 
@@ -871,6 +890,7 @@ def _navigate_with_chromium(url: str, task_id: Optional[str]) -> Optional[str]:
         return None
     from tools.browser_tool import _browser_navigate
 
+    logger.warning("Camofox недоступен после попытки восстановления; страница открывается в Chromium без профильных входов")
     return _browser_navigate(url, task_id)
 
 

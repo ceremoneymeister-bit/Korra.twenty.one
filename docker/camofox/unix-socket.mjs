@@ -75,6 +75,49 @@ const PREWARM_BLOCK =
 const PREWARM_SKIPPED = "    log('info', 'browser pre-warm skipped (Korra): the first request starts it');\n";
 const serverUrl = pathToFileURL(serverScript).href;
 
+// isConnected() не проверяет способность Firefox создавать контексты после
+// уборки вкладок. Проверяем context + page + close с одним сроком, не вызывая
+// ensureBrowser (health не должен запускать браузер или сдвигать idle timer).
+// Общая pending-проба и защёлка отказа не дают health накапливать зависшие
+// фабрики. После отказа Korra перезапускает весь сервис через s6.
+const HEALTH_ROUTE = "app.get('/health', (req, res) => {";
+const CONTEXT_HEALTH_ROUTE = `
+let korraContextProbe = null;
+let korraContextFailed = false;
+async function korraContextReady() {
+  if (korraContextFailed) return false;
+  if (!browser || !browser.isConnected()) return true;
+  if (!korraContextProbe) {
+    korraContextProbe = (async () => {
+      let timer;
+      const work = (async () => {
+        const context = await browser.newContext();
+        try { await context.newPage(); }
+        finally { await context.close(); }
+      })();
+      try {
+        await Promise.race([
+          work,
+          new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error('context/page readiness timeout')), 5000);
+          }),
+        ]);
+        return true;
+      } catch (err) {
+        korraContextFailed = true;
+        console.error('[camofox] context/page readiness failed: ' + err.message);
+        return false;
+      } finally { clearTimeout(timer); }
+    })().finally(() => { korraContextProbe = null; });
+  }
+  return korraContextProbe;
+}
+app.get('/health', async (req, res) => {
+  if (!await korraContextReady()) {
+    return res.status(503).json({ ok: false, engine: 'camoufox', contextReady: false });
+  }
+`;
+
 // Виртуальный экран. camoufox-js запускает Xvfb с -ac -nolisten tcp: файловый сокет
 // в /tmp контейнера остаётся, но Xvfb ещё слушает абстрактный сокет
 // @/tmp/.X11-unix/X*, а он живёт в сетевом пространстве имён хоста и доступен всем
@@ -99,10 +142,15 @@ registerHooks({
       return { ...result, source: text.replace(XVFB_NOLISTEN, XVFB_NOLISTEN_LOCAL) };
     }
     if (url !== serverUrl) return result;
-    const text = Buffer.from(result.source).toString('utf8');
+    let text = Buffer.from(result.source).toString('utf8');
+    if (text.includes(HEALTH_ROUTE)) {
+      text = text.replace(HEALTH_ROUTE, () => CONTEXT_HEALTH_ROUTE);
+    } else if (/[\\/]@askjo[\\/]camofox-browser[\\/]server\.js$/.test(serverScript)) {
+      die('блок /health в server.js не найден: проверка context/page не установлена');
+    }
     if (!text.includes(PREWARM_BLOCK)) {
       console.error('[camofox] блок прогрева в server.js не найден: браузер запустится при старте сервера');
-      return result;
+      return { ...result, source: text };
     }
     return { ...result, source: text.replace(PREWARM_BLOCK, () => PREWARM_SKIPPED) };
   },

@@ -178,6 +178,11 @@ def test_check_camofox_available_uses_the_socket(embedded):
         assert bc.check_camofox_available() is True
 
 
+def test_availability_check_rejects_http_200_with_failed_readiness(embedded):
+    with UnixServer(emb.socket_path(), reply=b'{"ok":false}'):
+        assert bc.check_camofox_available() is False
+
+
 def test_external_server_still_uses_plain_tcp(embedded, monkeypatch):
     with TcpSpy() as spy:
         monkeypatch.setenv("CAMOFOX_URL", f"http://127.0.0.1:{spy.port}")
@@ -456,6 +461,82 @@ def test_tab_creation_timeout_sends_the_call_to_chromium(install, data, monkeypa
     run.assert_called()
     assert "Chromium" in result["note"]
     assert bc.is_camofox_mode() is False
+
+
+@pytest.mark.parametrize("recovers", [True, False])
+@pytest.mark.parametrize("failure_stage", ["tab", "health"])
+def test_hung_tab_creation_restarts_service_and_retries_once_before_fallback(
+    install, data, monkeypatch, recovers, failure_stage, caplog,
+):
+    restarted = False
+    signals = []
+    servers = []
+    # Сохранённые входы двух профилей должны пережить восстановление побайтно.
+    for name in ("a", "b"):
+        saved = data / "camofox" / "profiles" / name / "storage-state.json"
+        saved.parent.mkdir(parents=True)
+        saved.write_text(name)
+
+    def respond(method, path, body):
+        if path == "/health" and failure_stage == "health" and not (restarted and recovers):
+            return 503, b'{"ok":false,"contextReady":false}'
+        if method == "POST" and path == "/tabs" and not (restarted and recovers):
+            # Зависшая фабрика: HTTP-клиент должен сам прервать ожидание.
+            time.sleep(2)
+            return 500, b'{}'
+
+    def signal(cmd, **kwargs):
+        nonlocal restarted
+        import subprocess
+
+        signals.append(cmd)
+        servers[-1].__exit__()
+        restarted = True
+        server = UnixServer(emb.socket_path(), reply=REPLY, respond=respond)
+        server.__enter__()
+        servers.append(server)
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(emb, "in_container", lambda: True)
+    monkeypatch.setattr(emb.subprocess, "run", signal)
+    monkeypatch.setattr(emb, "_RESTART_WAIT", 2.0)
+    monkeypatch.setattr(bc, "_get_command_timeout", lambda: 0.5)
+    # Ускоряем только транспортный deadline, оставляя настоящий Unix HTTP-путь.
+    request = bc._request
+
+    def fast_request(method, *args, **kwargs):
+        if method.lower() == "post":
+            kwargs["timeout"] = 0.5
+        return request(method, *args, **kwargs)
+
+    monkeypatch.setattr(bc, "_request", fast_request)
+    first = UnixServer(emb.socket_path(), reply=REPLY, respond=respond)
+    first.__enter__()
+    servers.append(first)
+    try:
+        with in_profile(data, "a"):
+            expected = get_camofox_identity("recover")
+            result, chromium = _navigate_for_real(task_id="recover")
+        assert len(signals) == 1
+        assert signals[0][1:] == ["-t", emb.S6_SERVICE_DIR]
+        posts = [e for s in servers for e in s.seen if e["method"] == "POST"]
+        if failure_stage == "tab":
+            assert len(posts) == 3  # запрос, диагностическая пустая вкладка, один повтор
+            assert json.loads(posts[0]["body"]) == json.loads(posts[2]["body"])
+        else:
+            assert len(posts) == (1 if recovers else 0)  # сбой health лечится до создания вкладки
+        assert all(json.loads(e["body"])["userId"] == expected["user_id"] for e in posts)
+        if recovers:
+            chromium.assert_not_called()
+            assert result["success"] is True and "note" not in result
+        else:
+            chromium.assert_called()
+            assert "Chromium" in result["note"]
+            assert "Chromium" in caplog.text
+        for name in ("a", "b"):
+            assert (data / "camofox" / "profiles" / name / "storage-state.json").read_text() == name
+    finally:
+        servers[-1].__exit__()
 
 
 def test_a_dead_site_does_not_mark_a_healthy_server_as_down(install, data):
