@@ -3742,6 +3742,9 @@ def atomic_config_write(config_path: Path, data: Any, **kwargs: Any) -> None:
     _refuse_failed_read(config_path, data)
     require_readable_config_before_write(config_path)
     atomic_yaml_write(config_path, data, **kwargs)
+    from korra_cli import camofox_embedded
+
+    camofox_embedded.sync()
 
 
 def load_config() -> Dict[str, Any]:
@@ -4241,8 +4244,6 @@ def save_config(
                     f"Не сохранено настроек, закреплённых администратором: {len(_stripped)}. Ключи: {', '.join(sorted(_stripped))}",
                     file=sys.stderr,
                 )
-        from utils import atomic_yaml_write
-
         ensure_hermes_home()
         config_path = get_config_path()
         _refuse_failed_read(config_path, config)
@@ -4308,7 +4309,7 @@ def save_config(
         if not fb_is_valid:
             parts.append(_FALLBACK_COMMENT)
 
-        atomic_yaml_write(
+        atomic_config_write(
             config_path,
             normalized,
             extra_content="".join(parts) if parts else None,
@@ -4695,6 +4696,10 @@ def save_env_value(key: str, value: str, *, update_process: bool = True):
     if update_process:
         korra_env_set(os.environ, key, value)
     invalidate_env_cache()
+    if key == "CAMOFOX_URL":
+        from korra_cli import camofox_embedded
+
+        camofox_embedded.sync()
 
 
 def custom_endpoint_key_env(identity: str) -> str:
@@ -4794,6 +4799,10 @@ def remove_env_value(key: str, *, update_process: bool = True) -> bool:
     if update_process:
         korra_env_pop(os.environ, key)
     invalidate_env_cache()
+    if key == "CAMOFOX_URL":
+        from korra_cli import camofox_embedded
+
+        camofox_embedded.sync()
     return found
 
 
@@ -6008,8 +6017,7 @@ def set_config_value(key: str, value: str, force: bool = False):
         print('  (api_base — другое имя; сохранено как model.base_url)')
     # Write only user config back (not the full merged defaults)
     ensure_hermes_home()
-    from utils import atomic_yaml_write
-    atomic_yaml_write(config_path, user_config, sort_keys=False)
+    atomic_config_write(config_path, user_config, sort_keys=False)
     
     # Keep .env in sync for keys that terminal_tool reads directly from env vars.
     # config.yaml is authoritative, but terminal_tool only reads TERMINAL_ENV etc.
@@ -6120,8 +6128,7 @@ def unset_config_value(key: str):
         sys.exit(1)
 
     ensure_hermes_home()
-    from utils import atomic_yaml_write
-    atomic_yaml_write(config_path, user_config, sort_keys=False)
+    atomic_config_write(config_path, user_config, sort_keys=False)
     print(f'✓ Удалено {key} из {config_path}')
 
 

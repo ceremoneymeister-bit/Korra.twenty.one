@@ -76,6 +76,9 @@ def publish_profile(key, name, request, populate, *,
 
 
 def _activate(name: str) -> None:
+    from korra_cli import camofox_embedded
+
+    camofox_embedded.sync()
     # Registration is retryable and cannot turn a committed create into a
     # destructive retry. No model call, Telegram startup or image generation.
     profiles._maybe_register_gateway_service(name)

@@ -89,18 +89,9 @@ def _explicit_camofox_url() -> str:
 def _embedded_camofox_endpoint() -> str:
     """Address of the Camofox server bundled in the Korra image, or ``""``.
 
-    The bundled server is the default browser of the image: it is used when
-    this profile selected Camofox, or never selected a browser at all, and no
-    explicit ``CAMOFOX_URL`` is set. Any other explicit choice (Chromium, a
-    cloud provider, a CDP address) keeps it out. Outside the image there is
-    nothing to use. If the installation switched the server off
-    (``korra tools camofox off``), a profile that never selected a browser
-    simply uses Chromium; a profile that selected Camofox explicitly keeps the
-    address and gets a clear error instead. The answer does not depend on
-    whether the server is running right now: the browser choice and the
-    profile's saved logins must not change with server availability (see
-    :func:`_embedded_unavailable` for the one place that reacts to a dead
-    server).
+    Used only when this profile selected Camofox and no external CAMOFOX_URL
+    is set. The address and saved identity do not depend on server availability;
+    an installation switched off by its owner gives a clear error.
     """
     try:
         from korra_cli import camofox_embedded
@@ -111,8 +102,6 @@ def _embedded_camofox_endpoint() -> str:
             return ""
         selected = read_selection("browser")
         if selected == "camofox":
-            return endpoint
-        if selected is None and not camofox_embedded.is_disabled() and camofox_embedded.uses_default_browser():
             return endpoint
         return ""
     except Exception:  # pragma: no cover — helpers are in-repo

@@ -2,19 +2,16 @@
 # shellcheck shell=sh
 # Встроенный Camofox («Браузер с защитой от блокировок», K21-336).
 #
-# Сервер принадлежит установке и работает всегда, когда Camofox есть в образе:
-# Camofox — браузер по умолчанию, и он нужен почти каждой установке. Сам браузер
-# ленивый (Firefox стартует первым запросом, прогрева нет), без запросов сервер
-# держит только Node. Единственный выключатель — файл <данные>/camofox/disabled
-# (korra tools camofox off|on): пока он лежит, процесс — обычный sh с sleep, то
-# есть ни Node, ни браузера. Выбор браузера профилями выключатель не трогает.
-# Не используем exit 125 из finish, как у dashboard: такой слот s6 больше не
-# перезапускает, а включить его обратно без root нельзя. Выключение останавливает
-# слот командой `s6-svc -t` (при следующем запуске он снова ждёт); остановленную
-# через -d службу поднимает `s6-svc -u`.
+# Сервер запускается только после явного выбора Camofox хотя бы одним профилем.
+# Маркер enabled сверяется при старте и сохранении настроек. Без выбора или
+# при выключателе disabled слот ждёт в sh: нет ни Node, ни Firefox, ни Python.
+# Не используем exit 125 из finish: такой слот больше не перезапускается.
+# Отключение последнего профиля останавливает слот через s6-svc -t;
+# остановленную через -d службу поднимает s6-svc -u.
 
 data_root="${KORRA_HOME:-${HERMES_HOME:-/opt/data}}"
 switch="$data_root/camofox/disabled"
+enabled="$data_root/camofox/enabled"
 server="${KORRA_CAMOFOX_HOME:-/opt/camofox}/node_modules/@askjo/camofox-browser/server.js"
 
 while [ -f "$switch" ] || [ ! -f "$server" ]; do
@@ -26,6 +23,18 @@ export HOME=/opt/data
 cd /opt/data
 # shellcheck disable=SC1091
 . /opt/hermes/.venv/bin/activate
+
+# После обновления существующий явный выбор тоже должен включить службу.
+# sync не сигналит собственному слоту s6. При ошибке остаёмся в ожидании.
+if [ "$(id -u)" = 0 ]; then
+    s6-setuidgid hermes python -m korra_cli.camofox_embedded sync
+else
+    python -m korra_cli.camofox_embedded sync
+fi
+
+while [ -f "$switch" ] || [ ! -f "$enabled" ]; do
+    sleep 3
+done
 
 # Unix-сокет (<данные>/camofox/server.sock, 0600), ключ доступа, выключенная
 # телеметрия и белый список окружения задаёт сам модуль; TCP-порта у сервера

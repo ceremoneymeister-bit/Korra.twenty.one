@@ -1,29 +1,20 @@
 """Встроенный Camofox («Браузер с защитой от блокировок») в коробке Korra.
 
-Образ содержит Camofox в ``/opt/camofox`` (см. Dockerfile), а s6-сервис
-``camofox`` принадлежит установке и работает всегда, когда Camofox есть в
-образе. Браузер внутри ленивый: Firefox запускается первым запросом и
-закрывается после простоя, так что без запросов сервер держит только Node.
-Состояние живёт в ``<корень данных>/camofox`` и переживает пересоздание
-контейнера:
+Образ содержит Camofox в ``/opt/camofox`` (см. Dockerfile). Сервер запускается,
+только если хотя бы один профиль явно выбрал ``browser.cloud_provider: camofox``
+без внешнего адреса. Без выбора действует прежнее определение браузера.
+Состояние живёт в ``<корень данных>/camofox`` и переживает пересоздание контейнера:
 
-* ``disabled`` — единственный выключатель установки: файл есть — сервер не
-  запускается (слабый сервер, поддержка). По умолчанию файла нет;
+* ``enabled`` — кэш явного выбора профилей, сверяется при сохранении настроек,
+  создании/импорте/удалении профиля и запуске службы;
+* ``disabled`` — выключатель установки (поддержка, слабый сервер);
 * ``server.sock`` — Unix-сокет сервера (0600) в каталоге 0700;
 * ``access.key`` — ключ доступа этой установки (0600);
 * ``profiles/`` — профили браузера (вход на сайты).
 
 Сервер слушает Unix-сокет, а не TCP-порт: контейнеры работают с
-``--network host``, и любой порт на loopback виден всему хосту, так что чужой
-процесс мог бы занять адрес установки и получить её ключ. Сокет лежит в
-каталоге данных этой установки, и подключиться к нему может только её
-пользователь. Ключ доступа остаётся вторым рубежом.
-
-Camofox — браузер по умолчанию в образе: профиль, который не выбирал браузер
-явно, работает через него (:func:`uses_default_browser`). Явный выбор (обычный
-Chromium, облачный провайдер, ``browser.cdp_url``, внешний ``CAMOFOX_URL``)
-сохраняется. Выбор браузера профильный и влияет только на маршрутизацию
-вызовов профиля; сервер от него не зависит.
+``--network host``, и любой порт на loopback виден всему хосту. Сокет лежит
+в закрытом каталоге данных установки; ключ остаётся вторым рубежом.
 
 Модуль не импортирует ничего тяжёлого на верхнем уровне: он нужен и клиенту
 браузера, и ``korra doctor``. Ключ нигде не печатается.
@@ -128,8 +119,8 @@ def is_disabled() -> bool:
 
 
 def is_enabled() -> bool:
-    """Сервер есть в образе и не выключен выключателем установки."""
-    return is_installed() and not is_disabled()
+    """Сервер выбран хотя бы одним профилем и не выключен владельцем."""
+    return is_installed() and (state_dir() / "enabled").is_file() and not is_disabled()
 
 
 def _ensure_dir() -> Path:
@@ -284,59 +275,51 @@ def explicit_url() -> str:
         return (os.environ.get("CAMOFOX_URL") or "").strip()
 
 
-# ── Выбор браузера текущим профилем ────────────────────────────────────────
+def sync(*, signal: bool = True) -> bool:
+    """Сверить маркер службы с явным выбором профилей, не меняя их настройки.
 
-
-def _chose_other_browser() -> bool:
-    """Текущий профиль уже определил браузер иначе, чем «ничего не выбрано».
-
-    Явный CDP-адрес, режим Browser Use, профиль настоящего браузера, не
-    автоматический движок или учётные данные облачного провайдера — это
-    решения владельца, и умолчание им не мешает. Если настройки не читаются,
-    считаем, что выбор мог быть, и остаёмся на прежнем поведении.
-    """
-    from korra_cli.config import read_raw_config_readonly
-
-    cfg = read_raw_config_readonly()
-    if getattr(cfg, "read_error", None) is not None:
-        return True
-    section = cfg.get("browser") if isinstance(cfg, dict) else None
-    section = section if isinstance(section, dict) else {}
-    if str(section.get("cdp_url") or "").strip():
-        return True
-    if (os.environ.get("BROWSER_CDP_URL") or "").strip():
-        return True
-    backend = section.get("backend")
-    if isinstance(backend, str) and backend.strip().lower() not in ("", "off"):
-        return True
-    if section.get("use_real_profile") is True:
-        return True
-    for engine in (section.get("engine"), os.environ.get("AGENT_BROWSER_ENGINE")):
-        if str(engine or "").strip().lower() not in ("", "auto"):
-            return True
-    try:
-        from plugins.browser.browser_use.provider import BrowserUseBrowserProvider
-        from plugins.browser.browserbase.provider import BrowserbaseBrowserProvider
-
-        return BrowserUseBrowserProvider().is_available() or BrowserbaseBrowserProvider().is_available()
-    except Exception:
-        return True
-
-
-def uses_default_browser() -> bool:
-    """В образе есть Camofox, и текущий профиль не выбирал браузер: работает умолчание.
-
-    Явный внешний ``CAMOFOX_URL`` здесь не учитывается: он решает, какой
-    сервер использовать (см. :func:`explicit_url`), а не выбирает ли профиль
-    Camofox.
+    Читаем только файлы соответствующего профиля: окружение текущего процесса
+    и его secret scope не описывают выбор других профилей. Это также исключает
+    влияние чужих облачных ключей. Выключатель ``disabled`` сохраняется.
     """
     if not is_installed():
         return False
-    from tools.tool_backend_helpers import read_selection
+    import fcntl
+    from korra_constants import named_profile_is_deleted
+    from utils import is_truthy_value
 
-    if read_selection("browser") is not None:
+    try:
+        _ensure_dir()
+        lock_path = state_dir() / "selection.lock"
+        _create_once(lock_path, "")
+        with lock_path.open("r+") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            root = state_dir().parent
+            homes = [root]
+            profiles = root / "profiles"
+            if profiles.is_dir():
+                homes.extend(h for h in profiles.iterdir() if h.is_dir()
+                             and not h.is_symlink() and not h.name.startswith(".")
+                             and not named_profile_is_deleted(h))
+            wanted = any(
+                _profile_setting(h, "", ("browser", "cloud_provider")).strip().lower() == "camofox"
+                and not is_truthy_value(_profile_setting(h, "", ("browser", "use_gateway")), default=False)
+                and not _profile_setting(h, "CAMOFOX_URL", ())
+                for h in homes
+            )
+            marker = state_dir() / "enabled"
+            was_enabled = marker.is_file()
+            if wanted:
+                if not was_enabled:
+                    _write_private(marker, "1\n")
+            else:
+                marker.unlink(missing_ok=True)
+                if was_enabled and signal:
+                    _s6_svc("-t")
+            return wanted
+    except OSError as exc:
+        logger.warning("Camofox: не удалось сверить выбор профилей (%s)", type(exc).__name__)
         return False
-    return not _chose_other_browser()
 
 
 # ── Состояние ──────────────────────────────────────────────────────────────
@@ -489,16 +472,17 @@ def recover() -> bool:
 
 
 def _profile_setting(profile_dir: Path, env_name: str, config_keys: tuple) -> str:
-    """Значение из .env или config.yaml другого профиля (удаляемого), без переключения HERMES_HOME."""
+    """Явное значение из .env или config.yaml указанного профиля, без смены HERMES_HOME."""
     from korra_cli.config import _parse_env_value, read_user_config_raw
 
-    try:
-        for line in (profile_dir / ".env").read_text(encoding="utf-8-sig").splitlines():
-            key, sep, value = line.strip().partition("=")
-            if sep and key.strip() == env_name and _parse_env_value(value):
-                return _parse_env_value(value)
-    except OSError:
-        pass
+    if env_name:
+        try:
+            for line in (profile_dir / ".env").read_text(encoding="utf-8-sig").splitlines():
+                key, sep, value = line.strip().removeprefix("export ").lstrip().partition("=")
+                if sep and key.strip() == env_name and _parse_env_value(value):
+                    return _parse_env_value(value)
+        except OSError:
+            pass
     if not config_keys:
         return ""
     try:
@@ -552,7 +536,7 @@ def status() -> Dict[str, object]:
     """Состояние для doctor: ``state``, пояснение и следующий шаг.
 
     state: ``not_installed`` (нет в образе), ``switched_off`` (выключатель
-    установки), ``running``, ``not_responding``.
+    установки), ``unused`` (нет явного выбора), ``running``, ``not_responding``.
     """
     if not is_installed():
         return {
@@ -565,6 +549,12 @@ def status() -> Dict[str, object]:
             "state": "switched_off",
             "detail": "выключен на этой установке",
             "next": "включить: korra tools camofox on",
+        }
+    if not is_enabled():
+        return {
+            "state": "unused",
+            "detail": "выключен: ни один профиль не выбрал встроенный Camofox",
+            "next": "включить: Инструменты → Браузер → Camofox или korra tools → Браузер → Camofox",
         }
     problem = socket_path_problem()
     if problem:
@@ -589,7 +579,9 @@ def tools_command(action: str) -> int:
         return 1
     if action == "on":
         enable()
-        print("Встроенный Camofox включён: сервер запустится в течение нескольких секунд.")
+        sync()
+        print("Выключатель встроенного Camofox снят; сервер запускается для профилей, выбравших Camofox.")
+        print("Выбрать: Инструменты → Браузер → Camofox или korra tools → Браузер → Camofox.")
         print("Проверить: korra doctor")
         return 0
     if action == "off":
@@ -603,7 +595,7 @@ def tools_command(action: str) -> int:
     print(f"Встроенный Camofox: {info['detail']}")
     if info["next"]:
         print(info["next"])
-    return 0 if info["state"] in ("running", "switched_off") else 1
+    return 0 if info["state"] in ("running", "switched_off", "unused") else 1
 
 
 def server_env() -> Dict[str, str]:
@@ -670,13 +662,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     if command == "disable":
         disable()
         return 0
+    if command == "sync":
+        sync(signal=False)
+        return 0
     if command == "status":
         info = status()
         print(f"{info['state']}: {info['detail']}")
         if info["next"]:
             print(info["next"])
         return 0 if info["state"] == "running" else 1
-    print("usage: python -m korra_cli.camofox_embedded {serve|enable|disable|status}", file=sys.stderr)
+    print("usage: python -m korra_cli.camofox_embedded {serve|enable|disable|sync|status}", file=sys.stderr)
     return 2
 
 
