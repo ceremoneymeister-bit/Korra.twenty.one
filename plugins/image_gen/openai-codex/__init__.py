@@ -144,7 +144,8 @@ _CODEX_HOST_CACHE: Dict[Tuple[str, ...], Tuple[str, ...]] = {}
 _CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
 _CODEX_INSTRUCTIONS = (
     "You are an assistant that must fulfill image generation and image editing "
-    "requests by using the image_generation tool when provided."
+    "requests by making exactly one call to image_generation. "
+    "Return that image without additional image_generation calls or revisions."
 )
 
 _MAX_REFERENCE_IMAGES = 5
@@ -880,6 +881,7 @@ class CodexImageStreamDiagnostics:
         self.terminal_event: Optional[str] = None
         self.output_item_types: List[str] = []
         self.image_call_statuses: List[str] = []
+        self.image_call_count: Optional[int] = None
         self.partial_frames = 0
         self.refusals: List[str] = []
         self.incomplete_reason: Optional[str] = None
@@ -965,6 +967,8 @@ class CodexImageStreamDiagnostics:
             parts.append(
                 "image_generation_call status: " + ", ".join(self.image_call_statuses)
             )
+        if self.image_call_count is not None:
+            parts.append(f"image_generation calls: {self.image_call_count}")
         if self.partial_frames:
             parts.append(f"partial_image frames: {self.partial_frames}")
         if self.incomplete_reason:
@@ -984,6 +988,7 @@ class CodexImageStreamDiagnostics:
             "terminal_status": self.terminal_status,
             "output_item_types": list(self.output_item_types),
             "image_call_statuses": list(self.image_call_statuses),
+            "image_call_count": self.image_call_count,
             "partial_frames": self.partial_frames,
             "incomplete_reason": self.incomplete_reason,
             "error_message": self.error_message,
@@ -1003,31 +1008,38 @@ class CodexImageEmptyResponse(RuntimeError):
         )
 
 
-def _completed_image_calls(nodes: Any) -> List[Dict[str, Any]]:
-    """Return every ``image_generation_call`` object found in a payload tree."""
+def _image_calls(nodes: Any) -> List[Tuple[int, Dict[str, Any]]]:
+    """Keep output order and every call status, including unfinished calls."""
     return [
-        node
-        for node in _walk_objects(nodes)
+        (index, node)
+        for index, item in enumerate(nodes if isinstance(nodes, list) else [nodes])
+        for node in _walk_objects(item)
         if node.get("type") == "image_generation_call"
     ]
 
 
 def _merge_image_calls(
-    terminal_calls: List[Dict[str, Any]],
-    streamed_calls: List[Dict[str, Any]],
+    terminal_calls: List[Tuple[int, Dict[str, Any]]],
+    streamed_calls: List[Tuple[int, Dict[str, Any]]],
 ) -> List[Dict[str, Any]]:
-    """Merge terminal-output calls with streamed ``output_item.done`` calls.
+    """Merge terminal-output calls with streamed output-item observations.
 
     The terminal ``response.completed.output`` is authoritative when it
     carries the call; the streamed copy is used when the terminal output is
     empty (observed 12.09.2026: ``output: []`` after a completed item). Calls
     are deduplicated by ``id`` so the same call seen twice is not counted as
-    two generations, while two distinct ids still trip the multi-call guard.
+    two generations. Distinct IDs count separately even with identical pixels.
+    Stream output indices preserve order when terminal output omits some calls.
     """
-    merged: List[Dict[str, Any]] = []
+    merged: List[Tuple[int, bool, Dict[str, Any]]] = []
     seen_ids: set = set()
-    seen_results: set = set()
-    for call in terminal_calls + streamed_calls:
+    seen_results: Dict[str, bool] = {}
+    streamed_positions = {call["id"]: index for index, call in streamed_calls
+                          if isinstance(call.get("id"), str) and call["id"]}
+    streamed_result_positions = {call["result"]: index for index, call in streamed_calls
+                                 if isinstance(call.get("result"), str) and call["result"]}
+    # Terminal data wins; otherwise the latest streamed copy wins.
+    for position, (index, call) in enumerate(terminal_calls + list(reversed(streamed_calls))):
         call_id = call.get("id")
         result = call.get("result")
         has_id = isinstance(call_id, str) and bool(call_id)
@@ -1036,14 +1048,22 @@ def _merge_image_calls(
             continue
         # The same finished image seen twice (streamed item without an id,
         # terminal copy with one) is one generation, not two.
-        if has_result and result in seen_results:
+        if has_result and result in seen_results and (not has_id or not seen_results[result]):
+            if has_id:
+                seen_ids.add(call_id)
+                seen_results[result] = True
             continue
         if has_id:
             seen_ids.add(call_id)
         if has_result:
-            seen_results.add(result)
-        merged.append(call)
-    return merged
+            seen_results[result] = has_id
+        output_index = streamed_result_positions.get(result, index) if has_result else index
+        if has_id:
+            output_index = streamed_positions.get(call_id, output_index)
+        merged.append((output_index, position < len(terminal_calls), call))
+    # On an index tie prefer terminal output as the later authoritative view.
+    merged.sort(key=lambda entry: (entry[0], entry[1]))
+    return [call for _, _, call in merged]
 
 
 def _collect_image_b64(
@@ -1061,6 +1081,7 @@ def _collect_image_b64(
     action: str = "auto",
     mask_part: Optional[Dict[str, str]] = None,
     base_url: str = _CODEX_BASE_URL,
+    diagnostics: Optional[CodexImageStreamDiagnostics] = None,
 ) -> Optional[Dict[str, str]]:
     """Stream a Codex Responses image_generation call.
 
@@ -1071,7 +1092,8 @@ def _collect_image_b64(
     Codex backend has been observed sending the finished item early and an
     empty terminal ``output`` (K21-056). Preview frames
     (``partial_image_b64``) are never a result, truncated streams are an
-    error, and more than one distinct image call is an error.
+    error. Multiple finished calls yield the last image in output order only
+    when every call completed with a non-empty result.
 
     Raises :class:`CodexImageEmptyResponse` (carrying stream diagnostics)
     when the stream completed but no finished image was delivered.
@@ -1100,9 +1122,9 @@ def _collect_image_b64(
     )
     timeout = httpx.Timeout(300.0, connect=30.0, read=300.0, write=30.0, pool=30.0)
 
-    diagnostics = CodexImageStreamDiagnostics()
+    diagnostics = diagnostics if diagnostics is not None else CodexImageStreamDiagnostics()
     completed_response: Optional[Dict[str, Any]] = None
-    streamed_calls: List[Dict[str, Any]] = []
+    streamed_calls: List[Tuple[int, Dict[str, Any]]] = []
     with httpx.Client(timeout=timeout, headers=headers) as http:
         with http.stream("POST", f"{base_url.rstrip('/')}/responses", json=payload) as response:
             try:
@@ -1122,14 +1144,14 @@ def _collect_image_b64(
                     continue
                 diagnostics.observe(event)
                 event_type = event.get("type")
-                if event_type == "response.output_item.done":
+                if event_type in {"response.output_item.added", "response.output_item.done"}:
                     item = event.get("item")
                     if (
                         isinstance(item, dict)
                         and item.get("type") == "image_generation_call"
-                        and item.get("status") == "completed"
                     ):
-                        streamed_calls.append(item)
+                        index = event.get("output_index")
+                        streamed_calls.append((index if isinstance(index, int) else len(streamed_calls), item))
                 elif event_type == "response.completed":
                     terminal = event.get("response")
                     if not isinstance(terminal, dict) or terminal.get("status") != "completed":
@@ -1150,24 +1172,21 @@ def _collect_image_b64(
             f"({diagnostics.summary()})"
         )
 
-    terminal_calls = _completed_image_calls(completed_response.get("output", []))
+    terminal_calls = _image_calls(completed_response.get("output", []))
     calls = _merge_image_calls(terminal_calls, streamed_calls)
-    if len(calls) > 1:
-        raise RuntimeError(
-            "Codex returned multiple image_generation calls "
-            f"({diagnostics.summary()})"
-        )
-    if not calls:
+    diagnostics.image_call_count = len(calls)
+    if not calls or (not terminal_calls and not any(call.get("status") == "completed" for call in calls)):
         raise CodexImageEmptyResponse(diagnostics)
-    call = calls[0]
-    if call.get("status") != "completed":
+    if any(call.get("status") != "completed" for call in calls):
         raise RuntimeError(
             "Codex returned a non-completed image_generation call "
             f"({diagnostics.summary()})"
         )
-    result_b64 = call.get("result")
-    if not isinstance(result_b64, str) or not result_b64:
+    if any(not isinstance(call.get("result"), str) or not call["result"] for call in calls):
         raise CodexImageEmptyResponse(diagnostics)
+    result_b64 = calls[-1]["result"]
+    if len(calls) > 1:
+        logger.warning("Codex returned multiple images; using last completed image (%s)", diagnostics.summary())
     return {"b64": result_b64, "source": "final"}
 
 
@@ -1371,6 +1390,7 @@ class OpenAICodexImageGenProvider(ImageGenProvider):
                 aspect_ratio=aspect,
             )
 
+        stream_diagnostics = CodexImageStreamDiagnostics()
         try:
             host_key, candidates = _host_model_candidates(token, base_url)
             if not candidates:
@@ -1394,6 +1414,7 @@ class OpenAICodexImageGenProvider(ImageGenProvider):
                         action=action,
                         mask_part=mask_part,
                         base_url=base_url,
+                        diagnostics=stream_diagnostics,
                     )
                 except CodexHostModelUnsupported:
                     rejected.add(host_model)
@@ -1536,6 +1557,7 @@ class OpenAICodexImageGenProvider(ImageGenProvider):
                     },
                     "image_model": model_id,
                     "host_model": host_model,
+                    "stream_diagnostics": stream_diagnostics.as_dict(),
                     "quality": quality,
                     "size": size,
                     "size_matches_request": size_matches_request,
@@ -1578,6 +1600,7 @@ class OpenAICodexImageGenProvider(ImageGenProvider):
                 "action": action,
                 "input_image_count": len(input_images),
                 "image_source": image_source,
+                "stream_diagnostics": stream_diagnostics.as_dict(),
                 "requested_size": size,
                 "pixel_size": pixel_size,
                 "size_matches_request": size_matches_request,

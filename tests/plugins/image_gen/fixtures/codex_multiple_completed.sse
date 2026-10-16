@@ -1,0 +1,44 @@
+: K21-374: reconstructed event shape; synthetic IDs, text and 4x4 PNGs, no customer payload.
+
+event: response.created
+data: {"type": "response.created", "response": {"id": "fixture_response", "status": "in_progress", "output": []}}
+
+event: response.output_item.added
+data: {"type": "response.output_item.added", "output_index": 0, "item": {"id": "reason_1", "type": "reasoning", "summary": [], "status": "in_progress", "result": null}}
+
+event: response.output_item.done
+data: {"type": "response.output_item.done", "output_index": 0, "item": {"id": "reason_1", "type": "reasoning", "summary": []}}
+
+event: response.output_item.added
+data: {"type": "response.output_item.added", "output_index": 1, "item": {"id": "image_1", "type": "image_generation_call", "status": "in_progress", "result": null}}
+
+event: response.output_item.done
+data: {"type": "response.output_item.done", "output_index": 1, "item": {"id": "image_1", "type": "image_generation_call", "status": "completed", "result": "iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAEElEQVR4nGP8z4AATAxEcQAz0QEHOoQ+uAAAAABJRU5ErkJggg=="}}
+
+event: response.output_item.added
+data: {"type": "response.output_item.added", "output_index": 2, "item": {"id": "reason_2", "type": "reasoning", "summary": [], "status": "in_progress", "result": null}}
+
+event: response.output_item.done
+data: {"type": "response.output_item.done", "output_index": 2, "item": {"id": "reason_2", "type": "reasoning", "summary": []}}
+
+event: response.output_item.added
+data: {"type": "response.output_item.added", "output_index": 3, "item": {"id": "image_2", "type": "image_generation_call", "status": "in_progress", "result": null}}
+
+event: response.output_item.done
+data: {"type": "response.output_item.done", "output_index": 3, "item": {"id": "image_2", "type": "image_generation_call", "status": "completed", "result": "iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAFElEQVR4nGNkYPjPAANMDEgANwcAMdMBB1sLEtoAAAAASUVORK5CYII="}}
+
+event: response.output_item.added
+data: {"type": "response.output_item.added", "output_index": 4, "item": {"id": "reason_3", "type": "reasoning", "summary": [], "status": "in_progress", "result": null}}
+
+event: response.output_item.done
+data: {"type": "response.output_item.done", "output_index": 4, "item": {"id": "reason_3", "type": "reasoning", "summary": []}}
+
+event: response.output_item.added
+data: {"type": "response.output_item.added", "output_index": 5, "item": {"id": "message_1", "type": "message", "status": "in_progress", "role": "assistant", "content": [], "result": null}}
+
+event: response.output_item.done
+data: {"type": "response.output_item.done", "output_index": 5, "item": {"id": "message_1", "type": "message", "status": "completed", "role": "assistant", "content": []}}
+
+event: response.completed
+data: {"type": "response.completed", "response": {"id": "fixture_response", "status": "completed", "output": [{"id": "reason_1", "type": "reasoning", "summary": []}, {"id": "image_1", "type": "image_generation_call", "status": "completed", "result": "iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAEElEQVR4nGP8z4AATAxEcQAz0QEHOoQ+uAAAAABJRU5ErkJggg=="}, {"id": "reason_2", "type": "reasoning", "summary": []}, {"id": "image_2", "type": "image_generation_call", "status": "completed", "result": "iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAFElEQVR4nGNkYPjPAANMDEgANwcAMdMBB1sLEtoAAAAASUVORK5CYII="}, {"id": "reason_3", "type": "reasoning", "summary": []}, {"id": "message_1", "type": "message", "status": "completed", "role": "assistant", "content": []}]}}
+

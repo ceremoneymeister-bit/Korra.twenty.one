@@ -141,6 +141,7 @@ class TestGenerate:
 
         def _collect(token, *, prompt, size, quality, input_images=None, **options):
             captured["request_base_url"] = options.pop("base_url")
+            options.pop("diagnostics")
             captured.update(codex_plugin._build_responses_payload(
                 prompt=prompt,
                 size=size,

@@ -215,7 +215,7 @@ def test_in_progress_item_without_result_is_not_a_result(monkeypatch):
     assert "image_generation_call status: in_progress" in str(excinfo.value)
 
 
-def test_two_distinct_calls_are_still_an_error(monkeypatch):
+def test_distinct_completed_calls_return_latest_terminal_image(monkeypatch):
     image = _png_b64()
     second = {
         "id": "ig_other",
@@ -225,8 +225,7 @@ def test_two_distinct_calls_are_still_an_error(monkeypatch):
     }
     _install_stream(monkeypatch, _live_shape_events(image, terminal_output=[second]))
 
-    with pytest.raises(RuntimeError, match="multiple image_generation calls"):
-        _collect()
+    assert _collect() == {"b64": second["result"], "source": "final"}
 
 
 def test_same_result_without_id_is_one_call(monkeypatch):
