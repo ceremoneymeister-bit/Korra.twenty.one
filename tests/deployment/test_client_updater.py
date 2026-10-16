@@ -4523,3 +4523,185 @@ def test_failed_migration_removes_what_it_created(tmp_path):
     store.mkdir()
     assert run_migration(python, ["toolkit_a-2.1"], store).returncode != 0
     assert [p for p in store.rglob("*") if p.is_file()] == []
+
+
+# ── K21-377: явный режим «модель не проверять» ───────────────────────────────
+
+def _running_gateways(updater, monkeypatch):
+    def native(action="status", timeout=None):
+        if action != "status" or updater.receipt.get("phase") not in ("smoke", "rollback_recreate"):
+            return FakeDockerUpdater.native_states(updater, action, timeout)
+        return [{"home": "/opt/data", "state": {
+            "gateway_state": "running", "served_profiles": ["default", "secretary"]}}]
+    monkeypatch.setattr(updater, "native_states", native)
+
+
+@pytest.mark.parametrize("phase", ["smoke", "rollback_recreate"])
+def test_skip_model_smoke_never_calls_model_and_says_why(real_smoke_context, monkeypatch, phase):
+    updater, _, models, _ = real_smoke_context
+    _running_gateways(updater, monkeypatch)
+    updater.receipt.update(phase=phase, skip_model_smoke=True)
+
+    u.Updater.smoke(updater, OLD)
+
+    assert models == []
+    assert updater.receipt["model_smoke"] == {"status": "skipped", "reason": "operator_requested"}
+    assert "error_code" not in updater.receipt
+    assert updater.receipt["active_capability"] == updater.receipt["baseline_capability"]
+
+
+@pytest.mark.parametrize("flag", [None, False])
+def test_model_smoke_is_on_unless_explicitly_skipped(real_smoke_context, monkeypatch, flag):
+    updater, _, models, _ = real_smoke_context
+    _running_gateways(updater, monkeypatch)
+    if flag is not None:
+        updater.receipt["skip_model_smoke"] = flag
+
+    u.Updater.smoke(updater, OLD)
+
+    assert len(models) == 1 and updater.receipt["model_smoke"] == {"status": "ok"}
+
+
+def test_skip_model_smoke_keeps_readiness_gate(real_smoke_context, monkeypatch):
+    updater, clock, models, _ = real_smoke_context
+    monkeypatch.setenv("WAIT_SECONDS", "3")
+    updater.receipt["skip_model_smoke"] = True
+    def native(**kwargs):
+        raise u.UpdateError("Gateway control socket unavailable")
+    monkeypatch.setattr(updater, "native_states", native)
+
+    with pytest.raises(u.UpdateError, match="Native gateway readiness timed out after 3s"):
+        u.Updater.smoke(updater, OLD)
+
+    assert models == [] and "model_smoke" not in updater.receipt
+    assert updater.receipt["error_code"] == "native_readiness_timeout"
+
+
+def test_skip_model_smoke_keeps_provider_fingerprint_gate(real_smoke_context, monkeypatch):
+    updater, _, models, _ = real_smoke_context
+    _running_gateways(updater, monkeypatch)
+    updater.receipt["skip_model_smoke"] = True
+    changed = dict(updater.receipt["baseline_capability"], fingerprint="changed-" + "0" * 20)
+    monkeypatch.setattr(updater, "capability", lambda: changed)
+
+    with pytest.raises(u.UpdateError, match="Provider capability differs"):
+        u.Updater.smoke(updater, OLD)
+
+    assert models == [] and "model_smoke" not in updater.receipt
+    assert updater.receipt["error_code"] == "provider_capability_mismatch"
+
+
+def test_skip_model_smoke_keeps_degraded_health_gate(real_smoke_context, monkeypatch):
+    updater, _, models, settings = real_smoke_context
+    _running_gateways(updater, monkeypatch)
+    updater.receipt["skip_model_smoke"] = True
+    settings["status"]["components"]["storage"]["status"] = "degraded"
+
+    with pytest.raises(u.UpdateError):
+        u.Updater.smoke(updater, OLD)
+
+    assert models == [] and "model_smoke" not in updater.receipt
+
+
+def test_update_with_skip_model_smoke_succeeds_without_model(real_smoke_context, monkeypatch):
+    updater, _, models, settings = real_smoke_context
+    _running_gateways(updater, monkeypatch)
+    updater.smoke = lambda image: u.Updater.smoke(updater, image)
+    updater.receipt["skip_model_smoke"] = True
+
+    updater.update("registry.example/korra:latest")
+
+    assert updater.receipt["status"] == "succeeded" and updater.image == NEW
+    assert models == []
+    assert updater.receipt["model_smoke"] == {"status": "skipped", "reason": "operator_requested"}
+
+
+def test_rollback_of_a_skipping_job_skips_the_model_too(real_smoke_context, monkeypatch):
+    updater, _, models, _ = real_smoke_context
+    _running_gateways(updater, monkeypatch)
+    updater.smoke = lambda image: u.Updater.smoke(updater, image)
+    updater.receipt["skip_model_smoke"] = True
+    updater.update("registry.example/korra:latest")
+    updater.receipt["model_smoke"] = None
+
+    updater.rollback()
+
+    assert updater.receipt["status"] == "rolled_back" and updater.image == OLD
+    assert models == []
+    assert updater.receipt["model_smoke"] == {"status": "skipped", "reason": "operator_requested"}
+
+
+def test_automatic_rollback_after_failed_smoke_keeps_skip_mode(real_smoke_context, monkeypatch):
+    updater, _, models, _ = real_smoke_context
+    _running_gateways(updater, monkeypatch)
+    updater.receipt["skip_model_smoke"] = True
+    seen = []
+    def smoke(image):
+        seen.append(updater.receipt["phase"])
+        if len(seen) == 1:
+            raise u.UpdateError("forward readiness failed")
+        u.Updater.smoke(updater, image)
+    updater.smoke = smoke
+
+    with pytest.raises(u.UpdateError, match="forward readiness failed"):
+        updater.update("registry.example/korra:latest")
+
+    assert seen == ["smoke", "rollback_recreate"]
+    assert updater.receipt["status"] == "rolled_back" and updater.image == OLD
+    assert models == []
+    assert updater.receipt["model_smoke"] == {"status": "skipped", "reason": "operator_requested"}
+
+
+def test_skip_model_smoke_cli_is_for_update_and_rollback_only():
+    assert u.parse_args(["--update", NEW]).skip_model_smoke is False
+    assert u.parse_args(["--update", NEW, "--skip-model-smoke"]).skip_model_smoke is True
+    assert u.parse_args(["--rollback", "job", "--skip-model-smoke"]).skip_model_smoke is True
+    for argv in (["--status", "--skip-model-smoke"], ["--gc", "--skip-model-smoke"],
+                 ["--capabilities", "--skip-model-smoke"]):
+        with pytest.raises(SystemExit):
+            u.parse_args(argv)
+
+
+def test_skip_model_smoke_is_recorded_in_the_job_and_is_job_identity(updater, monkeypatch, capsys):
+    monkeypatch.setattr(u.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(u, "HERE", updater.home)
+    monkeypatch.setattr(u, "Updater", lambda: updater)
+    monkeypatch.setattr(u, "trusted_control", lambda path: None)
+    args = ["--update", "/unused/fixture.tar", "--job-id", "skip-job", "--dry-run", "--skip-model-smoke"]
+    assert u.main(args) == 0
+    assert json.loads(capsys.readouterr().out)["skip_model_smoke"] is True
+    with pytest.raises(u.UpdateError, match="different model-smoke mode"):
+        u.main(args[:-1])
+    plain = ["--update", "/unused/fixture.tar", "--job-id", "plain-job", "--dry-run"]
+    assert u.main(plain) == 0
+    assert json.loads(capsys.readouterr().out)["skip_model_smoke"] is False
+    with pytest.raises(u.UpdateError, match="different model-smoke mode"):
+        u.main([*plain, "--skip-model-smoke"])
+
+
+def test_detached_rollback_can_request_skip_model_smoke(updater, monkeypatch, capsys):
+    updater.update("registry.example/korra:latest")
+    assert updater.receipt.get("skip_model_smoke") is False
+    updater.verify_launcher = lambda rollback=False: None
+    monkeypatch.setattr(u.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(u, "HERE", updater.home)
+    monkeypatch.setattr(u, "Updater", lambda: updater)
+    monkeypatch.setattr(u, "trusted_control", lambda path: None)
+    pending = {}
+    def spawn(command, **kwargs):
+        pending["fd"] = os.dup(kwargs["pass_fds"][0])
+        return type("Process", (), {"pid": 123456})()
+    monkeypatch.setattr(u.subprocess, "Popen", spawn)
+
+    assert u.main(["--rollback", "fixture-job", "--detach", "--skip-model-smoke"]) == 0
+
+    assert json.loads(capsys.readouterr().out)["skip_model_smoke"] is True
+    assert json.loads((updater.job / "status.json").read_text())["skip_model_smoke"] is True
+    assert u.main(["--worker", "fixture-job", "--lock-fd", str(pending["fd"]), "--rollback-worker"]) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "rolled_back"
+
+
+def test_capabilities_announce_model_smoke_skip(monkeypatch, capsys):
+    monkeypatch.setattr(u.os, "geteuid", lambda: 1000)
+    assert u.main(["--capabilities"]) == 0
+    assert json.loads(capsys.readouterr().out)["model_smoke_skip"] is True

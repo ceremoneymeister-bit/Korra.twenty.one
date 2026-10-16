@@ -1396,7 +1396,8 @@ class Updater:
         return info
 
     def initialize(self, job_id, reference, dry_run=False, expected_current=None,
-                   expected_target=None, expected_archive_sha256=None, accept_custom_current=None):
+                   expected_target=None, expected_archive_sha256=None, accept_custom_current=None,
+                   skip_model_smoke=False):
         self.jobs.mkdir(mode=0o700, exist_ok=True)
         self.job = self.jobs / checked_identifier(job_id)
         self.job.mkdir(mode=0o700)
@@ -1406,7 +1407,8 @@ class Updater:
                             data=str(self.data), reference=reference, dry_run=bool(dry_run),
                             expected_current=expected_current, expected_target=expected_target,
                             expected_archive_sha256=expected_archive_sha256,
-                            accept_custom_current=accept_custom_current)
+                            accept_custom_current=accept_custom_current,
+                            skip_model_smoke=bool(skip_model_smoke))
         self.phase("pending")
 
     def image_integrity(self, info=None):
@@ -2512,6 +2514,13 @@ class Updater:
                 self.receipt["error_code"] = "foundation_smoke_failed"
                 raise UpdateError("Foundation API readiness failed; see private operation.log") from None
             return
+        if self.receipt.get("skip_model_smoke"):
+            # An explicit operator mode for a route we may not call (the owner's
+            # paid provider). Readiness, provider fingerprint and health above
+            # are unchanged; only the generation is not requested.
+            self.receipt["model_smoke"] = {"status": "skipped", "reason": "operator_requested"}
+            self.log("model smoke: skipped at operator request, update acceptance continues")
+            return
         try:
             result = self.execute(MODEL_SMOKE_CODE)
         except (UpdateError, OSError, subprocess.SubprocessError) as exc:
@@ -3148,6 +3157,8 @@ def parse_args(argv=None):
     parser.add_argument("--expected-archive-sha256", metavar="HEX_SHA256")
     parser.add_argument("--accept-custom-current", metavar="SHA256_IMAGE_ID",
                         help="Явно разрешить замену этого нестандартного текущего образа")
+    parser.add_argument("--skip-model-smoke", action="store_true",
+                        help="Не вызывать модель при приёмке обновления и отката (квитанция: model_smoke=skipped)")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--detach", action="store_true")
     parser.add_argument("--lock-fd", type=int, help=argparse.SUPPRESS)
@@ -3165,6 +3176,8 @@ def parse_args(argv=None):
         if not args.update or not re.fullmatch(r"[a-fA-F0-9]{64}", args.expected_archive_sha256):
             parser.error("--expected-archive-sha256 requires --update and 64 hexadecimal characters")
         args.expected_archive_sha256 = args.expected_archive_sha256.lower()
+    if args.skip_model_smoke and not (args.update or args.rollback):
+        parser.error("--skip-model-smoke requires --update or --rollback")
     if args.dry_run and not args.update:
         parser.error("--dry-run requires --update")
     if args.detach and not (args.update or args.rollback):
@@ -3214,6 +3227,8 @@ def main(argv=None):
                           # K21-137/K21-136: the kit sizes its own readiness
                           # budget and bounds its own updates/* history.
                           "readiness_budget": True, "update_history": True,
+                          # K21-377: model acceptance may be skipped explicitly.
+                          "model_smoke_skip": True,
                           "image_integrity": True, "custom_current_confirmation": True,
                           "files": ["update.sh", "updater.py", "up.sh", "backup.sh", "dependencies.lock.json"]}))
         return 0
@@ -3287,6 +3302,7 @@ def main(argv=None):
                 load_job(updater, args.job_id)
                 if (updater.receipt.get("reference") == args.update
                         and bool(updater.receipt.get("dry_run")) == args.dry_run
+                        and bool(updater.receipt.get("skip_model_smoke")) == args.skip_model_smoke
                         and all(updater.receipt.get(key) == getattr(args, key) for key in
                                 ("expected_current", "expected_target", "expected_archive_sha256", "accept_custom_current"))):
                     print(json.dumps(updater.receipt))
@@ -3304,6 +3320,9 @@ def main(argv=None):
             if updater.receipt.get("status") == "rolled_back":
                 print(json.dumps(updater.receipt))
                 return 0
+            if args.skip_model_smoke:
+                # Persisted by the next phase() write, before any worker starts.
+                updater.receipt["skip_model_smoke"] = True
         else:
             updater.require_data()
             job_id = checked_identifier(args.job_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ-") + uuid.uuid4().hex[:8])
@@ -3313,6 +3332,8 @@ def main(argv=None):
                     raise UpdateError("Job ID already belongs to a different request")
                 if bool(updater.receipt.get("dry_run")) != args.dry_run:
                     raise UpdateError("Job ID belongs to a different dry-run/execution mode")
+                if bool(updater.receipt.get("skip_model_smoke")) != args.skip_model_smoke:
+                    raise UpdateError("Job ID belongs to a different model-smoke mode")
                 if updater.receipt.get("expected_current") != args.expected_current:
                     raise UpdateError("Job ID belongs to a different expected-current image")
                 if (updater.receipt.get("expected_target") != args.expected_target
@@ -3323,7 +3344,8 @@ def main(argv=None):
                 return 0
             updater.initialize(job_id, args.update, dry_run=args.dry_run, expected_current=args.expected_current,
                                expected_target=args.expected_target, expected_archive_sha256=args.expected_archive_sha256,
-                               accept_custom_current=args.accept_custom_current)
+                               accept_custom_current=args.accept_custom_current,
+                               skip_model_smoke=args.skip_model_smoke)
         if args.detach:
             # start_new_session severs the SSH/browser controlling terminal;
             # the inherited flock survives until the actual operation exits.

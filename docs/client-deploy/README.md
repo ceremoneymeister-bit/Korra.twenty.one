@@ -897,6 +897,14 @@ diff в receipt, а не источником ожиданий. После во�
 проверяет stateless SSE с ожидаемым русским missing-provider error и [DONE],
 без model ACK; configured обязан получить KORRA_UPDATE_OK от модели.
 Degraded/malformed/missing health не маскируется успешной моделью.
+Явный режим `--skip-model-smoke` (K21-377, capability `model_smoke_skip`) для
+`--update` и `--rollback` не вызывает модель — для установки, чей единственный
+маршрут оплачивает клиент. Режим хранится в квитанции операции, поэтому
+автоматический откат того же job наследует его; запрос того же `--job-id`
+с другим режимом отклоняется. Receipt: `model_smoke={"status":"skipped",
+"reason":"operator_requested"}`. Готовность, capability/provider fingerprint,
+health, SQLite и сохранность данных проверяются как обычно; foundation-проверка
+и без того не обращается к модели. Без флага проба обязательна.
 Native readiness ожидается в пределах бюджета, который updater сам соразмеряет
 составу загрузки (K21-137): 120 с базы плюс 20 с за каждое следующее
 подключение платформы, которое корневой шлюз делает подряд (в multiplex — все
