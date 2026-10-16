@@ -325,12 +325,20 @@ def _run_hung_restart(run_dir: Path, *, recovers: bool):
     return proc.returncode, err, display_pid
 
 
-def _is_dead(pid: int) -> bool:
-    try:
-        state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
-    except FileNotFoundError:
-        return True
-    return state in ("Z", "X")
+def _is_dead(pid: int, wait: float = 3.0) -> bool:
+    # SIGKILL доходит не мгновенно: под нагрузкой параллельного прогона процесс
+    # ещё секунду-другую виден как работающий. Ждём ограниченно, а не однажды.
+    deadline = time.monotonic() + wait
+    while True:
+        try:
+            state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
+        except (FileNotFoundError, ProcessLookupError):
+            return True
+        if state in ("Z", "X"):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
 
 
 def test_watchdog_restarts_the_whole_process_when_the_server_stays_in_recovery(run_dir):
