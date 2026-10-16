@@ -44,6 +44,13 @@ export function parseSSEBlock(block: string): SSEEvent | null {
   }
 
   // Route by event type
+  if (eventType === "hermes.assistant.commentary") {
+    try {
+      const data = JSON.parse(dataLine);
+      if (typeof data.text !== "string" || !data.text.trim()) return null;
+      return { type: "commentary", data: { text: data.text, already_streamed: data.already_streamed === true } };
+    } catch { return null; }
+  }
   if (
     eventType === "hermes.tool.progress" ||
     eventType === "korra.tool.progress"

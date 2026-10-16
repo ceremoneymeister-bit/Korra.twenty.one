@@ -2118,6 +2118,29 @@ class TestWebServerEndpoints:
         assert resp.status_code == 200
         assert resp.json()["pagination"]["limit"] == 500
 
+    def test_history_projects_public_commentary_without_mutating_provider_sidecar(self):
+        from korra_state import SessionDB
+        item = {"type": "message", "role": "assistant", "phase": "commentary",
+                "content": [{"type": "output_text", "text": "Проверяю файл."}]}
+        db = SessionDB()
+        try:
+            db.create_session(session_id="commentary", source="api_server")
+            db.append_messages_batch("commentary", [
+                {"role": "user", "content": "Проверь"},
+                {"role": "assistant", "content": "Готово", "reasoning_content": "PRIVATE_ANALYSIS",
+                 "codex_message_items": [item]},
+            ])
+            before = db.get_messages_as_conversation("commentary")
+            response = self.client.get("/api/sessions/commentary/messages?display_limit=70")
+            assert response.status_code == 200
+            answer = response.json()["messages"][-1]
+            assert answer["display_commentary"] == ["Проверяю файл."]
+            assert answer["display_reasoning"] == ""
+            assert answer["content"] == "Готово"
+            assert db.get_messages_as_conversation("commentary") == before
+        finally:
+            db.close()
+
     def test_get_session_messages_default_hides_compacted_rows(self):
         """The endpoint default matches get_messages: active rows only.
 

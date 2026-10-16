@@ -176,7 +176,8 @@ def test_chat_proxy_persists_and_replays_same_client_message(monkeypatch, tmp_pa
         },
         ensure_ascii=False,
     ).encode("utf-8")
-    response_payload = b"data: " + chunk_payload + b"\n\ndata: [DONE]\n\n"
+    commentary = 'event: hermes.assistant.commentary\ndata: {"text":"Проверяю.","already_streamed":false}\n\n'.encode()
+    response_payload = commentary + b"data: " + chunk_payload + b"\n\ndata: [DONE]\n\n"
 
     class FakeResponse:
         status_code = 200
@@ -230,6 +231,8 @@ def test_chat_proxy_persists_and_replays_same_client_message(monkeypatch, tmp_pa
     assert first.status_code == 200
     assert second.status_code == 200
     assert "Ответ" in first.text
+    assert first.text.count("Проверяю.") == 1
+    assert "hermes.assistant.commentary" in first.text
     assert second.content == first.content
     assert second.headers["x-korra-delivery-state"] == "replayed"
     assert len(calls) == 1

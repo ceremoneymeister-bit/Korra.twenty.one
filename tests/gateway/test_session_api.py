@@ -891,3 +891,53 @@ async def test_patch_session_still_rejects_unknown_fields(adapter, session_db):
         resp = await cli.patch(f"/api/sessions/{session_id}", json={"nonsense": 1})
         assert resp.status == 400, await resp.text()
         assert (await resp.json())["error"]["code"] == "unsupported_session_field"
+
+
+@pytest.mark.asyncio
+async def test_interim_commentary_reaches_session_sse_and_responses_stream(adapter, session_db, monkeypatch):
+    """Codex commentary / mid-turn assistant text is a typed ``assistant.commentary`` event on the
+    session SSE endpoint and a ``phase: commentary`` message item on /v1/responses, never part of
+    the final answer (#67580)."""
+    import json as _json
+
+    session_id = session_db.create_session("commentary-session", "api_server")
+
+    def fake_create_agent(**kwargs):
+        interim = kwargs["interim_assistant_callback"]
+
+        class FakeAgent:
+            provider, model = "openai-codex", "gpt-5"
+            session_prompt_tokens = session_completion_tokens = session_total_tokens = 0
+
+            def run_conversation(self, **_kw):
+                interim("Checking the docs first.", already_streamed=False)
+                return {"final_response": "Done.", "messages": [], "api_calls": 1}
+
+        return FakeAgent()
+
+    app = _create_session_app(adapter)
+    app.router.add_post("/v1/responses", adapter._handle_responses)
+    with patch.object(adapter, "_create_agent", side_effect=fake_create_agent):
+        async with TestClient(TestServer(app)) as cli:
+            sse = await (await cli.post(f"/api/sessions/{session_id}/chat/stream", json={"message": "go"})).text()
+            responses = await (await cli.post(
+                "/v1/responses", json={"model": "hermes-agent", "input": "go", "stream": True})).text()
+
+    def _events(body):
+        out = []
+        for block in body.split("\n\n"):
+            lines = block.splitlines()
+            name = next((ln[7:] for ln in lines if ln.startswith("event: ")), None)
+            data = next((ln[6:] for ln in lines if ln.startswith("data: ")), None)
+            if data:
+                out.append((name, _json.loads(data)))
+        return out
+
+    sse_events = _events(sse)
+    commentary = [d for n, d in sse_events if n == "assistant.commentary"]
+    assert [(d["text"], d["already_streamed"]) for d in commentary] == [("Checking the docs first.", False)]
+    assert next(d for n, d in sse_events if n == "assistant.completed")["content"] == "Done."
+
+    done_items = [d["item"] for n, d in _events(responses) if n == "response.output_item.done"]
+    assert [(i.get("phase"), i["content"][0]["text"]) for i in done_items if i["type"] == "message"] == [
+        ("commentary", "Checking the docs first."), (None, "Done.")]

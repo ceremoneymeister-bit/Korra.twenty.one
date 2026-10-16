@@ -304,7 +304,7 @@ function AssistantBubble({
   // больше нечего, сервер ещё ничего не сообщил. Как только приходит первый
   // `tool.progress`, орбита переезжает в заголовок AgentTrace.
   // (Хуки выше выполняются безусловно; ранний выход стоит после них.)
-  if (!message.content && !hasTrace) {
+  if (!message.content && !hasTrace && !message.commentary?.length) {
     if (!streaming) return null;
     return (
       <div className="flex justify-start">
@@ -325,9 +325,19 @@ function AssistantBubble({
           "font-sans normal-case tracking-normal",
         )}
       >
+        {(message.commentary ?? []).map((part, index, parts) => {
+          const from = index === 0 ? 0 : parts[index - 1].toolOffset;
+          const preceding = tools.slice(from, part.toolOffset);
+          return <div key={index}>
+            {preceding.length > 0 && <AgentTrace tools={preceding} startedAt={message.timestamp} />}
+            <article className="korra-chat-answer" aria-label="Сообщение о ходе работы">
+              <Markdown content={part.text} />
+            </article>
+          </div>;
+        })}
         {hasTrace && (
           <AgentTrace
-            tools={tools}
+            tools={tools.slice(message.commentary?.at(-1)?.toolOffset ?? 0)}
             reasoning={message.reasoning}
             active={Boolean(streaming)}
             answering={Boolean(message.content)}

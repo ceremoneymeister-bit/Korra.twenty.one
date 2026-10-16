@@ -642,6 +642,14 @@ async def _handle_runs(
         except Exception:
             pass
 
+    def _interim_cb(text, *, already_streamed=False):
+        if not isinstance(text, str) or not text.strip() or run_id not in self._run_streams:
+            return
+        loop.call_soon_threadsafe(_put_event_if_active, {
+            "event": "message.interim", "run_id": run_id, "timestamp": time.time(),
+            "text": text, "already_streamed": bool(already_streamed),
+        })
+
     initial_status = self._set_run_status(
         run_id,
         "queued",
@@ -751,6 +759,7 @@ async def _handle_runs(
                     ephemeral_system_prompt=ephemeral_system_prompt,
                     session_id=session_id,
                     stream_delta_callback=_text_cb,
+                    interim_assistant_callback=_interim_cb,
                     tool_progress_callback=event_cb,
                     gateway_session_key=gateway_session_key,
                     requested_model=agent_overrides.get("requested_model"),

@@ -15,6 +15,8 @@ export interface ChatMessage {
   content: string;
   timestamp: number;
   toolCalls?: ToolEntry[];
+  /** Public mid-turn messages, positioned between tool calls. Never model input. */
+  commentary?: Array<{ text: string; toolOffset: number }>;
   /** След размышления агента. Приходит ТОЛЬКО из истории сессии
    *  (`reasoning_content` в строке ответа) — живой поток
    *  `/api/chat/completions` размышление не передаёт: `_on_tool_start`
@@ -161,12 +163,15 @@ export interface SSEApprovalRequestData {
  *  до браузера как есть. */
 export interface SessionMessageReasoning {
   reasoning_content?: string | null;
+  display_commentary?: string[];
+  display_reasoning?: string;
   display_kind?: string | null;
 }
 
 /** Discriminated union for SSE parser output */
 export type SSEEvent =
   | { type: "chunk"; data: SSEChatChunkData }
+  | { type: "commentary"; data: { text: string; already_streamed?: boolean } }
   | { type: "tool_progress"; data: SSEToolProgressData }
   | { type: "approval_request"; data: SSEApprovalRequestData }
   | { type: "done" };

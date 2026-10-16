@@ -836,6 +836,9 @@ async def get_session_messages(
     from agent.compaction_display import project_compaction_message_for_display
     from agent.context_compressor import is_compaction_summary_message
 
+    from agent.history_commentary import project_history_commentary
+
+    messages = project_history_commentary(messages, home=_cron_profile_home(profile)[1])
     projected_messages = []
     for message in messages:
         if not is_compaction_summary_message(message):

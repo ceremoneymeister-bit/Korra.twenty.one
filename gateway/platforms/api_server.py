@@ -3239,6 +3239,7 @@ class APIServerAdapter(BasePlatformAdapter):
         ephemeral_system_prompt: Optional[str] = None,
         session_id: Optional[str] = None,
         stream_delta_callback=None,
+        interim_assistant_callback=None,
         tool_progress_callback=None,
         tool_start_callback=None,
         tool_complete_callback=None,
@@ -3559,6 +3560,7 @@ class APIServerAdapter(BasePlatformAdapter):
             "session_id": session_id,
             "platform": "api_server",
             "stream_delta_callback": stream_delta_callback,
+            "interim_assistant_callback": interim_assistant_callback,
             "tool_progress_callback": tool_progress_callback,
             "tool_start_callback": tool_start_callback,
             "tool_complete_callback": tool_complete_callback,
@@ -5698,6 +5700,13 @@ class APIServerAdapter(BasePlatformAdapter):
                 event_name = event_type.replace("tool.", "tool.")
                 _enqueue(event_name, {"message_id": message_id, "tool_name": tool_name, "preview": preview, "args": args})
 
+        def _commentary(text, *, already_streamed=False):
+            if isinstance(text, str) and text.strip():
+                _enqueue("assistant.commentary", {
+                    "message_id": message_id, "text": text,
+                    "already_streamed": bool(already_streamed),
+                })
+
         async def _run_and_signal() -> None:
             try:
                 await queue.put(_event_payload("run.started", {
@@ -5713,6 +5722,7 @@ class APIServerAdapter(BasePlatformAdapter):
                     ephemeral_system_prompt=system_prompt,
                     session_id=session_id,
                     stream_delta_callback=_delta,
+                    interim_assistant_callback=_commentary,
                     tool_progress_callback=_tool_progress,
                     active_run_id=run_id,
                     gateway_session_key=gateway_session_key,
@@ -6092,6 +6102,12 @@ class APIServerAdapter(BasePlatformAdapter):
                 if delta is not None:
                     _stream_q.put_threadsafe(delta)
 
+            def _on_commentary(text, *, already_streamed=False):
+                if isinstance(text, str) and text.strip():
+                    _stream_q.put_threadsafe(("__commentary__", {
+                        "text": text, "already_streamed": bool(already_streamed),
+                    }))
+
             # Track which tool_call_ids we've emitted a "running" lifecycle
             # event for, so a "completed" event without a matching "running"
             # (e.g. internal/filtered tools) is silently dropped instead of
@@ -6248,6 +6264,7 @@ class APIServerAdapter(BasePlatformAdapter):
                     ephemeral_system_prompt=system_prompt,
                     session_id=session_id,
                     stream_delta_callback=_on_delta,
+                    interim_assistant_callback=_on_commentary,
                     tool_start_callback=_on_tool_start,
                     tool_complete_callback=_on_tool_complete,
                     agent_ref=agent_ref,
@@ -6485,6 +6502,7 @@ class APIServerAdapter(BasePlatformAdapter):
                 человек не ответит, и карточка должна доехать до браузера
                 отдельным событием, а не текстом ответа.
                 """
+                nonlocal saw_text_delta
                 if isinstance(item, tuple) and len(item) == 2 and item[0] == "__tool_progress__":
                     await response.write(_sse_frame(item[1], event="hermes.tool.progress"))
                 elif (
@@ -6495,8 +6513,11 @@ class APIServerAdapter(BasePlatformAdapter):
                     await response.write(
                         _sse_frame(item[1], event=CHAT_APPROVAL_SSE_EVENT)
                     )
+                elif isinstance(item, tuple) and len(item) == 2 and item[0] == "__commentary__":
+                    if item[1].get("already_streamed"):
+                        saw_text_delta = False
+                    await response.write(_sse_frame(item[1], event="hermes.assistant.commentary"))
                 else:
-                    nonlocal saw_text_delta
                     saw_text_delta = True
                     content_chunk = {
                         "id": completion_id, "object": "chat.completion.chunk",
@@ -6879,6 +6900,17 @@ class APIServerAdapter(BasePlatformAdapter):
                     "logprobs": [],
                 })
 
+            async def _emit_commentary(text: str) -> None:
+                nonlocal output_index
+                item = {"id": f"msg_{uuid.uuid4().hex[:24]}", "type": "message",
+                        "role": "assistant", "status": "completed", "phase": "commentary",
+                        "content": [{"type": "output_text", "text": text, "annotations": []}]}
+                idx = output_index
+                output_index += 1
+                emitted_items.append(item)
+                for event in ("response.output_item.added", "response.output_item.done"):
+                    await _write_event(event, {"type": event, "output_index": idx, "item": item})
+
             async def _emit_tool_started(payload: Dict[str, Any]) -> str:
                 """Emit response.output_item.added for a function_call.
 
@@ -7001,7 +7033,9 @@ class APIServerAdapter(BasePlatformAdapter):
                     # Flush batched text before tool events
                     if _batch_buf:
                         await _flush_batch()
-                    if tag == "__tool_started__":
+                    if tag == "__commentary__":
+                        await _emit_commentary(payload["text"])
+                    elif tag == "__tool_started__":
                         await _emit_tool_started(payload)
                     elif tag == "__tool_completed__":
                         await _emit_tool_completed(payload)
@@ -7433,6 +7467,11 @@ class APIServerAdapter(BasePlatformAdapter):
                 """
                 return
 
+            def _on_commentary(text, *, already_streamed=False):
+                # Ordinary provider preambles already belong to text deltas.
+                if isinstance(text, str) and text.strip() and not already_streamed:
+                    _stream_q.put_threadsafe(("__commentary__", {"text": text}))
+
             def _on_tool_start(tool_call_id, function_name, function_args):
                 """Queue a started tool for live function_call streaming."""
                 _stream_q.put_threadsafe(("__tool_started__", {
@@ -7457,6 +7496,7 @@ class APIServerAdapter(BasePlatformAdapter):
                 ephemeral_system_prompt=instructions,
                 session_id=session_id,
                 stream_delta_callback=_on_delta,
+                interim_assistant_callback=_on_commentary,
                 tool_progress_callback=_on_tool_progress,
                 tool_start_callback=_on_tool_start,
                 tool_complete_callback=_on_tool_complete,
@@ -8231,6 +8271,7 @@ class APIServerAdapter(BasePlatformAdapter):
         ephemeral_system_prompt: Optional[str] = None,
         session_id: Optional[str] = None,
         stream_delta_callback=None,
+        interim_assistant_callback=None,
         tool_progress_callback=None,
         tool_start_callback=None,
         tool_complete_callback=None,
@@ -8363,6 +8404,7 @@ class APIServerAdapter(BasePlatformAdapter):
                         ephemeral_system_prompt=ephemeral_system_prompt,
                         session_id=session_id,
                         stream_delta_callback=stream_delta_callback,
+                        interim_assistant_callback=interim_assistant_callback,
                         tool_progress_callback=tool_progress_callback,
                         tool_start_callback=tool_start_callback,
                         tool_complete_callback=tool_complete_callback,

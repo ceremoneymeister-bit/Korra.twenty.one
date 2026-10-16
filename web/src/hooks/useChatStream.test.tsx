@@ -215,7 +215,8 @@ describe("useChatStream — история сессии", () => {
     const [question, answer] = current.messages;
     expect(question.role).toBe("user");
     // Текст обоих ответов агента живёт в одном пузыре — как в живом потоке.
-    expect(answer.content).toBe("Смотрю остатки.\n\nГотово: два файла.");
+    expect(answer.content).toBe("Готово: два файла.");
+    expect(answer.commentary).toEqual([{ text: "Смотрю остатки.", toolOffset: 0 }]);
     expect(answer.reasoning).toBe("Сначала проверю склад, потом посчитаю.");
     expect(answer.toolCalls).toHaveLength(1);
     expect(answer.toolCalls?.[0]).toMatchObject({
@@ -2381,7 +2382,8 @@ it("защищённое начало и архивная часть того ж
   ];
   const messages = sessionMessagesToChat("child", rows);
   expect(messages).toHaveLength(1);
-  expect(messages[0]?.content).toBe("Проверяю\n\nГотово");
+  expect(messages[0]?.content).toBe("Готово");
+  expect(messages[0]?.commentary).toEqual([{ text: "Проверяю", toolOffset: 0 }]);
   expect(messages[0]?.toolCalls?.[0]?.summary).toBe("результат");
   expect(messages[0]?.readOnly).toBe(true);
 });
@@ -2418,4 +2420,48 @@ it("скрытое уведомление сохраняет границу дв
     { id: 4, role: "user", content: quote },
   ]);
   expect(messages.map(m => m.content)).toEqual(["Первый помощник готов", "Второй помощник готов", quote]);
+});
+
+it("K21-376: commentary is visible before final and survives tool boundaries once", async () => {
+  let stream!: ReadableStreamDefaultController<Uint8Array>;
+  const encode = new TextEncoder();
+  const sendFrame = (frame: string) => stream.enqueue(encode.encode(frame + "\n\n"));
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => String(url).includes("/chat/completions")
+    ? new Response(new ReadableStream<Uint8Array>({ start(controller) { stream = controller; } }),
+      { headers: { "content-type": "text/event-stream" } })
+    : new Response(JSON.stringify({ approvals: [] }))));
+  let pending!: Promise<boolean>;
+  await act(async () => { pending = current.send("Проверь файл"); });
+  await act(async () => {
+    sendFrame('event: hermes.assistant.commentary\ndata: {"text":"Проверяю файл.","already_streamed":false}');
+    sendFrame('event: hermes.tool.progress\ndata: {"tool":"read_file","toolCallId":"c1","status":"running"}');
+  });
+  expect(current.isStreaming).toBe(true);
+  expect(current.messages.at(-1)?.content).toBe("");
+  expect(current.messages.at(-1)?.commentary).toEqual([{ text: "Проверяю файл.", toolOffset: 0 }]);
+  await act(async () => {
+    sendFrame('event: hermes.tool.progress\ndata: {"tool":"read_file","toolCallId":"c1","status":"completed"}');
+    sendFrame('event: hermes.assistant.commentary\ndata: {"text":"Проверяю результат.","already_streamed":false}');
+    sendFrame('data: {"choices":[{"delta":{"content":"Готово."},"finish_reason":null}]}');
+    sendFrame('data: [DONE]');
+    stream.close();
+    await pending;
+  });
+  expect(current.messages.at(-1)?.content).toBe("Готово.");
+  expect(current.messages.at(-1)?.commentary).toEqual([
+    { text: "Проверяю файл.", toolOffset: 0 }, { text: "Проверяю результат.", toolOffset: 1 },
+  ]);
+  expect(current.isStreaming).toBe(false);
+});
+
+it("K21-376: an already streamed preamble becomes a segment without duplicating final", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => sseResponse(
+    'data: {"choices":[{"delta":{"content":"Проверяю."},"finish_reason":null}]}\n\n',
+    'event: hermes.assistant.commentary\ndata: {"text":"Проверяю.","already_streamed":true}\n\n',
+    'data: {"choices":[{"delta":{"content":"Готово."},"finish_reason":null}]}\n\n',
+    'data: [DONE]\n\n',
+  )));
+  await act(async () => { await current.send("Проверь"); });
+  expect(current.messages.at(-1)?.content).toBe("Готово.");
+  expect(current.messages.at(-1)?.commentary).toEqual([{ text: "Проверяю.", toolOffset: 0 }]);
 });

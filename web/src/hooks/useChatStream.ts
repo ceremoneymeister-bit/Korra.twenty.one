@@ -124,6 +124,7 @@ type StreamAction =
        *  Дописывать после него нечего: поток пишет в последнее сообщение. */
       replay?: boolean;
     }
+  | { type: "COMMENTARY"; text: string; already_streamed?: boolean }
   | { type: "APPEND_DELTA"; content: string }
   | { type: "UPSERT_TOOL"; toolData: SSEToolProgressData }
   | { type: "FINALIZE" }
@@ -256,6 +257,7 @@ function sameRendered(previous: ChatMessage, next: ChatMessage): boolean {
   return (
     sameChatTurn(previous, next) &&
     (previous.reasoning ?? "") === (next.reasoning ?? "") &&
+    JSON.stringify(previous.commentary ?? []) === JSON.stringify(next.commentary ?? []) &&
     toolTrace(previous) === toolTrace(next)
   );
 }
@@ -402,7 +404,7 @@ function reducer(state: StreamState, action: StreamAction): StreamState {
     case "RETRY_USER": {
       let found = false;
       const messages = state.messages
-        .filter((message) => message.role !== "assistant" || message.content || message.toolCalls?.length)
+        .filter((message) => message.role !== "assistant" || message.content || message.toolCalls?.length || message.commentary?.length)
         .map((message) => {
           if (message.id !== action.userMsg.id) return message;
           found = true;
@@ -455,7 +457,7 @@ function reducer(state: StreamState, action: StreamAction): StreamState {
         ...state,
         messages: state.messages.filter((message) =>
           message.clientMessageId !== action.messageId &&
-          (message.role !== "assistant" || Boolean(message.content) || Boolean(message.toolCalls?.length)),
+          (message.role !== "assistant" || Boolean(message.content) || Boolean(message.toolCalls?.length) || Boolean(message.commentary?.length)),
         ),
         error: null,
       };
@@ -546,6 +548,18 @@ function reducer(state: StreamState, action: StreamAction): StreamState {
         return (!identity || !existing.has(identity)) && (typeof action.cursor !== "number" || message.historyId === undefined || message.historyId < action.cursor);
       });
       return { ...state, messages: [...older, ...state.messages], history: action.history };
+    }
+
+    case "COMMENTARY": {
+      if (!state.messages.length) return state;
+      const messages = [...state.messages];
+      const last = { ...messages[messages.length - 1] };
+      // Non-Codex narration may already be on the text channel. Move that
+      // segment out of the final, keeping content exactly once.
+      if (action.already_streamed && last.content && action.text.startsWith(last.content)) last.content = "";
+      last.commentary = [...(last.commentary ?? []), { text: action.text, toolOffset: last.toolCalls?.length ?? 0 }];
+      messages[messages.length - 1] = last;
+      return { ...state, messages };
     }
 
     case "APPEND_DELTA": {
@@ -840,7 +854,7 @@ export function sessionMessagesToChat(
   const closeTurn = (complete = false) => {
     if (!turn) return;
     // Ход без текста и без вызовов показывать нечего (служебные строки).
-    if (turn.content || turn.toolCalls?.length || turn.reasoning) {
+    if (turn.content || turn.toolCalls?.length || turn.reasoning || turn.commentary?.length) {
       result.push({ ...turn, turnComplete: complete });
     }
     turn = null;
@@ -930,13 +944,19 @@ export function sessionMessagesToChat(
         ...history,
       };
     }
-    if (content) {
+    const calls = message.tool_calls ?? [];
+    if (content && !calls.length) {
       turn.content = turn.content ? `${turn.content}\n\n${content}` : content;
     }
-    const reasoning = message.reasoning_content?.trim();
+    const narration = message.display_commentary ?? (calls.length && content ? [content] : []);
+    for (const text of narration) {
+      if (text.trim() && !turn.commentary?.some(part => part.text === text)) {
+        turn.commentary = [...(turn.commentary ?? []), { text, toolOffset: turn.toolCalls?.length ?? 0 }];
+      }
+    }
+    const reasoning = (message.display_reasoning ?? message.reasoning_content)?.trim();
     if (reasoning && !turn.reasoning) turn.reasoning = reasoning;
 
-    const calls = message.tool_calls ?? [];
     if (calls.length > 0) {
       const entries: ToolEntry[] = calls.map((call) => {
         const preview = previewArguments(call.function.name, call.function.arguments);
@@ -956,8 +976,8 @@ export function sessionMessagesToChat(
       return;
     }
 
-    // Ответ без вызовов завершает ход.
-    closeTurn(true);
+    // A sidecar-only commentary row is not a completed final answer.
+    if (content || !narration.length) closeTurn(true);
   });
 
   closeTurn();
@@ -1391,7 +1411,8 @@ export function useChatStream(
               }
               throw new Error(explanation);
             }
-          } else if (event.type === "tool_progress") dispatch({ type: "UPSERT_TOOL", toolData: event.data });
+          } else if (event.type === "commentary") dispatch({ type: "COMMENTARY", ...event.data });
+          else if (event.type === "tool_progress") dispatch({ type: "UPSERT_TOOL", toolData: event.data });
           else if (event.type === "approval_request") {
             const request = normalizeApprovalRequest(event.data);
             if (request) dispatch({ type: "APPROVAL_REQUESTED", request });
@@ -1765,6 +1786,9 @@ export function useChatStream(
                 void reader.cancel();
                 break;
               }
+            } else if (event.type === "commentary") {
+              noteAgentOutput();
+              dispatch({ type: "COMMENTARY", ...event.data });
             } else if (event.type === "tool_progress") {
               noteAgentOutput();
               dispatch({ type: "UPSERT_TOOL", toolData: event.data });
