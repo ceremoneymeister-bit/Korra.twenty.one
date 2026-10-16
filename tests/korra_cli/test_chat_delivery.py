@@ -394,6 +394,7 @@ def test_chat_proxy_routes_profile_and_verified_attachment(monkeypatch, tmp_path
     attachment = files_root / "client" / "inbox" / "report.pdf"
     attachment.parent.mkdir(parents=True)
     attachment.write_bytes(b"pdf data")
+    (web_server.get_hermes_home() / "profiles" / "researcher").mkdir(parents=True)
     monkeypatch.setenv("HERMES_DASHBOARD_FILES_ROOT", str(files_root))
     monkeypatch.setenv("API_SERVER_KEY", "test-key")
     calls = []

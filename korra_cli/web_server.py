@@ -4012,7 +4012,7 @@ def _apply_chat_attachments(
                 status_code=400, detail="Некорректный путь вложения"
             ) from exc
         if request is not None:
-            descriptor = _chat_file_descriptor(str(item.get("path", "")), request, folder_deadline=folder_deadline)
+            descriptor = _chat_file_descriptor(str(item.get("path", "")), request, folder_deadline=folder_deadline, profile=profile)
             target = Path(descriptor["path"])
         elif not _path_is_under(root, target):
             raise HTTPException(
@@ -4992,9 +4992,14 @@ def _managed_file_response(
     media_only: bool = False,
     inline_requested: bool = False,
     expected_sha256: Optional[str] = None,
+    chat: bool = False,
 ) -> FileResponse:
     """Build a range-aware response after applying managed-file policy."""
-    policy, target, _display_path = _resolve_managed_path(path, request)
+    image_mime = None
+    if chat:
+        target, image_mime = _resolve_chat_file(path, request)
+    else:
+        _policy, target, _display_path = _resolve_managed_path(path, request)
     if not target.exists():
         raise HTTPException(status_code=404, detail="File not found")
     if not target.is_file():
@@ -5011,7 +5016,7 @@ def _managed_file_response(
     if size > _CHAT_MAX_FILE_BYTES:
         raise HTTPException(status_code=413, detail="Файл больше 2 ГБ. Разделите его на части.")
 
-    mime_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+    mime_type = image_mime or mimetypes.guess_type(target.name)[0] or "application/octet-stream"
 
     if expected_sha256 is not None:
         expected = expected_sha256.strip().lower()
@@ -5100,14 +5105,49 @@ def _chat_folder_descriptor(target: Path, *, deadline: float | None = None) -> d
             "sample": sample, "truncated": truncated or bool(pending)}
 
 
-def _chat_file_descriptor(reference: str, request: Request, *, folder_deadline: float | None = None) -> dict[str, Any]:
+def _resolve_chat_file(reference: str, request: Request, *, profile: str | None = None) -> tuple[Path, str | None]:
+    """Chat may read its profile's generated raster images, never browse cache.
+
+    Keep this exception out of the Files resolver: listing, editing and other
+    downloads must retain the workspace policy. Metadata and chat downloads
+    share this check, including signature detection on every request.
+    """
     path = _chat_file_path(reference)
+    candidate = Path(path)
+    if ".." in candidate.parts:
+        raise HTTPException(403, "Выход за пределы папки вложения запрещён.")
+    with _config_profile_scope(profile or request.query_params.get("profile")):
+        home = get_hermes_home().resolve()
+    images = home / "cache" / "images"
+    if _path_is_under(images, candidate):
+        if _is_private_managed_path(candidate):
+            raise HTTPException(403, "Служебный файл недоступен для передачи.")
+        cursor = home
+        for part in candidate.relative_to(home).parts:
+            cursor = cursor / part
+            if cursor.is_symlink():
+                raise HTTPException(403, "Символические ссылки недоступны.")
+        target = _canonical_path(candidate, require_exists=True)
+        if not _path_is_under(images, target) or not target.is_file():
+            raise HTTPException(403, "Доступно только изображение из cache/images этого профиля.")
+        from agent.image_routing import _sniff_mime_from_bytes
+
+        try:
+            with target.open("rb") as source:
+                image_mime = _sniff_mime_from_bytes(source.read(512))
+        except OSError as exc:
+            raise HTTPException(403, "Изображение недоступно для чтения.") from exc
+        # These are the generator's raster output formats plus GIF photos.
+        # SVG is active content and must never gain access through this gate.
+        if image_mime not in {"image/png", "image/jpeg", "image/webp", "image/gif"}:
+            raise HTTPException(403, "Файл не является поддерживаемым изображением.")
+        return target, image_mime
+
     try:
         policy, target, _ = _resolve_managed_path(path, request)
     except HTTPException as exc:
         # Карточка в чате показывает причину владельцу: результат, сохранённый
-        # агентом в свой профиль или в /tmp, не «недоступен вообще», а лежит
-        # вне общей рабочей папки, и продолжение — попросить перенести его.
+        # вне разрешённых каталогов, нужно перенести в рабочую папку.
         if exc.status_code == 403 and exc.detail == "Path outside managed files root":
             raise HTTPException(403, "Файл вне рабочей папки. Попросите агента сохранить его в workspace.") from exc
         if exc.status_code == 404:
@@ -5116,9 +5156,22 @@ def _chat_file_descriptor(reference: str, request: Request, *, folder_deadline: 
     if policy.locked_root is None:
         # Local admin Files may browse the host. Model-produced links have a
         # narrower contract: only the active data directory is deliverable.
-        root = Path(get_hermes_home()).resolve()
-        if not _path_is_under(root, target):
+        if not _path_is_under(home, target):
             raise HTTPException(403, "Файл вне рабочей папки. Попросите агента сохранить его в workspace.")
+    # Even a permissive local/DATA Files root must not make another profile's
+    # storage an attachment of this chat (default home contains all profiles).
+    from korra_constants import get_default_hermes_root
+
+    data = get_default_hermes_root().resolve()
+    if (_path_is_under(data / "profiles", target) and
+            (home == data or not _path_is_under(home, target))) or (
+            home != data and _path_is_under(data / "cache", target)):
+        raise HTTPException(403, "Вложение другого профиля недоступно.")
+    return target, None
+
+
+def _chat_file_descriptor(reference: str, request: Request, *, folder_deadline: float | None = None, profile: str | None = None) -> dict[str, Any]:
+    target, image_mime = _resolve_chat_file(reference, request, profile=profile)
     if _is_private_managed_path(target):
         raise HTTPException(403, "Служебный файл недоступен для передачи.")
     if target.is_dir():
@@ -5131,9 +5184,9 @@ def _chat_file_descriptor(reference: str, request: Request, *, folder_deadline: 
         raise HTTPException(413, "Файл больше 2 ГБ. Попросите агента разделить его на части.")
     return {
         "path": str(target), "name": target.name,
-        "kind": target.suffix.lstrip(".").lower() or "bin", "size": size,
+        "kind": image_mime.split("/", 1)[1] if image_mime else target.suffix.lstrip(".").lower() or "bin", "size": size,
         "revision": _managed_file_revision_from_stat(stat),
-        "reader": _CHAT_ATTACHMENT_READERS.get(target.suffix.lower(), "unknown"),
+        "reader": "image" if image_mime else _CHAT_ATTACHMENT_READERS.get(target.suffix.lower(), "unknown"),
     }
 
 
@@ -5164,8 +5217,6 @@ async def download_managed_file(
     their player source, while preserving attachment semantics for ordinary
     link/document requests.
     """
-    if chat:
-        path = _chat_file_descriptor(path, request)["path"]
     fetch_destination = request.headers.get("sec-fetch-dest", "").lower()
     is_media_subresource = fetch_destination in {"audio", "video"}
     return _managed_file_response(
@@ -5175,6 +5226,7 @@ async def download_managed_file(
         media_only=is_media_subresource,
         inline_requested=inline or is_media_subresource,
         expected_sha256=expected_sha256,
+        chat=chat,
     )
 
 

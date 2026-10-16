@@ -72,7 +72,7 @@ def test_upload_visible_downloadable_and_reusable_without_copy(files):
     listing = client.get('/api/files', params={'path': str(target.parent)}).json()
     assert [entry['path'] for entry in listing['entries']] == [str(target)]
     assert client.get('/api/files/download', params={'path': str(target)}).content == data
-    request = Request({'type': 'http', 'app': server.app, 'path': '/', 'headers': [], 'server': ('testserver', 80)})
+    request = Request({'type': 'http', 'app': server.app, 'path': '/', 'query_string': b'', 'headers': [], 'server': ('testserver', 80)})
     body = {'messages': [{'role': 'user', 'content': 'Прочти'}], 'attachments': [descriptor, descriptor]}
     server._apply_chat_attachments(body, request=request)
     assert body['messages'][0]['content'].count(str(target)) == 1
@@ -149,7 +149,7 @@ def test_folder_attachment_recounts_files_and_skips_private_links(files):
     assert descriptor['size'] == 5
     assert descriptor['sample'] == ['visible.txt']
     assert descriptor['truncated'] is False
-    request = Request({'type': 'http', 'app': server.app, 'path': '/', 'headers': [], 'server': ('testserver', 80)})
+    request = Request({'type': 'http', 'app': server.app, 'path': '/', 'query_string': b'', 'headers': [], 'server': ('testserver', 80)})
     descriptor.update(file_count=900, size=1000000, sample=['invented'])
     body = {'messages': [{'role': 'user', 'content': 'Выбери нужное'}], 'attachments': [descriptor]}
     server._apply_chat_attachments(body, request=request)
@@ -165,7 +165,7 @@ def test_thirty_attachments_are_admitted_without_truncation(files):
         path = workspace / f'{index}.txt'
         path.write_text(str(index))
         attachments.append({'path': str(path)})
-    request = Request({'type': 'http', 'app': server.app, 'path': '/', 'headers': [], 'server': ('testserver', 80)})
+    request = Request({'type': 'http', 'app': server.app, 'path': '/', 'query_string': b'', 'headers': [], 'server': ('testserver', 80)})
     body = {'messages': [{'role': 'user', 'content': ''}], 'attachments': attachments}
     server._apply_chat_attachments(body, request=request)
     assert all(item['path'] in body['messages'][0]['content'] for item in attachments)
