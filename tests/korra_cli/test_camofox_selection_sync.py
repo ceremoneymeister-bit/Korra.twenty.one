@@ -233,3 +233,128 @@ def test_unreadable_profile_env_is_logged_and_cannot_break_another_save(install,
     assert emb.is_enabled()
     assert str(a / '.env') in caplog.text
     assert 'IsADirectoryError' in caplog.text
+
+
+@pytest.mark.parametrize('stage', ['directory', 'create', 'open', 'flock'])
+@pytest.mark.parametrize('write', ['config', 'save-url', 'remove-url'])
+def test_lock_failure_does_not_block_settings_save(install, data, monkeypatch, caplog, stage, write):
+    import fcntl
+    import korra_cli.config as config
+    import utils
+
+    config.atomic_config_write(data / 'config.yaml', {'browser': {'cloud_provider': 'local'}})
+    config.save_env_value('CAMOFOX_URL', 'http://old.invalid', update_process=False)
+    lock_path = data / 'camofox' / 'selection.lock'
+    error = PermissionError(13, 'Camofox state is read-only', str(lock_path))
+    attempts = []
+
+    def fail(*args, **kwargs):
+        attempts.append(stage)
+        raise error
+
+    if stage == 'directory':
+        monkeypatch.setattr(emb, '_ensure_dir', fail)
+    elif stage == 'create':
+        monkeypatch.setattr(emb, '_create_once', fail)
+    elif stage == 'open':
+        original_open = Path.open
+
+        def open_path(path, *args, **kwargs):
+            if path == lock_path:
+                return fail()
+            return original_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, 'open', open_path)
+    else:
+        monkeypatch.setattr(fcntl, 'flock', fail)
+
+    caplog.clear()
+    with patch.object(emb, '_s6_svc') as signal:
+        if write == 'config':
+            with patch.object(utils, 'atomic_yaml_write', wraps=utils.atomic_yaml_write) as publish:
+                config.atomic_config_write(data / 'config.yaml', {'browser': {'cloud_provider': 'camofox'}})
+            assert config.read_user_config_raw(data / 'config.yaml')['browser']['cloud_provider'] == 'camofox'
+        else:
+            with patch.object(config, 'atomic_replace', wraps=config.atomic_replace) as publish:
+                if write == 'save-url':
+                    config.save_env_value('CAMOFOX_URL', 'http://new.invalid', update_process=False)
+                else:
+                    assert config.remove_env_value('CAMOFOX_URL', update_process=False)
+            from agent.secret_scope import load_env_file
+            values = load_env_file(data / '.env')
+            if write == 'save-url':
+                assert values['CAMOFOX_URL'] == 'http://new.invalid'
+            else:
+                assert 'CAMOFOX_URL' not in values
+        publish.assert_called_once()
+        signal.assert_not_called()  # A failed lock must not allow an unlocked stop.
+    assert len(attempts) >= 2  # Retry synchronization after publication.
+    warnings = [record for record in caplog.records if record.name == emb.__name__]
+    assert len(warnings) == 1
+    assert str(lock_path) in warnings[0].getMessage()
+    assert 'PermissionError' in warnings[0].getMessage()
+
+
+@pytest.mark.parametrize('lock_fails', [False, True])
+@pytest.mark.parametrize('write', ['config', 'save-url', 'remove-url'])
+def test_settings_write_error_escapes_once_even_when_lock_fails(install, data, monkeypatch, lock_fails, write):
+    import korra_cli.config as config
+
+    config.atomic_config_write(data / 'config.yaml', {'browser': {'cloud_provider': 'local'}})
+    config.save_env_value('CAMOFOX_URL', 'http://old.invalid', update_process=False)
+    if lock_fails:
+        def fail_lock():
+            raise PermissionError('lock failed')
+
+        monkeypatch.setattr(emb, '_ensure_dir', fail_lock)
+    error = OSError('settings publication failed')
+    target = 'utils.atomic_yaml_write' if write == 'config' else 'korra_cli.config.atomic_replace'
+    with patch(target, side_effect=error) as publish, patch.object(emb, '_sync_selection') as scan:
+        with pytest.raises(OSError) as raised:
+            if write == 'config':
+                config.atomic_config_write(data / 'config.yaml', {'browser': {'cloud_provider': 'camofox'}})
+            elif write == 'save-url':
+                config.save_env_value('CAMOFOX_URL', 'http://new.invalid', update_process=False)
+            else:
+                config.remove_env_value('CAMOFOX_URL', update_process=False)
+        assert raised.value is error
+        publish.assert_called_once()
+        scan.assert_not_called()
+    assert config.read_user_config_raw(data / 'config.yaml')['browser']['cloud_provider'] == 'local'
+    from agent.secret_scope import load_env_file
+    assert load_env_file(data / '.env')['CAMOFOX_URL'] == 'http://old.invalid'
+
+
+@pytest.mark.parametrize('stage', ['directory', 'flock'])
+@pytest.mark.parametrize('scan_fails', [False, True])
+def test_sync_retries_after_publication_when_lock_recovers(install, data, monkeypatch, caplog, stage, scan_fails):
+    import fcntl
+    from korra_cli.config import atomic_config_write, read_user_config_raw
+
+    atomic_config_write(data / 'config.yaml', {'browser': {'cloud_provider': 'local'}})
+    owner, name = (emb, '_ensure_dir') if stage == 'directory' else (fcntl, 'flock')
+    original = getattr(owner, name)
+    attempts = []
+
+    def fail_once(*args, **kwargs):
+        attempts.append(stage)
+        if len(attempts) == 1:
+            raise PermissionError('temporary lock failure')
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(owner, name, fail_once)
+    if scan_fails:
+        def fail_marker(*args, **kwargs):
+            raise PermissionError('marker is read-only')
+
+        monkeypatch.setattr(emb, '_write_private', fail_marker)
+    caplog.clear()
+    with patch.object(emb, '_sync_selection', wraps=emb._sync_selection) as scan:
+        atomic_config_write(data / 'config.yaml', {'browser': {'cloud_provider': 'camofox'}})
+        scan.assert_called_once()
+    assert read_user_config_raw(data / 'config.yaml')['browser']['cloud_provider'] == 'camofox'
+    assert emb.is_enabled() == (not scan_fails)
+    warnings = [record for record in caplog.records if record.name == emb.__name__]
+    assert len(warnings) == 1
+    assert str(data / 'camofox' / 'selection.lock') in warnings[0].getMessage()
+    assert 'PermissionError' in warnings[0].getMessage()

@@ -34,7 +34,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -277,27 +277,48 @@ def explicit_url() -> str:
 
 
 @contextmanager
+def _selection_lock(lock_path: Path):
+    """Захватить блокировку; при ошибке flock открытый файл тоже закрывается."""
+    import fcntl
+
+    _ensure_dir()
+    _create_once(lock_path, "")
+    with lock_path.open("r+", encoding="utf-8") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
+@contextmanager
 def selection_update(*, signal: bool = True):
     """Публикация выбора и сверка службы — одна операция под selection.lock.
 
-    Пока читатель сверяет профили, писатели не меняют config.yaml/CAMOFOX_URL.
+    Сбой блокировки не запрещает запись настроек: после неё пробуем захватить
+    блокировку ещё раз для сверки. Без блокировки службу не останавливаем.
     Вне образа со встроенным Camofox запись настроек не требует блокировки.
     """
     if not is_installed():
         yield
         return
-    import fcntl
-
-    _ensure_dir()
     lock_path = state_dir() / "selection.lock"
-    _create_once(lock_path, "")
-    with lock_path.open("r+") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        yield
+    with ExitStack() as stack:
+        lock_failed = False
         try:
+            stack.enter_context(_selection_lock(lock_path))
+        except OSError as exc:
+            lock_failed = True
+            logger.warning("Camofox: не удалось захватить блокировку %s (%s)", lock_path, type(exc).__name__)
+
+        # Исключения записи не относятся к сбою блокировки: не перехватываем
+        # их и не повторяем тело with.
+        yield
+
+        try:
+            if lock_failed:
+                stack.enter_context(_selection_lock(lock_path))
             _sync_selection(signal=signal)
         except OSError as exc:
-            logger.warning("Camofox: не удалось сверить выбор профилей (%s)", type(exc).__name__)
+            if not lock_failed:  # При повторном сбое достаточно первого предупреждения.
+                logger.warning("Camofox: не удалось сверить выбор профилей %s (%s)", lock_path, type(exc).__name__)
 
 
 def sync(*, signal: bool = True) -> bool:
