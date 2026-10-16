@@ -6111,14 +6111,21 @@ def run_job(
     один раз по окончании (третье чистое ревью Astra, P1-1). Подробности —
     ``_run_job_inner``.
     """
-    with _job_send_context(job, execution_id):
-        return _run_job_inner(
-            job,
-            defer_agent_teardown=defer_agent_teardown,
-            extra_prompt=extra_prompt,
-            cancel_event=cancel_event,
-            execution_id=execution_id,
-        )
+    from gateway.mcp_reload import try_enter_agent_work, MCP_RELOAD_BUSY
+    mcp_lease = try_enter_agent_work()
+    if mcp_lease is None:
+        return False, MCP_RELOAD_BUSY, MCP_RELOAD_BUSY, None
+    try:
+        with _job_send_context(job, execution_id):
+            return _run_job_inner(
+                job,
+                defer_agent_teardown=defer_agent_teardown,
+                extra_prompt=extra_prompt,
+                cancel_event=cancel_event,
+                execution_id=execution_id,
+            )
+    finally:
+        mcp_lease.release()
 
 
 def _run_job_inner(

@@ -1,5 +1,74 @@
 """Shared native MCP reconnect operation; callers own confirmation and history."""
+import threading
+from functools import wraps
+
 from agent.i18n import t
+
+# One process owns the native MCP transports, including shared/adopted profile
+# connections. Admission is nonblocking: no model queue or scheduler is added.
+_admission_lock = threading.Lock()
+_active_agent_work = 0
+_reload_active = False
+MCP_RELOAD_BUSY = 'MCP обновляются или используются текущей задачей. Повторите запрос после её завершения.'
+
+
+class _AdmissionLease:
+    def __init__(self, reload=False):
+        self.reload = reload
+        self.released = False
+
+    def release(self):
+        global _active_agent_work, _reload_active
+        with _admission_lock:
+            if self.released:
+                return
+            self.released = True
+            if self.reload:
+                _reload_active = False
+            else:
+                _active_agent_work -= 1
+
+
+def try_enter_agent_work():
+    global _active_agent_work
+    with _admission_lock:
+        if _reload_active:
+            return None
+        _active_agent_work += 1
+        return _AdmissionLease()
+
+
+def try_enter_mcp_reload():
+    global _reload_active
+    # Detached delegates may outlive their foreground caller's shared lease.
+    # Their existing registry counts queued and running work before handoff.
+    from tools.async_delegation import active_count
+    if active_count():
+        return None
+    with _admission_lock:
+        if _reload_active or _active_agent_work:
+            return None
+        _reload_active = True
+        return _AdmissionLease(reload=True)
+
+
+def mcp_busy_result():
+    return {'final_response': MCP_RELOAD_BUSY, 'error': MCP_RELOAD_BUSY,
+            'failed': True, 'completed': False, 'api_calls': 0}
+
+
+def guard_agent_mcp_work(function):
+    """Hold a shared lease for the actual synchronous gateway worker lifetime."""
+    @wraps(function)
+    def admitted(*args, **kwargs):
+        lease = try_enter_agent_work()
+        if lease is None:
+            return mcp_busy_result()
+        try:
+            return function(*args, **kwargs)
+        finally:
+            lease.release()
+    return admitted
 
 
 def reload_mcp_servers():

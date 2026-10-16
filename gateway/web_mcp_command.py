@@ -50,29 +50,35 @@ class _WebMCPCommand:
         return message
 
     async def _execute_mcp_reload(self, event):
-        # A reconnect can close a transport currently used by a live tool call.
-        # Defer the operation until ongoing API work has completed.
-        from gateway.run import _gateway_runner_ref
-        runner = self.adapter.gateway_runner or _gateway_runner_ref()
-        api_busy = (
-            self.adapter._shutdown_interruptible_agents
-            or self.adapter._inflight_agent_runs > 1
-            or self.adapter._pending_agent_requests
-            or any(not task.done() for run_id, task in self.adapter._active_run_tasks.items()
-                   if run_id != _active_command_run.get())
-        )
-        gateway_busy = runner and (
-            runner._running_agent_count() or runner._active_cron_job_count()
-        )
-        if api_busy or gateway_busy:
-            return 'MCP пока не обновлены: дождитесь завершения текущих задач и повторите /reload-mcp.'
-        from gateway.mcp_reload import reload_mcp_servers
-        from gateway.platforms.api_server import _redact_api_error_text
+        from gateway.mcp_reload import try_enter_mcp_reload, MCP_RELOAD_BUSY
+        lease = try_enter_mcp_reload()
+        if lease is None:
+            return MCP_RELOAD_BUSY
         try:
-            return reload_mcp_servers()[-1]
-        except Exception as exc:
-            return f'Не удалось обновить MCP: {_redact_api_error_text(exc)}'
-
+            # A reconnect can close a transport currently used by a live tool call.
+            # Defer the operation until ongoing API work has completed.
+            from gateway.run import _gateway_runner_ref
+            runner = self.adapter.gateway_runner or _gateway_runner_ref()
+            api_busy = (
+                self.adapter._shutdown_interruptible_agents
+                or self.adapter._inflight_agent_runs > 1
+                or self.adapter._pending_agent_requests
+                or any(not task.done() for run_id, task in self.adapter._active_run_tasks.items()
+                       if run_id != _active_command_run.get())
+            )
+            gateway_busy = runner and (
+                runner._running_agent_count() or runner._active_cron_job_count()
+            )
+            if api_busy or gateway_busy:
+                return 'MCP пока не обновлены: дождитесь завершения текущих задач и повторите /reload-mcp.'
+            from gateway.mcp_reload import reload_mcp_servers
+            from gateway.platforms.api_server import _redact_api_error_text
+            try:
+                return reload_mcp_servers()[-1]
+            except Exception as exc:
+                return f'Не удалось обновить MCP: {_redact_api_error_text(exc)}'
+        finally:
+            lease.release()
 
 def run_web_mcp_command(adapter, user_message, session_id, active_run_id=None, *, owner=True):
     """Return a service reply, or None for an unrelated ordinary message.

@@ -4692,6 +4692,9 @@ def _reconnect_needs_attention(info: dict, now: float) -> bool:
     return (now - queued_at) >= _RECONNECT_ATTENTION_AFTER_SECONDS
 
 
+from gateway.mcp_reload import guard_agent_mcp_work
+
+
 class TurnRunner:
     """Per-turn collaborator carrying the tool-progress callbacks that used to
     be nested closures inside ``GatewayRunner._run_agent_inner``.
@@ -5794,6 +5797,7 @@ class TurnRunner:
                     ctx._cleanup_msg_ids.append(str(mid))
             _fut.add_done_callback(_track_status_id)
 
+    @guard_agent_mcp_work
     def run_sync(self):
         ctx = self._ctx
         # Historical note: as a nested closure this body declared
@@ -25444,15 +25448,19 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         wrapper can invoke the same path whether the user confirmed via
         button, text reply, or has the confirm gate disabled.
         """
+        from gateway.mcp_reload import try_enter_mcp_reload, MCP_RELOAD_BUSY
+        mcp_lease = try_enter_mcp_reload()
+        if mcp_lease is None:
+            return t("gateway.reload_mcp.failed", error=MCP_RELOAD_BUSY)
         loop = asyncio.get_running_loop()
+        reload_work = None
         try:
             from contextvars import copy_context
             from gateway.mcp_reload import reload_mcp_servers
 
             # Executor threads must retain profile paths, registry and secrets.
-            new_tools, added, removed, reconnected, summary = await loop.run_in_executor(
-                None, copy_context().run, reload_mcp_servers,
-            )
+            reload_work = loop.run_in_executor(None, copy_context().run, reload_mcp_servers)
+            new_tools, added, removed, reconnected, summary = await asyncio.shield(reload_work)
             lines = [summary]
 
             # Refresh cached agents so existing sessions see new MCP tools on
@@ -25526,6 +25534,15 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         except Exception as e:
             logger.warning("MCP reload failed: %s", e)
             return t("gateway.reload_mcp.failed", error=e)
+        finally:
+            if reload_work is not None and not reload_work.done():
+                def _reload_settled(future):
+                    mcp_lease.release()
+                    if not future.cancelled():
+                        future.exception()
+                reload_work.add_done_callback(_reload_settled)
+            else:
+                mcp_lease.release()
 
 
 

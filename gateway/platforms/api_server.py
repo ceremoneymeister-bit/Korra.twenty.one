@@ -8399,6 +8399,11 @@ class APIServerAdapter(BasePlatformAdapter):
                     session_source=request_session_source,
                 )
                 agent = None
+                from gateway.mcp_reload import try_enter_agent_work, mcp_busy_result
+                mcp_lease = try_enter_agent_work()
+                if mcp_lease is None:
+                    clear_session_vars(tokens)
+                    return mcp_busy_result(), {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
                 try:
                     agent = self._create_agent(
                         ephemeral_system_prompt=ephemeral_system_prompt,
@@ -8581,6 +8586,7 @@ class APIServerAdapter(BasePlatformAdapter):
                         {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
                     )
                 finally:
+                    mcp_lease.release()
                     # Turn finished (success, auth failure, or crash) — clear
                     # ownership markers so a disconnect landing after this
                     # point can't reap background work this turn left

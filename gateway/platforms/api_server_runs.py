@@ -710,6 +710,8 @@ async def _handle_runs(
     )
 
     async def _run_and_close():
+        mcp_lease = None
+        mcp_async_work = None
         try:
             self._set_run_status(run_id, "running")
             if run_id in self._stopping_run_ids:
@@ -744,6 +746,10 @@ async def _handle_runs(
                         last_event="run.completed",
                     )
                     return
+                from gateway.mcp_reload import try_enter_agent_work, MCP_RELOAD_BUSY
+                mcp_lease = try_enter_agent_work()
+                if mcp_lease is None:
+                    raise RuntimeError(MCP_RELOAD_BUSY)
                 # MCP connections and registrations are profile-owned. Native
                 # runs may be the first entry to a hidden profile; discover
                 # before its tool snapshot, off-loop with copied context. A
@@ -754,7 +760,8 @@ async def _handle_runs(
                 if request_profile is not None or is_multiplex_active():
                     from tools.mcp_tool import ensure_native_profile_mcp_tools
 
-                    await asyncio.to_thread(ensure_native_profile_mcp_tools)
+                    mcp_async_work = asyncio.create_task(asyncio.to_thread(ensure_native_profile_mcp_tools))
+                    await asyncio.shield(mcp_async_work)
                 agent = self._create_agent(
                     ephemeral_system_prompt=ephemeral_system_prompt,
                     session_id=session_id,
@@ -897,7 +904,9 @@ async def _handle_runs(
                     }
                     return r, u
 
-            result, usage = await asyncio.get_running_loop().run_in_executor(None, _run_sync)
+            mcp_async_work = asyncio.get_running_loop().run_in_executor(None, _run_sync)
+            # Keep the worker's transport lease alive if its task is cancelled.
+            result, usage = await asyncio.shield(mcp_async_work)
             if (
                 run_id in self._stopping_run_ids
                 and isinstance(result, dict)
@@ -1012,6 +1021,15 @@ async def _handle_runs(
             except Exception:
                 pass
         finally:
+            if mcp_lease is not None:
+                if mcp_async_work is not None and not mcp_async_work.done():
+                    def _mcp_work_settled(future):
+                        mcp_lease.release()
+                        if not future.cancelled():
+                            future.exception()
+                    mcp_async_work.add_done_callback(_mcp_work_settled)
+                else:
+                    mcp_lease.release()
             # If the asyncio wrapper is cancelled (for example via
             # /stop), the executor thread can still be blocked waiting
             # on an approval Event. Unregistering here releases those
