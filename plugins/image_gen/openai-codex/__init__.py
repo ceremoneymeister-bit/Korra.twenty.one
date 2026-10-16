@@ -355,15 +355,19 @@ def _decoded_image(raw: bytes, *, label: str, expected_format: Optional[str] = N
 
 
 def _assert_local_input_root(path: Path) -> Path:
-    """Confine local reads to the active profile or current workspace root."""
-    from korra_constants import get_hermes_home
+    """Confine local reads to the active profile, cwd or the shared workspace."""
+    from korra_constants import get_default_hermes_root, get_hermes_home
 
     resolved = path.expanduser().resolve()
-    roots = (get_hermes_home().resolve(), Path.cwd().resolve())
+    roots = (
+        get_hermes_home().resolve(),
+        Path.cwd().resolve(),
+        (get_default_hermes_root() / "workspace").resolve(),
+    )
     if not any(resolved == root or root in resolved.parents for root in roots):
         raise ValueError(
             "Local image input must be inside the active Korra profile or "
-            "current workspace."
+            "current workspace (including the shared workspace folder)."
         )
     return resolved
 
@@ -458,6 +462,76 @@ def _validate_size(size: str) -> str:
     if not 655_360 <= width * height <= 8_294_400:
         raise ValueError("Size must contain between 655360 and 8294400 pixels.")
     return size
+
+
+def _plan_size(size: str) -> Tuple[str, Optional[str]]:
+    """Return ``(api_size, final_size)``; ``final_size`` is set when the
+    requested size is not directly accepted and the result must be fitted.
+
+    The API size keeps the requested proportions as closely as 16-pixel steps
+    allow, so the fit afterwards is a (near-)lossless scale plus at most a
+    sub-percent centre crop.
+    """
+    try:
+        return _validate_size(size), None
+    except ValueError:
+        pass
+    if not re.fullmatch(r"[0-9]+x[0-9]+", size):
+        raise ValueError("Size must be auto or WIDTHxHEIGHT.")
+    width, height = (int(edge) for edge in size.split("x"))
+    if width <= 0 or height <= 0:
+        raise ValueError("Size must be positive.")
+    if max(width, height) > 3 * min(width, height):
+        raise ValueError("Size exceeds the 3:1 aspect-ratio bound.")
+    if max(width, height) > 3840:
+        raise ValueError("Size exceeds the 3840px edge bound.")
+    target = min(max(width * height, 655_360), 8_294_400)
+    best: Optional[Tuple[float, int, float, str]] = None
+    for h in range(16, 3841, 16):
+        w = max(16, round(h * width / height / 16) * 16)
+        try:
+            candidate = _validate_size(f"{w}x{h}")
+        except ValueError:
+            continue
+        ratio_error = abs(w / h - width / height) / (width / height)
+        # Same proportions first, then never smaller than asked (scaling down
+        # keeps detail), then the closest pixel count.
+        score = (round(ratio_error, 4), int(w * h < target), abs(w * h - target) / target, candidate)
+        if best is None or score < best:
+            best = score
+    if best is None:
+        raise ValueError("No supported generation size matches the requested proportions.")
+    return best[3], size
+
+
+def _fit_to_size(raw: bytes, final_size: str, output_format: str,
+                 output_compression: Optional[int]) -> bytes:
+    """Centre-crop to the target proportions, then scale to the exact size."""
+    from PIL import Image
+
+    width, height = (int(edge) for edge in final_size.split("x"))
+    image = _decoded_image(raw, label="Generated payload", expected_format=output_format)
+    try:
+        src_w, src_h = image.size
+        if src_w * height > src_h * width:
+            crop_w = round(src_h * width / height)
+            left = (src_w - crop_w) // 2
+            box = (left, 0, left + crop_w, src_h)
+        else:
+            crop_h = round(src_w * height / width)
+            top = (src_h - crop_h) // 2
+            box = (0, top, src_w, top + crop_h)
+        fitted = image.crop(box).resize((width, height), Image.Resampling.LANCZOS)
+        if output_format == "jpeg" and fitted.mode not in ("RGB", "L"):
+            fitted = fitted.convert("RGB")
+        save_args: Dict[str, Any] = {}
+        if output_format in {"jpeg", "webp"} and output_compression is not None:
+            save_args["quality"] = output_compression
+        out = io.BytesIO()
+        fitted.save(out, format=_PIL_FORMATS[output_format], **save_args)
+        return out.getvalue()
+    finally:
+        image.close()
 
 
 def _validate_options(
@@ -1313,9 +1387,10 @@ class OpenAICodexImageGenProvider(ImageGenProvider):
             action = str(
                 kwargs.get("action") or ("edit" if image_url else "auto")
             ).strip().lower()
+            api_size, final_size = _plan_size(size)
             _validate_options(
                 quality=quality,
-                size=size,
+                size=api_size,
                 background=background,
                 output_format=output_format,
                 output_compression=output_compression,
@@ -1403,7 +1478,7 @@ class OpenAICodexImageGenProvider(ImageGenProvider):
                     collected = _collect_image_b64(
                         token,
                         prompt=guided_prompt,
-                        size=size,
+                        size=api_size,
                         quality=quality,
                         host_model=host_model,
                         input_images=input_images or None,
@@ -1512,6 +1587,7 @@ class OpenAICodexImageGenProvider(ImageGenProvider):
             )
             err["image_source"] = image_source
             err["requested_size"] = size
+            err["api_size"] = api_size
             err["partial_pixel_size"] = pixel_hint
             return err
 
@@ -1532,6 +1608,27 @@ class OpenAICodexImageGenProvider(ImageGenProvider):
                 prompt=prompt,
                 aspect_ratio=aspect,
             )
+
+        original_path = None
+        if final_size is not None:
+            try:
+                fitted = _fit_to_size(raw_bytes, final_size, output_format, output_compression)
+                fitted_path = output_dir / (
+                    f"openai_codex_{model_id}_{uuid.uuid4().hex}_{final_size}.{extension}"
+                )
+                fitted_meta = _atomic_write_validated_image(
+                    fitted_path, fitted, output_format, allowed_root=output_root
+                )
+            except Exception as exc:
+                return error_response(
+                    error=f"Could not fit the image to {final_size}: {_sanitize_error_text(exc)}",
+                    error_type="invalid_image_output",
+                    provider="openai-codex",
+                    model=model_id,
+                    prompt=prompt,
+                    aspect_ratio=aspect,
+                )
+            original_path, saved_path, output_meta = saved_path, fitted_path, fitted_meta
 
         pixel_size = f"{output_meta['width']}x{output_meta['height']}"
         size_matches_request = None if size == "auto" else pixel_size == size
@@ -1562,6 +1659,8 @@ class OpenAICodexImageGenProvider(ImageGenProvider):
                     "size": size,
                     "size_matches_request": size_matches_request,
                     "size_warning": size_warning,
+                    "api_size": api_size,
+                    "pixel_size": pixel_size,
                     "background": background,
                     "output_format": output_format,
                     "output_compression": output_compression,
@@ -1605,6 +1704,8 @@ class OpenAICodexImageGenProvider(ImageGenProvider):
                 "pixel_size": pixel_size,
                 "size_matches_request": size_matches_request,
                 "size_warning": size_warning,
+                "api_size": api_size,
+                "original_image": str(original_path) if original_path else None,
                 "receipt": str(receipt_path) if receipt_path else None,
                 "receipt_error": receipt_error,
             },

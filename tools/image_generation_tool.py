@@ -2191,11 +2191,14 @@ def _build_dynamic_image_schema() -> Dict[str, Any]:
         properties["size"] = {
             "type": "string",
             "description": (
-                "auto or WIDTHxHEIGHT. Custom edges must be multiples of 16, "
-                "at most 3840px, within 3:1 and 655360-8294400 total pixels. "
-                "Requested dimensions are not guaranteed: inspect pixel_size and "
-                "size_warning in the result. Keep the original; do not regenerate "
-                "automatically to correct dimensions."
+                "auto or WIDTHxHEIGHT, at most 3840px per edge and within 3:1. "
+                "Any such size is accepted (for example 1080x1920 or 1080x1350): "
+                "the nearest supported size with the same proportions is "
+                "generated and the result is fitted to the exact requested size, "
+                "unless the generated original differs: then inspect pixel_size "
+                "and size_warning. The result's `image` is the final file; "
+                "`original_image` is the untouched generation. Do not "
+                "regenerate to correct dimensions."
             ),
         }
     if info.get("backgrounds"):
