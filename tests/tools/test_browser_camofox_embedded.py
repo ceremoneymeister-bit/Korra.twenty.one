@@ -447,7 +447,7 @@ def test_server_answering_5xx_on_tab_creation_sends_the_call_to_chromium(install
     assert "Chromium" in result["note"]
     posts = [e for e in server.seen if e["method"] == "POST" and e["path"] == "/tabs"]
     assert len(posts) == 2  # сам вызов и проба пустой вкладки
-    assert "about:blank" in posts[1]["body"]
+    assert "url" not in json.loads(posts[1]["body"])
     assert bc._health_cache[2] is False
     assert bc.is_camofox_mode() is False
 
@@ -622,3 +622,28 @@ def test_health_probe_is_reused_for_a_few_seconds(install, data):
         for _ in range(5):
             assert bc.is_camofox_mode() is False
     assert probe.call_count == 1
+
+
+def test_blank_probe_distinguishes_a_site_failure_without_restarting_peers(embedded):
+    def respond(method, path, body):
+        if method == "POST" and path == "/tabs":
+            payload = json.loads(body)
+            if payload.get("url", "").startswith("about:"):
+                return 400, b'{"error":"Blocked URL scheme"}'
+            if payload.get("url"):
+                return 500, b'{"error":"navigation failed"}'
+
+    with UnixServer(emb.socket_path(), reply=REPLY, respond=respond), patch.object(emb, "recover") as recover:
+        result, chromium = _navigate_for_real(task_id="site-failure")
+    assert result.get("success") is False
+    chromium.assert_not_called()
+    recover.assert_not_called()
+
+
+def test_ensure_blank_tab_omits_the_url_instead_of_navigating_to_about(embedded):
+    def respond(method, path, body):
+        if method == "POST" and path == "/tabs" and "url" in json.loads(body):
+            return 400, b'{"error":"Blocked URL scheme"}'
+
+    with UnixServer(emb.socket_path(), reply=REPLY, respond=respond):
+        assert bc._ensure_tab("blank")["tab_id"] == "t1"

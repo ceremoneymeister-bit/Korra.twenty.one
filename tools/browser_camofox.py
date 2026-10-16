@@ -573,7 +573,7 @@ def _get_session(task_id: Optional[str]) -> Dict[str, Any]:
         return _adopt_existing_tab(session)
 
 
-def _ensure_tab(task_id: Optional[str], url: str = "about:blank") -> Dict[str, Any]:
+def _ensure_tab(task_id: Optional[str], url: Optional[str] = None) -> Dict[str, Any]:
     """Ensure a tab exists for the session, creating one if needed."""
     session = _get_session(task_id)
     if session["tab_id"]:
@@ -587,7 +587,7 @@ def _ensure_tab(task_id: Optional[str], url: str = "about:blank") -> Dict[str, A
                 json={
                     "userId": session["user_id"],
                     "listItemId": session["session_key"],
-                    "url": url,
+                    **({"url": url} if url else {}),
                 },
                 timeout=_get_command_timeout(),
                 headers=_auth_headers(),
@@ -633,7 +633,7 @@ def _server_cannot_open_tab(session: Dict[str, Any], exc: Exception) -> bool:
         probe = _request(
             "post",
             f"{get_camofox_url()}/tabs",
-            json={"userId": session["user_id"], "listItemId": session["session_key"], "url": "about:blank"},
+            json={"userId": session["user_id"], "listItemId": session["session_key"]},
             timeout=15,
             headers=_auth_headers(),
         )
