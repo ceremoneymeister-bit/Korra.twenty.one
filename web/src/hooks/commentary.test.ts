@@ -24,3 +24,13 @@ it("parses commentary without treating it as final delta", () => {
   expect(parseSSEBlock('event: hermes.assistant.commentary\ndata: {"text":"Проверяю.","already_streamed":false}'))
     .toEqual({ type: "commentary", data: { text: "Проверяю.", already_streamed: false } });
 });
+
+it("a hidden commentary snapshot does not mark an active turn completed", () => {
+  const messages = sessionMessagesToChat("s", [
+    { role: "assistant", content: "", display_commentary: ["Проверяю."],
+      tool_calls: [{ id: "c", function: { name: "read_file", arguments: "{}" } }] },
+    { role: "assistant", content: "", display_commentary: [], display_reasoning: "" },
+  ] as Parameters<typeof sessionMessagesToChat>[1]);
+  expect(messages).toHaveLength(1);
+  expect(messages[0].turnComplete).toBe(false);
+});

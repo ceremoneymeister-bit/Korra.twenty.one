@@ -977,7 +977,7 @@ export function sessionMessagesToChat(
     }
 
     // A sidecar-only commentary row is not a completed final answer.
-    if (content || !narration.length) closeTurn(true);
+    if (content || message.display_commentary === undefined) closeTurn(true);
   });
 
   closeTurn();

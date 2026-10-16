@@ -84,7 +84,7 @@ def _project_one(message: dict, *, enabled: bool) -> dict:
         return message
     raw = _commentary_items(message)
     if not raw:
-        return dict(message, display_reasoning="") if message.get("codex_message_items") else message
+        return dict(message, display_commentary=[], display_reasoning="") if message.get("codex_message_items") else message
     projected = dict(message)
     # A disabled profile must not recover raw sidecar text on the frontend.
     projected["display_commentary"] = []
