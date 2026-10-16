@@ -21,6 +21,10 @@ for line in sys.stdin:
         }]}
     elif method == 'tools/call':
         value = message['params']['arguments']['value']
+        call_log = os.environ.get('RELOAD_CALL_LOG')
+        if call_log:
+            with open(call_log, 'a', encoding='utf-8') as log:
+                log.write(json.dumps(message['params']) + '\n')
         result = {'content': [{'type': 'text', 'text': f"{os.environ.get('RELOAD_MARKER', 'missing')}:{value}"}]}
     elif method == 'ping':
         result = {}
