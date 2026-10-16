@@ -35,6 +35,7 @@ from utils import (
 
 # Shared formatter; the private alias is kept because claw.py and the backup
 # tests import ``_format_size`` from this module.
+from korra_cli.backup_secrets import SECRETS_MEMBER
 from korra_cli.sizefmt import format_bytes as _format_size
 
 logger = logging.getLogger(__name__)
@@ -109,18 +110,28 @@ _EXCLUDED_DIRS = {
     ".ruff_cache",
 }
 
+# SQLite sidecar files — the backup takes a consistent snapshot of every SQLite
+# database via ``sqlite3.backup()``, so shipping the live WAL / shared-memory /
+# rollback-journal alongside would pair a fresh snapshot with stale sidecar
+# state and produce a torn restore on the next open. They're transient and
+# regenerated on first connection anyway.
+_SQLITE_SIDECAR_SUFFIXES = (
+    ".db-wal",
+    ".db-shm",
+    ".db-journal",
+    ".sqlite-wal",
+    ".sqlite-shm",
+    ".sqlite-journal",
+    ".sqlite3-wal",
+    ".sqlite3-shm",
+    ".sqlite3-journal",
+)
+
 # File-name suffixes to skip
 _EXCLUDED_SUFFIXES = (
     ".pyc",
     ".pyo",
-    # SQLite sidecar files — the backup takes a consistent snapshot of ``*.db``
-    # via ``sqlite3.backup()``, so shipping the live WAL / shared-memory /
-    # rollback-journal alongside would pair a fresh snapshot with stale sidecar
-    # state and produce a torn restore on the next open. They're transient and
-    # regenerated on first connection anyway.
-    ".db-wal",
-    ".db-shm",
-    ".db-journal",
+    *_SQLITE_SIDECAR_SUFFIXES,
 )
 
 # File names to skip (runtime state that's meaningless on another machine)
@@ -383,7 +394,49 @@ def _is_runtime_ipc_file(path: Path) -> bool:
     return stat.S_ISSOCK(mode) or stat.S_ISFIFO(mode)
 
 
-def _should_skip_backup_file(abs_path: Path, rel_path: Path, out_path: Path) -> bool:
+_SQLITE_MAGIC = b"SQLite format 3\x00"
+
+
+def _is_sqlite_database(path: Path) -> bool:
+    """True when *path* must be snapshotted through the SQLite backup API.
+
+    ``*.db`` always goes through ``_safe_copy_db`` (a zeroed or broken one must
+    fail loudly, not be copied byte-for-byte). Any other name is recognised by
+    the ``SQLite format 3`` header, whatever its extension (``*.sqlite3``,
+    ``*.session``, extensionless plugin databases): a WAL-mode database copied
+    byte-for-byte loses everything that is only in its WAL.
+    """
+    if path.suffix.lower() == ".db":
+        return True
+    try:
+        with path.open("rb") as stream:
+            return stream.read(len(_SQLITE_MAGIC)) == _SQLITE_MAGIC
+    except OSError:
+        return False
+
+
+_SQLITE_SIDECAR_TAILS = ("-wal", "-shm", "-journal")
+
+
+def _drop_sqlite_sidecars(entries: list, path_of=lambda entry: entry[0]) -> list:
+    """Remove ``-wal/-shm/-journal`` entries that belong to a SQLite database.
+
+    The database itself goes into the archive as a consistent snapshot, so a
+    live sidecar next to it (even of ``*.session`` or an extensionless file)
+    would only leak or contradict that snapshot.
+    """
+    kept = []
+    for entry in entries:
+        path = path_of(entry)
+        name = path.name
+        tail = next((t for t in _SQLITE_SIDECAR_TAILS if name.endswith(t) and len(name) > len(t)), None)
+        if tail is not None and _is_sqlite_database(path.with_name(name[: -len(tail)])):
+            continue
+        kept.append(entry)
+    return kept
+
+
+def _should_skip_backup_file(abs_path: Path, rel_path: Path, out_path: Optional[Path]) -> bool:
     """Return True when a candidate file should not be written to a backup zip."""
     if _should_exclude(rel_path):
         return True
@@ -395,6 +448,8 @@ def _should_skip_backup_file(abs_path: Path, rel_path: Path, out_path: Path) -> 
     if _is_runtime_ipc_file(abs_path):
         return True
 
+    if out_path is None:
+        return False
     try:
         return abs_path.resolve() == out_path.resolve()
     except (OSError, ValueError):
@@ -852,12 +907,194 @@ def run_backup(args) -> None:
         print(f"Ошибка: папка данных Korra не найдена: {hermes_root}")
         sys.exit(1)
 
+    to_drive = getattr(args, "to_drive", False)
+    if to_drive and (args.output or getattr(args, "label", None)):
+        print("Ошибка: --to-drive не сочетается с --output и --label: копия не сохраняется на диск сервера.")
+        raise SystemExit(1)
+
     try:
         with _backup_operation_lock(hermes_root):
-            _run_backup_locked(args, hermes_root)
+            if to_drive:
+                from korra_cli.backup_drive import run_backup_to_drive
+
+                run_backup_to_drive(hermes_root)
+            else:
+                _run_backup_locked(args, hermes_root)
     except BackupInProgressError as exc:
         print(f"Ошибка: {exc}")
         raise SystemExit(2) from exc
+
+
+def _scan_backup_files(
+    hermes_root: Path, out_path: Optional[Path] = None
+) -> tuple[list[tuple[Path, Path]], set[str]]:
+    """Walk *hermes_root* and return ``([(absolute, relative)], skipped_dirs)``."""
+    files_to_add: list[tuple[Path, Path]] = []
+    skipped_dirs: set[str] = set()
+
+    for dirpath, dirnames, filenames in os.walk(hermes_root, followlinks=False):
+        dp = Path(dirpath)
+        rel_dir = dp.relative_to(hermes_root)
+
+        # Prune excluded directories in-place so os.walk doesn't descend
+        # ``hermes-agent`` is only pruned at the root level; nested dirs
+        # with the same name (e.g. in skills/) must be preserved.
+        is_root = rel_dir == Path(".")
+        orig_dirnames = dirnames[:]
+        dirnames[:] = [
+            d for d in dirnames
+            if d not in _EXCLUDED_DIRS or (d == "hermes-agent" and not is_root)
+        ]
+        for removed in set(orig_dirnames) - set(dirnames):
+            skipped_dirs.add(str(rel_dir / removed))
+
+        for fname in filenames:
+            fpath = dp / fname
+            rel = fpath.relative_to(hermes_root)
+
+            if _should_skip_backup_file(fpath, rel, out_path):
+                continue
+
+            files_to_add.append((fpath, rel))
+    return _drop_sqlite_sidecars(files_to_add), skipped_dirs
+
+
+def _scan_external_files() -> tuple[list[tuple[Path, str]], list[str]]:
+    """External memory-provider state (e.g. ~/.honcho, ~/.hindsight).
+
+    It lives outside HERMES_HOME, so the walk above never sees it. Ask the
+    active provider for its declared paths and stage them under the reserved
+    ``_external/`` arc prefix, encoded relative to the user's home dir. Only
+    paths under home are captured (security + portability); anything else is
+    skipped with a note.
+    """
+    home_dir = Path.home().resolve()
+    external_to_add: list[tuple[Path, str]] = []  # (absolute, arcname)
+    skipped_external: list[str] = []
+    for base in _collect_memory_provider_external_paths():
+        try:
+            base_resolved = base.resolve()
+            base_resolved.relative_to(home_dir)
+        except (ValueError, OSError):
+            skipped_external.append(str(base))
+            continue
+        for fpath in _iter_external_files(base):
+            try:
+                rel_to_home = fpath.resolve().relative_to(home_dir)
+            except (ValueError, OSError):
+                continue
+            arcname = _EXTERNAL_PREFIX + rel_to_home.as_posix()
+            external_to_add.append((fpath, arcname))
+    return _drop_sqlite_sidecars(external_to_add), skipped_external
+
+
+def _write_backup_member(
+    zf: zipfile.ZipFile,
+    abs_path: Path,
+    arcname: str,
+    snapshot_dir: Path,
+    errors: list[str],
+    fts_notes: list[str],
+) -> int:
+    """Add one file to *zf*; return its size, or 0 after recording an error.
+
+    SQLite databases are written from a consistent snapshot taken in
+    *snapshot_dir*, which must be on a filesystem that can hold them.
+    """
+    try:
+        if _is_sqlite_database(abs_path):
+            with tempfile.NamedTemporaryFile(
+                suffix=".db", delete=False, dir=str(snapshot_dir)
+            ) as tmp:
+                tmp_db = Path(tmp.name)
+            try:
+                if not _safe_copy_db(abs_path, tmp_db):
+                    errors.append(f"  {arcname}: SQLite safe copy failed")
+                    return 0
+                # K21-039: импорт проверяет каждую базу из архива своим
+                # `quick_check`, поэтому копию с повреждённым обратным
+                # индексом FTS5 отдавать нельзя — восстановление из
+                # такого архива требовало ручной пересборки. Снимок ещё
+                # никому не принадлежит, так что индекс чинится прямо в
+                # нём, а боевая база остаётся нетронутой.
+                repaired = _repair_snapshot_fts(tmp_db, Path(arcname))
+                if repaired is not None:
+                    fts_notes.append(repaired)
+                zf.write(tmp_db, arcname=arcname)
+                return tmp_db.stat().st_size
+            finally:
+                tmp_db.unlink(missing_ok=True)
+        zf.write(abs_path, arcname=arcname)
+        return abs_path.stat().st_size
+    except (PermissionError, OSError, ValueError) as exc:
+        errors.append(f"  {arcname}: {exc}")
+        return 0
+
+
+class _SplitArchiveStats:
+    """What ``_write_split_archive`` put into the archive."""
+
+    def __init__(self) -> None:
+        self.total_bytes = 0
+        self.files = 0
+        self.secret_files = 0
+        self.errors: list[str] = []
+        self.fts_notes: list[str] = []
+
+
+def _write_split_archive(
+    stream,
+    files_to_add: list[tuple[Path, Path]],
+    external_to_add: list[tuple[Path, str]],
+    recipient,
+    snapshot_dir: Path,
+    progress=None,
+) -> _SplitArchiveStats:
+    """Write a backup ZIP to a (possibly non-seekable) *stream* with secrets sealed.
+
+    Credential files (see ``backup_secrets``) go into an inner ZIP that is
+    encrypted to *recipient* and stored as ``secrets.korra-enc``; every other
+    file is stored openly, exactly as ``korra backup`` does.
+    """
+    from korra_cli.backup_crypto import EncryptingWriter
+    from korra_cli.backup_secrets import is_secret
+
+    stats = _SplitArchiveStats()
+    entries = [(abs_path, rel.as_posix()) for abs_path, rel in files_to_add]
+    entries += [(abs_path, arcname) for abs_path, arcname in external_to_add]
+    secret_entries = []
+    open_entries = []
+    for abs_path, arcname in entries:
+        (secret_entries if is_secret(arcname, abs_path) else open_entries).append((abs_path, arcname))
+
+    zip_kwargs = {"compression": zipfile.ZIP_DEFLATED, "compresslevel": 6, "strict_timestamps": False}
+    with zipfile.ZipFile(stream, "w", **zip_kwargs) as zf:
+        if secret_entries:
+            member = zipfile.ZipInfo(SECRETS_MEMBER, time.localtime()[:6])
+            member.compress_type = zipfile.ZIP_STORED
+            member.external_attr = 0o600 << 16
+            with zf.open(member, "w", force_zip64=True) as sink:
+                sealer = EncryptingWriter(sink, recipient)
+                with zipfile.ZipFile(sealer, "w", **zip_kwargs) as inner:
+                    for abs_path, arcname in secret_entries:
+                        before = len(stats.errors)
+                        stats.total_bytes += _write_backup_member(
+                            inner, abs_path, arcname, snapshot_dir, stats.errors, stats.fts_notes
+                        )
+                        if len(stats.errors) == before:
+                            stats.secret_files += 1
+                sealer.close()
+        for index, (abs_path, arcname) in enumerate(open_entries, 1):
+            before = len(stats.errors)
+            stats.total_bytes += _write_backup_member(
+                zf, abs_path, arcname, snapshot_dir, stats.errors, stats.fts_notes
+            )
+            if len(stats.errors) == before:
+                stats.files += 1
+            if progress is not None and index % 500 == 0:
+                progress(index, len(open_entries))
+    stats.files += stats.secret_files
+    return stats
 
 
 def _run_backup_locked(args, hermes_root: Path) -> None:
@@ -893,57 +1130,8 @@ def _run_backup_locked(args, hermes_root: Path) -> None:
     scan_started = time.monotonic()
     logger.info("backup phase=scan status=started")
     print(f"Проверяю файлы в {display_hermes_home()}…")
-    files_to_add: list[tuple[Path, Path]] = []  # (absolute, relative)
-    skipped_dirs = set()
-
-    for dirpath, dirnames, filenames in os.walk(hermes_root, followlinks=False):
-        dp = Path(dirpath)
-        rel_dir = dp.relative_to(hermes_root)
-
-        # Prune excluded directories in-place so os.walk doesn't descend
-        # ``hermes-agent`` is only pruned at the root level; nested dirs
-        # with the same name (e.g. in skills/) must be preserved.
-        is_root = rel_dir == Path(".")
-        orig_dirnames = dirnames[:]
-        dirnames[:] = [
-            d for d in dirnames
-            if d not in _EXCLUDED_DIRS or (d == "hermes-agent" and not is_root)
-        ]
-        for removed in set(orig_dirnames) - set(dirnames):
-            skipped_dirs.add(str(rel_dir / removed))
-
-        for fname in filenames:
-            fpath = dp / fname
-            rel = fpath.relative_to(hermes_root)
-
-            if _should_skip_backup_file(fpath, rel, out_path):
-                continue
-
-            files_to_add.append((fpath, rel))
-
-    # External memory-provider state (e.g. ~/.honcho, ~/.hindsight) lives
-    # outside HERMES_HOME, so the walk above never sees it. Ask the active
-    # provider for its declared paths and stage them under the reserved
-    # ``_external/`` arc prefix, encoded relative to the user's home dir.
-    # Only paths under home are captured (security + portability); anything
-    # else is skipped with a note.
-    home_dir = Path.home().resolve()
-    external_to_add: list[tuple[Path, str]] = []  # (absolute, arcname)
-    skipped_external: list[str] = []
-    for base in _collect_memory_provider_external_paths():
-        try:
-            base_resolved = base.resolve()
-            base_resolved.relative_to(home_dir)
-        except (ValueError, OSError):
-            skipped_external.append(str(base))
-            continue
-        for fpath in _iter_external_files(base):
-            try:
-                rel_to_home = fpath.resolve().relative_to(home_dir)
-            except (ValueError, OSError):
-                continue
-            arcname = _EXTERNAL_PREFIX + rel_to_home.as_posix()
-            external_to_add.append((fpath, arcname))
+    files_to_add, skipped_dirs = _scan_backup_files(hermes_root, out_path)
+    external_to_add, skipped_external = _scan_external_files()
 
     if not files_to_add and not external_to_add:
         logger.info(
@@ -969,43 +1157,13 @@ def _run_backup_locked(args, hermes_root: Path) -> None:
     t0 = time.monotonic()
 
     with _atomic_output_path(out_path) as archive_path, zipfile.ZipFile(
-        archive_path, "w", zipfile.ZIP_DEFLATED, compresslevel=6
+        archive_path, "w", zipfile.ZIP_DEFLATED, compresslevel=6,
+        strict_timestamps=False,
     ) as zf:
         for i, (abs_path, rel_path) in enumerate(files_to_add, 1):
-            try:
-                # Safe copy for SQLite databases (handles WAL mode)
-                if abs_path.suffix == ".db":
-                    # Stage the snapshot alongside the output zip so that the
-                    # temp file lives on the same filesystem.  The system
-                    # default (/tmp) may be a small tmpfs that cannot hold
-                    # large databases, causing silent backup incompleteness.
-                    with tempfile.NamedTemporaryFile(
-                        suffix=".db", delete=False, dir=str(out_path.parent)
-                    ) as tmp:
-                        tmp_db = Path(tmp.name)
-                    if _safe_copy_db(abs_path, tmp_db):
-                        # K21-039: импорт проверяет каждую базу из архива своим
-                        # `quick_check`, поэтому копию с повреждённым обратным
-                        # индексом FTS5 отдавать нельзя — восстановление из
-                        # такого архива требовало ручной пересборки. Снимок ещё
-                        # никому не принадлежит, так что индекс чинится прямо в
-                        # нём, а боевая база остаётся нетронутой.
-                        repaired = _repair_snapshot_fts(tmp_db, rel_path)
-                        if repaired is not None:
-                            fts_notes.append(repaired)
-                        zf.write(tmp_db, arcname=str(rel_path))
-                        total_bytes += tmp_db.stat().st_size
-                        tmp_db.unlink(missing_ok=True)
-                    else:
-                        tmp_db.unlink(missing_ok=True)
-                        errors.append(f"  {rel_path}: SQLite safe copy failed")
-                        continue
-                else:
-                    zf.write(abs_path, arcname=str(rel_path))
-                    total_bytes += abs_path.stat().st_size
-            except (PermissionError, OSError, ValueError) as exc:
-                errors.append(f"  {rel_path}: {exc}")
-                continue
+            total_bytes += _write_backup_member(
+                zf, abs_path, str(rel_path), out_path.parent, errors, fts_notes
+            )
 
             # Progress every 500 files
             if i % 500 == 0:
@@ -1020,12 +1178,9 @@ def _run_backup_locked(args, hermes_root: Path) -> None:
         # prefix. These never include ``.db`` files in practice (config/env
         # blobs), so a straight zf.write is fine.
         for abs_path, arcname in external_to_add:
-            try:
-                zf.write(abs_path, arcname=arcname)
-                total_bytes += abs_path.stat().st_size
-            except (PermissionError, OSError, ValueError) as exc:
-                errors.append(f"  {arcname}: {exc}")
-                continue
+            total_bytes += _write_backup_member(
+                zf, abs_path, arcname, out_path.parent, errors, fts_notes
+            )
 
     elapsed = time.monotonic() - t0
     zip_size = out_path.stat().st_size
@@ -1097,7 +1252,7 @@ def _validate_backup_zip(zf: zipfile.ZipFile) -> tuple[bool, str]:
         return False, "zip archive is empty"
 
     # Look for telltale files that a hermes home would have
-    markers = {"config.yaml", ".env", "state.db"}
+    markers = {"config.yaml", ".env", "state.db", SECRETS_MEMBER}
     found = set()
     for n in names:
         # Could be at the root or one level deep (if someone zipped the directory)
@@ -1445,9 +1600,19 @@ def _assert_import_offline(roots: list[Path], *, importer_fd: int | None = None)
         raise _ImportRefused("не удалось проверить всех держателей DATA; нужен root и доступ к /proc хоста") from exc
 
 
-def _import_archive_plan(zf, root, home, *, same_host_restore=False):
-    """Validate the complete central directory before creating any target."""
-    infos = zf.infolist()
+def _import_archive_plan(zf, root, home, *, same_host_restore=False, secrets_zf=None):
+    """Validate the complete central directory before creating any target.
+
+    *secrets_zf* is the decrypted ``secrets.korra-enc`` inner archive; its
+    members are planned exactly like outer ones. Without it the encrypted block
+    itself is not restored.
+    """
+    sources = [(zf, info) for info in zf.infolist() if info.filename != SECRETS_MEMBER]
+    prefixes = {id(zf): _detect_prefix(zf)}
+    if secrets_zf is not None:
+        sources += [(secrets_zf, info) for info in secrets_zf.infolist()]
+        prefixes[id(secrets_zf)] = _detect_prefix(secrets_zf)
+    infos = [info for _, info in sources]
     if len(infos) > _IMPORT_MAX_FILES:
         raise _ImportRefused("слишком много файлов в ZIP")
     total_file_size = sum(info.file_size for info in infos)
@@ -1461,11 +1626,11 @@ def _import_archive_plan(zf, root, home, *, same_host_restore=False):
     total_compress_size = sum(info.compress_size for info in infos)
     if total_file_size > max(total_compress_size, 1) * _IMPORT_MAX_RATIO:
         raise _ImportRefused("слишком высокое сжатие ZIP")
-    prefix = _detect_prefix(zf)
     seen = set()
     plan = []
     physical_root = get_default_hermes_root().resolve()
-    for info in infos:
+    for source_zf, info in sources:
+        prefix = prefixes[id(source_zf)]
         name = info.filename
         parts = name.rstrip("/").split("/")
         if (not name or name != info.orig_filename or name.startswith("/") or "\\" in name
@@ -1511,12 +1676,13 @@ def _import_archive_plan(zf, root, home, *, same_host_restore=False):
                     or relative.name in _IMPORT_IDENTITY_NAMES or target.name in _IMPORT_IDENTITY_NAMES)
         skipped = (relative.name in _IMPORT_SKIP_NAMES or target.name in _IMPORT_SKIP_NAMES
                    or (relative.name.startswith("gateway.loop-tick.") and relative.name.endswith(".sock"))
-                   or relative.name.endswith((".db-wal", ".db-shm", ".db-journal"))
+                   or relative.name.endswith(_SQLITE_SIDECAR_SUFFIXES)
                    or (not same_host_restore and identity))
         # Locks never transfer, even in explicit same-host recovery.
         skipped = skipped or relative.name == ".install_id.lock"
-        plan.append({"info": info, "target": target, "relative": relative,
+        plan.append({"info": info, "zf": source_zf, "target": target, "relative": relative,
                      "external": external, "skipped": skipped, "base": base,
+                     "secret": source_zf is secrets_zf,
                      "ssh": ".ssh" in relative.parts or ".ssh" in target_rel.parts})
     destinations = {entry["target"] for entry in plan if not entry["skipped"]}
     if any(parent in destinations for dest in destinations for parent in dest.parents):
@@ -1528,14 +1694,15 @@ def _stage_import(zf, plan, stage):
     """Read every member to EOF (CRC) and quick_check only staged SQLite."""
     # Directory records carry no payload, but still have local ZIP headers
     # whose names/offsets must agree with the central directory.
-    for info in zf.infolist():
-        if info.is_dir():
-            with zf.open(info) as stream:
-                if stream.read(1):
-                    raise _ImportRefused("каталог ZIP содержит данные")
+    for source in dict.fromkeys([zf, *(entry["zf"] for entry in plan)]):
+        for info in source.infolist():
+            if info.is_dir():
+                with source.open(info) as stream:
+                    if stream.read(1):
+                        raise _ImportRefused("каталог ZIP содержит данные")
     for index, entry in enumerate(plan):
         staged = stage / str(index)
-        _extract_member_atomically(zf, entry["info"], staged, 0o600)
+        _extract_member_atomically(entry["zf"], entry["info"], staged, 0o600)
         # Do not trust the suffix alone: plugins also use extensionless SQLite.
         with staged.open("rb") as stream:
             magic = stream.read(16)
@@ -1628,7 +1795,7 @@ def _publish_import(plan, root, home):
             old = journal / f"{index}.old"
             existing = target.stat() if target.exists() else None
             mode = stat.S_IMODE(existing.st_mode) & 0o777 if existing else default_mode
-            sensitive = (entry["ssh"] or target.name in _SECRET_FILE_NAMES
+            sensitive = (entry["ssh"] or entry["secret"] or target.name in _SECRET_FILE_NAMES
                          or entry["database"] or entry["external"] and target.suffix in {".json", ".env", ".conf"})
             if sensitive:
                 mode = 0o600
@@ -1685,6 +1852,51 @@ def _publish_import(plan, root, home):
             shutil.rmtree(journal)
 
 
+def _import_stage_parent(roots) -> Path:
+    """Directory for staged files: never inside any destination, even when TMPDIR
+    points into DATA. No target mkdir/chmod/lock before preflight; gettempdir()
+    probes candidates by creating/writing a file, so even querying it may
+    violate the zero-write preflight."""
+    candidates = [os.environ.get(name) for name in ("TMPDIR", "TEMP", "TMP")]
+    candidates.extend(("/var/tmp", "/tmp"))
+    for candidate in candidates:
+        if not candidate:
+            continue
+        parent = Path(candidate).resolve()
+        if (not any(parent.is_relative_to(root) for root in roots)
+                and parent.is_dir() and os.access(parent, os.W_OK | os.X_OK)):
+            return parent
+    raise _ImportRefused("нет staging-каталога вне DATA")
+
+
+def _open_secrets_archive(zf, key_path, hermes_root: Path, stack: ExitStack):
+    """Decrypt ``secrets.korra-enc`` into an unnamed temp file and open it as a ZIP."""
+    from korra_cli.backup_crypto import SecretsCryptoError, decrypt_stream, load_private_key
+
+    if not key_path:
+        raise _ImportRefused(
+            "секреты в этой копии (токены, .env, доступы) зашифрованы ключом команды Korra, "
+            "а ключ не указан. Передайте файл ключа: --operator-key <файл>. "
+            "Если секреты не нужны, добавьте --skip-secrets: всё остальное восстановится, "
+            "но подключения и ключи придётся ввести заново"
+        )
+    info = zf.getinfo(SECRETS_MEMBER)
+    if info.flag_bits & 1 or info.file_size > _IMPORT_MAX_FILE_BYTES:
+        raise _ImportRefused("блок секретов в копии повреждён")
+    try:
+        private = load_private_key(Path(key_path))
+        stage_parent = _import_stage_parent([hermes_root])
+        plain = stack.enter_context(tempfile.TemporaryFile(dir=stage_parent))
+        with zf.open(info) as encrypted:
+            decrypt_stream(encrypted, private, plain, max_bytes=_IMPORT_MAX_FILE_BYTES)
+        plain.seek(0)
+        return stack.enter_context(zipfile.ZipFile(plain, "r"))
+    except SecretsCryptoError as exc:
+        raise _ImportRefused(str(exc)) from exc
+    except zipfile.BadZipFile as exc:
+        raise _ImportRefused("блок секретов в копии повреждён") from exc
+
+
 def run_import(args) -> None:
     """Restore a native ZIP only after complete offline and archive preflight."""
     zip_path = Path(args.zipfile).expanduser().resolve()
@@ -1693,12 +1905,21 @@ def run_import(args) -> None:
     try:
         if not zip_path.is_file() or not zipfile.is_zipfile(zip_path):
             raise _ImportRefused("файл не найден или не является ZIP")
-        with zipfile.ZipFile(zip_path, "r") as zf:
+        secrets_stack = ExitStack()
+        with secrets_stack, zipfile.ZipFile(zip_path, "r") as zf:
             ok, reason = _validate_backup_zip(zf)
             if not ok:
                 raise _ImportRefused(reason)
+            secrets_zf = None
+            has_secrets_block = SECRETS_MEMBER in zf.namelist()
+            skip_secrets = getattr(args, "skip_secrets", False)
+            if has_secrets_block and not skip_secrets:
+                secrets_zf = _open_secrets_archive(
+                    zf, getattr(args, "operator_key", None), hermes_root, secrets_stack
+                )
             plan = _import_archive_plan(zf, hermes_root, home_dir,
-                                       same_host_restore=getattr(args, "same_host_restore", False))
+                                       same_host_restore=getattr(args, "same_host_restore", False),
+                                       secrets_zf=secrets_zf)
             if any(entry["target"] == zip_path and not entry["skipped"] for entry in plan):
                 raise _ImportRefused("архив не может перезаписать сам себя")
             roots = [hermes_root]
@@ -1714,23 +1935,7 @@ def run_import(args) -> None:
                     raise _ImportRefused("отменено")
                 if answer not in {"y", "yes", "д", "да"}:
                     return
-            # Staging must never be inside any destination, even when TMPDIR
-            # points into DATA. No target mkdir/chmod/lock before preflight.
-            # gettempdir() probes candidates by creating/writing a file,
-            # so even querying it may violate the zero-write preflight.
-            candidates = [os.environ.get(name) for name in ("TMPDIR", "TEMP", "TMP")]
-            candidates.extend(("/var/tmp", "/tmp"))
-            stage_parent = None
-            for candidate in candidates:
-                if not candidate:
-                    continue
-                parent = Path(candidate).resolve()
-                if (not any(parent.is_relative_to(root) for root in roots)
-                        and parent.is_dir() and os.access(parent, os.W_OK | os.X_OK)):
-                    stage_parent = parent
-                    break
-            if stage_parent is None:
-                raise _ImportRefused("нет staging-каталога вне DATA")
+            stage_parent = _import_stage_parent(roots)
             with tempfile.TemporaryDirectory(prefix="korra-import-", dir=stage_parent) as stage:
                 _stage_import(zf, plan, Path(stage))
                 from korra_cli.sqlite_safe_read import offline_file_access
@@ -1757,6 +1962,12 @@ def run_import(args) -> None:
 
     restored = sum(not entry["skipped"] for entry in plan)
     print(f"Восстановление завершено: файлов {restored}.")
+    if secrets_zf is not None:
+        restored_secrets = sum(not entry["skipped"] for entry in plan if entry["zf"] is secrets_zf)
+        print(f"  Из них секретов (токены, .env, доступы): {restored_secrets}.")
+    elif has_secrets_block:
+        print("  Секреты (токены, .env, доступы) не восстановлены: указан --skip-secrets.")
+        print("  Подключения и ключи придётся ввести заново.")
     # Keep native successful profile-alias restoration, with no service start.
     # Post-import: restore profile wrapper scripts
     profiles_dir = hermes_root / "profiles"
@@ -2520,6 +2731,7 @@ def _write_full_zip_backup_locked(out_path: Path, hermes_root: Path) -> Optional
         logger.warning("Full-zip backup: walk failed: %s", exc)
         return None
 
+    files_to_add = _drop_sqlite_sidecars(files_to_add)
     if not files_to_add:
         return None
 
@@ -2532,11 +2744,12 @@ def _write_full_zip_backup_locked(out_path: Path, hermes_root: Path) -> Optional
     archive_started = time.monotonic()
     try:
         with _atomic_output_path(out_path) as archive_path, zipfile.ZipFile(
-            archive_path, "w", zipfile.ZIP_DEFLATED, compresslevel=6
+            archive_path, "w", zipfile.ZIP_DEFLATED, compresslevel=6,
+            strict_timestamps=False,
         ) as zf:
             for index, (abs_path, rel_path) in enumerate(files_to_add, 1):
                 try:
-                    if abs_path.suffix == ".db":
+                    if _is_sqlite_database(abs_path):
                         # Stage the snapshot alongside the output zip so that the
                         # temp file lives on the same filesystem.  The system
                         # default (/tmp) may be a small tmpfs that cannot hold

@@ -33,4 +33,12 @@ def build_backup_parser(subparsers, *, cmd_backup: Callable) -> None:
     backup_parser.add_argument(
         "-l", "--label", help='Метка снимка, только с --quick'
     )
+    backup_parser.add_argument(
+        "--to-drive",
+        action="store_true",
+        help=(
+            'Сохранить копию на Google Диск владельца (папка «Korra — резервные копии»); '
+            'секреты в ней зашифрованы ключом команды Korra'
+        ),
+    )
     backup_parser.set_defaults(func=cmd_backup)

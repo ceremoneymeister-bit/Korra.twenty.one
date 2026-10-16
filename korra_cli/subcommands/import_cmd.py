@@ -30,4 +30,12 @@ def build_import_cmd_parser(subparsers, *, cmd_import: Callable) -> None:
         "--same-host-restore", action="store_true",
         help="Восстановление того же контура: вернуть .ssh/install_id из архива; новый контур по умолчанию сохраняет свою identity",
     )
+    import_parser.add_argument(
+        "--operator-key", metavar="ФАЙЛ",
+        help="Закрытый ключ команды Korra (PEM): расшифровать секреты копии, сделанной на Google Диск",
+    )
+    import_parser.add_argument(
+        "--skip-secrets", action="store_true",
+        help="Восстановить всё, кроме зашифрованных секретов (токены, .env, доступы)",
+    )
     import_parser.set_defaults(func=cmd_import)

@@ -645,8 +645,8 @@ class TestBackupEdgeCases:
         assert not (tmp_path / "out.zip").exists()
 
 
-    def test_pre1980_timestamp_skipped(self, tmp_path, monkeypatch):
-        """Backup skips files with pre-1980 timestamps (ZIP limitation)."""
+    def test_pre1980_timestamp_is_archived_and_restored(self, tmp_path, monkeypatch):
+        """K21-348: a file with mtime before 1980 is archived, not dropped."""
         hermes_home = tmp_path / ".hermes"
         hermes_home.mkdir()
         (hermes_home / "config.yaml").write_text("model: test\n")
@@ -670,8 +670,86 @@ class TestBackupEdgeCases:
         with zipfile.ZipFile(out_zip, "r") as zf:
             names = zf.namelist()
             assert "config.yaml" in names
-            # The pre-1980 file should be skipped, not crash the backup
-            assert "ancient.txt" not in names
+            assert "ancient.txt" in names
+            assert zf.read("ancient.txt") == b"old data"
+
+        dst_home = tmp_path / "dest" / ".hermes"
+        dst_home.mkdir(parents=True)
+        monkeypatch.setenv("HERMES_HOME", str(dst_home))
+        monkeypatch.setattr(Path, "home", lambda: tmp_path / "dest")
+        from korra_cli.backup import run_import
+        run_import(Namespace(zipfile=str(out_zip), force=True))
+        assert (dst_home / "ancient.txt").read_text() == "old data"
+
+    def test_pre_update_zip_keeps_pre1980_file(self, tmp_path, monkeypatch):
+        hermes_home = tmp_path / ".hermes"
+        hermes_home.mkdir()
+        (hermes_home / "config.yaml").write_text("model: test\n")
+        ancient = hermes_home / "plugins" / "jev" / "plugin.yaml"
+        ancient.parent.mkdir(parents=True)
+        ancient.write_text("name: jev\n")
+        os.utime(ancient, (0, 0))
+        monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+        import korra_cli.backup as backup_mod
+        out_zip = hermes_home / "backups" / "pre-update-test.zip"
+        out_zip.parent.mkdir()
+        assert backup_mod._write_full_zip_backup(out_zip, hermes_home) == out_zip
+        with zipfile.ZipFile(out_zip) as zf:
+            assert zf.read("plugins/jev/plugin.yaml") == b"name: jev\n"
+
+    @pytest.mark.parametrize("suffix", [".sqlite3", ".sqlite"])
+    def test_sqlite_with_wal_is_snapshotted_consistently(self, tmp_path, monkeypatch, suffix):
+        """K21-348: *.sqlite/*.sqlite3 get a backup() snapshot, never a raw copy."""
+        hermes_home = tmp_path / ".hermes"
+        hermes_home.mkdir()
+        (hermes_home / "config.yaml").write_text("model: test\n")
+        (hermes_home / "state").mkdir()
+        db_path = hermes_home / "state" / f"delivery{suffix}"
+        conn = sqlite3.connect(db_path)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA wal_autocheckpoint=0")
+        conn.execute("CREATE TABLE t (v TEXT)")
+        conn.execute("INSERT INTO t VALUES ('only-in-wal')")
+        conn.commit()
+        try:
+            assert Path(str(db_path) + "-wal").stat().st_size > 0
+            monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+            monkeypatch.setattr(Path, "home", lambda: tmp_path)
+            out_zip = tmp_path / "out.zip"
+            from korra_cli.backup import run_backup, run_import
+            run_backup(Namespace(output=str(out_zip)))
+        finally:
+            conn.close()
+
+        with zipfile.ZipFile(out_zip) as zf:
+            names = zf.namelist()
+            assert f"state/delivery{suffix}" in names
+            assert not [n for n in names if n.endswith(("-wal", "-shm", "-journal"))]
+
+        dst_home = tmp_path / "dest" / ".hermes"
+        dst_home.mkdir(parents=True)
+        monkeypatch.setenv("HERMES_HOME", str(dst_home))
+        monkeypatch.setattr(Path, "home", lambda: tmp_path / "dest")
+        run_import(Namespace(zipfile=str(out_zip), force=True))
+        restored = dst_home / "state" / f"delivery{suffix}"
+        assert not Path(str(restored) + "-wal").exists()
+        with sqlite3.connect(restored) as check:
+            assert check.execute("SELECT v FROM t").fetchall() == [("only-in-wal",)]
+
+    def test_non_sqlite_file_with_sqlite_suffix_is_copied_verbatim(self, tmp_path, monkeypatch):
+        hermes_home = tmp_path / ".hermes"
+        hermes_home.mkdir()
+        (hermes_home / "config.yaml").write_text("model: test\n")
+        (hermes_home / "notes.sqlite3").write_text("not a database\n")
+        monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        out_zip = tmp_path / "out.zip"
+        from korra_cli.backup import run_backup
+        run_backup(Namespace(output=str(out_zip)))
+        with zipfile.ZipFile(out_zip) as zf:
+            assert zf.read("notes.sqlite3") == b"not a database\n"
 
 
 
