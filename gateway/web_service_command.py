@@ -13,6 +13,16 @@ from typing import Any
 
 
 logger = logging.getLogger(__name__)
+_CONFIG_READ_ERROR_REPLY = (
+    "Не удалось прочитать настройки профиля. Проверьте файл настроек в панели; "
+    "параметры модели этой командой не проверялись и не менялись."
+)
+
+
+class _ConfigReadFailure(Exception):
+    """A failed local read; only the fixed safe reply may cross the API."""
+
+
 _SERVICE_COMMANDS = frozenset({
     "help", "status", "version", "model", "tools", "profile", "usage",
     "reasoning", "fast", "reload-skills", "compress", "new", "clear",
@@ -123,7 +133,7 @@ def _reply(adapter, command, args, session, profile, requested_model,
 
     config = read_raw_config()
     if isinstance(config, FailedConfigRead):
-        return "Не удалось прочитать настройки профиля. Проверьте файл настроек в панели; параметры модели этой командой не проверялись и не менялись."
+        raise _ConfigReadFailure
     model = config.get("model") or {}
     model = model if isinstance(model, dict) else {"default": model}
     agent = config.get("agent") or {}
@@ -218,6 +228,8 @@ def run_web_service_command(adapter, user_message, session_id, *, profile=None,
         if db is not None:
             db.append_messages_batch(session_id, pair, turn_lease_holder=holder, human_turn=True)
         return {"final_response": reply, "messages": pair, "api_calls": 0, "completed": True}
+    except _ConfigReadFailure:
+        return {"final_response": _CONFIG_READ_ERROR_REPLY, "api_calls": 0, "completed": False, "failed": True}
     except Exception as exc:
         # Do not echo config/skill/DB exception text across the HTTP boundary.
         logger.warning("Web service /%s failed (%s)", parsed[0], type(exc).__name__)

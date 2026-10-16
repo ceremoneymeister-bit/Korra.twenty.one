@@ -509,3 +509,55 @@ async def test_service_commands_do_not_construct_model_agent(text):
     assert result["final_response"]
     assert result["messages"][:len(history)] == history
     assert result["api_calls"] == usage["total_tokens"] == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('native_run', [False, True])
+async def test_service_config_read_failure_is_failed_not_completed(native_run):
+    """K21-378: a safe config explanation is still a failed command."""
+    import asyncio
+    from korra_cli.config import FailedConfigRead
+
+    adapter = _adapter()
+    try:
+        with (
+            patch('korra_cli.config.read_raw_config', return_value=FailedConfigRead(
+                error=ValueError('PRIVATE-CONFIG-ERROR-SENTINEL'),
+            )),
+            patch.object(adapter, '_create_agent', side_effect=AssertionError('MODEL CALLED')),
+            patch('agent.title_generator.generate_title', side_effect=AssertionError('TITLE MODEL CALLED')),
+            patch('agent.auxiliary_client.call_llm', side_effect=AssertionError('AUXILIARY MODEL CALLED')),
+        ):
+            if native_run:
+                app = web.Application()
+                app['api_server_adapter'] = adapter
+                app.router.add_post('/v1/runs', adapter._handle_runs)
+                app.router.add_get('/v1/runs/{run_id}', adapter._handle_get_run)
+                async with TestClient(TestServer(app)) as client:
+                    response = await client.post('/v1/runs', headers=_AUTH, json={
+                        'input': '/model', 'session_id': 'failed-service-command',
+                    })
+                    assert response.status == 202
+                    run_id = (await response.json())['run_id']
+                    task = adapter._active_run_tasks.get(run_id)
+                    if task:
+                        await asyncio.wait_for(task, timeout=10)
+                    status_response = await client.get(f'/v1/runs/{run_id}', headers=_AUTH)
+                    result = await status_response.json()
+                assert result['status'] == 'failed', result
+                assert result['last_event'] == 'run.failed'
+                text = result['error']
+                assert result['usage']['total_tokens'] == 0
+            else:
+                result, usage = await adapter._run_agent(
+                    '/model', [], session_id='failed-service-command',
+                )
+                assert result['failed'] is True
+                assert result['completed'] is False
+                assert usage['total_tokens'] == 0
+                text = result['final_response']
+            assert 'Не удалось прочитать настройки профиля' in text
+            assert 'PRIVATE-CONFIG-ERROR-SENTINEL' not in str(result)
+            assert result.get('api_calls', 0) == 0
+    finally:
+        await adapter.disconnect()
