@@ -1,4 +1,5 @@
 """Real HTTP paths: files, chat attachment admission, and download policy."""
+import os
 from pathlib import Path
 from urllib.parse import quote
 
@@ -42,6 +43,91 @@ def test_delivery_reference_downloads_exact_bytes(files, style):
     response = client.get('/api/files/download', params={'path': ref, 'chat': 1})
     assert response.content == path.read_bytes()
     assert response.headers['content-disposition'].startswith('attachment;')
+
+
+@pytest.mark.parametrize("mode", ["local", "fleet"])
+@pytest.mark.parametrize("profile", ["default", "designer"])
+def test_workspace_file_attachment(tmp_path, monkeypatch, mode, profile):
+    """Round 2: a profile chat retains the shared workspace in local mode."""
+    data = tmp_path / "data"
+    (data / "profiles" / "designer").mkdir(parents=True)
+    target = data / "workspace" / "agents" / "abc" / "report.txt"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"hello")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setenv("KORRA_HOME", str(data))
+    monkeypatch.setenv("HERMES_HOME", str(data))
+    if mode == "fleet":
+        monkeypatch.setenv("KORRA_UI_MODE", "fleet")
+        monkeypatch.setenv("KORRA_DASHBOARD_FILES_ROOT", str(data))
+    else:
+        monkeypatch.delenv("KORRA_UI_MODE", raising=False)
+        monkeypatch.delenv("KORRA_DASHBOARD_FILES_ROOT", raising=False)
+    monkeypatch.setattr(server.app.state, "auth_required", False, raising=False)
+    monkeypatch.setattr(server.app.state, "bound_host", None, raising=False)
+    with TestClient(server.app) as client:
+        client.headers[server._SESSION_HEADER_NAME] = server._SESSION_TOKEN
+        params = {"profile": profile, "path": f'MEDIA:"{target}"', "chat": 1}
+        descriptor = client.get("/api/files/attachment", params=params)
+        assert descriptor.status_code == 200, descriptor.text
+        assert descriptor.json()["path"] == str(target)
+        downloaded = client.get("/api/files/download", params=params)
+        assert downloaded.status_code == 200, downloaded.text
+        assert downloaded.content == target.read_bytes()
+
+
+@pytest.mark.parametrize("mode", ["local", "fleet", "forced"])
+@pytest.mark.parametrize("profile", ["default", "designer", "not-created"])
+def test_ordinary_attachment_policy_matches_base(files, monkeypatch, mode, profile):
+    """Only profile cache/images gets new rules; other paths keep their ACL."""
+    client, data, workspace = files
+    if mode != "fleet":
+        monkeypatch.delenv("KORRA_UI_MODE")
+    if mode == "local":
+        monkeypatch.delenv("KORRA_DASHBOARD_FILES_ROOT")
+    ordinary = [
+        workspace / "report.txt",
+        data / "report.txt",
+        data / "profiles" / "designer" / "report.txt",
+        data / "profiles" / "other" / "report.txt",
+        data / "cache" / "documents" / "report.txt",
+        data / "profiles" / "other" / "cache" / "documents" / "report.txt",
+    ]
+    for target in ordinary:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"ordinary attachment")
+        expected = 200 if mode != "fleet" or target.is_relative_to(workspace) else 403
+        params = {"path": str(target), "profile": profile, "chat": 1}
+        for endpoint in ("/api/files/attachment", "/api/files/download"):
+            response = client.get(endpoint, params=params)
+            assert response.status_code == expected, (mode, profile, target, response.text)
+            if expected == 200 and endpoint.endswith("download"):
+                assert response.content == target.read_bytes()
+    private = workspace / ".env"
+    private.write_bytes(b"private")
+    traversal = workspace / ".." / "workspace" / "report.txt"
+    symlink = workspace / "link.txt"
+    symlink.symlink_to(ordinary[1])
+    for target, expected in [
+        (private, 403),
+        (traversal, 400),
+        (symlink, 200 if mode == "local" else 403),
+    ]:
+        for endpoint in ("/api/files/attachment", "/api/files/download"):
+            response = client.get(endpoint, params={"path": str(target), "profile": profile, "chat": 1})
+            assert response.status_code == expected, (mode, profile, target, response.text)
+            if target == private:
+                assert response.json()["detail"] == "Служебный файл недоступен для передачи."
+
+
+@pytest.mark.linux_only
+def test_ordinary_special_file_retains_chat_not_found_status(files):
+    client, _, workspace = files
+    target = workspace / "report.pipe"
+    os.mkfifo(target)
+    for endpoint in ("/api/files/attachment", "/api/files/download"):
+        response = client.get(endpoint, params={"path": str(target), "chat": 1})
+        assert response.status_code == 404
 
 
 def test_profile_private_paths_traversal_and_symlinks_are_denied(files):
