@@ -5003,6 +5003,8 @@ def _managed_file_response(
     if not target.exists():
         raise HTTPException(status_code=404, detail="File not found")
     if not target.is_file():
+        if chat and not target.is_dir():
+            raise HTTPException(404, "Файл удалён или перемещён. Попросите агента создать его снова.")
         raise HTTPException(status_code=400, detail="Path is not a file")
     if _is_private_managed_path(target):
         raise HTTPException(status_code=403, detail="Access to sensitive files is not allowed")
@@ -5014,6 +5016,8 @@ def _managed_file_response(
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f"Could not stat file: {exc}")
     if size > _CHAT_MAX_FILE_BYTES:
+        if chat:
+            raise HTTPException(413, "Файл больше 2 ГБ. Попросите агента разделить его на части.")
         raise HTTPException(status_code=413, detail="Файл больше 2 ГБ. Разделите его на части.")
 
     mime_type = image_mime or mimetypes.guess_type(target.name)[0] or "application/octet-stream"
@@ -5114,12 +5118,26 @@ def _resolve_chat_file(reference: str, request: Request, *, profile: str | None 
     """
     path = _chat_file_path(reference)
     candidate = Path(path)
-    if ".." in candidate.parts:
-        raise HTTPException(403, "Выход за пределы папки вложения запрещён.")
-    with _config_profile_scope(profile or request.query_params.get("profile")):
-        home = get_hermes_home().resolve()
-    images = home / "cache" / "images"
-    if _path_is_under(images, candidate):
+    root = Path(get_hermes_home()).resolve()
+    from korra_constants import get_default_hermes_root
+
+    data = get_default_hermes_root().resolve()
+    relative = candidate.relative_to(data).parts if _path_is_under(data, candidate) else ()
+    # Select the exception by storage location, not by the chat's profile:
+    # ordinary paths must keep the original managed-files policy in every mode.
+    image_cache = (
+        _path_is_under(root / "cache" / "images", candidate)
+        or relative[:2] == ("cache", "images")
+        or (relative[:1] == ("profiles",) and relative[2:4] == ("cache", "images"))
+    )
+    if image_cache:
+        with _config_profile_scope(profile or request.query_params.get("profile")):
+            home = get_hermes_home().resolve()
+        images = home / "cache" / "images"
+        if not _path_is_under(images, candidate):
+            raise HTTPException(403, "Вложение другого профиля недоступно.")
+        if ".." in candidate.parts:
+            raise HTTPException(403, "Выход за пределы папки вложения запрещён.")
         if _is_private_managed_path(candidate):
             raise HTTPException(403, "Служебный файл недоступен для передачи.")
         cursor = home
@@ -5156,24 +5174,15 @@ def _resolve_chat_file(reference: str, request: Request, *, profile: str | None 
     if policy.locked_root is None:
         # Local admin Files may browse the host. Model-produced links have a
         # narrower contract: only the active data directory is deliverable.
-        if not _path_is_under(home, target):
+        if not _path_is_under(root, target):
             raise HTTPException(403, "Файл вне рабочей папки. Попросите агента сохранить его в workspace.")
-    # Even a permissive local/DATA Files root must not make another profile's
-    # storage an attachment of this chat (default home contains all profiles).
-    from korra_constants import get_default_hermes_root
-
-    data = get_default_hermes_root().resolve()
-    if (_path_is_under(data / "profiles", target) and
-            (home == data or not _path_is_under(home, target))) or (
-            home != data and _path_is_under(data / "cache", target)):
-        raise HTTPException(403, "Вложение другого профиля недоступно.")
+    if _is_private_managed_path(target):
+        raise HTTPException(403, "Служебный файл недоступен для передачи.")
     return target, None
 
 
 def _chat_file_descriptor(reference: str, request: Request, *, folder_deadline: float | None = None, profile: str | None = None) -> dict[str, Any]:
     target, image_mime = _resolve_chat_file(reference, request, profile=profile)
-    if _is_private_managed_path(target):
-        raise HTTPException(403, "Служебный файл недоступен для передачи.")
     if target.is_dir():
         return _chat_folder_descriptor(target, deadline=folder_deadline)
     if not target.is_file():
