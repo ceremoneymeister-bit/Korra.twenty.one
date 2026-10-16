@@ -426,13 +426,18 @@ def restore_undelivered_completions(target_queue) -> int:
     restored = 0
     with _DB_LOCK, _transaction() as conn:
         rows = conn.execute(
-            """SELECT delegation_id, event_json, completed_at, dispatched_at
+            """SELECT delegation_id, event_json, completed_at, dispatched_at, state
                FROM async_delegations
                WHERE state != 'running' AND delivery_state='pending' AND event_json IS NOT NULL
                ORDER BY completed_at, delegation_id"""
         ).fetchall()
-        for delegation_id, payload, completed_at, dispatched_at in rows:
-            age_basis = completed_at or dispatched_at
+        for delegation_id, payload, completed_at, dispatched_at, state in rows:
+            # An abandoned record's completed_at is the recovery time (now),
+            # not a real result: measure its age from dispatch, otherwise a
+            # weeks-old task looks fresh after every restart.
+            age_basis = (
+                dispatched_at if state == "unknown" else completed_at or dispatched_at
+            )
             if age_basis and (now - age_basis) > _MAX_COMPLETION_REPLAY_AGE_S:
                 conn.execute(
                     """UPDATE async_delegations SET delivery_state='dropped',
