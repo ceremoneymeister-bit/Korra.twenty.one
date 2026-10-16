@@ -959,6 +959,31 @@ export function BubbleChatComposer({
     if (input) resizeTextarea(input);
   }, [resizeTextarea, value]);
 
+  // После явного выбора разговора или агента готовый композер получает
+  // фокус, чтобы сразу печатать. Только при обычной клавиатуре: на телефоне
+  // экранная клавиатура сама не открывается. Чужой ввод, диалог и меню
+  // фокус не отдают, фоновое обновление композер не пересоздаёт.
+  useEffect(() => {
+    if (disabled || !active) return;
+    const el = taRef.current;
+    if (!el || el.disabled) return;
+    const finePointer =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(pointer: fine)").matches;
+    if (!finePointer) return;
+    const current = document.activeElement;
+    if (current === el) return;
+    if (current instanceof HTMLElement && current !== document.body) {
+      const typing = current.isContentEditable
+        || current instanceof HTMLInputElement
+        || current instanceof HTMLTextAreaElement
+        || current instanceof HTMLSelectElement;
+      if (typing || current.closest('[role="dialog"], [role="menu"], [role="listbox"], [aria-modal="true"]')) return;
+    }
+    el.focus({ preventScroll: true });
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, [disabled, active]);
+
   // «Изменить» на артефакте подставляет заготовку и отдаёт курсор владельцу:
   // отправлять за него нельзя — он ещё не сказал, что менять.
   useEffect(() => {
