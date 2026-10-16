@@ -68,13 +68,12 @@ def test_bundled_server_is_not_used_when_another_browser_is_selected(embedded):
     assert bc.is_camofox_mode() is False
 
 
-def test_profile_without_a_browser_choice_uses_the_default(install, data):
+def test_profile_without_a_browser_choice_never_contacts_camofox(install, data):
     with UnixServer(emb.socket_path(), reply=REPLY) as server:
-        assert bc.get_camofox_url() == emb.BASE_URL
-        assert bc.is_camofox_mode() is True
-        assert bc._using_embedded_camofox() is True
-        assert bc._auth_headers()
-    assert server.seen
+        assert bc.get_camofox_url() == ""
+        assert bc.is_camofox_mode() is False
+        assert bc._using_embedded_camofox() is False
+    assert not server.seen
 
 
 @pytest.mark.parametrize(
@@ -243,9 +242,10 @@ def test_server_switched_off_profile_without_a_choice_goes_to_chromium_without_a
     camofox.assert_not_called()
     assert result["success"] is True and "note" not in result
     emb.enable()
-    with UnixServer(emb.socket_path(), reply=REPLY):
+    with UnixServer(emb.socket_path(), reply=REPLY) as server:
         bc._health_cache = (0.0, "", True)
-        assert bc.is_camofox_mode() is True
+        assert bc.is_camofox_mode() is False
+    assert not server.seen
 
 
 def test_no_anonymous_session_is_ever_created_or_cached(embedded):

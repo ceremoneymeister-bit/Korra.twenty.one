@@ -1,4 +1,4 @@
-"""K21 fix12: встроенный Camofox доступен по умолчанию с сохранением явного выбора."""
+"""K21 fix12: встроенный Camofox доступен по явному выбору."""
 
 import json
 import os
@@ -53,20 +53,20 @@ def test_existing_explicit_selection_survives_startup_sync(install, data):
     assert config.read_bytes() == before
 
 
-def test_startup_keeps_default_profiles_enabled(install, data):
+def test_startup_disables_a_stale_default_marker(install, data):
     folder = data / "camofox"
     folder.mkdir()
     (folder / "enabled").write_text("1\n")
     with patch.object(emb, "_s6_svc") as signal:
         assert emb.main(["sync"]) == 0
     signal.assert_not_called()  # служба сверяет себя до запуска Node
-    assert emb.is_enabled()
+    assert not emb.is_enabled()
 
 
-def test_subscription_view_shows_the_default_browser(install, data):
+def test_subscription_view_keeps_implicit_chromium(install, data):
     from korra_cli.nous_subscription import get_nous_subscription_features
 
-    assert get_nous_subscription_features({}).browser.current_provider == "Camofox"
+    assert get_nous_subscription_features({}).browser.current_provider != "Camofox"
 
 
 def test_unused_service_is_a_normal_state_with_enable_instructions(chromium_root, install, data):
@@ -95,28 +95,28 @@ def test_deleting_last_consumer_stops_the_service(chromium_root, install, data):
     assert not emb.is_enabled()
 
 
-def test_picker_describes_the_default(install, data):
+def test_picker_keeps_camofox_available_for_explicit_choice(install, data):
     from korra_cli import tools_config as tc
     from korra_cli.config import load_config
 
     rows = tc._visible_providers(tc.TOOL_CATEGORIES["browser"], load_config())
     row = next(r for r in rows if r.get("browser_provider") == "camofox")
     assert "для сайтов, которые не пускают роботов" in row["tag"]
-    assert "по умолчанию" in row["badge"]
-    assert tc._is_provider_active(row, load_config())
+    assert "по умолчанию" not in row["badge"]
+    assert not tc._is_provider_active(row, load_config())
     choose_browser("Camofox")
     assert tc._is_provider_active(row, load_config())
 
 
-def test_profile_without_a_choice_uses_camofox_alongside_an_explicit_profile(install, data):
+def test_profile_without_a_choice_keeps_chromium_alongside_an_explicit_profile(install, data):
     from tools import browser_camofox as bc
 
     with in_profile(data, "chosen"):
         choose_browser("Camofox")
     with in_profile(data, "plain"), patch.object(emb, "health", return_value=True) as health:
-        assert bc.get_camofox_url() == emb.BASE_URL
-        assert bc.is_camofox_mode()
-    health.assert_called()
+        assert bc.get_camofox_url() == ""
+        assert not bc.is_camofox_mode()
+    health.assert_not_called()
     assert emb.is_enabled()
 
 
@@ -138,7 +138,7 @@ def test_config_set_and_raw_yaml_follow_the_same_service_switch(install, data):
     set_config_value("browser.cloud_provider", "camofox")
     assert emb.is_enabled()
     atomic_config_write(data / "config.yaml", {})
-    assert emb.is_enabled()
+    assert not emb.is_enabled()
 
 
 def test_legacy_gateway_selection_does_not_start_camofox(install, data):
@@ -223,3 +223,28 @@ def test_real_service_script_waits_without_node_until_selection(chromium_root, i
         if process.poll() is None:
             process.terminate()
             process.communicate(timeout=10)
+
+
+def test_release_hold_keeps_implicit_chromium_even_with_enough_memory(install, data, monkeypatch):
+    from tools import browser_camofox as bc, browser_tool as bt
+    from korra_cli import tools_config as tc
+    from korra_cli.nous_subscription import get_nous_subscription_features
+
+    monkeypatch.setattr(emb, "memory_limit_bytes", lambda: 8 * 1024 ** 3)
+    config = data / "config.yaml"
+    config.write_text("browser:\n  inactivity_timeout: 120\n")
+    before = config.read_bytes()
+    with patch.object(emb, "health") as health, patch.object(emb, "recover") as recover:
+        assert not emb.sync(signal=False)
+        assert bc.get_camofox_url() == ""
+        assert get_nous_subscription_features({}).browser.current_provider != "Camofox"
+        with patch.object(bt, "_run_browser_command", return_value={"success": True}) as chromium:
+            assert json.loads(bt.browser_navigate("https://example.com", "release-hold"))["success"]
+        chromium.assert_called()
+        rows = tc._visible_providers(tc.TOOL_CATEGORIES["browser"], {})
+        active = [row["name"] for row in rows if tc._is_provider_active(row, {})]
+        assert "Camofox" not in active
+        assert rows[0]["name"] == "Local Browser"
+    health.assert_not_called()
+    recover.assert_not_called()
+    assert config.read_bytes() == before

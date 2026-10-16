@@ -15,6 +15,12 @@ from tests.fakes.camofox_embedded import (  # noqa: F401  (фикстуры)
     install,
 )
 
+@pytest.fixture(autouse=True)
+def enabled_default_policy(monkeypatch):
+    """Exercise the retained memory guard when an implicit rollout is enabled."""
+    monkeypatch.setattr(emb, "DEFAULT_ENABLED", True)
+
+
 GIB = 1024 ** 3
 
 

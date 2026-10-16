@@ -3507,16 +3507,17 @@ def _visible_providers(
 
         if camofox_embedded.is_installed() and not camofox_embedded.is_disabled():
             memory_note = camofox_embedded.default_memory_note()
+            implicit_camofox = camofox_embedded.uses_embedded({})
             visible = [dict(row) for row in visible]
             for row in visible:
                 if memory_note:
                     if row.get("name") == "Camofox" and cfg_get(config, "browser", "cloud_provider") != "camofox":
                         row["tag"] = f'{row.get("tag", "")}. {memory_note}'
-                elif row.get("name") == "Camofox":
+                elif implicit_camofox and row.get("name") == "Camofox":
                     row["badge"] = 'по умолчанию · бесплатно · локально'
-                elif row.get("name") == "Local Browser":
+                elif implicit_camofox and row.get("name") == "Local Browser":
                     row["badge"] = 'бесплатно · локально'
-            if not memory_note:
+            if implicit_camofox:
                 visible.sort(key=lambda row: row.get("name") != "Camofox")
 
     # Inject plugin-registered TTS backends (issue #30398). Plugin rows
@@ -3663,7 +3664,7 @@ def _post_setup_embedded_camofox() -> None:
     """Проверить тот Camofox, которым профиль действительно будет пользоваться.
 
     С явным внешним ``CAMOFOX_URL`` проверяется внешний адрес. Встроенный
-    сервер принадлежит установке и по умолчанию уже работает: здесь только
+    сервер принадлежит установке и запускается после выбора: здесь только
     ждём его ответа. Если установка выключила сервер, выбор профиля его не
     включает: владелец включает его отдельной командой.
     """

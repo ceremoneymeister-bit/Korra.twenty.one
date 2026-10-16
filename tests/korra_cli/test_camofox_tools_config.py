@@ -161,12 +161,12 @@ def _rows(config=None):
         return tc._visible_providers(cat, config or {})
 
 
-def test_in_the_image_camofox_is_the_default_browser(install, data):
+def test_in_the_image_camofox_is_an_explicit_option(install, data):
     rows = _rows()
     camofox = next(r for r in rows if r["name"] == "Camofox")
-    assert "по умолчанию" in camofox["badge"]
+    assert "по умолчанию" not in camofox["badge"]
     assert "для сайтов, которые не пускают роботов" in camofox["tag"]
-    assert rows[0]["name"] == "Camofox"
+    assert rows[0]["name"] == "Local Browser"
 
 
 def test_outside_the_image_nothing_changes(tmp_path, monkeypatch):
@@ -177,12 +177,12 @@ def test_outside_the_image_nothing_changes(tmp_path, monkeypatch):
     assert "по умолчанию" not in next(r for r in rows if r["name"] == "Camofox")["badge"]
 
 
-def test_unconfigured_profile_shows_camofox_as_active(install, data):
+def test_unconfigured_profile_does_not_show_camofox_as_active(install, data):
     from korra_cli.config import load_config
 
     config = load_config()
     camofox = next(r for r in _rows() if r["name"] == "Camofox")
-    assert tc._is_provider_active(camofox, config)
+    assert not tc._is_provider_active(camofox, config)
 
 
 def test_chromium_is_one_action_and_the_row_follows_it(install, data):
@@ -216,16 +216,16 @@ def _no_foreign_env(monkeypatch):
         monkeypatch.delenv(key, raising=False)
 
 
-def test_new_profile_uses_default_camofox(install, data, monkeypatch):
+def test_new_profile_keeps_implicit_chromium(install, data, monkeypatch):
     from tools import browser_camofox as bc
     from korra_cli import profiles
 
     _no_foreign_env(monkeypatch)
     with patch.object(profiles, "create_wrapper_script"):
         profiles.create_profile("fresh", no_alias=True, no_skills=True)
-    assert emb.is_enabled()
+    assert not emb.is_enabled()
     with in_profile(data, "fresh"):
-        assert bc.get_camofox_url() == emb.BASE_URL
+        assert bc.get_camofox_url() == ""
 
 
 def test_review2_finding_1_cloud_key_of_another_profile_changes_nothing(install, data, monkeypatch):
