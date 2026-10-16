@@ -5109,12 +5109,17 @@ def _chat_folder_descriptor(target: Path, *, deadline: float | None = None) -> d
             "sample": sample, "truncated": truncated or bool(pending)}
 
 
-def _resolve_chat_file(reference: str, request: Request, *, profile: str | None = None) -> tuple[Path, str | None]:
-    """Chat may read its profile's generated raster images, never browse cache.
+_CHAT_CACHE_KINDS = ("images", "documents", "audio", "videos")
 
-    Keep this exception out of the Files resolver: listing, editing and other
-    downloads must retain the workspace policy. Metadata and chat downloads
-    share this check, including signature detection on every request.
+
+def _resolve_chat_file(reference: str, request: Request, *, profile: str | None = None) -> tuple[Path, str | None]:
+    """Chat may read its profile's media cache, never browse it.
+
+    The cache holds what the gateway saved for this profile: generated and
+    inbound images, documents, audio and video. Keep this exception out of the
+    Files resolver: listing, editing and other downloads must retain the
+    workspace policy. Metadata and chat downloads share this check, including
+    signature detection of images on every request.
     """
     path = _chat_file_path(reference)
     candidate = Path(path)
@@ -5125,30 +5130,31 @@ def _resolve_chat_file(reference: str, request: Request, *, profile: str | None 
     relative = candidate.relative_to(data).parts if _path_is_under(data, candidate) else ()
     # Select the exception by storage location, not by the chat's profile:
     # ordinary paths must keep the original managed-files policy in every mode.
-    image_cache = (
-        _path_is_under(root / "cache" / "images", candidate)
-        or relative[:2] == ("cache", "images")
-        or (relative[:1] == ("profiles",) and relative[2:4] == ("cache", "images"))
-    )
-    if image_cache:
+    cache_kind = next((
+        kind for kind in _CHAT_CACHE_KINDS
+        if _path_is_under(root / "cache" / kind, candidate)
+        or relative[:2] == ("cache", kind)
+        or (relative[:1] == ("profiles",) and relative[2:4] == ("cache", kind))
+    ), None)
+    if cache_kind:
         requested = profile or request.query_params.get("profile")
         # Existing chat cards send only the path. The authenticated owner can
-        # read images from any live profile in this installation; an explicit
-        # profile still takes precedence and must match the path below.
+        # read cached media from any live profile in this installation; an
+        # explicit profile still takes precedence and must match the path below.
         if not requested:
             if relative[:1] == ("profiles",):
                 requested = relative[1]
-            elif relative[:2] == ("cache", "images"):
+            elif relative[:1] == ("cache",):
                 requested = "default"
         try:
             with _config_profile_scope(requested):
                 home = get_hermes_home().resolve()
         except HTTPException as exc:
             if exc.status_code in {400, 404}:
-                raise HTTPException(403, "Профиль изображения недоступен.") from exc
+                raise HTTPException(403, "Профиль вложения недоступен.") from exc
             raise
-        images = home / "cache" / "images"
-        if not _path_is_under(images, candidate):
+        cache = home / "cache" / cache_kind
+        if not _path_is_under(cache, candidate):
             raise HTTPException(403, "Вложение другого профиля недоступно.")
         if ".." in candidate.parts:
             raise HTTPException(403, "Выход за пределы папки вложения запрещён.")
@@ -5160,8 +5166,10 @@ def _resolve_chat_file(reference: str, request: Request, *, profile: str | None 
             if cursor.is_symlink():
                 raise HTTPException(403, "Символические ссылки недоступны.")
         target = _canonical_path(candidate, require_exists=True)
-        if not _path_is_under(images, target) or not target.is_file():
-            raise HTTPException(403, "Доступно только изображение из cache/images этого профиля.")
+        if not _path_is_under(cache, target) or not target.is_file():
+            raise HTTPException(403, "Доступен только файл из cache этого профиля.")
+        if cache_kind != "images":
+            return target, None
         from agent.image_routing import _sniff_mime_from_bytes
 
         try:
