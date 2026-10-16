@@ -31,5 +31,8 @@ export function useCabinetSession() {
     canManageSkills: allowed("skills_manage"),
     // «В каждом чате» — отдельная подсказка: клиент закрепляет навык, не получая остального управления.
     canPinSkills: allowed("skills_auto_load"), canBrowseSkillsHub: allowed("skills_hub"),
-    canConfigureToolsets: allowed("toolsets_config") };
+    canConfigureToolsets: allowed("toolsets_config"),
+    // Выбор браузера агенту (K21-370) — отдельная подсказка: клиент выбирает из готовых
+    // вариантов, не получая ключей, установки и остальных наборов.
+    canChooseBrowser: allowed("browser_config") };
 }

@@ -135,7 +135,7 @@ const LEARN_DRAFT_PREFIX =
   "Создай навык по моему запросу и сохрани его через skill_manage. Источники прочитай своими инструментами и учти все пожелания из запроса. Запрос: ";
 
 export default function SkillsPage() {
-  const { canManageSkills, canPinSkills, canConfigureToolsets, canBrowseSkillsHub } = useCabinetSession();
+  const { canManageSkills, canPinSkills, canConfigureToolsets, canChooseBrowser, canBrowseSkillsHub } = useCabinetSession();
   const canToggleAutoLoad = canManageSkills || canPinSkills;
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [toolsets, setToolsets] = useState<ToolsetInfo[]>([]);
@@ -696,7 +696,7 @@ export default function SkillsPage() {
                                     : t.skills.disabledForCli}
                                 </span>
                               )}
-                              {canConfigureToolsets && <div className="mt-3">
+                              {(canConfigureToolsets || (canChooseBrowser && ts.name === "browser")) && <div className="mt-3">
                                 <Button
                                   size="sm"
                                   outlined
@@ -720,9 +720,10 @@ export default function SkillsPage() {
           )}
         </div>
       </div>
-      {canConfigureToolsets && configToolset && (
+      {configToolset && (canConfigureToolsets || (canChooseBrowser && configToolset.name === "browser")) && (
         <ToolsetConfigDrawer
           toolset={configToolset}
+          browserChoiceOnly={!canConfigureToolsets}
           profile={selectedProfile || undefined}
           onClose={() => setConfigToolset(null)}
           onChanged={() => void refreshToolsets()}
