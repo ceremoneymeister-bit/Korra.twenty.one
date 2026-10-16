@@ -163,7 +163,7 @@ def test_cache_image_requires_auth_and_is_revalidated(image_chat):
     assert client.get("/api/files/download", params=params).status_code == 403
 
 
-@pytest.mark.parametrize("profile", [None, "default", "designer"])
+@pytest.mark.parametrize("profile", ["default", "designer"])
 @pytest.mark.parametrize("mode", ["fleet", "forced", "local"])
 def test_foreign_profile_image_is_denied_even_with_a_permissive_files_root(image_chat, monkeypatch, profile, mode):
     client, _ = image_chat
@@ -223,3 +223,86 @@ def test_cache_special_file_is_denied_without_opening_it(image_chat):
     os.mkfifo(fifo)
     for endpoint in ("/api/files/attachment", "/api/files/download"):
         assert client.get(endpoint, params={"path": str(fifo), "profile": "designer", "chat": 1}).status_code == 403
+
+
+@pytest.mark.parametrize("owner", ["default", "designer", "other"])
+@pytest.mark.parametrize("mode", ["fleet", "forced", "local"])
+def test_image_path_supplies_missing_profile_for_metadata_preview_and_download(image_chat, monkeypatch, owner, mode):
+    """A19R8-01: use the exact requests made by the unmodified chat UI."""
+    client, _ = image_chat
+    path, raw = _generated_image(owner)
+    if mode != "fleet":
+        monkeypatch.delenv("KORRA_UI_MODE")
+    if mode == "local":
+        monkeypatch.delenv("KORRA_DASHBOARD_FILES_ROOT")
+    descriptor = client.get("/api/files/attachment", params={"path": str(path)})
+    assert descriptor.status_code == 200, descriptor.text
+    assert descriptor.json()["path"] == str(path)
+    assert descriptor.json()["reader"] == "image"
+    for inline in (0, 1):
+        response = client.get("/api/files/download", params={"path": str(path), "chat": 1, "inline": inline})
+        assert response.status_code == 200, response.text
+        assert response.content == raw
+        assert response.headers["content-type"] == "image/png"
+        assert response.headers["content-disposition"].startswith("inline;" if inline else "attachment;")
+
+
+@pytest.mark.parametrize("owner", ["default", "other"])
+def test_missing_profile_is_inferred_independently_of_process_profile(image_chat, monkeypatch, owner):
+    client, data = image_chat
+    path, raw = _generated_image(owner)
+    home = data / "profiles" / "designer"
+    monkeypatch.setenv("KORRA_HOME", str(home))
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    for endpoint in ("/api/files/attachment", "/api/files/download"):
+        response = client.get(endpoint, params={"path": str(path), "chat": 1})
+        assert response.status_code == 200, response.text
+        if endpoint.endswith("download"):
+            assert response.content == raw
+
+
+@pytest.mark.parametrize("case", ["missing", "deleted", "invalid_name", "dotdot", "symlink_profile"])
+def test_inferred_profile_must_be_a_live_valid_profile(image_chat, case):
+    from korra_constants import mark_named_profile_deleted
+
+    client, data = image_chat
+    path, raw = _generated_image("designer")
+    if case == "missing":
+        path = data / "profiles" / "missing" / "cache" / "images" / path.name
+    elif case == "deleted":
+        mark_named_profile_deleted(path.parents[2])
+    elif case == "invalid_name":
+        path = data / "profiles" / "bad..name" / "cache" / "images" / path.name
+        path.parent.mkdir(parents=True)
+        path.write_bytes(raw)
+    elif case == "dotdot":
+        default, _ = _generated_image("default")
+        path = data / "profiles" / ".." / "cache" / "images" / default.name
+    else:
+        alias = data / "profiles" / "alias"
+        alias.symlink_to(path.parents[2], target_is_directory=True)
+        path = alias / "cache" / "images" / path.name
+    for endpoint in ("/api/files/attachment", "/api/files/download"):
+        response = client.get(endpoint, params={"path": str(path), "chat": 1})
+        assert response.status_code == 403, (case, endpoint, response.text)
+
+
+@pytest.mark.parametrize("case", ["env", "auth", "fake_image", "symlink", "traversal", "directory"])
+def test_inferred_profile_retains_image_file_checks(image_chat, case):
+    client, data = image_chat
+    path, raw = _generated_image("designer")
+    if case in {"env", "auth", "fake_image"}:
+        path = path.parent / {"env": ".env", "auth": "auth.json", "fake_image": "fake.png"}[case]
+        path.write_bytes(b"not an image" if case == "fake_image" else raw)
+    elif case == "symlink":
+        outside = data / "outside.png"
+        outside.write_bytes(raw)
+        path = path.parent / "link.png"
+        path.symlink_to(outside)
+    elif case == "traversal":
+        path = path.parent / ".." / "images" / path.name
+    else:
+        path = path.parent
+    for endpoint in ("/api/files/attachment", "/api/files/download"):
+        response = client.get(endpoint, params={"path": str(path), "chat": 1})
+        assert response.status_code == 403, (case, endpoint, response.text)
