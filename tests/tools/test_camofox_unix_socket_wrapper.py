@@ -637,10 +637,14 @@ await closeSession('a', session);
     )
     pid = int(next(line.split('=')[1] for line in done.stdout.splitlines() if line.startswith('child-pid=')))
     status = Path(f'/proc/{pid}/status')
-    try:
-        alive = '\nState:\tZ' not in status.read_text()
-    except FileNotFoundError:
-        alive = False
+    for _ in range(100):
+        try:
+            alive = '\nState:\tZ' not in status.read_text()
+        except (FileNotFoundError, ProcessLookupError):
+            alive = False
+        if not alive:
+            break
+        time.sleep(0.01)
     if alive:
         os.kill(pid, 9)
     assert not alive, 'deadline left the owned Firefox process running'
