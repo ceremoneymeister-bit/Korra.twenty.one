@@ -8307,6 +8307,21 @@ class APIServerAdapter(BasePlatformAdapter):
                 persist_message_kwargs["persist_user_message"] = user_message
 
             with self._profile_scope(request_profile):
+                from gateway.web_mcp_command import run_web_mcp_command
+
+                command_reply = run_web_mcp_command(
+                    self, user_message, session_id or gateway_session_key, active_run_id,
+                )
+                if command_reply is not None:
+                    result = {
+                        "final_response": command_reply,
+                        "messages": list(conversation_history or []),
+                        "api_calls": 0,
+                        "completed": True,
+                    }
+                    if session_id:
+                        result["session_id"] = session_id
+                    return result, {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
                 if learning_slash and learning_slash[0] in _LEARNING_SLASH_NO_MODEL:
                     # Не требуют ни модели, ни входа в подписку: выполняются до
                     # разрешения провайдера и создания агента.

@@ -25446,38 +25446,14 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         """
         loop = asyncio.get_running_loop()
         try:
-            from tools.mcp_tool import shutdown_mcp_servers, discover_mcp_tools, _servers, _lock
+            from contextvars import copy_context
+            from gateway.mcp_reload import reload_mcp_servers
 
-            # Capture old server names before shutdown
-            with _lock:
-                old_servers = set(_servers.keys())
-
-            # Read new config before shutting down, so we know what will be added/removed
-            # Shutdown existing connections
-            await loop.run_in_executor(None, shutdown_mcp_servers)
-
-            # Reconnect by discovering tools (reads config.yaml fresh)
-            new_tools = await loop.run_in_executor(None, discover_mcp_tools)
-
-            # Compute what changed
-            with _lock:
-                connected_servers = set(_servers.keys())
-
-            added = connected_servers - old_servers
-            removed = old_servers - connected_servers
-            reconnected = connected_servers & old_servers
-
-            lines = [t("gateway.reload_mcp.header")]
-            if reconnected:
-                lines.append(t("gateway.reload_mcp.reconnected", names=", ".join(sorted(reconnected))))
-            if added:
-                lines.append(t("gateway.reload_mcp.added", names=", ".join(sorted(added))))
-            if removed:
-                lines.append(t("gateway.reload_mcp.removed", names=", ".join(sorted(removed))))
-            if not connected_servers:
-                lines.append(t("gateway.reload_mcp.none_connected"))
-            else:
-                lines.append(t("gateway.reload_mcp.tools_available", tools=len(new_tools), servers=len(connected_servers)))
+            # Executor threads must retain profile paths, registry and secrets.
+            new_tools, added, removed, reconnected, summary = await loop.run_in_executor(
+                None, copy_context().run, reload_mcp_servers,
+            )
+            lines = [summary]
 
             # Refresh cached agents so existing sessions see new MCP tools on
             # their next turn — without this, the user has to `/new` (which
