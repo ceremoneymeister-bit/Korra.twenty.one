@@ -564,3 +564,134 @@ def test_pillow_decompression_bomb_warning_fails_closed(monkeypatch):
         assert "fully decodable" in str(exc)
     else:
         raise AssertionError("Pillow decompression-bomb warning was ignored")
+
+
+# ---------------------------------------------------------------------------
+# K21-373: references from the shared workspace folder
+# ---------------------------------------------------------------------------
+
+
+def _fleet_layout(monkeypatch, tmp_path):
+    root = tmp_path / "data"
+    profile = root / "profiles" / "designer"
+    other = root / "profiles" / "other"
+    for folder in (profile, other, root / "workspace" / "shared" / "yana", root / "workspace" / "agents"):
+        folder.mkdir(parents=True)
+    monkeypatch.setenv("HERMES_HOME", str(profile))
+    monkeypatch.chdir(profile)
+    return root, profile, other
+
+
+def test_shared_workspace_reference_is_accepted(monkeypatch, tmp_path):
+    root, _profile, _other = _fleet_layout(monkeypatch, tmp_path)
+    shared = root / "workspace" / "shared" / "yana" / "ref.png"
+    _write_image(shared)
+
+    assert provider_mod._local_image_to_data_url(str(shared)).startswith("data:image/png;base64,")
+    part = provider_mod._to_input_image_part(str(shared))
+    assert part["image_url"].startswith("data:image/png;base64,")
+
+
+def test_workspace_other_profile_system_and_secret_paths_stay_rejected(monkeypatch, tmp_path):
+    root, _profile, other = _fleet_layout(monkeypatch, tmp_path)
+    foreign = other / "cache" / "images" / "private.png"
+    foreign.parent.mkdir(parents=True)
+    _write_image(foreign)
+    outside = tmp_path / "elsewhere.png"
+    _write_image(outside)
+    secret = root / "workspace" / "shared" / ".env"
+    secret.write_bytes(b"TOKEN=1")
+    link = root / "workspace" / "shared" / "link.png"
+    link.symlink_to(foreign)
+
+    for path in (foreign, outside, secret, link):
+        with pytest.raises(ValueError):
+            provider_mod._local_image_to_data_url(str(path))
+    with pytest.raises(ValueError):
+        provider_mod._source_bytes(str(foreign), label="Mask")
+
+
+# ---------------------------------------------------------------------------
+# K21-381: standard social sizes are normalised instead of rejected
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("requested", ["1080x1920", "1080x1350", "1290x1710", "1080x1080"])
+def test_nonstandard_size_is_planned_to_valid_api_size_with_same_proportions(requested):
+    api_size, final_size = provider_mod._plan_size(requested)
+    provider_mod._validate_size(api_size)
+    assert final_size == requested
+    aw, ah = (int(v) for v in api_size.split("x"))
+    fw, fh = (int(v) for v in requested.split("x"))
+    assert abs(aw / ah - fw / fh) / (fw / fh) < 0.005
+
+
+def test_valid_and_auto_sizes_pass_through_unchanged():
+    assert provider_mod._plan_size("1024x1536") == ("1024x1536", None)
+    assert provider_mod._plan_size("auto") == ("auto", None)
+
+
+def test_unreachable_sizes_still_fail():
+    for bad in ("100x1000", "5000x5000", "12", "0x100"):
+        with pytest.raises(ValueError):
+            provider_mod._plan_size(bad)
+
+
+def _tall_b64(size):
+    out = io.BytesIO()
+    Image.new("RGB", size, (200, 30, 30)).save(out, format="PNG")
+    return base64.b64encode(out.getvalue()).decode("ascii")
+
+
+@pytest.mark.parametrize("requested", ["1080x1920", "1080x1350"])
+def test_generate_requests_valid_size_and_returns_exact_requested_size(monkeypatch, tmp_path, requested):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setattr(provider_mod, "_resolve_codex_credentials", _credentials)
+    sent = []
+
+    def collect(token, **kwargs):
+        sent.append(kwargs["size"])
+        aw, ah = (int(v) for v in kwargs["size"].split("x"))
+        return {"b64": _tall_b64((aw, ah)), "source": "final"}
+
+    monkeypatch.setattr(provider_mod, "_collect_image_b64", collect)
+    result = provider_mod.OpenAICodexImageGenProvider().generate(
+        "story", size=requested, receipt=True
+    )
+
+    assert result["success"] is True, result
+    assert len(sent) == 1
+    provider_mod._validate_size(sent[0])
+    assert result["pixel_size"] == requested
+    assert result["size_matches_request"] is True
+    assert result["requested_size"] == requested
+    assert result["api_size"] == sent[0]
+    with Image.open(result["image"]) as final:
+        assert f"{final.width}x{final.height}" == requested
+    assert Path(result["original_image"]).is_file()
+    assert result["original_image"] != result["image"]
+    receipt = json.loads(Path(result["receipt"]).read_text())
+    assert receipt["pixel_size"] == requested and receipt["api_size"] == sent[0]
+
+
+def test_resize_crops_instead_of_stretching(monkeypatch, tmp_path):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setattr(provider_mod, "_resolve_codex_credentials", _credentials)
+    out = io.BytesIO()
+    wide = Image.new("RGB", (1152, 1152), (0, 0, 0))
+    wide.paste((255, 255, 255), (0, 0, 576, 1152))
+    wide.save(out, format="PNG")
+    payload = base64.b64encode(out.getvalue()).decode("ascii")
+    monkeypatch.setattr(
+        provider_mod, "_collect_image_b64",
+        lambda *a, **k: {"b64": payload, "source": "final"},
+    )
+    result = provider_mod.OpenAICodexImageGenProvider().generate("x", size="1080x1350")
+    with Image.open(result["image"]) as final:
+        assert final.size == (1080, 1350)
+        assert final.getpixel((10, 675)) == (255, 255, 255)
+        assert final.getpixel((1070, 675)) == (0, 0, 0)
+        # a stretch would put the black/white edge at x=540 as well; a 4:5 crop of
+        # the square keeps it centred, so the edge must still be at the middle.
+        assert final.getpixel((530, 675)) == (255, 255, 255)
+        assert final.getpixel((550, 675)) == (0, 0, 0)
