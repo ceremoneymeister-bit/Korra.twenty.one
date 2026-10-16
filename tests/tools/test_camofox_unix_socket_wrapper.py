@@ -608,6 +608,12 @@ def test_last_session_unloads_browser_after_persistence_and_before_next_launch(r
 @pytest.mark.parametrize('stage', ['context', 'teardown'])
 def test_lifecycle_deadline_terminates_instead_of_leaving_a_pending_factory(run_dir, stage):
     prefix = LIFECYCLE_SERVER.split('const context = {')[0]
+    prefix += """
+import { spawn } from 'node:child_process';
+const child = spawn(process.execPath, ['-e', "process.title = 'firefox'; console.log('ready'); setInterval(() => {}, 1000)"]);
+await new Promise(resolve => child.stdout.once('data', resolve));
+console.log('child-pid=' + child.pid);
+"""
     if stage == 'context':
         prefix += """
 browser.newContext = () => new Promise(() => {});
@@ -629,8 +635,22 @@ await closeSession('a', session);
         ['node', str(WRAPPER), str(script)], capture_output=True, text=True, timeout=9,
         env={**os.environ, 'CAMOFOX_UNIX_SOCKET':str(run_dir / 'server.sock')},
     )
+    pid = int(next(line.split('=')[1] for line in done.stdout.splitlines() if line.startswith('child-pid=')))
+    status = Path(f'/proc/{pid}/status')
+    for _ in range(100):
+        try:
+            alive = '\nState:\tZ' not in status.read_text()
+        except (FileNotFoundError, ProcessLookupError):
+            alive = False
+        if not alive:
+            break
+        time.sleep(0.01)
+    if alive:
+        os.kill(pid, 9)
+    assert not alive, 'deadline left the owned Firefox process running'
     assert done.returncode == 1
     assert 'exceeded 5s; terminating service and browser tree' in done.stderr
+    assert 'ReferenceError' not in done.stderr
 
 
 def test_reaper_preserves_last_page_until_storage_is_saved(run_dir):

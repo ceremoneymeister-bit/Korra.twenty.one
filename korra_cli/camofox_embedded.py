@@ -1,7 +1,7 @@
 """Встроенный Camofox («Браузер с защитой от блокировок») в коробке Korra.
 
 Образ содержит Camofox в ``/opt/camofox`` (см. Dockerfile). Сервер запускается,
-если хотя бы один профиль использует встроенный браузер: по умолчанию или
+если хотя бы один профиль использует встроенный браузер
 по явному выбору ``browser.cloud_provider: camofox``. Явный другой браузер сохраняется.
 Состояние живёт в ``<корень данных>/camofox`` и переживает пересоздание контейнера:
 
@@ -337,6 +337,9 @@ def sync(*, signal: bool = True) -> bool:
 # Один Firefox с тремя вкладками занимает ~0,5 ГиБ cgroup, тяжёлые сайты больше:
 # в контейнере меньше этого предела OOM убил бы работу агента, а не браузер.
 DEFAULT_MIN_MEMORY_BYTES = 3 * 1024 ** 3
+# K21-336: 0.21.20 stays opt-in until storage restoration is reliable. Keep
+# the memory gate for the eventual default rollout; this is not user config.
+DEFAULT_ENABLED = False
 _NO_LIMIT_BYTES = 1 << 50  # cgroup v1 без лимита отдаёт число порядка 2**63
 _CGROUP_MEMORY_FILES = (
     Path("/sys/fs/cgroup/memory.max"),  # cgroup v2
@@ -390,7 +393,8 @@ def uses_embedded(browser: dict, *, external_url: str = "", cdp_url: str = "") -
     if selected:
         return selected == "camofox"
     return (
-        browser.get("backend") in (None, "")
+        DEFAULT_ENABLED
+        and browser.get("backend") in (None, "")
         and browser.get("engine") in (None, "", "auto")
         and not is_truthy_value(browser.get("use_real_profile"), default=False)
         and not is_disabled()

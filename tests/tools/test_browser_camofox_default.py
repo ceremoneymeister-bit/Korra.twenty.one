@@ -20,16 +20,16 @@ def clean():
         bt._page_browser_backends.clear()
 
 
-def test_default_service_runtime_and_picker_agree_without_rewriting_config(install, data):
+def test_explicit_service_runtime_and_picker_agree_without_rewriting_config(install, data):
     from korra_cli.nous_subscription import get_nous_subscription_features
     config = data / 'config.yaml'
-    config.write_text('browser:\n  inactivity_timeout: 120\n')
+    config.write_text('browser:\n  cloud_provider: camofox\n  inactivity_timeout: 120\n')
     before = config.read_bytes()
     emb.ensure_state()
     with UnixServer(emb.socket_path(), reply=b'{"ok":true,"tabId":"new","snapshot":"page"}'):
         assert emb.sync(signal=False)
         assert bc.is_camofox_mode()
-        assert get_nous_subscription_features({}).browser.current_provider == 'Camofox'
+        assert get_nous_subscription_features({'browser': {'cloud_provider': 'camofox'}}).browser.current_provider == 'Camofox'
         assert json.loads(bt.browser_navigate('https://example.com', 'implicit'))['success']
     assert config.read_bytes() == before
 
@@ -105,6 +105,7 @@ def test_same_task_name_in_another_profile_does_not_inherit_page_backend(install
         bt._pin_page_browser('same', 'chromium')
         assert not bt._is_camofox_page('same')
     with in_profile(data, 'b'), patch.object(emb, 'health', return_value=True):
+        choose_browser('Camofox')
         assert bt._is_camofox_page('same')
 
 

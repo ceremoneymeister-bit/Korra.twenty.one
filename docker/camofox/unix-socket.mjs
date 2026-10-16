@@ -7,8 +7,7 @@
 // сервера. Любой другой TCP listen в этом процессе запрещён.
 //
 // Прогрев браузера при старте отключён: апстрим сразу запускает Firefox
-// (около 0,5 ГиБ) и держит его пять минут, а Camofox теперь работает у всех
-// установок. Файлы пакета не правятся: при загрузке server.js в памяти
+// (около 0,5 ГиБ) и держит его пять минут даже без запросов. Файлы пакета не правятся: при загрузке server.js в памяти
 // подменяется ровно один блок, браузер запускается первым запросом. Если
 // блок в новой версии пакета изменился, сервер стартует с прогревом и пишет
 // об этом в лог.
@@ -135,8 +134,7 @@ function korraBounded(work, stage) {
   const expired = new Promise(() => {
     timer = setTimeout(() => {
       console.error('[camofox] ' + stage + ' exceeded 5s; terminating service and browser tree');
-      killBrowserChildren(true);
-      process.exit(1);
+      globalThis.korraCamofoxTerminate();
     }, 5000);
   });
   return Promise.race([work, expired]).finally(() => clearTimeout(timer));
@@ -285,6 +283,14 @@ function killBrowserChildren(includeDisplay = false) {
   }
   return killed;
 }
+
+// Lifecycle code runs in the imported server module, outside this module's
+// lexical scope. Share the abort explicitly so its deadline kills the owned
+// Firefox/Xvfb tree before exiting, rather than throwing ReferenceError.
+globalThis.korraCamofoxTerminate = () => {
+  try { killBrowserChildren(true); }
+  finally { process.exit(1); }
+};
 
 const stuckLimit = stuckLimitMs();
 if (stuckLimit > 0) {
