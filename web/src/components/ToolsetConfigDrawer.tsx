@@ -35,7 +35,7 @@ interface Props {
  * Full configuration surface for a single toolset's backends — the dashboard
  * equivalent of selecting a toolset in the `hermes tools` curses UI: toggle
  * the toolset on/off, pick a provider, enter API keys, and run a provider's
- * post-setup install hook (npm/pip/binary) with a live log tail.
+ * post-setup action (setup or readiness check) with a live log tail.
  */
 export function ToolsetConfigDrawer({ toolset, profile, onClose, onChanged }: Props) {
   const { toast, showToast } = useToast();
@@ -51,7 +51,7 @@ export function ToolsetConfigDrawer({ toolset, profile, onClose, onChanged }: Pr
   const [savingProvider, setSavingProvider] = useState<string | null>(null);
   const [isSet, setIsSet] = useState<Record<string, boolean>>({});
 
-  // Post-setup install log tail state.
+  // Post-setup log tail state.
   const [postSetupRunning, setPostSetupRunning] = useState(false);
   const [postSetupLog, setPostSetupLog] = useState<string[]>([]);
   const [postSetupKey, setPostSetupKey] = useState<string | null>(null);
@@ -390,11 +390,11 @@ export function ToolsetConfigDrawer({ toolset, profile, onClose, onChanged }: Pr
                     </div>
                   )}
 
-                  {/* Post-setup install hook */}
+                  {/* Post-setup action */}
                   {provider.post_setup && (
                     <div className="mt-3 border-t border-border pt-3">
                       <p className="text-xs text-muted-foreground mb-1.5">
-                        {tr("This backend needs a one-time install")}
+                        {tr("Setup or readiness check for this backend")}
                         {" "}
                         <span className="font-mono">
                           ({provider.post_setup})
@@ -422,8 +422,8 @@ export function ToolsetConfigDrawer({ toolset, profile, onClose, onChanged }: Pr
                       >
                         {postSetupRunning &&
                         postSetupKey === provider.post_setup
-                          ? tr("Installing…")
-                          : tr("Run setup")}
+                          ? tr("Running…")
+                          : tr("Set up / check")}
                       </Button>
                     </div>
                   )}

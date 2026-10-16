@@ -22,6 +22,7 @@ Design rationale lives in ``docs/design/multiplexing-gateway.md`` (Workstream A)
 """
 from __future__ import annotations
 
+import logging
 import re
 from contextvars import ContextVar, Token
 from pathlib import Path
@@ -264,9 +265,13 @@ def load_env_file(env_path: Path) -> Dict[str, str]:
     except UnicodeDecodeError:
         try:
             text = env_path.read_bytes().removeprefix(b"\xef\xbb\xbf").decode("latin-1")
-        except OSError:
+        except OSError as exc:
+            logging.getLogger(__name__).warning("Не удалось прочитать .env профиля %s (%s)", env_path, type(exc).__name__)
             return secrets
-    except OSError:
+    except FileNotFoundError:
+        return secrets
+    except OSError as exc:
+        logging.getLogger(__name__).warning("Не удалось прочитать .env профиля %s (%s)", env_path, type(exc).__name__)
         return secrets
 
     # Parse values with the canonical Hermes parser: save_env_value

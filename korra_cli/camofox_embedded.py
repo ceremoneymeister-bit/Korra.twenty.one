@@ -34,6 +34,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -275,51 +276,91 @@ def explicit_url() -> str:
         return (os.environ.get("CAMOFOX_URL") or "").strip()
 
 
-def sync(*, signal: bool = True) -> bool:
-    """Сверить маркер службы с явным выбором профилей, не меняя их настройки.
+@contextmanager
+def _selection_lock(lock_path: Path):
+    """Захватить блокировку; при ошибке flock открытый файл тоже закрывается."""
+    import fcntl
 
-    Читаем только файлы соответствующего профиля: окружение текущего процесса
-    и его secret scope не описывают выбор других профилей. Это также исключает
-    влияние чужих облачных ключей. Выключатель ``disabled`` сохраняется.
+    _ensure_dir()
+    _create_once(lock_path, "")
+    with lock_path.open("r+", encoding="utf-8") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
+@contextmanager
+def selection_update(*, signal: bool = True):
+    """Публикация выбора и сверка службы — одна операция под selection.lock.
+
+    Сбой блокировки не запрещает запись настроек: после неё пробуем захватить
+    блокировку ещё раз для сверки. Без блокировки службу не останавливаем.
+    Вне образа со встроенным Camofox запись настроек не требует блокировки.
     """
     if not is_installed():
-        return False
-    import fcntl
-    from korra_constants import named_profile_is_deleted
-    from utils import is_truthy_value
+        yield
+        return
+    lock_path = state_dir() / "selection.lock"
+    with ExitStack() as stack:
+        lock_failed = False
+        try:
+            stack.enter_context(_selection_lock(lock_path))
+        except OSError as exc:
+            lock_failed = True
+            logger.warning("Camofox: не удалось захватить блокировку %s (%s)", lock_path, type(exc).__name__)
 
+        # Исключения записи не относятся к сбою блокировки: не перехватываем
+        # их и не повторяем тело with.
+        yield
+
+        try:
+            if lock_failed:
+                stack.enter_context(_selection_lock(lock_path))
+            _sync_selection(signal=signal)
+        except OSError as exc:
+            if not lock_failed:  # При повторном сбое достаточно первого предупреждения.
+                logger.warning("Camofox: не удалось сверить выбор профилей %s (%s)", lock_path, type(exc).__name__)
+
+
+def sync(*, signal: bool = True) -> bool:
+    """Сверить маркер службы с явным выбором профилей, не меняя их настройки."""
+    if not is_installed():
+        return False
     try:
-        _ensure_dir()
-        lock_path = state_dir() / "selection.lock"
-        _create_once(lock_path, "")
-        with lock_path.open("r+") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            root = state_dir().parent
-            homes = [root]
-            profiles = root / "profiles"
-            if profiles.is_dir():
-                homes.extend(h for h in profiles.iterdir() if h.is_dir()
-                             and not h.is_symlink() and not h.name.startswith(".")
-                             and not named_profile_is_deleted(h))
-            wanted = any(
-                _profile_setting(h, "", ("browser", "cloud_provider")).strip().lower() == "camofox"
-                and not is_truthy_value(_profile_setting(h, "", ("browser", "use_gateway")), default=False)
-                and not _profile_setting(h, "CAMOFOX_URL", ())
-                for h in homes
-            )
-            marker = state_dir() / "enabled"
-            was_enabled = marker.is_file()
-            if wanted:
-                if not was_enabled:
-                    _write_private(marker, "1\n")
-            else:
-                marker.unlink(missing_ok=True)
-                if was_enabled and signal:
-                    _s6_svc("-t")
-            return wanted
+        with selection_update(signal=signal):
+            pass
+        return (state_dir() / "enabled").is_file()
     except OSError as exc:
         logger.warning("Camofox: не удалось сверить выбор профилей (%s)", type(exc).__name__)
         return False
+
+
+def _sync_selection(*, signal: bool) -> None:
+    """Под selection.lock читаем только файлы профилей, без process env/scope."""
+    from korra_constants import named_profile_is_deleted
+    from utils import is_truthy_value
+
+    root = state_dir().parent
+    homes = [root]
+    profiles = root / "profiles"
+    if profiles.is_dir():
+        homes.extend(h for h in profiles.iterdir() if h.is_dir()
+                     and not h.is_symlink() and not h.name.startswith(".")
+                     and not named_profile_is_deleted(h))
+    wanted = any(
+        _profile_setting(h, "", ("browser", "cloud_provider")).strip().lower() == "camofox"
+        and not is_truthy_value(_profile_setting(h, "", ("browser", "use_gateway")), default=False)
+        and not _profile_setting(h, "CAMOFOX_URL", ())
+        for h in homes
+    )
+    marker = state_dir() / "enabled"
+    was_enabled = marker.is_file()
+    if wanted:
+        if not was_enabled:
+            _write_private(marker, "1\n")
+    else:
+        marker.unlink(missing_ok=True)
+        if was_enabled and signal:
+            _s6_svc("-t")
 
 
 # ── Состояние ──────────────────────────────────────────────────────────────
@@ -473,16 +514,14 @@ def recover() -> bool:
 
 def _profile_setting(profile_dir: Path, env_name: str, config_keys: tuple) -> str:
     """Явное значение из .env или config.yaml указанного профиля, без смены HERMES_HOME."""
-    from korra_cli.config import _parse_env_value, read_user_config_raw
+    from korra_cli.config import read_user_config_raw
 
     if env_name:
-        try:
-            for line in (profile_dir / ".env").read_text(encoding="utf-8-sig").splitlines():
-                key, sep, value = line.strip().removeprefix("export ").lstrip().partition("=")
-                if sep and key.strip() == env_name and _parse_env_value(value):
-                    return _parse_env_value(value)
-        except OSError:
-            pass
+        from agent.secret_scope import load_env_file
+
+        value = load_env_file(profile_dir / ".env").get(env_name, "").strip()
+        if value:
+            return value
     if not config_keys:
         return ""
     try:

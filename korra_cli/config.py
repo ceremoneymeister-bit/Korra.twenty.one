@@ -19,6 +19,7 @@ This module provides:
 from korra_constants import korra_env, korra_env_present, korra_env_aliases, korra_env_pop, korra_env_set
 
 import copy
+from contextlib import nullcontext
 from decimal import Decimal, InvalidOperation
 from korra_cli.cli_output import line_input
 import json
@@ -3739,12 +3740,12 @@ def atomic_config_write(config_path: Path, data: Any, **kwargs: Any) -> None:
     """
     from utils import atomic_yaml_write
 
-    _refuse_failed_read(config_path, data)
-    require_readable_config_before_write(config_path)
-    atomic_yaml_write(config_path, data, **kwargs)
     from korra_cli import camofox_embedded
 
-    camofox_embedded.sync()
+    with camofox_embedded.selection_update():
+        _refuse_failed_read(config_path, data)
+        require_readable_config_before_write(config_path)
+        atomic_yaml_write(config_path, data, **kwargs)
 
 
 def load_config() -> Dict[str, Any]:
@@ -4613,7 +4614,7 @@ def save_env_value(key: str, value: str, *, update_process: bool = True):
         return
     # Managed scope guard: a managed env key can't be set by the user — the
     # managed .env wins at load anyway. Distinct from is_managed() above.
-    from korra_cli import managed_scope
+    from korra_cli import camofox_embedded, managed_scope
 
     if managed_scope.is_env_managed(key):
         managed_dir = managed_scope.get_managed_dir()
@@ -4676,7 +4677,8 @@ def save_env_value(key: str, value: str, *, update_process: bool = True):
             f.writelines(lines)
             f.flush()
             os.fsync(f.fileno())
-        atomic_replace(tmp_path, env_path)
+        with camofox_embedded.selection_update() if key == "CAMOFOX_URL" else nullcontext():
+            atomic_replace(tmp_path, env_path)
         # Preserve the original file mode (e.g. 0640 for Docker volume mounts)
         # instead of letting _secure_file unconditionally tighten to 0600.
         if original_mode is not None:
@@ -4696,10 +4698,6 @@ def save_env_value(key: str, value: str, *, update_process: bool = True):
     if update_process:
         korra_env_set(os.environ, key, value)
     invalidate_env_cache()
-    if key == "CAMOFOX_URL":
-        from korra_cli import camofox_embedded
-
-        camofox_embedded.sync()
 
 
 def custom_endpoint_key_env(identity: str) -> str:
@@ -4730,7 +4728,7 @@ def remove_env_value(key: str, *, update_process: bool = True) -> bool:
         managed_error(f'удалить {key}')
         return False
     # Managed scope guard: a managed env key can't be removed by the user.
-    from korra_cli import managed_scope
+    from korra_cli import camofox_embedded, managed_scope
 
     if managed_scope.is_env_managed(key):
         managed_dir = managed_scope.get_managed_dir()
@@ -4778,7 +4776,8 @@ def remove_env_value(key: str, *, update_process: bool = True) -> bool:
                 f.writelines(new_lines)
                 f.flush()
                 os.fsync(f.fileno())
-            atomic_replace(tmp_path, env_path)
+            with camofox_embedded.selection_update() if key == "CAMOFOX_URL" else nullcontext():
+                atomic_replace(tmp_path, env_path)
             # Preserve the original file mode (e.g. 0640 for Docker volume
             # mounts) instead of letting _secure_file unconditionally tighten
             # to 0600. Mirrors save_env_value().
@@ -4799,10 +4798,6 @@ def remove_env_value(key: str, *, update_process: bool = True) -> bool:
     if update_process:
         korra_env_pop(os.environ, key)
     invalidate_env_cache()
-    if key == "CAMOFOX_URL":
-        from korra_cli import camofox_embedded
-
-        camofox_embedded.sync()
     return found
 
 
