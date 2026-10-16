@@ -14,6 +14,10 @@ Selection precedence for the image model (first hit wins):
 Output is decoded and saved atomically under the active profile's
 ``cache/images/``. Source images for generation/editing are sent as Responses
 ``input_image`` content parts.
+
+The Responses host is selected from the active OAuth connection's catalog.
+``image_gen.openai-codex.host_model`` (or ``image_gen.host_model``) can override
+the first choice without changing the image model.
 """
 
 from __future__ import annotations
@@ -55,7 +59,7 @@ logger = logging.getLogger(__name__)
 # payload as the user's entitlement problem and sent people away from a
 # provider that was never actually tried. The request-shape bug is fixed by
 # omitting tool_choice (see ``_build_responses_payload``); any remaining HTTP
-# error must surface verbatim so it stays diagnosable. See issues #19505,
+# request-shape error must surface verbatim so it stays diagnosable. See issues #19505,
 # #49008 and #31335.
 
 _MAX_ERROR_BODY_CHARS = 500
@@ -75,6 +79,8 @@ def _summarize_error_body(body: str) -> str:
         payload = json.loads(text)
         error = payload.get("error") if isinstance(payload, dict) else None
         message = error.get("message") if isinstance(error, dict) else None
+        if not message and isinstance(payload, dict):
+            message = payload.get("detail")
         if isinstance(message, str) and message.strip():
             return _sanitize_error_text(message.strip())
     except (TypeError, ValueError):
@@ -131,10 +137,10 @@ _SIZES = {
     "portrait": "1024x1536",
 }
 
-# Codex Responses surface used for the request. The chat model itself is only
-# the host that calls the ``image_generation`` tool; the actual image work is
-# done by ``API_MODEL``.
-_CODEX_CHAT_MODEL = "gpt-5.5"
+# These verified hosts are preferred only when present in the connection's
+# catalog, and are the first offline choices. The actual image model is separate.
+_PREFERRED_CODEX_HOST_MODELS = ("gpt-5.6-sol", "gpt-6.1-sol")
+_CODEX_HOST_CACHE: Dict[Tuple[str, ...], Tuple[str, ...]] = {}
 _CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
 _CODEX_INSTRUCTIONS = (
     "You are an assistant that must fulfill image generation and image editing "
@@ -234,6 +240,65 @@ def _read_codex_access_token() -> Optional[str]:
     except Exception as exc:
         logger.debug("Could not resolve Codex access token: %s", exc)
         return None
+
+
+class CodexHostModelUnsupported(RuntimeError):
+    """An HTTP 400 rejected the host before any image stream was accepted."""
+
+
+def _host_model_candidates(token: str, base_url: str) -> Tuple[Tuple[str, ...], List[str]]:
+    from agent.model_metadata import strip_codex_context_variant_suffix
+    from agent.models_dev import get_model_capabilities
+    from korra_cli.codex_models import (
+        DEFAULT_CODEX_MODELS,
+        _extract_chatgpt_account_id,
+        get_codex_model_ids,
+    )
+    from korra_constants import get_hermes_home
+
+    cfg = _load_image_gen_config()
+    sub = cfg.get("openai-codex")
+    configured = (sub.get("host_model") if isinstance(sub, dict) else None) or cfg.get("host_model")
+    explicit = configured.strip() if isinstance(configured, str) else ""
+    explicit = strip_codex_context_variant_suffix(explicit)
+    # Scope successes to a profile and connection. JWT account identity survives
+    # token refresh; opaque credentials use a fingerprint, never the token itself.
+    account = _extract_chatgpt_account_id(token) or hashlib.sha256(token.encode()).hexdigest()
+    key = (str(get_hermes_home().resolve()), base_url.rstrip("/"), account, explicit)
+    if key in _CODEX_HOST_CACHE:
+        return key, list(_CODEX_HOST_CACHE[key])
+
+    offline = list(dict.fromkeys([*_PREFERRED_CODEX_HOST_MODELS, *DEFAULT_CODEX_MODELS]))
+    try:
+        catalog = get_codex_model_ids(access_token=token, fallback_models=offline) or offline
+    except Exception:
+        logger.debug("Could not discover Codex image hosts", exc_info=True)
+        catalog = offline
+    catalog = list(dict.fromkeys(strip_codex_context_variant_suffix(model) for model in catalog))
+    ordered = [model for model in _PREFERRED_CODEX_HOST_MODELS if model in catalog]
+    ordered.extend(model for model in catalog if model not in ordered)
+    candidates = [explicit] if explicit else []
+    for model in ordered:
+        if not model or model in candidates:
+            continue
+        # Codex's catalog is agent-oriented. Unknown/new hosts stay eligible;
+        # exclude only models explicitly known to lack tools, without network I/O.
+        caps = get_model_capabilities("openai-codex", model, allow_network=False)
+        if caps is None or caps.supports_tools:
+            candidates.append(model)
+    return key, candidates
+
+
+def _is_unsupported_host(status: int, body: str, host_model: str) -> bool:
+    if status != 400:
+        return False
+    # Match the requested host, not the image model or an unsupported tool/size.
+    host = re.escape(host_model)
+    return bool(re.search(
+        rf"(?:['\"]{host}['\"]\s+model|model\s+['\"]?{host}['\"]?)\s+is\s+not\s+supported\b",
+        _summarize_error_body(body),
+        re.IGNORECASE,
+    ))
 
 
 def _sniff_image_mime(raw: bytes) -> Optional[str]:
@@ -644,6 +709,7 @@ def _build_responses_payload(
     prompt: str,
     size: str,
     quality: str,
+    host_model: str = _PREFERRED_CODEX_HOST_MODELS[0],
     input_images: Optional[List[Dict[str, str]]] = None,
     image_model: str = DEFAULT_MODEL,
     background: str = "opaque",
@@ -672,7 +738,7 @@ def _build_responses_payload(
         tool["input_image_mask"] = mask_part
 
     return {
-        "model": _CODEX_CHAT_MODEL,
+        "model": host_model,
         "store": False,
         "instructions": _CODEX_INSTRUCTIONS,
         "input": [{
@@ -986,6 +1052,7 @@ def _collect_image_b64(
     prompt: str,
     size: str,
     quality: str,
+    host_model: str = _PREFERRED_CODEX_HOST_MODELS[0],
     input_images: Optional[List[Dict[str, str]]] = None,
     image_model: str = DEFAULT_MODEL,
     background: str = "opaque",
@@ -1022,6 +1089,7 @@ def _collect_image_b64(
         prompt=prompt,
         size=size,
         quality=quality,
+        host_model=host_model,
         input_images=input_images,
         image_model=image_model,
         background=background,
@@ -1041,6 +1109,10 @@ def _collect_image_b64(
                 response.raise_for_status()
             except httpx.HTTPStatusError as exc:
                 exc.response.read()
+                if _is_unsupported_host(exc.response.status_code, exc.response.text, host_model):
+                    raise CodexHostModelUnsupported(
+                        f"Codex rejected image host {host_model}"
+                    ) from exc
                 raise RuntimeError(
                     f"Codex Responses API returned HTTP {exc.response.status_code}: "
                     f"{_summarize_error_body(exc.response.text)}"
@@ -1300,19 +1372,53 @@ class OpenAICodexImageGenProvider(ImageGenProvider):
             )
 
         try:
-            collected = _collect_image_b64(
-                token,
-                prompt=guided_prompt,
-                size=size,
-                quality=quality,
-                input_images=input_images or None,
-                image_model=model_id,
-                background=background,
-                output_format=output_format,
-                output_compression=output_compression,
-                action=action,
-                mask_part=mask_part,
-                base_url=base_url,
+            host_key, candidates = _host_model_candidates(token, base_url)
+            if not candidates:
+                raise CodexHostModelUnsupported("No eligible Codex image host")
+            rejected = set()
+            # At most one fallback. Only an initial HTTP rejection can enter
+            # this branch; a partial/empty/failed stream must never regenerate.
+            for host_model in candidates[:2]:
+                try:
+                    collected = _collect_image_b64(
+                        token,
+                        prompt=guided_prompt,
+                        size=size,
+                        quality=quality,
+                        host_model=host_model,
+                        input_images=input_images or None,
+                        image_model=model_id,
+                        background=background,
+                        output_format=output_format,
+                        output_compression=output_compression,
+                        action=action,
+                        mask_part=mask_part,
+                        base_url=base_url,
+                    )
+                except CodexHostModelUnsupported:
+                    rejected.add(host_model)
+                    logger.info("Codex image host %s is no longer supported", host_model)
+                    if len(rejected) == min(2, len(candidates)):
+                        raise
+                    continue
+                if collected and collected.get("source") == "final" and collected.get("b64"):
+                    _CODEX_HOST_CACHE[host_key] = tuple([
+                        host_model,
+                        *(model for model in candidates if model != host_model and model not in rejected),
+                    ])
+                break
+        except CodexHostModelUnsupported:
+            return error_response(
+                error=(
+                    "Сейчас не удалось создать изображение по подписке ChatGPT: "
+                    "сервис не принимает доступные модели. Попробуйте позже. "
+                    "Если ошибка повторяется, обратитесь в поддержку Korra."
+                ),
+                error_type="host_model_unavailable",
+                provider="openai-codex",
+                model=model_id,
+                prompt=prompt,
+                aspect_ratio=aspect,
             )
         except CodexImageEmptyResponse as exc:
             # The stream finished but carried no finished image. Say exactly
@@ -1429,7 +1535,7 @@ class OpenAICodexImageGenProvider(ImageGenProvider):
                         "revision": "cc52564687907194c8db02e95996757fb5d19b86",
                     },
                     "image_model": model_id,
-                    "host_model": _CODEX_CHAT_MODEL,
+                    "host_model": host_model,
                     "quality": quality,
                     "size": size,
                     "size_matches_request": size_matches_request,

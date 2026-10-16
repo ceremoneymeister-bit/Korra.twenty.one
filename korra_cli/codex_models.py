@@ -250,11 +250,14 @@ def _read_cache_models(codex_home: Path) -> List[str]:
     return deduped
 
 
-def get_codex_model_ids(access_token: Optional[str] = None) -> List[str]:
+def get_codex_model_ids(
+    access_token: Optional[str] = None, *, fallback_models: Optional[List[str]] = None
+) -> List[str]:
     """Return available Codex model IDs, trying API first, then local sources.
     
     Resolution order: API (live, if token provided) > config.toml default >
-    local cache > hardcoded defaults.
+    local cache > hardcoded defaults. Callers may supply task-specific offline
+    defaults with ``fallback_models``; live discovery always takes precedence.
     """
     codex_home_str = os.getenv("CODEX_HOME", "").strip() or str(Path.home() / ".codex")
     codex_home = Path(codex_home_str).expanduser()
@@ -275,7 +278,7 @@ def get_codex_model_ids(access_token: Optional[str] = None) -> List[str]:
         if model_id not in ordered:
             ordered.append(model_id)
 
-    for model_id in DEFAULT_CODEX_MODELS:
+    for model_id in DEFAULT_CODEX_MODELS if fallback_models is None else fallback_models:
         if model_id not in ordered:
             ordered.append(model_id)
 

@@ -27,6 +27,13 @@ from PIL import Image
 provider_mod = importlib.import_module("plugins.image_gen.openai-codex")
 
 
+@pytest.fixture(autouse=True)
+def _offline_host_catalog(monkeypatch):
+    monkeypatch.setattr(
+        "korra_cli.codex_models.get_codex_model_ids", lambda **kw: ["fixture-codex-host"]
+    )
+
+
 def _png_b64(color=(200, 100, 50)) -> str:
     out = io.BytesIO()
     Image.new("RGB", (4, 4), color).save(out, format="PNG")
