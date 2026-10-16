@@ -1003,6 +1003,18 @@ describe("K21-383: фокус в поле после явного выбора �
     expect(area().selectionStart).toBe("Начатая мысль".length);
   });
 
+  it("возвращает фокус по «Новый чат», когда разговор уже новый и композер не пересоздаётся", async () => {
+    pointer(true);
+    await render(<BubbleChatComposer key="new" draftKey="audit-new" active focusSignal={0} onSend={vi.fn()} />);
+    const button = document.createElement("button");
+    document.body.append(button);
+    button.focus();
+    expect(document.activeElement).toBe(button);
+    await swap(<BubbleChatComposer key="new" draftKey="audit-new" active focusSignal={1} onSend={vi.fn()} />);
+    expect(document.activeElement).toBe(area());
+    button.remove();
+  });
+
   it("не открывает клавиатуру телефона", async () => {
     pointer(false);
     await render(<BubbleChatComposer draftKey="audit-a" active onSend={vi.fn()} />);

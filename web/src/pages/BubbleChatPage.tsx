@@ -818,6 +818,9 @@ interface BubbleChatComposerProps {
   profile?: string;
   allowAttachments?: boolean;
   draftKey?: string;
+  /** Счётчик явных команд «Новый чат»: если разговор уже новый, композер не
+   *  пересоздаётся, и фокус в поле нужно вернуть по этому сигналу. */
+  focusSignal?: number;
 }
 
 const TEXTAREA_MIN_HEIGHT = 40;
@@ -845,6 +848,7 @@ export function BubbleChatComposer({
   agentLabel,
   allowAttachments = true,
   draftKey,
+  focusSignal = 0,
 }: BubbleChatComposerProps) {
   const [value, setValue] = useState(() => draftKey ? readChatDraft(draftKey) : "");
   useEffect(() => { if (draftKey) writeChatDraft(draftKey, value); }, [draftKey, value]);
@@ -982,7 +986,7 @@ export function BubbleChatComposer({
     }
     el.focus({ preventScroll: true });
     el.setSelectionRange(el.value.length, el.value.length);
-  }, [disabled, active]);
+  }, [disabled, active, focusSignal]);
 
   // «Изменить» на артефакте подставляет заготовку и отдаёт курсор владельцу:
   // отправлять за него нельзя — он ещё не сказал, что менять.
@@ -1800,9 +1804,11 @@ export default function BubbleChatPage({
     [loadSession, setMobileHistoryOpen],
   );
 
+  const [newChatFocus, setNewChatFocus] = useState(0);
   const handleNewChat = useCallback(() => {
     reset();
     setMobileHistoryOpen(false);
+    setNewChatFocus((count) => count + 1);
   }, [reset, setMobileHistoryOpen]);
 
   // Сводка для мобильной шапки и экрана-списка агентов: название открытого
@@ -2034,6 +2040,7 @@ export default function BubbleChatPage({
         <BubbleChatComposer
           active={active}
           key={sessionId ?? "new"}
+          focusSignal={newChatFocus}
           draftKey={chatViewKey(agentProfile, sessionId)}
           agentLabel={agentLabel}
           onSend={send}
