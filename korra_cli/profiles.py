@@ -1874,6 +1874,10 @@ def create_profile(
     # целиком и позже мигрируется — поэтому пин ставим последним шагом
     # (ревью 03.09: путь панели «клонировать из default» ронял адаптеры).
     _pin_api_server_off_under_multiplex(profile_dir, source_dir or fresh_source_dir)
+    if _staging_dir is None:
+        from korra_cli import camofox_embedded
+
+        camofox_embedded.sync()
 
     return profile_dir
 
@@ -2378,6 +2382,9 @@ def delete_profile(name: str, yes: bool = False) -> Path:
     except (OSError, ValueError) as exc:
         logger.warning("Could not archive file organization for %s: %s", canon, exc)
 
+    from korra_cli import camofox_embedded
+
+    camofox_embedded.sync()
     print(f"\nПрофиль '{canon}' удалён.")
     return profile_dir
 
@@ -2874,6 +2881,9 @@ def import_profile(archive_path: str, name: Optional[str] = None) -> Path:
 
         shutil.move(str(final_source), str(profile_dir))
 
+    from korra_cli import camofox_embedded
+
+    camofox_embedded.sync()
     return profile_dir
 
 

@@ -1,4 +1,4 @@
-"""K21-336: образ содержит закреплённый Camofox, а s6-сервис работает всегда, пока его не выключили выключателем установки."""
+"""K21-336: образ содержит закреплённый Camofox, а s6-сервис ждёт явного выбора профиля."""
 from __future__ import annotations
 
 import json
@@ -145,12 +145,6 @@ def test_stage2_hands_the_camofox_state_dir_to_hermes_in_the_targeted_chown() ->
 def test_stage2_chown_loop_stays_targeted() -> None:
     hook = (ROOT / "docker" / "stage2-hook.sh").read_text()
     assert "chown -R hermes:hermes \"$HERMES_HOME\"\n" not in hook
-
-
-def test_s6_run_has_no_profile_accounting_and_does_not_wait_for_a_marker_of_use() -> None:
-    run = (S6 / "camofox" / "run").read_text()
-    assert "camofox_embedded sync" not in run and "enabled" not in run
-    assert "s6-svc -t" in run  # подсказка: выключение останавливает слот, он вернётся в ожидание
 
 
 def test_s6_run_executes_cleanly_when_the_server_is_missing_or_switched_off(tmp_path) -> None:

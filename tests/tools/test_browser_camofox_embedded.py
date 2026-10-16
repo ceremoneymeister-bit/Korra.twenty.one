@@ -68,13 +68,13 @@ def test_bundled_server_is_not_used_when_another_browser_is_selected(embedded):
     assert bc.is_camofox_mode() is False
 
 
-def test_profile_without_a_browser_choice_uses_the_bundled_server(install, data):
-    with UnixServer(emb.socket_path(), reply=REPLY):
-        assert bc.get_camofox_url() == emb.BASE_URL
-        assert bc.is_camofox_mode() is True
-        assert bc._using_embedded_camofox() is True
-        assert bc._auth_headers() == {"Authorization": f"Bearer {emb.access_key()}"}
-        assert bc._managed_persistence_enabled() is True
+def test_profile_without_a_browser_choice_keeps_the_previous_browser(install, data):
+    with UnixServer(emb.socket_path(), reply=REPLY) as server:
+        assert bc.get_camofox_url() == ""
+        assert bc.is_camofox_mode() is False
+        assert bc._using_embedded_camofox() is False
+        assert bc._auth_headers() == {}
+    assert server.seen == []
 
 
 @pytest.mark.parametrize(
@@ -242,7 +242,7 @@ def test_server_switched_off_profile_without_a_choice_goes_to_chromium_without_a
     emb.enable()
     with UnixServer(emb.socket_path(), reply=REPLY):
         bc._health_cache = (0.0, "", True)
-        assert bc.is_camofox_mode() is True
+        assert bc.is_camofox_mode() is False
 
 
 def test_no_anonymous_session_is_ever_created_or_cached(embedded):
@@ -314,7 +314,7 @@ def test_two_profiles_with_different_browsers_do_not_disturb_each_other(install,
     assert id_a["user_id"] != id_b["user_id"]
     with in_profile(data, "a"):
         choose_browser("Local Browser")
-    assert emb.is_enabled()  # профили сервер не выключают
+    assert not emb.is_enabled()  # последний потребитель выбрал другой браузер
 
 
 # ── SSRF и приватные адреса: Camofox не слабее Chromium ───────────────────
@@ -373,10 +373,7 @@ def _navigate_through_dispatch(url="https://example.com/"):
     return result, run, camofox
 
 
-@pytest.mark.parametrize("how", ["default", "selected"])
-def test_silent_server_sends_the_call_to_chromium_with_a_short_note(install, data, how):
-    if how == "selected":
-        choose_browser("Camofox")
+def test_silent_selected_server_sends_the_call_to_chromium_with_a_short_note(embedded):
     assert bc.is_camofox_mode() is False
     result, run, camofox = _navigate_through_dispatch()
     camofox.assert_not_called()
@@ -387,6 +384,7 @@ def test_silent_server_sends_the_call_to_chromium_with_a_short_note(install, dat
 
 
 def test_running_server_takes_the_call_without_a_note(install, data):
+    choose_browser("Camofox")
     with UnixServer(emb.socket_path(), reply=REPLY):
         result, run, camofox = _navigate_through_dispatch()
     camofox.assert_called_once()
@@ -414,6 +412,7 @@ def _navigate_for_real(url="https://example.com/", task_id="live"):
 
 
 def test_connection_lost_after_a_good_probe_resets_the_cache_and_the_same_call_uses_chromium(install, data):
+    choose_browser("Camofox")
     # Сервер ответил на /health, кэш «жив», но к вкладке соединение рвётся.
     server = UnixServer(emb.socket_path(), reply=REPLY)
     with server:
@@ -433,6 +432,7 @@ def test_connection_lost_after_a_good_probe_resets_the_cache_and_the_same_call_u
 
 
 def test_server_answering_5xx_on_tab_creation_sends_the_call_to_chromium(install, data):
+    choose_browser("Camofox")
     def respond(method, path, body):
         if method == "POST" and path == "/tabs":
             return 500, b'{"error": "browser failed to launch"}'
@@ -450,6 +450,7 @@ def test_server_answering_5xx_on_tab_creation_sends_the_call_to_chromium(install
 
 
 def test_tab_creation_timeout_sends_the_call_to_chromium(install, data, monkeypatch):
+    choose_browser("Camofox")
     def respond(method, path, body):
         if method == "POST" and path == "/tabs":
             time.sleep(1.5)
@@ -515,6 +516,7 @@ def test_hung_tab_creation_restarts_service_and_retries_once_before_fallback(
     servers.append(first)
     try:
         with in_profile(data, "a"):
+            choose_browser("Camofox")
             expected = get_camofox_identity("recover")
             result, chromium = _navigate_for_real(task_id="recover")
         assert len(signals) == 1
@@ -540,6 +542,7 @@ def test_hung_tab_creation_restarts_service_and_retries_once_before_fallback(
 
 
 def test_a_dead_site_does_not_mark_a_healthy_server_as_down(install, data):
+    choose_browser("Camofox")
     # POST /tabs навигирует на адрес, поэтому недоступный сайт тоже даёт 500;
     # пустая вкладка при этом открывается, сервер исправен, ошибка остаётся ошибкой.
     def respond(method, path, body):
@@ -557,6 +560,7 @@ def test_a_dead_site_does_not_mark_a_healthy_server_as_down(install, data):
 
 
 def test_a_client_error_from_the_server_is_not_a_broken_server(install, data):
+    choose_browser("Camofox")
     def respond(method, path, body):
         if method == "POST" and path == "/tabs":
             return 400, b'{"error": "bad url"}'
@@ -570,6 +574,7 @@ def test_a_client_error_from_the_server_is_not_a_broken_server(install, data):
 
 
 def test_other_tools_after_a_lost_connection_get_a_russian_error_and_later_calls_use_chromium(install, data):
+    choose_browser("Camofox")
     with UnixServer(emb.socket_path(), reply=REPLY):
         assert bc.is_camofox_mode() is True
         bc._get_session("mid")["tab_id"] = "t1"
@@ -601,6 +606,7 @@ def test_cdp_override_is_not_annotated(install, data, monkeypatch):
 
 
 def test_the_server_coming_back_returns_calls_to_camofox(install, data, monkeypatch):
+    choose_browser("Camofox")
     assert bc.is_camofox_mode() is False
     with UnixServer(emb.socket_path(), reply=REPLY):
         bc._health_cache = (0.0, "", True)  # срок пробы вышел
@@ -608,6 +614,7 @@ def test_the_server_coming_back_returns_calls_to_camofox(install, data, monkeypa
 
 
 def test_health_probe_is_reused_for_a_few_seconds(install, data):
+    choose_browser("Camofox")
     with patch.object(emb, "health", return_value=False) as probe:
         for _ in range(5):
             assert bc.is_camofox_mode() is False

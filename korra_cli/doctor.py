@@ -896,7 +896,7 @@ def check_embedded_camofox(issues: list[str]) -> None:
     """Состояние встроенного Camofox («Браузер с защитой от блокировок»).
 
     Показывается только в образе, где он установлен. Сервер принадлежит
-    установке и по умолчанию включён: работает, не отвечает или выключен
+    установке и включается по явному выбору профиля: работает, не отвечает или выключен
     выключателем установки (`korra tools camofox off`). У каждого состояния
     понятный следующий шаг.
     """
@@ -911,6 +911,10 @@ def check_embedded_camofox(issues: list[str]) -> None:
     state = info["state"]
     name = 'Браузер с защитой от блокировок (встроенный Camofox)'
 
+    if state == "unused":
+        check_info(f"{name}: {info['detail']}")
+        check_info(info["next"])
+        return
     if state == "running":
         check_ok(name, '(работает)')
         return

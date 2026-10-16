@@ -25,16 +25,16 @@ from tests.fakes.camofox_embedded import (  # noqa: F401  (фикстуры)
 )
 
 
-def test_server_belongs_to_the_installation_and_is_on_by_default(install, data):
-    assert emb.is_enabled()
+def test_server_is_off_until_a_profile_explicitly_selects_it(install, data):
+    assert not emb.is_enabled()
     assert not emb.is_disabled()
-    assert emb.endpoint() == emb.BASE_URL
-    assert not (data / "camofox").exists()  # включать ничего не нужно, файлов не требуется
+    assert emb.endpoint() == emb.BASE_URL  # адрес не определяет выбор браузера
+    assert not (data / "camofox").exists()
 
 
-def test_choosing_chromium_everywhere_does_not_switch_the_server_off(chromium_root, install, data):
-    assert emb.is_enabled()
-    assert emb.status()["state"] == "not_responding"  # сервис запущен s6, пока нет ответа
+def test_choosing_chromium_everywhere_leaves_the_service_off(chromium_root, install, data):
+    assert not emb.is_enabled()
+    assert emb.status()["state"] == "unused"
 
 
 def test_endpoint_is_empty_without_the_image(tmp_path, monkeypatch, data):
@@ -178,6 +178,7 @@ def test_the_switch_is_one_named_file_and_keeps_key_and_profiles(install, data):
     assert emb.endpoint() == emb.BASE_URL  # идентичность не зависит от того, запущен ли сервер
     assert emb.access_key() == key
     assert (data / "camofox" / "profiles").is_dir()
+    choose_browser("Camofox")
     emb.enable()
     assert emb.is_enabled() and not (data / "camofox" / "disabled").exists()
     emb.enable()  # повторное включение безвредно
@@ -222,7 +223,8 @@ def test_switch_off_finds_s6_svc_outside_the_service_path(install, data, monkeyp
 
 
 def test_the_switch_command_reports_every_state_in_russian(install, data, capsys):
-    assert emb.main(["status"]) == 1  # включён, но процесса нет
+    choose_browser("Camofox")
+    assert emb.main(["status"]) == 1  # выбран, но процесса нет
     assert emb.tools_command("off") == 0
     out = capsys.readouterr().out
     assert "выключен" in out and "korra tools camofox on" in out and "Chromium" in out
@@ -259,6 +261,7 @@ def test_health_rejects_a_green_http_status_with_an_unhealthy_body(install, data
 
 
 def test_restart_cooldown_is_shared_between_processes_but_not_installations(install, data, monkeypatch, tmp_path):
+    choose_browser("Camofox")
     # Настоящие subprocess + flock + s6-svc-заглушка; недоступный s6 тоже не
     # должен получать шквал сигналов от разных процессов и профилей.
     bin_dir = tmp_path / "bin"
@@ -286,6 +289,7 @@ def test_restart_cooldown_is_shared_between_processes_but_not_installations(inst
     # Другая установка на том же хосте имеет собственный cooldown.
     other = use_root(monkeypatch, short_dir())
     try:
+        choose_browser("Camofox")
         process = run()
         _, error = process.communicate(timeout=15)
         assert process.returncode == 0, error.decode()
@@ -295,6 +299,7 @@ def test_restart_cooldown_is_shared_between_processes_but_not_installations(inst
 
 
 def test_recovery_does_not_accept_green_health_from_the_old_process(install, data, monkeypatch):
+    choose_browser("Camofox")
     monkeypatch.setattr(emb, "in_container", lambda: True)
     monkeypatch.setattr(emb, "_RESTART_WAIT", 0.1)
     calls = []
@@ -351,6 +356,7 @@ def test_unix_session_ignores_proxy_environment(install, data, monkeypatch):
 def test_too_long_socket_path_is_reported_and_never_served(install, tmp_path, monkeypatch):
     deep = tmp_path.joinpath(*["d" * 20] * 6)
     use_root(monkeypatch, deep)
+    choose_browser("Camofox")
     assert len(os.fsencode(str(emb.socket_path()))) > emb.MAX_SOCKET_PATH
     assert "путь к сокету" in emb.socket_path_problem()
     emb.ensure_state()
@@ -366,6 +372,7 @@ def test_too_long_socket_path_is_reported_and_never_served(install, tmp_path, mo
 
 
 def test_status_running_and_not_responding(install, data):
+    choose_browser("Camofox")
     emb.ensure_state()
     with UnixServer(emb.socket_path()):
         info = emb.status()
@@ -434,7 +441,7 @@ def test_files_made_by_root_are_handed_to_the_data_owner(install, data, monkeypa
     assert all((uid, gid) == (owner.st_uid, owner.st_gid) for _, uid, gid in chowned)
 
 
-# ── Умолчание: профиль без выбора браузера пользуется встроенным Camofox ───
+# ── Явный выбор и изоляция настроек ──────────────────────────────────────
 
 
 def _save(root, name, browser):
@@ -444,45 +451,10 @@ def _save(root, name, browser):
         save_config({"browser": browser})
 
 
-def _uses_default(root, name):
-    with in_profile(root, name):
-        return emb.uses_default_browser()
-
-
-def test_a_profile_without_a_choice_uses_the_default_and_explicit_choices_are_kept(install, data):
-    _save(data, "plain", {})
-    _save(data, "chromium", {"cloud_provider": "local"})
-    _save(data, "lightpanda", {"cloud_provider": "local", "engine": "lightpanda"})
-    _save(data, "cloud", {"cloud_provider": "browserbase"})
-    _save(data, "cdp", {"cdp_url": "http://127.0.0.1:9222"})
-    _save(data, "driver", {"backend": "browser-use"})
-    _save(data, "real", {"use_real_profile": True})
-    names = ["plain", "chromium", "lightpanda", "cloud", "cdp", "driver", "real"]
-    assert {n: _uses_default(data, n) for n in names} == {
-        "plain": True,
-        "chromium": False,
-        "lightpanda": False,
-        "cloud": False,
-        "cdp": False,
-        "driver": False,
-        "real": False,
-    }
-
-
-def test_cloud_credentials_and_cdp_in_the_environment_keep_the_old_browser(install, data, monkeypatch):
-    assert _uses_default(data, None) is True
-    monkeypatch.setenv("BROWSERBASE_API_KEY", "k")
-    monkeypatch.setenv("BROWSERBASE_PROJECT_ID", "p")
-    assert _uses_default(data, None) is False
-    monkeypatch.delenv("BROWSERBASE_API_KEY")
-    monkeypatch.delenv("BROWSERBASE_PROJECT_ID")
-    monkeypatch.setenv("BROWSER_CDP_URL", "ws://127.0.0.1:9222/devtools/browser/x")
-    assert _uses_default(data, None) is False
-
-
-def test_unreadable_config_is_not_treated_as_no_choice(install, data):
+def test_unreadable_config_never_opts_into_camofox(install, data):
     (data / "config.yaml").write_text("browser: [unclosed\n")
-    assert _uses_default(data, None) is False
+    assert not emb.sync()
+    assert not emb.is_enabled()
 
 
 def test_external_camofox_url_is_read_from_the_current_profile_only(install, data, monkeypatch):
@@ -493,45 +465,31 @@ def test_external_camofox_url_is_read_from_the_current_profile_only(install, dat
 
 def test_nothing_changes_outside_the_image(tmp_path, monkeypatch, data):
     monkeypatch.setenv("KORRA_CAMOFOX_HOME", str(tmp_path / "missing"))
-    assert emb.uses_default_browser() is False
     assert emb.is_enabled() is False
     assert not (data / "camofox").exists()
 
 
-# ── Учёта потребителей больше нет ───────────────────────────────────────────
-
-
-def test_consumer_accounting_is_gone(install, data):
-    for name in ("consumers", "sync", "wants_embedded", "current_explicit_url", "_profile_homes", "_InHome", "_enabled_marker"):
-        assert not hasattr(emb, name), name
-    assert emb.main(["sync"]) == 2
+# ── Управление службой и выключатель установки ──────────────────────────
 
 
 def test_cloud_key_of_one_profile_cannot_switch_the_server_for_another(install, data, monkeypatch):
-    # Находка 1 ревью: ключ облака профиля A лишал профиль B встроенного
-    # браузера и останавливал сервер. Выбор профиля A больше не трогает сервер,
-    # а профиль B читает только свои настройки.
     _save(data, "a", {"cloud_provider": "local"})
-    _save(data, "fresh", {})
+    _save(data, "chosen", {"cloud_provider": "camofox"})
     (data / "profiles" / "a" / ".env").write_text("BROWSER_USE_API_KEY=fake-key-of-a\n")
-    emb.ensure_state()
     with in_profile(data, "a"):
         choose_browser("Local Browser")
     assert emb.is_enabled()
-    assert _uses_default(data, "fresh") is True
 
 
-def test_choosing_browsers_never_changes_the_server_switch(install, data, monkeypatch):
+def test_switching_last_consumer_off_stops_the_service(install, data, monkeypatch):
     calls = []
     monkeypatch.setattr(emb, "_s6_svc", lambda flag: calls.append(flag))
-    monkeypatch.setattr(emb, "in_container", lambda: True)
     for profile in ("a", "b", None):
         with in_profile(data, profile):
             choose_browser("Local Browser")
             choose_browser("Camofox")
             choose_browser("Local Browser")
-    assert emb.is_enabled() and calls == []
-    assert not (data / "camofox").exists()
+    assert not emb.is_enabled() and calls == ["-t", "-t", "-t"]
 
 
 def test_owner_switch_survives_any_browser_choice(install, data):
@@ -542,7 +500,7 @@ def test_owner_switch_survives_any_browser_choice(install, data):
     emb.enable()
     with in_profile(data, "a"):
         choose_browser("Local Browser")
-    assert emb.is_enabled()
+    assert not emb.is_enabled()
 
 
 def test_korra_tools_camofox_command_reaches_the_switch(install, data):
@@ -600,6 +558,7 @@ def test_deleting_a_profile_removes_its_saved_login_and_only_its_own(install, da
 
 
 def test_the_running_server_is_told_to_close_the_session_before_the_files_go(install, data):
+    choose_browser("Camofox")
     (data / "profiles" / "gone").mkdir(parents=True)
     user_id, folder = _saved_login(data, "gone")
     emb.ensure_state()
@@ -618,6 +577,7 @@ def test_the_running_server_is_told_to_close_the_session_before_the_files_go(ins
 
 
 def test_a_live_session_without_saved_files_is_closed_and_leaves_nothing_behind(install, data):
+    choose_browser("Camofox")
     # Вход ещё не сохранён на диск: сервер запишет его при закрытии сессии (так было в живой проверке).
     (data / "profiles" / "gone").mkdir(parents=True)
     _, folder = _saved_login(data, "gone")
