@@ -4,7 +4,17 @@ import uuid
 from types import SimpleNamespace
 from contextvars import ContextVar
 
-from gateway.slash_commands import GatewaySlashCommandsMixin
+
+_MCP_SERVICE_COMMANDS = frozenset({'/reload-mcp', '/reload_mcp', '/approve', '/always', '/cancel'})
+
+
+def is_web_mcp_command(user_message):
+    """Cheap gate: ordinary API turns need no command executor or gateway import."""
+    if not isinstance(user_message, str):
+        return False
+    parts = user_message.strip().split(maxsplit=1)
+    return bool(parts and parts[0].lower() in _MCP_SERVICE_COMMANDS)
+
 
 _active_command_run = ContextVar("mcp_command_run", default=None)
 
@@ -19,7 +29,9 @@ def _run_command(coro, active_run_id):
 
 class _WebMCPCommand:
     # Reuse the gateway's policy and opt-out persistence, with HTTP text replies.
-    _handle_reload_mcp_command = GatewaySlashCommandsMixin._handle_reload_mcp_command
+    async def _handle_reload_mcp_command(self, event):
+        from gateway.slash_commands import GatewaySlashCommandsMixin
+        return await GatewaySlashCommandsMixin._handle_reload_mcp_command(self, event)
 
     def __init__(self, adapter, session_key):
         self.adapter = adapter
@@ -62,7 +74,7 @@ class _WebMCPCommand:
             return f'Не удалось обновить MCP: {_redact_api_error_text(exc)}'
 
 
-def run_web_mcp_command(adapter, user_message, session_id, active_run_id=None):
+def run_web_mcp_command(adapter, user_message, session_id, active_run_id=None, *, owner=True):
     """Return a service reply, or None for an unrelated ordinary message.
 
     Called in the executor inside the request's profile scope. Pending
@@ -72,8 +84,10 @@ def run_web_mcp_command(adapter, user_message, session_id, active_run_id=None):
         return None
     parts = user_message.strip().split(maxsplit=1)
     command = parts[0].lower() if parts else ''
-    if command not in {'/reload-mcp', '/reload_mcp', '/approve', '/always', '/cancel'}:
+    if command not in _MCP_SERVICE_COMMANDS:
         return None
+    if not owner:
+        return 'Обновление MCP и его подтверждение доступны только владельцу установки.'
     if len(parts) > 1:
         if command in {'/reload-mcp', '/reload_mcp'}:
             return 'Команда /reload-mcp выполняется без аргументов.'

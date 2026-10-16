@@ -717,6 +717,25 @@ async def _handle_runs(
                 )
                 return
             with self._profile_scope(request_profile):
+                from gateway.web_mcp_command import is_web_mcp_command, run_web_mcp_command
+
+                command_reply = None
+                if is_web_mcp_command(user_message):
+                    command_reply = await asyncio.to_thread(
+                        run_web_mcp_command, self, user_message, session_id, run_id,
+                        owner=room_dispatch is None,
+                    )
+                if command_reply is not None:
+                    usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+                    _put_event_if_active({
+                        "event": "run.completed", "run_id": run_id,
+                        "timestamp": time.time(), "output": command_reply, "usage": usage,
+                    })
+                    self._set_run_status(
+                        run_id, "completed", output=command_reply, usage=usage,
+                        last_event="run.completed",
+                    )
+                    return
                 # MCP connections and registrations are profile-owned. Native
                 # runs may be the first entry to a hidden profile; discover
                 # before its tool snapshot, off-loop with copied context. A

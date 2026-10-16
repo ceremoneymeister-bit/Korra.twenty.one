@@ -25467,7 +25467,14 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 _cache_lock = getattr(self, "_agent_cache_lock", None)
                 if _cache_lock is not None and _cache:
                     with _cache_lock:
+                        # The session-key namespace is the persisted profile
+                        # ownership contract (build_session_key). Never rebuild
+                        # a sibling profile's snapshot from this registry scope.
+                        multiplex = getattr(getattr(self, "config", None), "multiplex_profiles", False)
+                        namespace = self._session_key_for_source(event.source).split(":")[:2]
                         for _sess_key, _entry in list(_cache.items()):
+                            if multiplex and _sess_key.split(":")[:2] != namespace:
+                                continue
                             try:
                                 _agent = _entry[0] if isinstance(_entry, tuple) else _entry
                             except Exception:

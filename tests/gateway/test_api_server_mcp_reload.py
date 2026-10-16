@@ -175,3 +175,131 @@ def test_unrelated_slashes_remain_ordinary_messages():
     assert run_web_mcp_command(None, '/unknown', 's1') is None
     assert run_web_mcp_command(None, '/approve extra', 's1') is None
     assert 'без аргументов' in run_web_mcp_command(None, '/reload-mcp extra', 's1')
+
+
+@pytest.mark.asyncio
+async def test_reload_is_transient_and_next_normal_turn_keeps_existing_history():
+    """Service commands follow learning commands' non-model history contract."""
+    from unittest.mock import MagicMock
+    adapter = APIServerAdapter(PlatformConfig(enabled=True, extra={'key': 'x' * 32}))
+    history = [{'role': 'user', 'content': 'старое поручение'},
+               {'role': 'assistant', 'content': 'старый результат'}]
+    with patch.object(adapter, '_create_agent', side_effect=AssertionError('MODEL CALLED')):
+        result, _ = await adapter._run_agent('/reload-mcp', history, session_id='history')
+        cancelled, _ = await adapter._run_agent('/cancel', history, session_id='history')
+    assert result['messages'] == cancelled['messages'] == history
+    agent = MagicMock()
+    agent.session_prompt_tokens = agent.session_completion_tokens = agent.session_total_tokens = 0
+    agent.run_conversation.return_value = {'final_response': 'продолжил', 'messages': history}
+    with patch.object(adapter, '_create_agent', return_value=agent):
+        await adapter._run_agent('продолжи поручение', history, session_id='history')
+    assert agent.run_conversation.call_args.kwargs['conversation_history'] == history
+    assert agent.run_conversation.call_args.kwargs['user_message'] == 'продолжи поручение'
+
+
+@pytest.mark.asyncio
+async def test_runs_route_reload_and_followup_approval_never_create_agent():
+    import asyncio
+    from aiohttp import web
+    from aiohttp.test_utils import TestClient, TestServer
+    key = 'test-key-' + 'x' * 32
+    adapter = APIServerAdapter(PlatformConfig(enabled=True, extra={'key': key}))
+    app = web.Application()
+    app['api_server_adapter'] = adapter
+    app.router.add_post('/v1/runs', adapter._handle_runs)
+    app.router.add_get('/v1/runs/{run_id}', adapter._handle_get_run)
+    async with TestClient(TestServer(app)) as client:
+        async def run(message):
+            response = await client.post('/v1/runs', headers={'Authorization': f'Bearer {key}'},
+                                         json={'input': message, 'session_id': 'runs-mcp-test'})
+            assert response.status == 202
+            run_id = (await response.json())['run_id']
+            task = adapter._active_run_tasks.get(run_id)
+            if task:
+                await asyncio.wait_for(task, timeout=10)
+            status = await client.get(f'/v1/runs/{run_id}', headers={'Authorization': f'Bearer {key}'})
+            return await status.json()
+        with patch.object(adapter, '_create_agent', side_effect=AssertionError('MODEL CALLED')):
+            first = await run('/reload-mcp')
+            assert first['status'] == 'completed'
+            assert '/approve' in first['output']
+            # Real helper and busy guard execute while this /v1/runs task is
+            # itself active. Its own task must not be mistaken for a neighbor.
+            with patch('gateway.mcp_reload.reload_mcp_servers', return_value=([], set(), set(), set(), 'NATIVE RELOADED')) as reload:
+                second = await run('/approve')
+            assert second['status'] == 'completed'
+            assert second['output'] == 'NATIVE RELOADED'
+            reload.assert_called_once()
+            assert second['usage']['total_tokens'] == 0
+
+
+def test_room_dispatch_cannot_resolve_owner_mcp_command():
+    from gateway.web_mcp_command import run_web_mcp_command
+    assert 'только владельцу' in run_web_mcp_command(None, '/reload-mcp', 'room', owner=False)
+    assert 'только владельцу' in run_web_mcp_command(None, '/always', 'room', owner=False)
+
+
+@pytest.mark.asyncio
+async def test_runs_room_reload_refuses_before_native_profile_operations():
+    import asyncio
+    from unittest.mock import AsyncMock
+    from aiohttp import web
+    from aiohttp.test_utils import TestClient, TestServer
+    adapter = APIServerAdapter(PlatformConfig(enabled=True, extra={'key': 'x' * 32}))
+    app = web.Application()
+    app['api_server_adapter'] = adapter
+    app.router.add_post('/v1/runs', adapter._handle_runs)
+    # Authentication/dispatch normalization has its own grant regressions.
+    # Supply its validated output here to exercise the real runs lifecycle.
+    async def normalized(request, body):
+        return {**body, 'hosted_room_dispatch': {'room_id': 'room-test'}}, None
+    with (
+        patch.object(adapter, '_normalize_room_dispatch', new=AsyncMock(side_effect=normalized)),
+        patch.object(adapter, '_create_agent', side_effect=AssertionError('MODEL CALLED')),
+        patch('gateway.mcp_reload.reload_mcp_servers', side_effect=AssertionError('RELOAD CALLED')),
+        patch('tools.mcp_tool.ensure_native_profile_mcp_tools', side_effect=AssertionError('DISCOVERY CALLED')),
+    ):
+        async with TestClient(TestServer(app)) as client:
+            response = await client.post('/v1/runs', headers={'Authorization': 'Bearer ' + 'x' * 32},
+                                         json={'input': '/reload-mcp', 'session_id': 'room-s1'})
+            assert response.status == 202
+            run_id = (await response.json())['run_id']
+            task = adapter._active_run_tasks.get(run_id)
+            if task:
+                await asyncio.wait_for(task, timeout=10)
+            assert adapter._run_statuses[run_id]['status'] == 'completed'
+            assert 'только владельцу' in adapter._run_statuses[run_id]['output']
+
+
+@pytest.mark.asyncio
+async def test_responses_stored_history_survives_service_turn_and_continuation():
+    from unittest.mock import MagicMock
+    from aiohttp import web
+    from aiohttp.test_utils import TestClient, TestServer
+    key = 'test-key-' + 'x' * 32
+    adapter = APIServerAdapter(PlatformConfig(enabled=True, extra={'key': key}))
+    app = web.Application()
+    app['api_server_adapter'] = adapter
+    app.router.add_post('/v1/responses', adapter._handle_responses)
+    history = [{'role': 'user', 'content': 'задача до команды'},
+               {'role': 'assistant', 'content': 'сохранённый ответ'}]
+    agent = MagicMock()
+    agent.session_prompt_tokens = agent.session_completion_tokens = agent.session_total_tokens = 0
+    agent.run_conversation.return_value = {'final_response': 'продолжение'}
+    async with TestClient(TestServer(app)) as client:
+        with patch.object(adapter, '_create_agent', side_effect=AssertionError('MODEL CALLED')):
+            response = await client.post('/v1/responses', headers={'Authorization': f'Bearer {key}'},
+                                         json={'model': 'korra-agent', 'input': history + [
+                                             {'role': 'user', 'content': '/reload-mcp'}]})
+            assert response.status == 200
+            body = await response.json()
+        # Responses storage carries the exact old history, without duplicating
+        # it or inserting the transient confirmation into the model transcript.
+        stored = adapter._response_store.get(body['id'])
+        assert stored['conversation_history'] == history
+        with patch.object(adapter, '_create_agent', return_value=agent):
+            next_response = await client.post('/v1/responses', headers={'Authorization': f'Bearer {key}'},
+                                              json={'model': 'korra-agent', 'input': 'продолжи',
+                                                    'previous_response_id': body['id']})
+            assert next_response.status == 200
+        assert agent.run_conversation.call_args.kwargs['conversation_history'] == history

@@ -174,3 +174,29 @@ async def test_reload_mcp_preserves_per_agent_toolset_overrides():
     assert captured_calls, "get_tool_definitions was never called to refresh the cache"
     assert captured_calls[0]["enabled_toolsets"] == ["safe"]
     assert captured_calls[0]["disabled_toolsets"] == ["terminal"]
+
+
+@pytest.mark.asyncio
+async def test_multiplex_reload_never_rebuilds_sibling_profile_snapshot():
+    """Session-key namespaces, not incidental agent attrs, own cached agents."""
+    runner = _make_runner_with_cached_agents(num_agents=0)
+    runner.config.multiplex_profiles = True
+    source = _make_source()
+    source.profile = "alpha"
+    alpha = SimpleNamespace(tools=["alpha-old"])
+    beta = SimpleNamespace(tools=["beta-old"])
+    default = SimpleNamespace(tools=["default-old"])
+    runner._agent_cache.update({
+        build_session_key(source, profile="alpha"): (alpha, "alpha-signature"),
+        build_session_key(source, profile="beta"): (beta, "beta-signature"),
+        build_session_key(source, profile="default"): (default, "default-signature"),
+    })
+    runner.session_store = None  # Use the documented source→namespace fallback.
+    with (
+        patch("gateway.mcp_reload.reload_mcp_servers", return_value=([], set(), set(), set(), "ok")),
+        patch("tools.mcp_tool.refresh_agent_mcp_tools") as refresh,
+    ):
+        await runner._execute_mcp_reload(MessageEvent(text="/reload-mcp", source=source))
+    refresh.assert_called_once_with(alpha, quiet_mode=True)
+    assert beta.tools == ["beta-old"]
+    assert default.tools == ["default-old"]
