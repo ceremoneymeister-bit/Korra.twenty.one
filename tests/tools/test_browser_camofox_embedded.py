@@ -68,13 +68,13 @@ def test_bundled_server_is_not_used_when_another_browser_is_selected(embedded):
     assert bc.is_camofox_mode() is False
 
 
-def test_profile_without_a_browser_choice_keeps_the_previous_browser(install, data):
+def test_profile_without_a_browser_choice_uses_the_default(install, data):
     with UnixServer(emb.socket_path(), reply=REPLY) as server:
-        assert bc.get_camofox_url() == ""
-        assert bc.is_camofox_mode() is False
-        assert bc._using_embedded_camofox() is False
-        assert bc._auth_headers() == {}
-    assert server.seen == []
+        assert bc.get_camofox_url() == emb.BASE_URL
+        assert bc.is_camofox_mode() is True
+        assert bc._using_embedded_camofox() is True
+        assert bc._auth_headers()
+    assert server.seen
 
 
 @pytest.mark.parametrize(
@@ -84,6 +84,9 @@ def test_profile_without_a_browser_choice_keeps_the_previous_browser(install, da
         {"cloud_provider": "browserbase"},
         {"cdp_url": "http://127.0.0.1:9222"},
         {"backend": "browser-use"},
+        {"backend": False},
+        {"engine": "chromium"},
+        {"use_real_profile": True},
     ],
 )
 def test_explicit_choices_keep_the_default_out(install, data, browser):
@@ -242,7 +245,7 @@ def test_server_switched_off_profile_without_a_choice_goes_to_chromium_without_a
     emb.enable()
     with UnixServer(emb.socket_path(), reply=REPLY):
         bc._health_cache = (0.0, "", True)
-        assert bc.is_camofox_mode() is False
+        assert bc.is_camofox_mode() is True
 
 
 def test_no_anonymous_session_is_ever_created_or_cached(embedded):
@@ -295,7 +298,7 @@ def test_external_server_keeps_the_original_connection_error(embedded, monkeypat
 # ── Два профиля одной установки ────────────────────────────────────────────
 
 
-def test_two_profiles_with_different_browsers_do_not_disturb_each_other(install, data):
+def test_two_profiles_with_different_browsers_do_not_disturb_each_other(chromium_root, install, data):
     with in_profile(data, "a"):
         choose_browser("Camofox")
         id_a = get_camofox_identity("a")
@@ -428,7 +431,7 @@ def test_connection_lost_after_a_good_probe_resets_the_cache_and_the_same_call_u
     assert "Chromium" in result["note"]
     assert bc._health_cache[2] is False  # кэш сброшен: следующие вызовы сразу в Chromium
     assert bc.is_camofox_mode() is False
-    assert bc._sessions == {} or "second" not in bc._sessions
+    assert not any(key[1] == "second" for key in bc._sessions)
 
 
 def test_server_answering_5xx_on_tab_creation_sends_the_call_to_chromium(install, data):

@@ -256,7 +256,7 @@ class TestConfiguredCamofoxIdentity:
         assert result is True
         import tools.browser_camofox as mod
         with mod._sessions_lock:
-            assert "task-1" not in mod._sessions
+            assert not mod._sessions
 
 
 class TestVncUrlDiscovery:
@@ -301,7 +301,7 @@ class TestCamofoxSoftCleanup:
         # Session should have been dropped from in-memory store
         import tools.browser_camofox as mod
         with mod._sessions_lock:
-            assert "task-1" not in mod._sessions
+            assert not mod._sessions
 
 
     def test_does_not_call_server_delete(self, tmp_path, monkeypatch):

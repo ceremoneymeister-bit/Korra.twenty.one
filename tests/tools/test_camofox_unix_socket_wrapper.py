@@ -553,3 +553,109 @@ def test_wrapper_refuses_to_start_when_the_xvfb_block_changed(run_dir):
     assert done.returncode == 1
     assert "не найден блок аргументов Xvfb" in done.stderr
     assert "args " not in done.stdout
+
+
+LIFECYCLE_SERVER = """
+let browser = { isConnected: () => true };
+const sessions = new Map();
+const sessionCreations = new Map();
+const order = [];
+async function ensureBrowser() {
+  clearBrowserIdleTimer();
+  if (!browser) browser = { isConnected: () => true };
+  return browser;
+}
+function clearBrowserIdleTimer() {}
+async function closeBrowserFully(reason) { order.push(reason); browser = null; }
+async function closeSession(userId, session, {
+  reason = 'session_closed',
+} = {}) {
+  const key = userId;
+  order.push('persist:' + key);
+  await new Promise(r => setTimeout(r, 50));
+  await session.context.close().catch(() => {});
+  sessions.delete(key);
+}
+const context = { async close() { order.push('context-close'); } };
+const a = { context }, b = { context };
+sessions.set('a', a); sessions.set('b', b);
+await closeSession('a', a);
+console.log('other-session-browser=' + !!browser);
+const closing = closeSession('b', b);
+// A new request during persistence must wait for teardown and start fresh.
+const next = ensureBrowser().then(() => order.push('next-browser'));
+await Promise.all([closing, next]);
+console.log(JSON.stringify(order));
+await closeSession('missing', { context });
+console.log('empty-browser=' + !!browser);
+"""
+
+
+def test_last_session_unloads_browser_after_persistence_and_before_next_launch(run_dir):
+    script = run_dir / 'lifecycle.mjs'
+    script.write_text(LIFECYCLE_SERVER)
+    done = subprocess.run(
+        ['node', str(WRAPPER), str(script)], capture_output=True, text=True, timeout=10,
+        env={**os.environ, 'CAMOFOX_UNIX_SOCKET':str(run_dir / 'server.sock')},
+    )
+    assert done.returncode == 0, done.stderr
+    assert 'other-session-browser=true' in done.stdout
+    assert 'empty-browser=false' in done.stdout
+    order = json.loads(next(line for line in done.stdout.splitlines() if line.startswith('[')))
+    assert order.index('persist:b') < order.index('idle_shutdown') < order.index('next-browser')
+
+
+@pytest.mark.parametrize('stage', ['context', 'teardown'])
+def test_lifecycle_deadline_terminates_instead_of_leaving_a_pending_factory(run_dir, stage):
+    prefix = LIFECYCLE_SERVER.split('const context = {')[0]
+    if stage == 'context':
+        prefix += """
+browser.newContext = () => new Promise(() => {});
+async function create() { const b = browser; const context = await b.newContext(contextOptions); }
+const contextOptions = {};
+setInterval(() => {}, 1000);
+await create();
+"""
+    else:
+        prefix += """
+const session = { context: { close: () => new Promise(() => {}) } };
+sessions.set('a', session);
+setInterval(() => {}, 1000);
+await closeSession('a', session);
+"""
+    script = run_dir / 'deadline.mjs'
+    script.write_text(prefix)
+    done = subprocess.run(
+        ['node', str(WRAPPER), str(script)], capture_output=True, text=True, timeout=9,
+        env={**os.environ, 'CAMOFOX_UNIX_SOCKET':str(run_dir / 'server.sock')},
+    )
+    assert done.returncode == 1
+    assert 'exceeded 5s; terminating service and browser tree' in done.stderr
+
+
+def test_reaper_preserves_last_page_until_storage_is_saved(run_dir):
+    # Execute the same reaper operations on a context whose storage needs a live page.
+    script = run_dir / 'reap.mjs'
+    prefix = LIFECYCLE_SERVER.split('const context = {')[0]
+    prefix = prefix.replace("order.push('persist:' + key);", "if (!session.page.alive) throw Error('storage lost'); order.push('persist:' + key);")
+    script.write_text(prefix + """
+const tabState = { page: { alive: true } };
+const tabId = 'tab';
+const group = new Map([[tabId, tabState]]);
+const session = { page: tabState.page, tabGroups: new Map([['group', group]]),
+  context: { async close() { tabState.page.alive = false; } } };
+sessions.set('user', session);
+function safePageClose(page) { page.alive = false; }
+function hasActivePageLeases() { return false; }
+            safePageClose(tabState.page);
+            group.delete(tabId);
+session.tabGroups.clear();
+await closeSession('user', session);
+console.log('storage-saved-and-browser-unloaded=' + !browser);
+""")
+    done = subprocess.run(
+        ['node', str(WRAPPER), str(script)], capture_output=True, text=True, timeout=9,
+        env={**os.environ, 'CAMOFOX_UNIX_SOCKET':str(run_dir / 'server.sock')},
+    )
+    assert done.returncode == 0, done.stderr
+    assert 'storage-saved-and-browser-unloaded=true' in done.stdout

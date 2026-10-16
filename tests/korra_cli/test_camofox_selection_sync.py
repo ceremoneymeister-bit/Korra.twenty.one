@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from korra_cli import camofox_embedded as emb
-from tests.fakes.camofox_embedded import install, data, in_profile, choose_browser  # noqa: F401
+from tests.fakes.camofox_embedded import install, data, in_profile, choose_browser, chromium_root  # noqa: F401
 
 
 @pytest.mark.parametrize('dotenv', [
@@ -51,7 +51,7 @@ def test_other_profiles_legacy_env_encoding_cannot_break_config_save(install, da
     assert emb.is_enabled()
 
 
-def test_hidden_deleted_and_symlink_profiles_do_not_start_service(install, data, tmp_path):
+def test_hidden_deleted_and_symlink_profiles_do_not_start_service(chromium_root, install, data, tmp_path):
     from korra_constants import mark_named_profile_deleted
 
     root = data / 'profiles'
@@ -80,7 +80,7 @@ def _write_choices(home, start, final):
 
 
 @pytest.mark.parametrize('final', ['local', 'camofox'])
-def test_concurrent_process_saves_converge_to_actual_selection(install, data, final):
+def test_concurrent_process_saves_converge_to_actual_selection(chromium_root, install, data, final):
     ctx = multiprocessing.get_context('fork')
     start = ctx.Event()
     homes = [data / 'profiles' / name for name in ('a', 'b', 'c', 'd')]
@@ -103,7 +103,7 @@ def test_concurrent_process_saves_converge_to_actual_selection(install, data, fi
                 proc.join(5)
 
 
-def test_only_last_consumer_signals_stop_and_startup_does_not(install, data):
+def test_only_last_consumer_signals_stop_and_startup_does_not(chromium_root, install, data):
     with patch.object(emb, '_s6_svc') as signal:
         with in_profile(data, 'a'):
             choose_browser('Camofox')
@@ -122,7 +122,7 @@ def test_only_last_consumer_signals_stop_and_startup_does_not(install, data):
         assert not emb.is_enabled()
 
 
-def test_external_url_of_one_profile_does_not_disable_another(install, data):
+def test_external_url_of_one_profile_does_not_disable_another(chromium_root, install, data):
     from korra_cli.config import save_env_value
     with in_profile(data, 'a'):
         choose_browser('Camofox')
@@ -136,7 +136,7 @@ def test_external_url_of_one_profile_does_not_disable_another(install, data):
 
 
 @pytest.mark.parametrize("selection", ["config", "env"])
-def test_scan_must_not_stop_a_continuously_used_service(install, data, selection):
+def test_scan_must_not_stop_a_continuously_used_service(chromium_root, install, data, selection):
     """B starts using Camofox BEFORE A stops; there is always a consumer."""
     import threading
     import fcntl
@@ -168,6 +168,16 @@ def test_scan_must_not_stop_a_continuously_used_service(install, data, selection
             assert resume_scan.wait(10)
         return result
 
+    original_config_read = read_user_config_raw
+
+    def controlled_config_read(path):
+        result = original_config_read(path)
+        if selection == "config" and path == b / 'config.yaml' and not b_read.is_set():
+            assert result['browser']['cloud_provider'] == 'local'
+            b_read.set()
+            assert resume_scan.wait(10)
+        return result
+
     writer = threading.local()
     original_flock = fcntl.flock
 
@@ -192,7 +202,7 @@ def test_scan_must_not_stop_a_continuously_used_service(install, data, selection
             return read_user_config_raw(b / 'config.yaml')['browser']['cloud_provider'] == 'camofox'
         return 'CAMOFOX_URL' not in (b / '.env').read_text()
 
-    with patch.object(emb, '_profile_setting', side_effect=controlled_read), patch.object(emb, '_s6_svc') as signal, patch.object(fcntl, 'flock', side_effect=observed_flock):
+    with patch('korra_cli.config.read_user_config_raw', side_effect=controlled_config_read), patch.object(emb, '_profile_setting', side_effect=controlled_read), patch.object(emb, '_s6_svc') as signal, patch.object(fcntl, 'flock', side_effect=observed_flock):
         with ThreadPoolExecutor(max_workers=3) as pool:
             scan = pool.submit(emb.sync)
             try:
@@ -220,7 +230,7 @@ def test_scan_must_not_stop_a_continuously_used_service(install, data, selection
         )
 
 
-def test_unreadable_profile_env_is_logged_and_cannot_break_another_save(install, data, caplog, monkeypatch):
+def test_unreadable_profile_env_is_logged_and_cannot_break_another_save(chromium_root, install, data, caplog, monkeypatch):
     from korra_cli.config import save_config, read_user_config_raw
 
     with in_profile(data, 'a') as a:

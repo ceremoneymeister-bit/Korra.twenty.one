@@ -644,7 +644,7 @@ TOOL_CATEGORIES = {
             {
                 "name": "Camofox",
                 "badge": 'бесплатно · локально',
-                "tag": 'Браузер для сайтов, которые не пускают роботов; включите, выбрав Camofox',
+                "tag": 'Браузер для сайтов, которые не пускают роботов; входы сохраняются отдельно от Chromium',
                 # В образе Korra сервер встроен: адрес и ключ определяются сами,
                 # владельцу ничего вводить не нужно. Вне образа остаётся запрос адреса.
                 "env_vars": _camofox_env_vars(),
@@ -3503,6 +3503,16 @@ def _visible_providers(
     # local fallback, and the REST-API anti-detection backend respectively).
     if cat.get("name") == "Browser Automation":
         visible.extend(_plugin_browser_providers())
+        from korra_cli import camofox_embedded
+
+        if camofox_embedded.is_installed() and not camofox_embedded.is_disabled():
+            visible = [dict(row) for row in visible]
+            for row in visible:
+                if row.get("name") == "Camofox":
+                    row["badge"] = 'по умолчанию · бесплатно · локально'
+                elif row.get("name") == "Local Browser":
+                    row["badge"] = 'бесплатно · локально'
+            visible.sort(key=lambda row: row.get("name") != "Camofox")
 
     # Inject plugin-registered TTS backends (issue #30398). Plugin rows
     # render BELOW the 10 hardcoded built-in rows. Built-in shadowing
@@ -4135,6 +4145,11 @@ def _is_provider_active(
         # Browser Use mode composes with the provider (driver over the
         # provider's CDP endpoint) — don't deactivate the provider row.
         current = cfg_get(config, "browser", "cloud_provider")
+        from tools.tool_backend_helpers import read_selection
+
+        if read_selection("browser") is None:
+            if get_nous_subscription_features(config, force_fresh=force_fresh).browser.current_provider == "Camofox":
+                current = "camofox"
         if provider["browser_provider"] != current:
             return False
         # Two local rows differ only by engine ("Local Browser" vs

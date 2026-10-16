@@ -48,7 +48,7 @@ def test_service_follows_the_selected_browser(install, data, other):
     assert emb.is_enabled() == (other == "Camofox")
 
 
-def test_service_stays_on_while_another_profile_uses_it(install, data):
+def test_service_stays_on_while_another_profile_uses_it(chromium_root, install, data):
     with in_profile(data, "a"):
         choose_browser("Camofox")
     with in_profile(data, "b"):
@@ -161,12 +161,12 @@ def _rows(config=None):
         return tc._visible_providers(cat, config or {})
 
 
-def test_in_the_image_camofox_is_an_optional_browser(install, data):
+def test_in_the_image_camofox_is_the_default_browser(install, data):
     rows = _rows()
     camofox = next(r for r in rows if r["name"] == "Camofox")
-    assert "по умолчанию" not in camofox["badge"] and "рекомендуется" not in camofox["badge"]
+    assert "по умолчанию" in camofox["badge"]
     assert "для сайтов, которые не пускают роботов" in camofox["tag"]
-    assert rows[0]["name"] == "Local Browser"
+    assert rows[0]["name"] == "Camofox"
 
 
 def test_outside_the_image_nothing_changes(tmp_path, monkeypatch):
@@ -177,12 +177,12 @@ def test_outside_the_image_nothing_changes(tmp_path, monkeypatch):
     assert "по умолчанию" not in next(r for r in rows if r["name"] == "Camofox")["badge"]
 
 
-def test_unconfigured_profile_does_not_show_camofox_as_active(install, data):
+def test_unconfigured_profile_shows_camofox_as_active(install, data):
     from korra_cli.config import load_config
 
     config = load_config()
     camofox = next(r for r in _rows() if r["name"] == "Camofox")
-    assert not tc._is_provider_active(camofox, config)
+    assert tc._is_provider_active(camofox, config)
 
 
 def test_chromium_is_one_action_and_the_row_follows_it(install, data):
@@ -216,16 +216,16 @@ def _no_foreign_env(monkeypatch):
         monkeypatch.delenv(key, raising=False)
 
 
-def test_new_profile_keeps_the_previous_browser(install, data, monkeypatch):
+def test_new_profile_uses_default_camofox(install, data, monkeypatch):
     from tools import browser_camofox as bc
     from korra_cli import profiles
 
     _no_foreign_env(monkeypatch)
     with patch.object(profiles, "create_wrapper_script"):
         profiles.create_profile("fresh", no_alias=True, no_skills=True)
-    assert not emb.is_enabled()
+    assert emb.is_enabled()
     with in_profile(data, "fresh"):
-        assert bc.get_camofox_url() == ""
+        assert bc.get_camofox_url() == emb.BASE_URL
 
 
 def test_review2_finding_1_cloud_key_of_another_profile_changes_nothing(install, data, monkeypatch):
@@ -242,7 +242,7 @@ def test_review2_finding_1_cloud_key_of_another_profile_changes_nothing(install,
     assert emb.is_enabled()
 
 
-def test_review2_finding_2_published_profile_enables_the_service(install, data, monkeypatch):
+def test_review2_finding_2_published_profile_enables_the_service(chromium_root, install, data, monkeypatch):
     from tools import browser_camofox as bc
     from korra_cli import profiles
     from korra_cli.profile_creation import publish_profile
