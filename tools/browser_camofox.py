@@ -89,19 +89,24 @@ def _explicit_camofox_url() -> str:
 def _embedded_camofox_endpoint() -> str:
     """Address of the Camofox server bundled in the Korra image, or ``""``.
 
-    Used only when this profile selected Camofox and no external CAMOFOX_URL
-    is set. The address and saved identity do not depend on server availability;
+    Used by default in the image or when this profile selected Camofox,
+    unless an explicit browser/CDP/external URL overrides it. The address and
+    saved identity do not depend on server availability;
     an installation switched off by its owner gives a clear error.
     """
     try:
         from korra_cli import camofox_embedded
-        from tools.tool_backend_helpers import read_selection
+        from korra_cli.config import read_raw_config_readonly
 
         endpoint = camofox_embedded.endpoint()
         if not endpoint:
             return ""
-        selected = read_selection("browser")
-        if selected == "camofox":
+        cfg = read_raw_config_readonly() or {}
+        browser = cfg.get("browser") or {}
+        if camofox_embedded.uses_embedded(
+            browser, external_url=_explicit_camofox_url(),
+            cdp_url=os.getenv("BROWSER_CDP_URL", "").strip(),
+        ):
             return endpoint
         return ""
     except Exception:  # pragma: no cover — helpers are in-repo
@@ -114,7 +119,7 @@ def _using_embedded_camofox() -> bool:
 
 _FALLBACK_NOTE = (
     "Встроенный браузер с защитой от блокировок сейчас не отвечает, поэтому страница открыта обычным "
-    "Chromium (без сохранённых входов этого профиля). Автоматическое восстановление не помогло; "
+    "Chromium (входы из Camofox в него не переносятся). Автоматическое восстановление не помогло; "
     "повторите позже или выполните `korra doctor`."
 )
 _HEALTH_TTL = 5.0
@@ -472,8 +477,8 @@ def _rewrite_loopback_url_for_camofox(url: str) -> tuple[str, Optional[Dict[str,
 # ---------------------------------------------------------------------------
 # Session management
 # ---------------------------------------------------------------------------
-# Maps task_id -> {"user_id": str, "tab_id": str|None}
-_sessions: Dict[str, Dict[str, Any]] = {}
+# Maps (profile home, task_id) -> {"user_id": str, "tab_id": str|None}
+_sessions: Dict[tuple, Dict[str, Any]] = {}
 _sessions_lock = threading.Lock()
 
 
@@ -529,9 +534,12 @@ def _get_session(task_id: Optional[str]) -> Dict[str, Any]:
 
     _update_session_activity(task_id)
     _start_browser_cleanup_thread()
+    from korra_constants import get_hermes_home
+
+    cache_key = (str(get_hermes_home()), task_id)
     with _sessions_lock:
-        if task_id in _sessions:
-            return _adopt_existing_tab(_sessions[task_id])
+        if cache_key in _sessions:
+            return _adopt_existing_tab(_sessions[cache_key])
 
         _require_embedded_ready()
         camofox_cfg = _get_camofox_config()
@@ -561,7 +569,7 @@ def _get_session(task_id: Optional[str]) -> Dict[str, Any]:
                 "managed": False,
                 "adopt_existing_tab": False,
             }
-        _sessions[task_id] = session
+        _sessions[cache_key] = session
         return _adopt_existing_tab(session)
 
 
@@ -616,6 +624,11 @@ def _server_cannot_open_tab(session: Dict[str, Any], exc: Exception) -> bool:
         status = exc.response.status_code if exc.response is not None else 0
         if status < 500:
             return False
+        try:
+            if exc.response.json().get("code") == "admission_rejected":
+                return False
+        except (ValueError, AttributeError):
+            pass
     try:
         probe = _request(
             "post",
@@ -638,9 +651,11 @@ def _server_cannot_open_tab(session: Dict[str, Any], exc: Exception) -> bool:
 
 def _drop_session(task_id: Optional[str]) -> Optional[Dict[str, Any]]:
     """Remove and return session info."""
-    task_id = task_id or "default"
+    from korra_constants import get_hermes_home
+
+    cache_key = (str(get_hermes_home()), task_id or "default")
     with _sessions_lock:
-        return _sessions.pop(task_id, None)
+        return _sessions.pop(cache_key, None)
 
 
 def camofox_soft_cleanup(task_id: Optional[str] = None) -> bool:
@@ -697,12 +712,34 @@ def _require_embedded_ready() -> None:
         raise CamofoxUnreachable(_connection_error_text())
 
 
+class CamofoxStaleTab(RuntimeError):
+    """The page expired; the model must navigate and obtain fresh element refs."""
+
+
 def _request(method: str, *args: Any, **kwargs: Any) -> requests.Response:
     embedded = _using_embedded_camofox()
     try:
         if embedded:
-            return _embedded_session().request(method.upper(), *args, **kwargs)
-        return getattr(requests, method)(*args, **kwargs)
+            response = _embedded_session().request(method.upper(), *args, **kwargs)
+        else:
+            response = getattr(requests, method)(*args, **kwargs)
+        if response.status_code in (404, 410):
+            from urllib.parse import urlsplit
+
+            parts = urlsplit(str(args[0])).path.split("/")
+            if len(parts) >= 4 and parts[1] == "tabs":
+                with _sessions_lock:
+                    for session in _sessions.values():
+                        if session.get("tab_id") == parts[2]:
+                            session["tab_id"] = None
+                            if parts[3] != "navigate":
+                                url = session.get("url")
+                                target = f" to {url}" if url else " to the task's last URL"
+                                raise CamofoxStaleTab(
+                                    "Browser tab expired during inactivity. Call browser_navigate"
+                                    + target + ", then take a fresh snapshot before continuing; old element refs are invalid."
+                                )
+        return response
     except requests.ConnectionError:
         if embedded:
             _mark_embedded_down()
@@ -797,20 +834,23 @@ def camofox_navigate(url: str, task_id: Optional[str] = None) -> str:
                     timeout=60,
                 )
             except requests.HTTPError as e:
-                if e.response is not None and e.response.status_code == 404:
+                if e.response is not None and e.response.status_code in (404, 410):
                     logger.warning(
-                        "Camofox tab %s returned 404 — tab was garbage collected. "
-                        "Creating a fresh tab.",
-                        session["tab_id"],
+                        "Camofox tab expired (%s); creating a fresh tab.",
+                        e.response.status_code,
                     )
                     session["tab_id"] = None
                     session = _ensure_tab(task_id, browser_url)
                     data = {"ok": True, "url": browser_url}
                 else:
                     raise
+        session["url"] = data.get("url", browser_url)
+        from tools.browser_tool import _pin_page_browser
+
+        _pin_page_browser(task_id, "camofox")
         result = {
             "success": True,
-            "url": data.get("url", browser_url),
+            "url": session["url"],
             "title": data.get("title", ""),
         }
         if rewrite_info:
@@ -849,7 +889,14 @@ def camofox_navigate(url: str, task_id: Optional[str] = None) -> str:
 
         return json.dumps(result)
     except requests.HTTPError as e:
-        return tool_error(f"Navigation failed: {e}", success=False)
+        detail = str(e)
+        try:
+            payload = e.response.json()
+            if payload.get("code") == "admission_rejected" or e.response.status_code == 429:
+                detail = payload.get("error", detail) + ". Close unused browser sessions or wait for idle cleanup, then navigate again."
+        except (ValueError, AttributeError):
+            pass
+        return tool_error(f"Navigation failed: {detail}", success=False)
     except requests.ConnectionError:
         fallback = _navigate_with_chromium(url, task_id)
         if fallback is not None:

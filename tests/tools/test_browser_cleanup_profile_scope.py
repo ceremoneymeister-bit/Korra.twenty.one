@@ -73,7 +73,7 @@ def test_camofox_sessions_are_reaped_in_their_scope(setup, caplog):
     bt._session_last_activity["alice"] = 0
     reap()
     assert sent == [("delete", f"http://alice.invalid:9377/sessions/{users['alice']}", "alice")]
-    assert "bob" in cf._sessions
+    assert (str(root / "bob"), "bob") in cf._sessions
     bt._session_last_activity["bob"] = 0
     reap()
     assert sent[-1] == ("delete", f"http://bob.invalid:9377/sessions/{users['bob']}", "bob")

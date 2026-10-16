@@ -85,6 +85,7 @@ const CONTEXT_HEALTH_ROUTE = `
 let korraContextProbe = null;
 let korraContextFailed = false;
 async function korraContextReady() {
+  if (typeof korraSessionClosures !== 'undefined') await Promise.all([...korraSessionClosures]);
   if (korraContextFailed) return false;
   if (!browser || !browser.isConnected()) return true;
   if (!korraContextProbe) {
@@ -118,6 +119,39 @@ app.get('/health', async (req, res) => {
   }
 `;
 
+// Reaper closes the last context but retains the shared Firefox. Do not
+// reuse that empty process: persist first, close it through upstream's own
+// process-tree cleanup, then let the next request launch lazily. Serialize
+// teardown with ensureBrowser so a new profile cannot acquire the dying one.
+const SESSION_CLOSE = 'async function closeSession(userId, session, {';
+const SESSION_CLEANUP = '  await session.context.close().catch(() => {});\n  sessions.delete(key);';
+const BROWSER_ENSURE = 'async function ensureBrowser() {\n  clearBrowserIdleTimer();';
+const REAP_PAGE = '            safePageClose(tabState.page);\n            group.delete(tabId);';
+const CONTEXT_CREATE = 'const context = await b.newContext(contextOptions);';
+const SESSION_LIFECYCLE = `
+const korraSessionClosures = new Set();
+function korraBounded(work, stage) {
+  let timer;
+  const expired = new Promise(() => {
+    timer = setTimeout(() => {
+      console.error('[camofox] ' + stage + ' exceeded 5s; terminating service and browser tree');
+      killBrowserChildren(true);
+      process.exit(1);
+    }, 5000);
+  });
+  return Promise.race([work, expired]).finally(() => clearTimeout(timer));
+}
+async function closeSession(userId, session, options) {
+  if (!session) return;
+  if (session._korraClose) return session._korraClose;
+  session._closing = true;
+  const work = korraBounded(korraCloseSession(userId, session, options), 'session teardown');
+  korraSessionClosures.add(work);
+  session._korraClose = work.finally(() => korraSessionClosures.delete(work));
+  return session._korraClose;
+}
+async function korraCloseSession(userId, session, {`;
+
 // Виртуальный экран. camoufox-js запускает Xvfb с -ac -nolisten tcp: файловый сокет
 // в /tmp контейнера остаётся, но Xvfb ещё слушает абстрактный сокет
 // @/tmp/.X11-unix/X*, а он живёт в сетевом пространстве имён хоста и доступен всем
@@ -147,6 +181,28 @@ registerHooks({
       text = text.replace(HEALTH_ROUTE, () => CONTEXT_HEALTH_ROUTE);
     } else if (/[\\/]@askjo[\\/]camofox-browser[\\/]server\.js$/.test(serverScript)) {
       die('блок /health в server.js не найден: проверка context/page не установлена');
+    }
+    const lifecycle = [SESSION_CLOSE, SESSION_CLEANUP, BROWSER_ENSURE, CONTEXT_CREATE, REAP_PAGE];
+    const pinned = /[\\/]@askjo[\\/]camofox-browser[\\/]server\.js$/.test(serverScript);
+    if (pinned && lifecycle.some(block => text.split(block).length !== 2)) {
+      die('блок жизненного цикла server.js изменился: безопасная выгрузка Firefox не установлена');
+    }
+    if (text.includes(SESSION_CLOSE)) {
+      text = text.replace(SESSION_CLOSE, () => SESSION_LIFECYCLE)
+        .replace(SESSION_CLEANUP, () => `  await session.context.close().catch(() => {});
+  if (sessions.get(key) === session) sessions.delete(key);
+  if (sessions.size === 0) {
+    await closeBrowserFully('idle_shutdown');
+  }`)
+        .replace(BROWSER_ENSURE, () => `async function ensureBrowser() {
+  await Promise.all([...korraSessionClosures]);
+  clearBrowserIdleTimer();`)
+        .replace(REAP_PAGE, () => `            // Keep the final page alive until the persistence hook has read storage.
+            if (group.size !== 1 || session.tabGroups.size !== 1 || hasActivePageLeases(session)) {
+              safePageClose(tabState.page);
+            }
+            group.delete(tabId);`)
+        .replace(CONTEXT_CREATE, () => "const context = await korraBounded(b.newContext(contextOptions), 'newContext');");
     }
     if (!text.includes(PREWARM_BLOCK)) {
       console.error('[camofox] блок прогрева в server.js не найден: браузер запустится при старте сервера');

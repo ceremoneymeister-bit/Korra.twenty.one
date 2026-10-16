@@ -4191,6 +4191,21 @@ def evaluate_url_safety(url: str) -> Optional[dict]:
     return None
 
 
+_page_browser_backends: Dict[tuple, str] = {}
+
+
+def _pin_page_browser(task_id: Optional[str], backend: str) -> None:
+    _page_browser_backends[(str(get_hermes_home()), task_id or "default")] = backend
+
+
+def _is_camofox_page(task_id: Optional[str]) -> bool:
+    """Actions follow the page opened by this task, even after health recovers."""
+    if _get_cdp_override_raw():
+        return False
+    backend = _page_browser_backends.get((str(get_hermes_home()), task_id or "default"))
+    return backend == "camofox" if backend else _is_camofox_mode()
+
+
 def _camofox_fallback_note() -> str:
     """Пометка агенту: встроенный Camofox не ответил, вызов идёт через Chromium."""
     try:
@@ -4396,6 +4411,7 @@ def _browser_navigate(url: str, task_id: Optional[str] = None) -> str:
         # Failed opens and blocked redirects must not retarget follow-up clicks
         # or snapshots to a newly-created but irrelevant session.
         _last_active_session_key[effective_task_id] = nav_session_key
+        _pin_page_browser(task_id, "chromium")
         _copy_fallback_warning(response, result)
 
         # Detect common "blocked" page patterns from title/url
@@ -4470,7 +4486,7 @@ def browser_snapshot(
     Returns:
         JSON string with page snapshot
     """
-    if _is_camofox_mode():
+    if _is_camofox_page(task_id):
         from tools.browser_camofox import camofox_snapshot
         return camofox_snapshot(full, task_id)
 
@@ -4568,7 +4584,7 @@ def browser_click(ref: str, task_id: Optional[str] = None) -> str:
     Returns:
         JSON string with click result
     """
-    if _is_camofox_mode():
+    if _is_camofox_page(task_id):
         from tools.browser_camofox import camofox_click
         return camofox_click(ref, task_id)
 
@@ -4609,7 +4625,7 @@ def browser_type(ref: str, text: str, task_id: Optional[str] = None) -> str:
     Returns:
         JSON string with type result
     """
-    if _is_camofox_mode():
+    if _is_camofox_page(task_id):
         from tools.browser_camofox import camofox_type
         return camofox_type(ref, text, task_id)
 
@@ -4678,13 +4694,15 @@ def browser_scroll(direction: str, task_id: Optional[str] = None) -> str:
     # ~500px is roughly half a viewport of travel.
     _SCROLL_PIXELS = 500
 
-    if _is_camofox_mode():
+    if _is_camofox_page(task_id):
         from tools.browser_camofox import camofox_scroll
         # Camofox REST API doesn't support pixel args; use repeated calls
         _SCROLL_REPEATS = 5
         result = None
         for _ in range(_SCROLL_REPEATS):
             result = camofox_scroll(direction, task_id)
+            if not json.loads(result).get("success"):
+                break
         return result
 
     effective_task_id = _last_session_key(task_id or "default")
@@ -4714,7 +4732,7 @@ def browser_back(task_id: Optional[str] = None) -> str:
     Returns:
         JSON string with navigation result
     """
-    if _is_camofox_mode():
+    if _is_camofox_page(task_id):
         from tools.browser_camofox import camofox_back
         return camofox_back(task_id)
 
@@ -4766,7 +4784,7 @@ def browser_press(key: str, task_id: Optional[str] = None) -> str:
     Returns:
         JSON string with key press result
     """
-    if _is_camofox_mode():
+    if _is_camofox_page(task_id):
         from tools.browser_camofox import camofox_press
         return camofox_press(key, task_id)
 
@@ -4830,7 +4848,7 @@ def browser_console(clear: bool = False, expression: Optional[str] = None, task_
         return _browser_eval(expression, task_id)
 
     # --- Console output mode (original behaviour) ---
-    if _is_camofox_mode():
+    if _is_camofox_page(task_id):
         from tools.browser_camofox import camofox_console
         return camofox_console(clear, task_id)
 
@@ -5122,10 +5140,10 @@ def _browser_eval(expression: str, task_id: Optional[str] = None) -> str:
                 ),
             }, ensure_ascii=False)
 
-    # Camofox keeps its own raw-``task_id``-keyed session map, so pass the raw
+    # Camofox keeps its own profile/task-keyed session map, so pass the raw
     # id (matching every other Camofox tool) rather than the resolved
     # agent-browser session key.  The literal pre-scan above already ran.
-    if _is_camofox_mode():
+    if _is_camofox_page(task_id):
         return _camofox_eval(expression, task_id)
 
     # ── Private-network guard (eval return-value path) ──────────────────────
@@ -5271,7 +5289,7 @@ def _camofox_current_page_private_url(tab_id: str, user_id: str) -> Optional[str
     also changing the sibling).
     """
     try:
-        from tools.browser_camofox import _post
+        from tools.browser_camofox import CamofoxStaleTab, _post
 
         data = _post(
             f"/tabs/{tab_id}/evaluate",
@@ -5281,6 +5299,8 @@ def _camofox_current_page_private_url(tab_id: str, user_id: str) -> Optional[str
         current_url = current_url.strip().strip('"').strip("'")
         if current_url and (_is_always_blocked_url(current_url) or not _is_safe_url(current_url)):
             return current_url
+    except CamofoxStaleTab:
+        raise
     except Exception as exc:
         logger.debug("_camofox_current_page_private_url: probe failed (%s)", exc)
     return None
@@ -5392,7 +5412,7 @@ def browser_get_images(task_id: Optional[str] = None) -> str:
     Returns:
         JSON string with list of images (src and alt)
     """
-    if _is_camofox_mode():
+    if _is_camofox_page(task_id):
         from tools.browser_camofox import camofox_get_images
         return camofox_get_images(task_id)
 
@@ -5479,7 +5499,7 @@ def browser_vision(question: str, annotate: bool = False, task_id: Optional[str]
         A JSON string with vision analysis results and screenshot_path, or a
         multimodal tool-result envelope carrying the screenshot and metadata.
     """
-    if _is_camofox_mode():
+    if _is_camofox_page(task_id):
         from tools.browser_camofox import camofox_vision
         return camofox_vision(question, annotate, task_id)
 
@@ -5878,6 +5898,8 @@ def cleanup_browser(task_id: Optional[str] = None) -> None:
         with _cleanup_lock:
             _session_last_activity.pop(session_key, None)
             _session_cleanup_contexts.pop(session_key, None)
+
+    _page_browser_backends.pop((str(get_hermes_home()), bare_task_id), None)
 
     # Drop stale last-active ownership. Cleaning a bare task drops its binding;
     # cleaning a sidecar drops the binding only if that sidecar was still the

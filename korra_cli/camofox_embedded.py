@@ -1,11 +1,11 @@
 """Встроенный Camofox («Браузер с защитой от блокировок») в коробке Korra.
 
 Образ содержит Camofox в ``/opt/camofox`` (см. Dockerfile). Сервер запускается,
-только если хотя бы один профиль явно выбрал ``browser.cloud_provider: camofox``
-без внешнего адреса. Без выбора действует прежнее определение браузера.
+если хотя бы один профиль использует встроенный браузер: по умолчанию или
+по явному выбору ``browser.cloud_provider: camofox``. Явный другой браузер сохраняется.
 Состояние живёт в ``<корень данных>/camofox`` и переживает пересоздание контейнера:
 
-* ``enabled`` — кэш явного выбора профилей, сверяется при сохранении настроек,
+* ``enabled`` — кэш выбора профилей, сверяется при сохранении настроек,
   создании/импорте/удалении профиля и запуске службы;
 * ``disabled`` — выключатель установки (поддержка, слабый сервер);
 * ``server.sock`` — Unix-сокет сервера (0600) в каталоге 0700;
@@ -322,7 +322,7 @@ def selection_update(*, signal: bool = True):
 
 
 def sync(*, signal: bool = True) -> bool:
-    """Сверить маркер службы с явным выбором профилей, не меняя их настройки."""
+    """Сверить маркер службы с выбором профилей, не меняя их настройки."""
     if not is_installed():
         return False
     try:
@@ -334,11 +334,28 @@ def sync(*, signal: bool = True) -> bool:
         return False
 
 
+def uses_embedded(browser: dict, *, external_url: str = "", cdp_url: str = "") -> bool:
+    """One read-only choice rule for runtime, picker and service synchronization."""
+    from utils import is_truthy_value
+
+    if external_url or cdp_url or browser.get("cdp_url"):
+        return False
+    if is_truthy_value(browser.get("use_gateway"), default=False):
+        return False
+    selected = str(browser.get("cloud_provider") or "").strip().lower()
+    if selected:
+        return selected == "camofox"
+    return (
+        browser.get("backend") in (None, "")
+        and browser.get("engine") in (None, "", "auto")
+        and not is_truthy_value(browser.get("use_real_profile"), default=False)
+        and not is_disabled()
+    )
+
+
 def _sync_selection(*, signal: bool) -> None:
     """Под selection.lock читаем только файлы профилей, без process env/scope."""
     from korra_constants import named_profile_is_deleted
-    from utils import is_truthy_value
-
     root = state_dir().parent
     homes = [root]
     profiles = root / "profiles"
@@ -346,12 +363,22 @@ def _sync_selection(*, signal: bool) -> None:
         homes.extend(h for h in profiles.iterdir() if h.is_dir()
                      and not h.is_symlink() and not h.name.startswith(".")
                      and not named_profile_is_deleted(h))
-    wanted = any(
-        _profile_setting(h, "", ("browser", "cloud_provider")).strip().lower() == "camofox"
-        and not is_truthy_value(_profile_setting(h, "", ("browser", "use_gateway")), default=False)
-        and not _profile_setting(h, "CAMOFOX_URL", ())
-        for h in homes
-    )
+
+    def consumes(home: Path) -> bool:
+        from korra_cli.config import read_user_config_raw
+        import yaml
+
+        try:
+            browser = read_user_config_raw(home / "config.yaml").get("browser") or {}
+            return uses_embedded(
+                browser, external_url=_profile_setting(home, "CAMOFOX_URL", ()),
+                cdp_url=_profile_setting(home, "BROWSER_CDP_URL", ()),
+            )
+        except (yaml.YAMLError, TypeError, AttributeError):
+            # Unknown choice is not consent to replace an explicit browser.
+            return False
+
+    wanted = any(consumes(h) for h in homes)
     marker = state_dir() / "enabled"
     was_enabled = marker.is_file()
     if wanted:
@@ -655,6 +682,10 @@ def server_env() -> Dict[str, str]:
             "CAMOFOX_UPLOADS_DIR": str(root / "uploads"),
             "CAMOUFOX_INSTALL_DIR": str(browser_dir()),
             "NODE_ENV": "production",
+            # One shared Firefox per installation, at most three working tabs.
+            "MAX_SESSIONS": "3",
+            "MAX_TABS_PER_SESSION": "3",
+            "MAX_TABS_GLOBAL": "3",
         }
     )
     idle = os.environ.get("KORRA_CAMOFOX_IDLE_TIMEOUT_MS", "").strip()

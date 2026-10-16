@@ -484,6 +484,7 @@ def test_cloud_key_of_one_profile_cannot_switch_the_server_for_another(install, 
 def test_switching_last_consumer_off_stops_the_service(install, data, monkeypatch):
     calls = []
     monkeypatch.setattr(emb, "_s6_svc", lambda flag: calls.append(flag))
+    choose_browser("Local Browser")
     for profile in ("a", "b", None):
         with in_profile(data, profile):
             choose_browser("Local Browser")
@@ -492,7 +493,7 @@ def test_switching_last_consumer_off_stops_the_service(install, data, monkeypatc
     assert not emb.is_enabled() and calls == ["-t", "-t", "-t"]
 
 
-def test_owner_switch_survives_any_browser_choice(install, data):
+def test_owner_switch_survives_any_browser_choice(chromium_root, install, data):
     emb.disable(signal=False)
     with in_profile(data, "a"):
         choose_browser("Camofox")
