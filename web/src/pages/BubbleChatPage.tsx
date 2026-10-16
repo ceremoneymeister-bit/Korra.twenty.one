@@ -1609,7 +1609,20 @@ export default function BubbleChatPage({
   const handleRetry = (target: PendingMessageTarget) => {
     const pending = loadChatOutboxRecords(agentProfile ?? "", target.sessionId)
       .find((record) => record.messageId === target.messageId);
-    if (!pending || isStreaming || isLoading) return;
+    if (isStreaming || isLoading) return;
+    if (!pending) {
+      // Копию могли убрать в другой вкладке: текст ещё виден в реплике чата.
+      const sent = messages.find((message) => message.clientMessageId === target.messageId && message.role === "user");
+      const text = sent ? splitAttachments(sent.content).text.trim() : "";
+      if (!text) {
+        setRecoveryNotice("Сохранённой копии этого сообщения уже нет, и текст взять неоткуда. Напишите его заново.");
+        return;
+      }
+      const draft = readChatDraft(chatViewKey(agentProfile, sessionId));
+      setPrefill(draft && draft !== text ? `${draft}\n\n${text}` : text);
+      setRecoveryNotice("Текст возвращён в поле из отправленной реплики. Вложения вернуть не удалось. Ничего не отправлено.");
+      return;
+    }
     if (target.sessionId !== sessionId || !pending.terminal) { void retryPending(target); return; }
     const key = chatViewKey(agentProfile, sessionId);
     if (!restoreChatAttachmentDraft(key, pending.attachments)) {
