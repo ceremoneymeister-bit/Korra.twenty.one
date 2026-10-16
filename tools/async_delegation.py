@@ -489,6 +489,22 @@ def claim_completion_delivery(delegation_id: str, claim_id: str) -> bool:
         return cur.rowcount == 1
 
 
+def completion_delivery_still_pending(delegation_id: str) -> bool:
+    """True when a refused claim only met a live lease, not a final state.
+
+    A claim is refused either because the row is already delivered/dropped
+    (nothing left to do) or because another consumer's lease has not expired
+    yet. A consumer that dies before release/ack leaves the second case behind,
+    so the refused caller must keep the event and retry after the lease.
+    """
+    with _DB_LOCK, _transaction() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM async_delegations WHERE delegation_id=? AND delivery_state='pending'",
+            (delegation_id,),
+        ).fetchone()
+    return row is not None
+
+
 def claim_event_delivery(evt: Dict[str, Any], consumer: str) -> Optional[str]:
     """Claim a durable delegation event; non-durable events need no token."""
     if evt.get("type") != "async_delegation":
