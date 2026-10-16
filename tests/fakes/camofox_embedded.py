@@ -30,6 +30,7 @@ def install(tmp_path, monkeypatch):
     (home / "browser").mkdir()
     (home / "browser" / "camoufox-bin").write_text("")
     monkeypatch.setenv("KORRA_CAMOFOX_HOME", str(home))
+    monkeypatch.setattr(emb, "_CGROUP_MEMORY_FILES", (tmp_path / "no-cgroup-limit",))
     return home
 
 
