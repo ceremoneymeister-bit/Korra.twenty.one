@@ -27,6 +27,7 @@ _SECRET_DIR_NAMES = frozenset({
     "google-workspace", "google",
     "weixin", "proxy",
     "browser_auth",
+    "camofox",
 })
 
 # Two consecutive components that make a subtree secret.
