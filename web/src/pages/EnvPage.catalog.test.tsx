@@ -31,6 +31,8 @@ beforeEach(() => {
   // Карточка Google опрашивает статус при монтировании страницы. Без ответа
   // `act` не досчитывается до конца, и каталог падает по таймауту, ничего не
   // сказав про сам каталог.
+  vi.spyOn(api, "getConnections").mockResolvedValue({ google: { app: { configured: false }, profiles: [], available_services: [] } });
+  vi.spyOn(api, "getICloudCalendarStatus").mockResolvedValue({ state: "not_connected", account: null });
   vi.spyOn(api, "getGoogleWorkspaceStatus").mockResolvedValue({
     app: { configured: false },
     connection: { state: "not_connected" },

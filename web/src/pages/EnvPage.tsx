@@ -46,7 +46,6 @@ import { usePageHeader } from "@/contexts/usePageHeader";
 import { ProfileScopeChip } from "@/components/ProfileScopeChip";
 import { PluginSlot } from "@/plugins";
 import { useCabinetSession } from "@/hooks/useCabinetSession";
-import { isProductUiMode } from "@/lib/dashboard-flags";
 
 /* ------------------------------------------------------------------ */
 /*  Provider grouping                                                  */
@@ -323,7 +322,9 @@ function EnvVarRow({
         <div className="flex items-center gap-2">
           <Input
             autoFocus
-            type="text"
+            type={info.is_password ? "password" : "text"}
+            aria-label={varKey}
+            autoComplete={info.is_password ? "new-password" : "off"}
             value={edits[varKey]}
             onChange={(e) =>
               setEdits((prev) => ({ ...prev, [varKey]: e.target.value }))
@@ -567,6 +568,7 @@ function CustomKeysCard({
   const { t } = useI18n();
   const [newKey, setNewKey] = useState("");
   const trimmed = newKey.trim().toUpperCase();
+  const configuredCount = entries.filter(([, info]) => info.is_set).length;
   const alreadyEditing = edits[trimmed] !== undefined;
   const nameValid = ENV_VAR_NAME_RE.test(trimmed);
   const showInvalid = trimmed.length > 0 && !nameValid;
@@ -598,8 +600,8 @@ function CustomKeysCard({
         </div>
         <CardDescription>
           {t.env.customConfigured
-            .replace("{count}", String(entries.length))
-            .replace("{s}", entries.length !== 1 ? "s" : "")}
+            .replace("{count}", String(configuredCount))
+            .replace("{s}", configuredCount !== 1 ? "s" : "")}
         </CardDescription>
         <CardDescription className="text-text-tertiary">
           {t.env.customHint}
@@ -671,7 +673,6 @@ function scrollToSection(id: string, behavior: ScrollBehavior = "auto") {
 
 export default function EnvPage() {
   const { hash } = useLocation();
-  const clientMode = isProductUiMode();
   const { clientMode: cabinetClient } = useCabinetSession();
   const [vars, setVars] = useState<Record<string, EnvVarInfo> | null>(null);
   useEffect(() => {
@@ -731,13 +732,10 @@ export default function EnvPage() {
           items.push({ id: `section-${cat}`, label: CATEGORY_LABELS[cat] ?? cat });
         }
       }
-      if (!clientMode) {
-        // Arbitrary runtime keys are an operator surface, not an owner action.
-        items.push({ id: "section-custom", label: t.env.customTitle });
-      }
+      items.push({ id: "section-custom", label: t.env.customTitle });
     }
     return items;
-  }, [clientMode, vars, t]);
+  }, [vars, t]);
 
   useLayoutEffect(() => {
     const scrollTo = (id: string) => {
@@ -1117,21 +1115,19 @@ export default function EnvPage() {
           />
         );
       })}
-      {!clientMode && (
-        <CustomKeysCard
-          entries={customEntries}
-          edits={edits}
-          setEdits={setEdits}
-          revealed={revealed}
-          saving={saving}
-          onSave={handleSave}
-          onClear={keyClear.requestDelete}
-          onReveal={handleReveal}
-          onCancelEdit={cancelEdit}
-          onAddKey={handleAddKey}
-          clearDialogOpen={keyClear.isOpen}
-        />
-      )}
+      <CustomKeysCard
+        entries={customEntries}
+        edits={edits}
+        setEdits={setEdits}
+        revealed={revealed}
+        saving={saving}
+        onSave={handleSave}
+        onClear={keyClear.requestDelete}
+        onReveal={handleReveal}
+        onCancelEdit={cancelEdit}
+        onAddKey={handleAddKey}
+        clearDialogOpen={keyClear.isOpen}
+      />
       <PluginSlot name="env:bottom" />
     </div>
   );
