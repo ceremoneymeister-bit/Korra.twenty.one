@@ -3506,13 +3506,18 @@ def _visible_providers(
         from korra_cli import camofox_embedded
 
         if camofox_embedded.is_installed() and not camofox_embedded.is_disabled():
+            memory_note = camofox_embedded.default_memory_note()
             visible = [dict(row) for row in visible]
             for row in visible:
-                if row.get("name") == "Camofox":
+                if memory_note:
+                    if row.get("name") == "Camofox" and cfg_get(config, "browser", "cloud_provider") != "camofox":
+                        row["tag"] = f'{row.get("tag", "")}. {memory_note}'
+                elif row.get("name") == "Camofox":
                     row["badge"] = 'по умолчанию · бесплатно · локально'
                 elif row.get("name") == "Local Browser":
                     row["badge"] = 'бесплатно · локально'
-            visible.sort(key=lambda row: row.get("name") != "Camofox")
+            if not memory_note:
+                visible.sort(key=lambda row: row.get("name") != "Camofox")
 
     # Inject plugin-registered TTS backends (issue #30398). Plugin rows
     # render BELOW the 10 hardcoded built-in rows. Built-in shadowing

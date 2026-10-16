@@ -334,6 +334,50 @@ def sync(*, signal: bool = True) -> bool:
         return False
 
 
+# Один Firefox с тремя вкладками занимает ~0,5 ГиБ cgroup, тяжёлые сайты больше:
+# в контейнере меньше этого предела OOM убил бы работу агента, а не браузер.
+DEFAULT_MIN_MEMORY_BYTES = 3 * 1024 ** 3
+_NO_LIMIT_BYTES = 1 << 50  # cgroup v1 без лимита отдаёт число порядка 2**63
+_CGROUP_MEMORY_FILES = (
+    Path("/sys/fs/cgroup/memory.max"),  # cgroup v2
+    Path("/sys/fs/cgroup/memory/memory.limit_in_bytes"),  # cgroup v1
+)
+
+
+def memory_limit_bytes() -> Optional[int]:
+    """Лимит памяти контейнера из cgroup; ``None`` — без лимита или файл недоступен."""
+    for path in _CGROUP_MEMORY_FILES:
+        try:
+            raw = path.read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+        if raw.isdigit() and int(raw) < _NO_LIMIT_BYTES:
+            return int(raw)
+        return None
+    return None
+
+
+def _default_blocked_by_memory() -> bool:
+    limit = memory_limit_bytes()
+    return limit is not None and limit < DEFAULT_MIN_MEMORY_BYTES
+
+
+def _gib(value: float) -> str:
+    text = f"{value:.1f}".rstrip("0").rstrip(".")
+    return text.replace(".", ",")
+
+
+def default_memory_note() -> str:
+    """Пояснение, почему неявный Camofox не включён из-за памяти, иначе ``""``."""
+    limit = memory_limit_bytes()
+    if limit is None or limit >= DEFAULT_MIN_MEMORY_BYTES:
+        return ""
+    return (
+        f"Camofox не включён по умолчанию: контейнеру доступно {_gib(limit / 1024 ** 3)} ГиБ, "
+        f"нужно от {_gib(DEFAULT_MIN_MEMORY_BYTES / 1024 ** 3)} ГиБ; можно выбрать вручную"
+    )
+
+
 def uses_embedded(browser: dict, *, external_url: str = "", cdp_url: str = "") -> bool:
     """One read-only choice rule for runtime, picker and service synchronization."""
     from utils import is_truthy_value
@@ -350,6 +394,7 @@ def uses_embedded(browser: dict, *, external_url: str = "", cdp_url: str = "") -
         and browser.get("engine") in (None, "", "auto")
         and not is_truthy_value(browser.get("use_real_profile"), default=False)
         and not is_disabled()
+        and not _default_blocked_by_memory()
     )
 
 
@@ -617,6 +662,13 @@ def status() -> Dict[str, object]:
             "next": "включить: korra tools camofox on",
         }
     if not is_enabled():
+        note = default_memory_note()
+        if note:
+            return {
+                "state": "unused",
+                "detail": note,
+                "next": "выбрать вручную: Инструменты → Браузер → Camofox или korra tools → Браузер → Camofox",
+            }
         return {
             "state": "unused",
             "detail": "выключен: ни один профиль не выбрал встроенный Camofox",
