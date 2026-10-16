@@ -79,7 +79,7 @@ def test_workspace_file_attachment(tmp_path, monkeypatch, mode, profile):
 @pytest.mark.parametrize("mode", ["local", "fleet", "forced"])
 @pytest.mark.parametrize("profile", ["default", "designer", "not-created"])
 def test_ordinary_attachment_policy_matches_base(files, monkeypatch, mode, profile):
-    """Only profile cache/images gets new rules; other paths keep their ACL."""
+    """Only the profile media cache gets new rules; other paths keep their ACL."""
     client, data, workspace = files
     if mode != "fleet":
         monkeypatch.delenv("KORRA_UI_MODE")
@@ -90,8 +90,8 @@ def test_ordinary_attachment_policy_matches_base(files, monkeypatch, mode, profi
         data / "report.txt",
         data / "profiles" / "designer" / "report.txt",
         data / "profiles" / "other" / "report.txt",
-        data / "cache" / "documents" / "report.txt",
-        data / "profiles" / "other" / "cache" / "documents" / "report.txt",
+        data / "cache" / "screenshots" / "report.txt",
+        data / "profiles" / "other" / "cache" / "screenshots" / "report.txt",
     ]
     for target in ordinary:
         target.parent.mkdir(parents=True, exist_ok=True)

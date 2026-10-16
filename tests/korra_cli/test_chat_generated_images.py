@@ -122,7 +122,7 @@ def test_cache_image_delivery_denies_other_data(image_chat, case):
         path.write_bytes(raw if case in {"env", "auth"} else
                          b"<svg xmlns='http://www.w3.org/2000/svg'/>" if case == "svg" else b"not an image")
     elif case in {"other_cache", "profile_file", "data_file"}:
-        path = {"other_cache": home / "cache" / "documents" / "file.png",
+        path = {"other_cache": home / "cache" / "screenshots" / "file.png",
                 "profile_file": home / "file.png", "data_file": data / "file.png"}[case]
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(raw)
