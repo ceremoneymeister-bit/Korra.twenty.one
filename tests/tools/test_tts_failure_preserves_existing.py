@@ -110,3 +110,52 @@ def test_failed_piper_preserves_existing_sibling_wav(tmp_path, monkeypatch, targ
     assert sorted(p.name for p in audio_dir.iterdir()) == (
         ["report.mp3", "report.wav"] if target_exists else ["report.wav"]
     )
+
+
+def _multipart_setup(monkeypatch):
+    monkeypatch.setattr(tts_tool, "_resolve_max_text_length", lambda *_a, **_k: 35)
+
+    def single(text, output_path, **_kwargs):
+        Path(output_path).write_bytes(b"chunk-" + text[:3].encode())
+        return json.dumps({"success": True, "file_path": output_path, "provider": "edge"})
+
+    def deliver(encoded, output_path, _profile, **_kwargs):
+        base = Path(output_path)
+        staged = []
+        for index, source in enumerate(encoded, start=1):
+            target = base.with_name(f"{base.stem}.part{index:02d}{base.suffix}")
+            Path(source).replace(target)
+            staged.append(str(target))
+        return staged, False
+
+    monkeypatch.setattr(tts_tool, "_text_to_speech_single", single)
+    monkeypatch.setattr(tts_tool, "_build_audio_delivery_files", deliver)
+    return "Первое предложение для озвучки. Второе предложение для озвучки."
+
+
+def test_multipart_failure_keeps_existing_first_part(audio_dir, monkeypatch):
+    text = _multipart_setup(monkeypatch)
+    first = audio_dir / "voice.part01.mp3"
+    first.write_bytes(b"old-first")
+    (audio_dir / "voice.part02.mp3").mkdir()  # destination of the second part is unusable
+
+    result = json.loads(tts_tool.text_to_speech_tool(text, output_path=str(audio_dir / "voice.mp3")))
+
+    assert result["success"] is False
+    assert "voice.part02.mp3" in result["error"]
+    assert first.read_bytes() == b"old-first"
+    assert sorted(p.name for p in audio_dir.iterdir()) == ["voice.part01.mp3", "voice.part02.mp3"]
+
+
+def test_multipart_success_replaces_all_existing_parts(audio_dir, monkeypatch):
+    text = _multipart_setup(monkeypatch)
+    (audio_dir / "voice.part01.mp3").write_bytes(b"old-first")
+    (audio_dir / "voice.part02.mp3").write_bytes(b"old-second")
+
+    result = json.loads(tts_tool.text_to_speech_tool(text, output_path=str(audio_dir / "voice.mp3")))
+
+    assert result["success"] is True
+    assert len(result["file_paths"]) == 2
+    for path in result["file_paths"]:
+        assert Path(path).read_bytes().startswith(b"chunk-")
+    assert sorted(p.name for p in audio_dir.iterdir()) == ["voice.part01.mp3", "voice.part02.mp3"]
