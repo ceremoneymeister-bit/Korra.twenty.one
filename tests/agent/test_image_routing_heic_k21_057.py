@@ -251,6 +251,9 @@ def test_codex_heic_without_plugin_names_the_plugin(tmp_path: Path, monkeypatch)
 
 def test_codex_generate_with_heic_reference_sends_png_part(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setattr(
+        "korra_cli.codex_models.get_codex_model_ids", lambda **kw: ["fixture-codex-host"]
+    )
     provider_mod = importlib.import_module("plugins.image_gen.openai-codex")
     monkeypatch.setattr(
         provider_mod,

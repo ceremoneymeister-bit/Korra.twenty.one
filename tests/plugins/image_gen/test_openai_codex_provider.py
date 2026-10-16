@@ -33,6 +33,9 @@ def _b64_png() -> str:
 @pytest.fixture(autouse=True)
 def _tmp_hermes_home(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setattr(
+        "korra_cli.codex_models.get_codex_model_ids", lambda **kw: ["fixture-codex-host"]
+    )
     yield tmp_path
 
 
@@ -152,7 +155,7 @@ class TestGenerate:
         result = provider.generate("a cat", aspect_ratio="portrait")
         assert result["success"] is True
 
-        assert captured["model"] == "gpt-5.5"
+        assert captured["model"] == "fixture-codex-host"
         assert captured["store"] is False
         assert captured["request_base_url"] == "https://chatgpt.com/backend-api/codex"
         assert captured["input"][0]["type"] == "message"

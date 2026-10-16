@@ -8,10 +8,18 @@ import io
 import json
 from pathlib import Path
 
+import pytest
 from PIL import Image
 
 
 provider_mod = importlib.import_module("plugins.image_gen.openai-codex")
+
+
+@pytest.fixture(autouse=True)
+def _offline_host_catalog(monkeypatch):
+    monkeypatch.setattr(
+        "korra_cli.codex_models.get_codex_model_ids", lambda **kw: ["fixture-codex-host"]
+    )
 
 
 def _credentials(token="token"):
