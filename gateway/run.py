@@ -27417,10 +27417,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         """Deliver once per live gateway, or return False for a retry.
 
         ``True`` means this caller reached adapter acceptance, ``False`` means
-        injection failed and the claim was released for retry, and ``None``
-        means either another same-lifecycle caller owns/delivered the producer
-        event or the event has no gateway route. No cross-process exactly-once
-        guarantee is claimed.
+        injection failed, the claim was released, or another consumer's
+        unexpired claim is still on the row (retry after it expires), and
+        ``None`` means either another same-lifecycle caller delivered the
+        producer event or the event has no gateway route. No cross-process
+        exactly-once guarantee is claimed.
         """
         identity = self._completion_delivery_identity(evt)
         durable_claim_id = ""
@@ -27429,13 +27430,20 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             durable_delegation_id = str(evt.get("delegation_id") or "")
             if durable_delegation_id:
                 try:
-                    from tools.async_delegation import claim_completion_delivery
+                    from tools.async_delegation import (
+                        claim_completion_delivery,
+                        completion_delivery_still_pending,
+                    )
 
                     durable_claim_id = f"gateway:{id(self)}:{__import__('uuid').uuid4().hex}"
                     if not claim_completion_delivery(
                         durable_delegation_id, durable_claim_id,
                     ):
-                        return None
+                        # A lease left by a consumer that died before ack
+                        # expires on its own; keep the event for that retry.
+                        return False if completion_delivery_still_pending(
+                            durable_delegation_id,
+                        ) else None
                 except Exception as exc:
                     logger.warning(
                         "Could not claim durable async completion %s: %s",
@@ -27861,25 +27869,41 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         from tools.async_delegation import (
             claim_event_delivery,
             complete_event_delivery,
+            completion_delivery_still_pending,
             release_event_delivery,
         )
 
         primary_evt, primary_text = deliverable[0]
         blocks = [primary_text]
         siblings: list[tuple[dict, str]] = []
+        leased: list[dict] = []
         for evt, synth_text in deliverable[1:]:
             claim_id = claim_event_delivery(evt, f"gateway-batch:{id(self)}")
             if claim_id is None:
                 # Another consumer owns this row's delivery; keep its result
                 # out of our consolidated text so it is never double-injected.
+                # If its lease is still live the row stays pending: retry it
+                # after the lease instead of losing it with this tick's queue.
+                try:
+                    if completion_delivery_still_pending(
+                        str(evt.get("delegation_id") or ""),
+                    ):
+                        leased.append(evt)
+                except Exception:
+                    leased.append(evt)
                 continue
             siblings.append((evt, claim_id))
             blocks.append(synth_text)
 
         if not siblings:
-            return await self._deliver_completion_notification(
+            result = await self._deliver_completion_notification(
                 primary_text, primary_evt,
             )
+            if result is not False:
+                # False requeues the whole group, leased events included.
+                for evt in leased:
+                    _pr.completion_queue.put(evt)
+            return result
 
         consolidated = self._format_coalesced_async_delegations(blocks)
         delivered: Optional[bool] = False
@@ -27917,6 +27941,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     # still need delivery — requeue just them for the next tick.
                     for evt, _claim_id in siblings:
                         _pr.completion_queue.put(evt)
+            if delivered is not False:
+                for evt in leased:
+                    _pr.completion_queue.put(evt)
         return delivered
 
     async def _async_delegation_watcher(self, interval: float = 2.0) -> None:
