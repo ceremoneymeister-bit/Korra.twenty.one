@@ -27869,14 +27869,45 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         from tools.async_delegation import (
             claim_event_delivery,
             complete_event_delivery,
+            completion_delivery_claimable,
             completion_delivery_still_pending,
             release_event_delivery,
         )
 
+        # Every claim counts as a delivery attempt. A result whose lease is
+        # still held by another consumer must therefore not take part in this
+        # tick: if it were the primary, its refused claim would make us release
+        # (and re-claim next tick) every ready neighbour, burning their budget
+        # until they are terminally dropped. Wait for it on its own instead.
+        leased: list[dict] = []
+        ready: list[tuple[dict, str]] = []
+        for evt, synth_text in deliverable:
+            try:
+                if completion_delivery_claimable(str(evt.get("delegation_id") or "")):
+                    ready.append((evt, synth_text))
+                elif completion_delivery_still_pending(
+                    str(evt.get("delegation_id") or ""),
+                ):
+                    leased.append(evt)
+            except Exception:
+                ready.append((evt, synth_text))
+        if len(ready) < len(deliverable):
+            if not ready:
+                for evt in leased:
+                    _pr.completion_queue.put(evt)
+                return None
+            result = await self._deliver_async_delegation_group(
+                [evt for evt, _text in ready],
+            )
+            if result is not False:
+                for evt in leased:
+                    _pr.completion_queue.put(evt)
+            return result
+        deliverable = ready
+
         primary_evt, primary_text = deliverable[0]
         blocks = [primary_text]
         siblings: list[tuple[dict, str]] = []
-        leased: list[dict] = []
         for evt, synth_text in deliverable[1:]:
             claim_id = claim_event_delivery(evt, f"gateway-batch:{id(self)}")
             if claim_id is None:

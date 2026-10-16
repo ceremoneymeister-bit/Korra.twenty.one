@@ -474,6 +474,9 @@ def mark_completion_delivered(delegation_id: str) -> bool:
         return cur.rowcount == 1
 
 
+_CLAIM_LEASE_S = 300
+
+
 def claim_completion_delivery(delegation_id: str, claim_id: str) -> bool:
     """Claim one pending completion across competing consumers/processes."""
     now = time.time()
@@ -489,7 +492,7 @@ def claim_completion_delivery(delegation_id: str, claim_id: str) -> bool:
                       delivery_attempts=delivery_attempts+1, updated_at=?
                WHERE delegation_id=? AND delivery_state='pending'
                  AND (delivery_claim IS NULL OR delivery_claimed_at < ?)""",
-            (claim_id, now, now, delegation_id, now - 300),
+            (claim_id, now, now, delegation_id, now - _CLAIM_LEASE_S),
         )
         return cur.rowcount == 1
 
@@ -508,6 +511,25 @@ def completion_delivery_still_pending(delegation_id: str) -> bool:
             (delegation_id,),
         ).fetchone()
     return row is not None
+
+
+def completion_delivery_claimable(delegation_id: str) -> bool:
+    """True when a claim made now would succeed (read-only; races are possible)."""
+    if not delegation_id:
+        return True
+    with _DB_LOCK, _transaction() as conn:
+        row = conn.execute(
+            "SELECT delivery_state, delivery_claim, delivery_claimed_at "
+            "FROM async_delegations WHERE delegation_id=?",
+            (delegation_id,),
+        ).fetchone()
+    if row is None:
+        return True  # legacy event created before durable dispatch
+    state, claim, claimed_at = row
+    return state == "pending" and (
+        claim is None
+        or (claimed_at is not None and claimed_at < time.time() - _CLAIM_LEASE_S)
+    )
 
 
 def claim_event_delivery(evt: Dict[str, Any], consumer: str) -> Optional[str]:
