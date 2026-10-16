@@ -26,6 +26,8 @@ interface Props {
   /** Optional profile to scope config reads/writes to (Skills page profile
    *  selector). Omitted = the dashboard process's own profile. */
   profile?: string;
+  /** Клиентский кабинет (K21-370): только выбор готового браузера — без ключей, установки и включения набора. */
+  browserChoiceOnly?: boolean;
   onClose: () => void;
   /** Called after a toggle/provider/key change so the parent grid refreshes. */
   onChanged: () => void;
@@ -37,7 +39,7 @@ interface Props {
  * the toolset on/off, pick a provider, enter API keys, and run a provider's
  * post-setup action (setup or readiness check) with a live log tail.
  */
-export function ToolsetConfigDrawer({ toolset, profile, onClose, onChanged }: Props) {
+export function ToolsetConfigDrawer({ toolset, profile, browserChoiceOnly = false, onClose, onChanged }: Props) {
   const { toast, showToast } = useToast();
   const { tr } = useI18n();
   const [config, setConfig] = useState<ToolsetConfig | null>(null);
@@ -215,6 +217,10 @@ export function ToolsetConfigDrawer({ toolset, profile, onClose, onChanged }: Pr
     toolset.platform,
   );
 
+  const visibleProviders = (config?.providers ?? []).filter(
+    (p) => !browserChoiceOnly || p.name === activeProvider || p.status === "ready",
+  );
+
   return createPortal(
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-background/85 p-4"
@@ -251,7 +257,7 @@ export function ToolsetConfigDrawer({ toolset, profile, onClose, onChanged }: Pr
           <p className="text-xs text-muted-foreground mt-1">
             {descriptionText}
           </p>
-          <div className="mt-3 flex items-center gap-2">
+          {!browserChoiceOnly && <div className="mt-3 flex items-center gap-2">
             <Switch
               checked={enabled}
               onCheckedChange={(v) => void handleToggle(v)}
@@ -263,7 +269,7 @@ export function ToolsetConfigDrawer({ toolset, profile, onClose, onChanged }: Pr
                 ? tr("Enabled for {platform}", { platform: platformText })
                 : tr("Disabled for {platform}", { platform: platformText })}
             </span>
-          </div>
+          </div>}
         </header>
 
         {/* Body — provider matrix */}
@@ -276,12 +282,12 @@ export function ToolsetConfigDrawer({ toolset, profile, onClose, onChanged }: Pr
             <p className="text-sm text-muted-foreground py-6 text-center">
               {tr("This toolset has no configurable backends — toggle it on or off above. It works with no provider selection or API keys.")}
             </p>
-          ) : config.providers.length === 0 ? (
+          ) : visibleProviders.length === 0 ? (
             <p className="text-sm text-muted-foreground py-6 text-center">
               {tr("No providers are available for this toolset in this install.")}
             </p>
           ) : (
-            config.providers.map((provider) => {
+            visibleProviders.map((provider) => {
               const isActive = provider.name === activeProvider;
               const badgeText = russianInterfaceText(provider.badge);
               const tagText = russianInterfaceText(provider.tag);
@@ -330,7 +336,7 @@ export function ToolsetConfigDrawer({ toolset, profile, onClose, onChanged }: Pr
                   )}
 
                   {/* API key inputs */}
-                  {provider.env_vars.length > 0 && (
+                  {!browserChoiceOnly && provider.env_vars.length > 0 && (
                     <div className="mt-3 space-y-2.5">
                       {provider.env_vars.map((ev) => (
                         <div key={ev.key} className="space-y-1">
@@ -391,7 +397,7 @@ export function ToolsetConfigDrawer({ toolset, profile, onClose, onChanged }: Pr
                   )}
 
                   {/* Post-setup action */}
-                  {provider.post_setup && (
+                  {!browserChoiceOnly && provider.post_setup && (
                     <div className="mt-3 border-t border-border pt-3">
                       <p className="text-xs text-muted-foreground mb-1.5">
                         {tr("Setup or readiness check for this backend")}

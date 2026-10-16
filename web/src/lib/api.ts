@@ -3543,6 +3543,8 @@ export interface ToolsetProvider {
   post_setup: string | null;
   requires_nous_auth: boolean;
   is_active: boolean;
+  /** "ready" | "needs_keys" | "needs_auth" | "needs_setup" — готовность строки, считает сервер. */
+  status?: string;
 }
 
 export interface ToolsetConfig {

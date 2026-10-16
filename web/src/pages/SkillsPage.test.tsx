@@ -3,14 +3,14 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter, useLocation } from "react-router";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ allowed: false, clientRole: false, pin: false, getSkills: vi.fn(), getToolsets: vi.fn(), toggleSkill: vi.fn(), setSkillAutoLoad: vi.fn(),
+const mocks = vi.hoisted(() => ({ allowed: false, clientRole: false, pin: false, browser: false, getToolsetConfig: vi.fn(), getSkills: vi.fn(), getToolsets: vi.fn(), toggleSkill: vi.fn(), setSkillAutoLoad: vi.fn(),
   setEnd: vi.fn(), setAfterTitle: vi.fn() }));
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
-  return { ...actual, api: { ...actual.api, getSkills: mocks.getSkills, getToolsets: mocks.getToolsets, toggleSkill: mocks.toggleSkill, setSkillAutoLoad: mocks.setSkillAutoLoad } };
+  return { ...actual, api: { ...actual.api, getSkills: mocks.getSkills, getToolsets: mocks.getToolsets, getToolsetConfig: mocks.getToolsetConfig, toggleSkill: mocks.toggleSkill, setSkillAutoLoad: mocks.setSkillAutoLoad } };
 });
 vi.mock("@/hooks/useCabinetSession", () => ({ useCabinetSession: () => ({ canManageSkills: mocks.allowed, canPinSkills: mocks.pin,
-  canBrowseSkillsHub: mocks.allowed, canConfigureToolsets: mocks.allowed && !mocks.clientRole }) }));
+  canBrowseSkillsHub: mocks.allowed, canConfigureToolsets: mocks.allowed && !mocks.clientRole, canChooseBrowser: mocks.browser }) }));
 vi.mock("@/contexts/usePageHeader", () => ({ usePageHeader: () => ({ setEnd: mocks.setEnd, setAfterTitle: mocks.setAfterTitle }) }));
 vi.mock("@/plugins", () => ({ PluginSlot: () => null }));
 vi.mock("@/components/KorraLoader", () => ({ KorraLoader: () => <span>Загрузка</span> }));
@@ -23,6 +23,7 @@ beforeEach(() => {
   mocks.clientRole = false;
   delete (window as { __KORRA_UI_MODE__?: string }).__KORRA_UI_MODE__;
   mocks.pin = false;
+  mocks.browser = false;
   mocks.getSkills.mockResolvedValue([{ name: "visual-design", description: "Визуальный дизайн", enabled: true }]);
   mocks.getToolsets.mockResolvedValue([{ name: "image_gen", label: "Генерация", description: "Изображения", enabled: true, configured: false, tools: ["image_generate"] }]);
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
@@ -121,4 +122,43 @@ it("does not silently cut a too long learn request in fleet", async () => {
   await learn("а".repeat(1600));
   expect(where()).toBe("/skills");
   expect(document.body.textContent).toContain("слишком длинный");
+});
+
+const TOOLSETS_WITH_BROWSER = [
+  { name: "browser", label: "Автоматизация браузера", description: "Страницы", enabled: true, configured: true, tools: ["browser_navigate"] },
+  { name: "image_gen", label: "Генерация", description: "Изображения", enabled: true, configured: false, tools: ["image_generate"] },
+];
+async function openToolsets() {
+  const tab = [...host.querySelectorAll("button")].find((b) => b.textContent?.includes("Наборы инструментов"))!;
+  await act(async () => tab.click());
+}
+const configureButtons = (name: string) => {
+  const card = [...host.querySelectorAll("div.relative")].find((c) => c.textContent?.includes(name))!;
+  return [...card.querySelectorAll("button")].filter((b) => b.textContent?.includes("Настроить"));
+};
+it("lets a client choose the browser while the image generator and other toolsets stay closed (K21-370)", async () => {
+  mocks.browser = true;
+  mocks.getToolsets.mockResolvedValue(TOOLSETS_WITH_BROWSER);
+  mocks.getToolsetConfig.mockResolvedValue({ name: "browser", has_category: true, providers: [], active_provider: null });
+  await render();
+  await openToolsets();
+  expect(configureButtons("Автоматизация браузера")).toHaveLength(1);
+  expect(configureButtons("Генерация")).toHaveLength(0);
+  await act(async () => configureButtons("Автоматизация браузера")[0].click());
+  expect(mocks.getToolsetConfig).toHaveBeenCalledWith("browser", undefined);
+});
+it("shows no toolset settings at all without the browser hint or the toolsets hint (K21-370)", async () => {
+  mocks.getToolsets.mockResolvedValue(TOOLSETS_WITH_BROWSER);
+  await render();
+  await openToolsets();
+  expect(configureButtons("Автоматизация браузера")).toHaveLength(0);
+  expect(configureButtons("Генерация")).toHaveLength(0);
+});
+it("keeps settings on every toolset for the administrator", async () => {
+  mocks.allowed = true;
+  mocks.getToolsets.mockResolvedValue(TOOLSETS_WITH_BROWSER);
+  await render();
+  await openToolsets();
+  expect(configureButtons("Автоматизация браузера")).toHaveLength(1);
+  expect(configureButtons("Генерация")).toHaveLength(1);
 });

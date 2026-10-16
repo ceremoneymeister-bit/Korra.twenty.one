@@ -50,10 +50,24 @@ it("opens the auto-load switch only on the exact skills_auto_load hint", async (
   const loose = await probe({ kind: "cabinet", mode: "client", capabilities: { skills_auto_load: "true" } });
   expect(loose.canPinSkills).toBe(false);
 });
+it("offers the browser choice only on the exact browser_config hint, apart from the other toolsets (K21-370)", async () => {
+  const client = await probe({ kind: "cabinet", mode: "client", capabilities: { browser_config: true, toolsets_config: false } });
+  expect(client.canChooseBrowser).toBe(true);
+  expect(client.canConfigureToolsets).toBe(false);
+  // Старый кабинет подсказку не присылает — выбора браузера нет, как и раньше.
+  const legacy = await probe({ kind: "cabinet", mode: "client", capabilities: { toolsets_config: false, skills_manage: true } });
+  expect(legacy.canChooseBrowser).toBe(false);
+  const loose = await probe({ kind: "cabinet", mode: "client", capabilities: { browser_config: "true" } });
+  expect(loose.canChooseBrowser).toBe(false);
+  // Полный доступ к наборам не подменяет подсказку выбора браузера.
+  const toolsetsOnly = await probe({ kind: "cabinet", mode: "admin", capabilities: { toolsets_config: true } });
+  expect(toolsetsOnly.canChooseBrowser).toBe(false);
+});
 it("keeps standalone controls and does not probe a nonexistent cabinet", async () => {
   state.base = "";
   const result = await probe({});
   expect(result.canManageSkills).toBe(true);
+  expect(result.canChooseBrowser).toBe(true);
   expect(result.restrictedFiles).toBe(false);
   expect(state.fetch).not.toHaveBeenCalled();
 });
