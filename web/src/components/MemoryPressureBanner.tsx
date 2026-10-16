@@ -139,19 +139,16 @@ export function MemoryPressureBanner({
   };
 
   const critical = trigger === "critical" || trigger === "disk_critical";
-  const diskFreeLabel =
-    disk?.free_mb != null ? tr(" ({size} MB free)", { size: Math.round(disk.free_mb) }) : "";
+  const freeMb = disk?.free_mb != null ? Math.round(disk.free_mb) : null;
   const message =
     trigger === "disk_critical"
-      ? `${
-          t.app.diskCriticalBanner ??
-          tr("Your agent's disk is almost full. New messages, memories, and settings may fail to save.")
-        }${diskFreeLabel}`
+      ? (freeMb != null
+          ? tr("The server is almost out of space: {size} MB free. New messages, memories, and settings may fail to save. Check large uploaded and temporary files or contact support.", { size: freeMb })
+          : tr("The server is almost out of space. New messages, memories, and settings may fail to save. Check large uploaded and temporary files or contact support."))
       : trigger === "disk_elevated"
-        ? `${
-            t.app.diskElevatedBanner ??
-            tr("Your agent's disk is filling up. Consider clearing old sessions or expanding its storage.")
-          }${diskFreeLabel}`
+        ? (freeMb != null
+            ? tr("The server has {size} MB of free space left. Check large uploaded and temporary files or contact support.", { size: freeMb })
+            : tr("The server is running low on free space. Check large uploaded and temporary files or contact support."))
         : trigger === "oom_restart"
           ? (t.app.memoryOomRestartBanner ??
             tr("Your agent restarted unexpectedly, most likely because it ran out of memory. Long sessions and many concurrent tasks increase memory use."))
@@ -167,8 +164,8 @@ export function MemoryPressureBanner({
       data-testid="memory-pressure-banner"
       className={`flex items-center gap-2 border-b px-4 py-1.5 text-xs ${
         critical
-          ? "border-red-500/40 bg-red-500/10 text-red-300"
-          : "border-amber-500/40 bg-amber-500/10 text-amber-300"
+          ? "border-destructive/40 bg-destructive/10 text-destructive"
+          : "border-warning/40 bg-warning/10 text-warning"
       }`}
     >
       <AlertTriangle className="h-3.5 w-3.5 shrink-0" />

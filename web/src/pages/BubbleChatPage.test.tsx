@@ -47,6 +47,7 @@ import { $uploadJobs, dismissUploadJob } from "@/store/upload-jobs";
 import type { SessionInfo } from "@/lib/api";
 import type { UploadManifest } from "@/lib/upload-session";
 import type { ChatMessage } from "@/lib/chat-types";
+import { writeChatDraft } from "@/lib/chat-view-state";
 
 /** `MediaRecorder` из jsdom не существует — подменяем предсказуемым. */
 class FakeMediaRecorder {
@@ -982,4 +983,74 @@ it("K21-220: refused picker selection explains why instead of disappearing", asy
   await act(async () => { input.dispatchEvent(new Event("change", { bubbles: true })); });
   expect(container.querySelector('[role="alert"]')?.textContent).toContain("Разговор ещё загружается");
   expect(attachmentMocks.createUpload).not.toHaveBeenCalled();
+});
+
+describe("K21-383: фокус в поле после явного выбора чата", () => {
+  const pointer = (fine: boolean) => vi.stubGlobal("matchMedia", vi.fn(() => ({
+    matches: fine, addEventListener: vi.fn(), removeEventListener: vi.fn(),
+  })));
+  const area = () => container.querySelector<HTMLTextAreaElement>("textarea")!;
+  const swap = (node: ReactNode) => act(async () => root.render(<MemoryRouter>{node}</MemoryRouter>));
+
+  it("ставит каретку в конец черновика нового композера на обычной клавиатуре", async () => {
+    pointer(true);
+    writeChatDraft("audit-b", "Начатая мысль");
+    await render(<BubbleChatComposer key="a" draftKey="audit-a" active onSend={vi.fn()} />);
+    area().focus();
+    await swap(<BubbleChatComposer key="b" draftKey="audit-b" active onSend={vi.fn()} />);
+    expect(document.activeElement).toBe(area());
+    expect(area().value).toBe("Начатая мысль");
+    expect(area().selectionStart).toBe("Начатая мысль".length);
+  });
+
+  it("не открывает клавиатуру телефона", async () => {
+    pointer(false);
+    await render(<BubbleChatComposer draftKey="audit-a" active onSend={vi.fn()} />);
+    expect(document.activeElement).not.toBe(area());
+  });
+
+  it("ждёт загрузки разговора и вкладку агента, пока она не открыта", async () => {
+    pointer(true);
+    await render(<BubbleChatComposer draftKey="audit-a" active={false} disabled onSend={vi.fn()} />);
+    expect(document.activeElement).not.toBe(area());
+    await swap(<BubbleChatComposer draftKey="audit-a" active={false} onSend={vi.fn()} />);
+    expect(document.activeElement).not.toBe(area());
+    await swap(<BubbleChatComposer draftKey="audit-a" active onSend={vi.fn()} />);
+    expect(document.activeElement).toBe(area());
+  });
+
+  it("не отбирает фокус у поиска и не прерывает диалог", async () => {
+    pointer(true);
+    const search = document.createElement("input");
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    const confirm = document.createElement("button");
+    dialog.append(confirm);
+    document.body.append(search, dialog);
+    try {
+      search.focus();
+      await render(<BubbleChatComposer draftKey="audit-a" active onSend={vi.fn()} />);
+      expect(document.activeElement).toBe(search);
+      confirm.focus();
+      await swap(<BubbleChatComposer key="b" draftKey="audit-b" active onSend={vi.fn()} />);
+      expect(document.activeElement).toBe(confirm);
+    } finally {
+      search.remove();
+      dialog.remove();
+    }
+  });
+
+  it("фоновое обновление без пересоздания композера фокус не трогает", async () => {
+    pointer(true);
+    await render(<BubbleChatComposer draftKey="audit-a" active onSend={vi.fn()} />);
+    const other = document.createElement("button");
+    document.body.append(other);
+    try {
+      other.focus();
+      await swap(<BubbleChatComposer draftKey="audit-a" active streaming onSend={vi.fn()} />);
+      expect(document.activeElement).toBe(other);
+    } finally {
+      other.remove();
+    }
+  });
 });

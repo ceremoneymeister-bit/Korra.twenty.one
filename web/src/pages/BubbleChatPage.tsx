@@ -959,6 +959,31 @@ export function BubbleChatComposer({
     if (input) resizeTextarea(input);
   }, [resizeTextarea, value]);
 
+  // После явного выбора разговора или агента готовый композер получает
+  // фокус, чтобы сразу печатать. Только при обычной клавиатуре: на телефоне
+  // экранная клавиатура сама не открывается. Чужой ввод, диалог и меню
+  // фокус не отдают, фоновое обновление композер не пересоздаёт.
+  useEffect(() => {
+    if (disabled || !active) return;
+    const el = taRef.current;
+    if (!el || el.disabled) return;
+    const finePointer =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(pointer: fine)").matches;
+    if (!finePointer) return;
+    const current = document.activeElement;
+    if (current === el) return;
+    if (current instanceof HTMLElement && current !== document.body) {
+      const typing = current.isContentEditable
+        || current instanceof HTMLInputElement
+        || current instanceof HTMLTextAreaElement
+        || current instanceof HTMLSelectElement;
+      if (typing || current.closest('[role="dialog"], [role="menu"], [role="listbox"], [aria-modal="true"]')) return;
+    }
+    el.focus({ preventScroll: true });
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, [disabled, active]);
+
   // «Изменить» на артефакте подставляет заготовку и отдаёт курсор владельцу:
   // отправлять за него нельзя — он ещё не сказал, что менять.
   useEffect(() => {
@@ -1609,7 +1634,20 @@ export default function BubbleChatPage({
   const handleRetry = (target: PendingMessageTarget) => {
     const pending = loadChatOutboxRecords(agentProfile ?? "", target.sessionId)
       .find((record) => record.messageId === target.messageId);
-    if (!pending || isStreaming || isLoading) return;
+    if (isStreaming || isLoading) return;
+    if (!pending) {
+      // Копию могли убрать в другой вкладке: текст ещё виден в реплике чата.
+      const sent = messages.find((message) => message.clientMessageId === target.messageId && message.role === "user");
+      const text = sent ? splitAttachments(sent.content).text.trim() : "";
+      if (!text) {
+        setRecoveryNotice("Сохранённой копии этого сообщения уже нет, и текст взять неоткуда. Напишите его заново.");
+        return;
+      }
+      const draft = readChatDraft(chatViewKey(agentProfile, sessionId));
+      setPrefill(draft && draft !== text ? `${draft}\n\n${text}` : text);
+      setRecoveryNotice("Текст возвращён в поле из отправленной реплики. Вложения вернуть не удалось. Ничего не отправлено.");
+      return;
+    }
     if (target.sessionId !== sessionId || !pending.terminal) { void retryPending(target); return; }
     const key = chatViewKey(agentProfile, sessionId);
     if (!restoreChatAttachmentDraft(key, pending.attachments)) {

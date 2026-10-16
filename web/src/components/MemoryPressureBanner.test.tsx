@@ -9,6 +9,8 @@ import type { ReactNode } from "react";
 
 import { I18nProvider } from "@/i18n";
 import { MemoryPressureBanner } from "./MemoryPressureBanner";
+import { colorTheme, darkTheme, lightTheme } from "@/themes/presets";
+import { contrast, DEFAULT_COLOR, THEME_COLORS } from "@/themes/color";
 import type {
   StatusResponse,
   MemoryPressureStatus,
@@ -271,8 +273,8 @@ describe("MemoryPressureBanner", () => {
         status={statusWithDisk({ pressure: "critical", free_mb: 120 })}
       />,
     );
-    expect(banner()?.textContent).toContain("Диск агента почти заполнен");
-    expect(banner()?.textContent).toContain("(свободно 120 МБ)");
+    expect(banner()?.textContent).toContain("На сервере почти не осталось места");
+    expect(banner()?.textContent).toContain("свободно 120 МБ");
   });
 
   it("shows the disk-elevated warning", async () => {
@@ -281,7 +283,24 @@ describe("MemoryPressureBanner", () => {
         status={statusWithDisk({ pressure: "elevated", free_mb: 900 })}
       />,
     );
-    expect(banner()?.textContent).toContain("Диск агента заполняется");
+    expect(banner()?.textContent).toBe(
+      "На сервере осталось 900 МБ свободного места. Проверьте крупные загруженные и временные файлы или напишите в поддержку.",
+    );
+  });
+
+  it("K21-384: the elevated disk text does not suggest deleting sessions", async () => {
+    await render(
+      <MemoryPressureBanner
+        status={statusWithDisk({ pressure: "elevated", free_mb: 2054 })}
+      />,
+    );
+    expect(banner()?.textContent).toContain("осталось 2054 МБ");
+    expect(banner()?.textContent).not.toMatch(/сесси|хранилищ/);
+    await rerender(
+      <MemoryPressureBanner status={statusWithDisk({ pressure: "elevated" })} />,
+    );
+    expect(banner()?.textContent).toContain("заканчивается свободное место");
+    expect(banner()?.textContent).toContain("напишите в поддержку");
   });
 
   it("disk critical outranks memory critical", async () => {
@@ -294,7 +313,7 @@ describe("MemoryPressureBanner", () => {
         )}
       />,
     );
-    expect(banner()?.textContent).toContain("Диск агента почти заполнен");
+    expect(banner()?.textContent).toContain("На сервере почти не осталось места");
   });
 
   it("memory OOM notice outranks disk elevated", async () => {
@@ -347,7 +366,7 @@ describe("MemoryPressureBanner", () => {
         status={statusWithDisk({ pressure: "critical", free_mb: 150 })}
       />,
     );
-    expect(banner()?.textContent).toContain("Диск агента почти заполнен");
+    expect(banner()?.textContent).toContain("На сервере почти не осталось места");
   });
 
   it("disk recovery to ok resets disk dismissals for the next episode", async () => {
@@ -373,7 +392,7 @@ describe("MemoryPressureBanner", () => {
         status={statusWithDisk({ pressure: "critical", free_mb: 150 })}
       />,
     );
-    expect(banner()?.textContent).toContain("Диск агента почти заполнен");
+    expect(banner()?.textContent).toContain("На сервере почти не осталось места");
   });
 
   it("disk recovery does NOT reset memory dismissals (and vice versa)", async () => {
@@ -392,7 +411,7 @@ describe("MemoryPressureBanner", () => {
     // Trigger shown is memory critical (outranks disk elevated) — dismiss it.
     await act(async () => dismiss.click());
     // Disk warning is next in line and has its own key, so it surfaces...
-    expect(banner()?.textContent).toContain("Диск агента заполняется");
+    expect(banner()?.textContent).toContain("На сервере");
     const dismissDisk = container.querySelector(
       '[data-testid="memory-pressure-banner"] button',
     ) as HTMLButtonElement;
@@ -433,6 +452,43 @@ describe("MemoryPressureBanner", () => {
         )}
       />,
     );
-    expect(banner()?.textContent).toContain("Диск агента почти заполнен");
+    expect(banner()?.textContent).toContain("На сервере почти не осталось места");
+  });
+});
+
+describe("K21-384: banner colours come from theme tokens", () => {
+  it("uses semantic classes in both states, with no fixed light-on-light colours", async () => {
+    await render(
+      <MemoryPressureBanner status={statusWithDisk({ pressure: "elevated", free_mb: 900 })} />,
+    );
+    expect(banner()?.className).toContain("text-warning");
+    expect(banner()?.className).not.toMatch(/amber|red-/);
+    await rerender(
+      <MemoryPressureBanner status={statusWithDisk({ pressure: "critical", free_mb: 120 })} />,
+    );
+    expect(banner()?.className).toContain("text-destructive");
+    expect(banner()?.className).not.toMatch(/amber|red-/);
+  });
+
+  const blend = (top: string, base: string, alpha: number) =>
+    "#" + [1, 3, 5].map((i) => {
+      const a = parseInt(top.slice(i, i + 2), 16), b = parseInt(base.slice(i, i + 2), 16);
+      return Math.round(a * alpha + b * (1 - alpha)).toString(16).padStart(2, "0");
+    }).join("");
+
+  const themes = [
+    ["light", lightTheme.palette.background.hex, lightTheme.colorOverrides!],
+    ["dark", darkTheme.palette.background.hex, darkTheme.colorOverrides!],
+    ...(["light", "dark"] as const).flatMap((scheme) =>
+      [DEFAULT_COLOR, ...THEME_COLORS.map(([, value]) => value)].map((color) => {
+        const theme = colorTheme(color, scheme);
+        return [`color ${color}/${scheme}`, theme.palette.background.hex, theme.colorOverrides!] as const;
+      })),
+  ] as const;
+
+  it.each(themes)("keeps the 10%% tinted banner text at 4.5:1 or better: %s", (_name, background, tokens) => {
+    for (const text of [tokens.warning!, tokens.destructive!]) {
+      expect(contrast(text, blend(text, background, 0.1)), `${text} on ${background}`).toBeGreaterThanOrEqual(4.5);
+    }
   });
 });

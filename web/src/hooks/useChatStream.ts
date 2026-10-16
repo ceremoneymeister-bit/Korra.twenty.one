@@ -779,6 +779,8 @@ function reducer(state: StreamState, action: StreamAction): StreamState {
 // Hook
 // ---------------------------------------------------------------------------
 
+const STOPPED_BY_USER = "Ход остановлен. Текст сохранён: его можно вернуть в поле.";
+
 export interface PendingMessageTarget { sessionId: string; messageId: string }
 
 export interface UseChatStreamReturn {
@@ -1146,11 +1148,17 @@ export function useChatStream(
           method: "POST", headers: chatRunHeaders(),
         });
         if (!response.ok) throw new Error("Не удалось остановить ход. Проверьте связь и повторите.");
-        clearChatOutbox(run.message_id, profile ?? "");
+        // Остановка завершает ход, но не отбирает у владельца текст: копия
+        // остаётся «остановленной попыткой» для «Вернуть в поле» при любом
+        // порядке терминального SSE и ответа /cancel.
+        const kept = loadChatOutboxRecords(profile ?? "").find((record) => record.messageId === run.message_id);
+        const stopped = kept?.terminal && kept.error ? kept.error : STOPPED_BY_USER;
+        if (kept) saveChatOutbox({ ...kept, status: "failed", terminal: true, error: stopped });
         if (mountedRef.current && activeStreamIdRef.current === generation) {
           activeStreamIdRef.current = null;
           abortControllerRef.current?.abort();
           streamingRef.current = false;
+          if (kept) dispatch({ type: "MARK_DELIVERY", messageId: kept.messageId, delivery: "failed", terminal: true, error: stopped });
           dispatch({ type: "SET_ERROR", error: "Ход остановлен. Можно написать новое сообщение." });
         }
         void refreshChatRuns();

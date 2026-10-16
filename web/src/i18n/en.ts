@@ -102,10 +102,6 @@ export const en: Translations = {
     memoryCriticalBanner:
       "Your agent is almost out of memory and may restart. Consider closing idle sessions or upgrading its memory.",
     memoryElevatedBanner: "Your agent is running low on memory.",
-    diskCriticalBanner:
-      "Your agent's disk is almost full. New messages, memories, and settings may fail to save.",
-    diskElevatedBanner:
-      "Your agent's disk is filling up. Consider clearing old sessions or expanding its storage.",
     dismiss: "Dismiss",
   },
 
@@ -1080,9 +1076,10 @@ export const en: Translations = {
     "session ended": "session ended",
     "session ended (code {code})": "session ended (code {code})",
     "Console is not connected.": "Console is not connected.",
-    " ({size} MB free)": " ({size} MB free)",
-    "Your agent's disk is almost full. New messages, memories, and settings may fail to save.": "Your agent's disk is almost full. New messages, memories, and settings may fail to save.",
-    "Your agent's disk is filling up. Consider clearing old sessions or expanding its storage.": "Your agent's disk is filling up. Consider clearing old sessions or expanding its storage.",
+    "The server is almost out of space: {size} MB free. New messages, memories, and settings may fail to save. Check large uploaded and temporary files or contact support.": "The server is almost out of space: {size} MB free. New messages, memories, and settings may fail to save. Check large uploaded and temporary files or contact support.",
+    "The server is almost out of space. New messages, memories, and settings may fail to save. Check large uploaded and temporary files or contact support.": "The server is almost out of space. New messages, memories, and settings may fail to save. Check large uploaded and temporary files or contact support.",
+    "The server has {size} MB of free space left. Check large uploaded and temporary files or contact support.": "The server has {size} MB of free space left. Check large uploaded and temporary files or contact support.",
+    "The server is running low on free space. Check large uploaded and temporary files or contact support.": "The server is running low on free space. Check large uploaded and temporary files or contact support.",
     "Your agent restarted unexpectedly, most likely because it ran out of memory. Long sessions and many concurrent tasks increase memory use.": "Your agent restarted unexpectedly, most likely because it ran out of memory. Long sessions and many concurrent tasks increase memory use.",
     "Your agent is almost out of memory and may restart. Consider closing idle sessions or upgrading its memory.": "Your agent is almost out of memory and may restart. Consider closing idle sessions or upgrading its memory.",
     "Your agent is running low on memory.": "Your agent is running low on memory.",

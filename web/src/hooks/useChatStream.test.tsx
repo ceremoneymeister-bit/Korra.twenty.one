@@ -2476,3 +2476,65 @@ it("K21-376: a commentary marker does not remove unrelated final bytes", async (
   await act(async () => { await current.send("Проверь"); });
   expect(current.messages.at(-1)?.content).toBe(content);
 });
+
+describe('K21-385: Stop keeps the message recoverable', () => {
+  it('terminal SSE before the cancel response keeps the outbox copy and the failed bubble', async () => {
+    const { getChatRuns } = await import('@/lib/chat-runs');
+    let stream!: ReadableStreamDefaultController<Uint8Array>;
+    let resolveCancel!: (r: Response) => void;
+    const cancel = new Promise<Response>(resolve => { resolveCancel = resolve; });
+    vi.stubGlobal('fetch', vi.fn(async (url: string | URL | Request) => {
+      if (String(url).includes('/cancel')) return cancel;
+      if (!String(url).includes('/chat/completions')) return Response.json({sessions: [], messages: []});
+      return new Response(new ReadableStream<Uint8Array>({ start(c) { stream = c; } }), {
+        headers: { 'content-type': 'text/event-stream' },
+      });
+    }));
+    let sending!: Promise<boolean>;
+    await act(async () => { sending = current.send('Сохранить этот текст для дополнения'); });
+    const record = loadChatOutbox()!;
+    vi.mocked(getChatRuns).mockResolvedValue([{
+      message_id: record.messageId, session_id: current.sessionId!, profile: '',
+      status: 'running', updated_at: 1, history_count: 0,
+      user_message: { role: 'user', content: record.text },
+    }]);
+    await act(async () => { current.abort(); });
+    await act(async () => {
+      stream.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{},"finish_reason":"error"}],"error":{"message":"Остановка запрошена пользователем."}}\n\ndata: [DONE]\n\n'));
+      stream.close();
+      await sending;
+    });
+    expect(loadChatOutbox()?.terminal).toBe(true);
+    await act(async () => { resolveCancel(Response.json({ stopped: true })); });
+    const failed = current.messages.find(m => m.clientMessageId === record.messageId)!;
+    expect(failed.failureConfirmed).toBe(true);
+    expect(current.isStreaming).toBe(false);
+    expect(loadChatOutbox()?.text).toBe(record.text);
+  });
+  it('cancel response before the terminal SSE turns the copy into a stopped attempt', async () => {
+    const { getChatRuns } = await import('@/lib/chat-runs');
+    let stream!: ReadableStreamDefaultController<Uint8Array>;
+    vi.stubGlobal('fetch', vi.fn(async (url: string | URL | Request) => {
+      if (String(url).includes('/cancel')) return Response.json({ stopped: true });
+      if (!String(url).includes('/chat/completions')) return Response.json({sessions: [], messages: []});
+      return new Response(new ReadableStream<Uint8Array>({ start(c) { stream = c; } }), {
+        headers: { 'content-type': 'text/event-stream' },
+      });
+    }));
+    let sending!: Promise<boolean>;
+    await act(async () => { sending = current.send('Текст после остановки'); });
+    const record = loadChatOutbox()!;
+    vi.mocked(getChatRuns).mockResolvedValue([{
+      message_id: record.messageId, session_id: current.sessionId!, profile: '',
+      status: 'running', updated_at: 1, history_count: 0,
+      user_message: { role: 'user', content: record.text },
+    }]);
+    await act(async () => { current.abort(); });
+    await act(async () => { stream.close(); await sending; });
+    const stored = loadChatOutbox()!;
+    expect(stored).toMatchObject({ text: record.text, status: 'failed', terminal: true });
+    const failed = current.messages.find(m => m.clientMessageId === record.messageId)!;
+    expect(failed).toMatchObject({ delivery: 'failed', failureConfirmed: true });
+    expect(current.isStreaming).toBe(false);
+  });
+});
