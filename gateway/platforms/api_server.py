@@ -8348,6 +8348,22 @@ class APIServerAdapter(BasePlatformAdapter):
                 persist_message_kwargs["persist_user_message"] = user_message
 
             with self._profile_scope(request_profile):
+                from gateway.web_service_command import run_web_service_command
+
+                service_result = run_web_service_command(
+                    self, user_message, session_id or gateway_session_key,
+                    profile=request_profile, source=request_session_source or "api_server",
+                    display_metadata=persist_user_display_metadata,
+                    requested_model=requested_model, requested_provider=requested_provider,
+                    model_options=model_options, route=route, session_model=session_model,
+                )
+                if service_result is not None:
+                    service_result["messages"] = [
+                        *list(conversation_history or []), *service_result.get("messages", []),
+                    ]
+                    if session_id:
+                        service_result["session_id"] = session_id
+                    return service_result, {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
                 from gateway.web_mcp_command import run_web_mcp_command
 
                 command_reply = run_web_mcp_command(

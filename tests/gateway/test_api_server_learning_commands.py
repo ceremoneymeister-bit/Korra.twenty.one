@@ -496,3 +496,16 @@ async def test_curator_real_subprocess_changes_only_the_selected_profile(tmp_pat
     paused = lambda home: _json.loads((home / "skills" / ".curator_state").read_text())["paused"]
     assert paused(profile) is True
     assert paused(root) is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text", ["/help", "/status", "/model", "/reload_skills", "/compact"])
+async def test_service_commands_do_not_construct_model_agent(text):
+    """K21-378: local replies also work without provider credentials."""
+    adapter = _adapter()
+    history = [{"role": "user", "content": "сохранённая история"}]
+    with patch.object(adapter, "_create_agent", side_effect=AssertionError("MODEL CALLED")):
+        result, usage = await adapter._run_agent(text, history, session_id="service-test")
+    assert result["final_response"]
+    assert result["messages"][:len(history)] == history
+    assert result["api_calls"] == usage["total_tokens"] == 0

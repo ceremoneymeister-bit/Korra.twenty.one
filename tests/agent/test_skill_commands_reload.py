@@ -122,3 +122,25 @@ class TestReloadSkillsHelper:
         reload_skills()
 
         assert not _SKILLS_PROMPT_CACHE
+
+
+def test_reload_scans_current_profile_after_module_was_imported(tmp_path, monkeypatch):
+    """Long-lived HTTP workers must not keep the import-time profile directory."""
+    import tools.skills_tool as skills_tool
+    from agent.skill_commands import get_skill_commands, reload_skills
+    from gateway.run import _profile_runtime_scope
+
+    monkeypatch.setattr(skills_tool, 'SKILLS_DIR', skills_tool._SKILLS_DIR_AT_IMPORT)
+    homes = [tmp_path / 'alpha', tmp_path / 'beta']
+    for home in homes:
+        home.mkdir()
+        (home / 'config.yaml').write_text('skills:\n  disabled: []\n')
+        _write_skill(home / 'skills', home.name + '-only', 'Synthetic profile skill')
+    for home in [homes[0], homes[1], homes[0]]:
+        with _profile_runtime_scope(home):
+            result = reload_skills()
+            assert result['total'] >= 1
+            commands = get_skill_commands()
+            assert '/' + home.name + '-only' in commands
+            other = 'beta' if home.name == 'alpha' else 'alpha'
+            assert '/' + other + '-only' not in commands

@@ -728,8 +728,31 @@ async def _handle_runs(
                 return
             with self._profile_scope(request_profile):
                 from gateway.web_mcp_command import is_web_mcp_command, run_web_mcp_command
+                from gateway.web_service_command import parse_web_service_command, run_web_service_command
 
                 command_reply = None
+                if parse_web_service_command(user_message) is not None:
+                    service_result = await asyncio.to_thread(
+                        run_web_service_command, self, user_message, session_id,
+                        profile=request_profile, owner=room_dispatch is None,
+                        requested_model=agent_overrides.get("requested_model"),
+                        requested_provider=agent_overrides.get("requested_provider"),
+                        model_options=agent_overrides.get("model_options"), route=route,
+                    )
+                    usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+                    event = "run.failed" if service_result.get("failed") else "run.completed"
+                    status = "failed" if service_result.get("failed") else "completed"
+                    command_reply = service_result["final_response"]
+                    _put_event_if_active({
+                        "event": event, "run_id": run_id, "timestamp": time.time(),
+                        "output": command_reply, "usage": usage,
+                        **({"error": command_reply} if status == "failed" else {}),
+                    })
+                    self._set_run_status(
+                        run_id, status, output=command_reply, usage=usage, last_event=event,
+                        **({"error": command_reply} if status == "failed" else {}),
+                    )
+                    return
                 if is_web_mcp_command(user_message):
                     command_reply = await asyncio.to_thread(
                         run_web_mcp_command, self, user_message, session_id, run_id,
