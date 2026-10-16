@@ -5131,8 +5131,22 @@ def _resolve_chat_file(reference: str, request: Request, *, profile: str | None 
         or (relative[:1] == ("profiles",) and relative[2:4] == ("cache", "images"))
     )
     if image_cache:
-        with _config_profile_scope(profile or request.query_params.get("profile")):
-            home = get_hermes_home().resolve()
+        requested = profile or request.query_params.get("profile")
+        # Existing chat cards send only the path. The authenticated owner can
+        # read images from any live profile in this installation; an explicit
+        # profile still takes precedence and must match the path below.
+        if not requested:
+            if relative[:1] == ("profiles",):
+                requested = relative[1]
+            elif relative[:2] == ("cache", "images"):
+                requested = "default"
+        try:
+            with _config_profile_scope(requested):
+                home = get_hermes_home().resolve()
+        except HTTPException as exc:
+            if exc.status_code in {400, 404}:
+                raise HTTPException(403, "Профиль изображения недоступен.") from exc
+            raise
         images = home / "cache" / "images"
         if not _path_is_under(images, candidate):
             raise HTTPException(403, "Вложение другого профиля недоступно.")
