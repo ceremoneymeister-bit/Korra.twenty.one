@@ -556,7 +556,14 @@ function reducer(state: StreamState, action: StreamAction): StreamState {
       const last = { ...messages[messages.length - 1] };
       // Non-Codex narration may already be on the text channel. Move that
       // segment out of the final, keeping content exactly once.
-      if (action.already_streamed && last.content && action.text.startsWith(last.content)) last.content = "";
+      if (action.already_streamed && last.content) {
+        // Match the core's _interim_content_was_streamed contract: it strips
+        // and collapses whitespace before comparing the streamed prefix.
+        // Compare normalized copies only; never trim or splice final bytes.
+        const visible = action.text.replace(/\s+/g, " ").trim();
+        const streamed = last.content.replace(/\s+/g, " ").trim();
+        if (streamed && visible.startsWith(streamed)) last.content = "";
+      }
       last.commentary = [...(last.commentary ?? []), { text: action.text, toolOffset: last.toolCalls?.length ?? 0 }];
       messages[messages.length - 1] = last;
       return { ...state, messages };

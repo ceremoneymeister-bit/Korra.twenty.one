@@ -2454,9 +2454,9 @@ it("K21-376: commentary is visible before final and survives tool boundaries onc
   expect(current.isStreaming).toBe(false);
 });
 
-it("K21-376: an already streamed preamble becomes a segment without duplicating final", async () => {
+it.each(["Проверяю.", "Проверяю.\n", "  Проверяю.  "])("K21-376: streamed preamble %j becomes a segment without duplicating final", async (preamble) => {
   vi.stubGlobal("fetch", vi.fn(async () => sseResponse(
-    'data: {"choices":[{"delta":{"content":"Проверяю."},"finish_reason":null}]}\n\n',
+    `data: ${JSON.stringify({ choices: [{ delta: { content: preamble }, finish_reason: null }] })}\n\n`,
     'event: hermes.assistant.commentary\ndata: {"text":"Проверяю.","already_streamed":true}\n\n',
     'data: {"choices":[{"delta":{"content":"Готово."},"finish_reason":null}]}\n\n',
     'data: [DONE]\n\n',
@@ -2464,4 +2464,15 @@ it("K21-376: an already streamed preamble becomes a segment without duplicating 
   await act(async () => { await current.send("Проверь"); });
   expect(current.messages.at(-1)?.content).toBe("Готово.");
   expect(current.messages.at(-1)?.commentary).toEqual([{ text: "Проверяю.", toolOffset: 0 }]);
+});
+
+it("K21-376: a commentary marker does not remove unrelated final bytes", async () => {
+  const content = "Проверяю.\n\nРезультат  с  пробелами.\n";
+  vi.stubGlobal("fetch", vi.fn(async () => sseResponse(
+    `data: ${JSON.stringify({ choices: [{ delta: { content }, finish_reason: null }] })}\n\n`,
+    'event: hermes.assistant.commentary\ndata: {"text":"Проверяю.","already_streamed":true}\n\n',
+    'data: [DONE]\n\n',
+  )));
+  await act(async () => { await current.send("Проверь"); });
+  expect(current.messages.at(-1)?.content).toBe(content);
 });
