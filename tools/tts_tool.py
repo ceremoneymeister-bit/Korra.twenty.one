@@ -1724,6 +1724,41 @@ def _build_audio_delivery_files(
                     pass
 
 
+def _publish_staged_files(
+    staged_paths: List[str], target_dir: Path, backup_dir: Path,
+) -> List[str]:
+    """Publish all staged files into ``target_dir`` or leave it untouched.
+
+    Existing destinations are moved into ``backup_dir`` before being replaced.
+    If any replacement fails, files already published are removed and the
+    backups are put back, so a partial failure never loses an earlier recording.
+    """
+    published: List[Tuple[Path, Optional[Path]]] = []
+    try:
+        for index, staged in enumerate(staged_paths):
+            destination = target_dir / Path(staged).name
+            backup: Optional[Path] = None
+            if os.path.lexists(destination) and not destination.is_dir():
+                backup = backup_dir / f".backup{index:03d}-{destination.name}"
+                os.replace(destination, backup)
+            published.append((destination, backup))
+            os.replace(staged, destination)
+    except OSError as exc:
+        for destination, backup in reversed(published):
+            try:
+                if backup is not None:
+                    os.replace(backup, destination)
+                elif destination.is_file() or destination.is_symlink():
+                    destination.unlink()
+            except OSError:
+                logger.error("TTS rollback failed for %s", destination, exc_info=True)
+        raise RuntimeError(
+            f"не удалось сохранить аудиофайл {exc.filename2 or exc.filename or ''}: "
+            f"{exc.strerror or exc}. Прежние файлы оставлены без изменений."
+        ) from exc
+    return [str(destination) for destination, _ in published]
+
+
 # ===========================================================================
 # Provider: Edge TTS (free)
 # ===========================================================================
@@ -3692,10 +3727,9 @@ def text_to_speech_tool(
             voice_compatible=voice_compatible,
         )
         # Synthesis, conversion and delivery validation all succeeded.
-        for staged_path in staged_paths:
-            destination = base_path.parent / Path(staged_path).name
-            os.replace(staged_path, destination)
-            final_paths.append(str(destination))
+        final_paths = _publish_staged_files(
+            staged_paths, base_path.parent, Path(staging.name),
+        )
 
         for path in final_paths:
             logger.info(
