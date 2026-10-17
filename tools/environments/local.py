@@ -91,6 +91,19 @@ def cleanup_terminal_temp_cache(
             key = m.group(1)
             group_newest[key] = max(group_newest.get(key, 0.0), mt)
 
+    def group_touched(stem: str) -> bool:
+        # The snapshot is only a candidate list: a resumed process may have
+        # updated its log while an earlier member was being removed.
+        for suffix in ("log", "pid", "exit"):
+            try:
+                if (root / f"{stem}.{suffix}").stat().st_mtime >= cutoff:
+                    return True
+            except FileNotFoundError:
+                continue
+            except OSError:
+                return True
+        return False
+
     for f in entries:
         try:
             mt = f.stat().st_mtime
@@ -98,16 +111,23 @@ def cleanup_terminal_temp_cache(
             continue
         m = _BG_GROUP_RE.match(f.name)
         effective = group_newest.get(m.group(1), mt) if m else mt
-        if effective >= cutoff:
+        if effective >= cutoff or (m and group_touched(m.group(1))):
             continue
         try:
             if f.is_dir():
                 shutil.rmtree(f, ignore_errors=True)
             else:
                 f.unlink()
-            removed += 1
         except OSError:
             continue
+        # rmtree(ignore_errors=True) may leave the entry behind. Only proven
+        # absence counts; an unreadable path is not a successful removal.
+        try:
+            os.lstat(f)
+        except FileNotFoundError:
+            removed += 1
+        except OSError:
+            pass
     return removed
 
 

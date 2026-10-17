@@ -18,6 +18,7 @@ Security features (based on OWASP + NIST SP 800-63-4 guidance):
 Storage: ~/.hermes/pairing/
 """
 
+import contextlib
 import hashlib
 import json
 import logging
@@ -432,6 +433,16 @@ def _secure_write(path: Path, data: str) -> None:
         raise
 
 
+_dir_lock_holders: dict = {}
+_dir_lock_holders_guard = threading.Lock()
+
+
+def _dir_lock_holder(directory: Path) -> threading.local:
+    """Share file-lock reentrancy across stores using the same directory."""
+    with _dir_lock_holders_guard:
+        return _dir_lock_holders.setdefault(str(directory.resolve()), threading.local())
+
+
 class PairingStore:
     """
     Manages pairing codes and approved user lists.
@@ -479,6 +490,21 @@ class PairingStore:
         # platform adapters concurrently in threads sharing one PairingStore.
         self._lock = threading.RLock()
         self._profile = profile  # for diagnostics / log lines
+
+    @contextlib.contextmanager
+    def _locked(self):
+        """Serialize load/mutate/save across dashboard requests and CLI processes.
+
+        Take the file lock before the instance lock so waiting for another
+        process does not hold the lock used by local gateway readers.
+        """
+        from korra_cli.auth import _file_lock
+
+        with _file_lock(
+            self._dir / ".lock", _dir_lock_holder(self._dir), 10.0,
+            f"Timed out waiting for the pairing store lock ({self._dir})",
+        ), self._lock:
+            yield
 
     @property
     def profile(self) -> Optional[str]:
@@ -562,7 +588,7 @@ class PairingStore:
         return results
 
     def _approve_user(self, platform: str, user_id: str, user_name: str = "") -> None:
-        """Add a user to the approved list. Must be called under self._lock."""
+        """Add a user to the approved list. Must be called under self._locked()."""
         approved = self._load_json(self._approved_path(platform))
         normalized_user_id = self._normalize_user_id(platform, user_id)
         duplicate_ids = [
@@ -587,7 +613,7 @@ class PairingStore:
     def revoke(self, platform: str, user_id: str) -> bool:
         """Remove a user from the approved list. Returns True if found."""
         path = self._approved_path(platform)
-        with self._lock:
+        with self._locked():
             approved = self._load_json(path)
             matching_ids = [
                 approved_user_id
@@ -615,7 +641,7 @@ class PairingStore:
     def _finish_approval(
         self, platform: str, pending: dict, matched_key: str, matched_entry: dict
     ) -> dict:
-        """Remove a pending request and approve its user. Must hold self._lock."""
+        """Remove a pending request and approve its user. Must hold self._locked()."""
         del pending[matched_key]
         self._save_json(self._pending_path(platform), pending)
 
@@ -650,7 +676,7 @@ class PairingStore:
         The code is NOT stored in plaintext.  Only a salted SHA-256 hash is
         persisted so that reading the pending file does not reveal codes.
         """
-        with self._lock:
+        with self._locked():
             self._cleanup_expired(platform)
             normalized_user_id = self._normalize_user_id(platform, user_id)
 
@@ -707,7 +733,7 @@ class PairingStore:
         pre-upgrade pending.json files) are silently ignored — they get
         pruned at TTL by ``_cleanup_expired``.
         """
-        with self._lock:
+        with self._locked():
             self._cleanup_expired(platform)
             code = code.upper().strip()
 
@@ -780,7 +806,7 @@ class PairingStore:
         expired", not an attack. Counting it here let a few GUI clicks on a
         stale list lock the operator out of the CLI's code path too.
         """
-        with self._lock:
+        with self._locked():
             self._cleanup_expired(platform)
             request_id = str(request_id or "").strip().lower()
             if not request_id:
@@ -806,7 +832,7 @@ class PairingStore:
         id — they report an empty ``request_id`` and age out at TTL.
         """
         results = []
-        with self._lock:
+        with self._locked():
             platforms = [platform] if platform else self._all_platforms("pending")
             for p in platforms:
                 self._cleanup_expired(p)
@@ -832,7 +858,7 @@ class PairingStore:
 
     def clear_pending(self, platform: str = None) -> int:
         """Clear all pending requests. Returns count removed."""
-        with self._lock:
+        with self._locked():
             count = 0
             platforms = [platform] if platform else self._all_platforms("pending")
             for p in platforms:
