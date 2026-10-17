@@ -225,3 +225,16 @@ def test_cleanup_drops_spare_session_and_affinity_after_chromium_was_opened(loca
 def test_http_errors_need_leading_antibot_evidence(status):
     assert bt._chromium_failure_reason({'status': status, 'snapshot': '- StaticText "Unusual traffic from your computer network"'})
     assert not bt._chromium_failure_reason({'status': status, 'snapshot': '- heading "Article about captcha"\n- paragraph: A normal article'})
+
+
+def test_failed_site_affinity_releases_the_host_back_to_chromium(local, data):
+    key = (str(data), 'stuck')
+    bt._camofox_hosts[key] = {'example.com'}
+    with patch.object(emb, 'start_for_fallback', return_value=False):
+        result = json.loads(bt.browser_navigate('https://example.com', 'stuck'))
+    assert result['success'] is False and 'Chromium' in result['bot_detection_warning']
+    assert key not in bt._camofox_hosts
+    with patch.object(bt, '_try_camofox_page', side_effect=lambda url, task, payload, reason: payload) as fallback:
+        bt.browser_navigate('https://example.com', 'stuck')
+    local.assert_called()  # the next navigation starts with Chromium again
+    assert fallback.call_args.args[3] != 'site affinity'

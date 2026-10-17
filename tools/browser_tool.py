@@ -4310,7 +4310,18 @@ def _try_camofox_page(url: str, task_id: Optional[str], original: dict, reason: 
         logger.info("Camofox fallback host=%s reason=%s outcome=%s elapsed=%.2fs",
                     host, reason, outcome, time.monotonic() - started)
     if reason == "site affinity":
-        original["bot_detection_warning"] = "Этот сайт закреплён за Camofox, но сейчас он не открыл страницу в отведённый срок."
+        # Do not keep a task stuck on a spare browser that stopped answering:
+        # the next navigation tries Chromium again (and the spare only if blocked).
+        key = (str(get_hermes_home()), task_id or "default")
+        hosts = _camofox_hosts.get(key)
+        if hosts is not None:
+            hosts.discard(host)
+            if not hosts:
+                _camofox_hosts.pop(key, None)
+        original["bot_detection_warning"] = (
+            "Сайт был открыт через Camofox, но сейчас Camofox не открыл страницу в отведённый срок. "
+            "Следующая навигация снова начнёт с Chromium."
+        )
         return original
     original["bot_detection_warning"] = (
         f"Chromium не смог открыть содержимое сайта ({reason}). "
