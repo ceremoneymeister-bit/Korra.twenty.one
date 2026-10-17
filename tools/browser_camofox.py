@@ -32,6 +32,8 @@ import os
 import threading
 import time
 import uuid
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, Dict, Optional
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
@@ -47,6 +49,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
+
+_fallback_deadline: ContextVar[Optional[float]] = ContextVar("camofox_fallback_deadline", default=None)
 
 _DEFAULT_TIMEOUT = 30  # fallback when config is unreadable
 _SNAPSHOT_MAX_CHARS = 80_000  # camofox paginates at this limit
@@ -89,7 +93,7 @@ def _explicit_camofox_url() -> str:
 def _embedded_camofox_endpoint() -> str:
     """Address of the Camofox server bundled in the Korra image, or ``""``.
 
-    Used by default in the image or when this profile selected Camofox,
+    Available as a spare for local Chromium or when this profile selected Camofox,
     unless an explicit browser/CDP/external URL overrides it. The address and
     saved identity do not depend on server availability;
     an installation switched off by its owner gives a clear error.
@@ -103,10 +107,8 @@ def _embedded_camofox_endpoint() -> str:
             return ""
         cfg = read_raw_config_readonly() or {}
         browser = cfg.get("browser") or {}
-        if camofox_embedded.uses_embedded(
-            browser, external_url=_explicit_camofox_url(),
-            cdp_url=os.getenv("BROWSER_CDP_URL", "").strip(),
-        ):
+        overrides = dict(external_url=_explicit_camofox_url(), cdp_url=os.getenv("BROWSER_CDP_URL", "").strip())
+        if camofox_embedded.uses_embedded(browser, **overrides) or camofox_embedded.fallback_candidate(browser, **overrides):
             return endpoint
         return ""
     except Exception:  # pragma: no cover — helpers are in-repo
@@ -183,7 +185,8 @@ def embedded_fallback_note() -> str:
     """Short note for the agent when this call went to Chromium for lack of the bundled server."""
     if os.getenv("BROWSER_CDP_URL", "").strip() or _config_cdp_url():
         return ""
-    if _using_embedded_camofox() and _embedded_unavailable():
+    from tools.tool_backend_helpers import read_selection
+    if read_selection("browser") == "camofox" and _using_embedded_camofox() and _embedded_unavailable():
         return _FALLBACK_NOTE
     return ""
 
@@ -246,8 +249,8 @@ def _config_cdp_url() -> str:
 def is_camofox_mode() -> bool:
     """True when the Camofox backend is selected and no CDP override is active.
 
-    In the Korra image the bundled Camofox is also the default: a profile that
-    never selected a browser uses it. If the bundled server does not answer,
+    In the Korra image Chromium is primary unless Camofox was explicitly selected.
+    If an explicitly selected bundled server does not answer,
     this is False for the call and the browser tools use Chromium instead.
 
     Camofox is a selection: ``browser.cloud_provider: camofox`` (set via
@@ -279,7 +282,8 @@ def is_camofox_mode() -> bool:
         # An explicit different browser selection wins: CAMOFOX_URL is just
         # an address, not a choice.
         return False
-    if selected is None and not get_camofox_url():
+    if selected is None and not _explicit_camofox_url():
+        # The bundled endpoint is available as a spare, never the implicit primary.
         return False
     # Bundled server that does not answer: ordinary Chromium takes the call.
     return not (_using_embedded_camofox() and _embedded_unavailable())
@@ -520,6 +524,21 @@ def _adopt_existing_tab(session: Dict[str, Any]) -> Dict[str, Any]:
     return session
 
 
+@contextmanager
+def _session_guard():
+    deadline = _fallback_deadline.get()
+    if deadline is None:
+        acquired = _sessions_lock.acquire()
+    else:
+        acquired = _sessions_lock.acquire(timeout=max(0, deadline - time.monotonic()))
+    if not acquired:
+        raise requests.Timeout("Camofox session lock deadline")
+    try:
+        yield
+    finally:
+        _sessions_lock.release()
+
+
 def _get_session(task_id: Optional[str]) -> Dict[str, Any]:
     """Get or create a camofox session for the given task.
 
@@ -537,7 +556,7 @@ def _get_session(task_id: Optional[str]) -> Dict[str, Any]:
     from korra_constants import get_hermes_home
 
     cache_key = (str(get_hermes_home()), task_id)
-    with _sessions_lock:
+    with _session_guard():
         if cache_key in _sessions:
             return _adopt_existing_tab(_sessions[cache_key])
 
@@ -597,6 +616,8 @@ def _ensure_tab(task_id: Optional[str], url: Optional[str] = None) -> Dict[str, 
         except (requests.Timeout, requests.HTTPError, requests.ConnectionError) as exc:
             if not _using_embedded_camofox():
                 raise
+            if _fallback_deadline.get() is not None:
+                raise  # one bounded attempt; no recovery probes or Chromium cascade
             if attempt == 0:
                 if not _server_cannot_open_tab(session, exc):
                     raise
@@ -610,6 +631,8 @@ def _ensure_tab(task_id: Optional[str], url: Optional[str] = None) -> Dict[str, 
             raise CamofoxCannotOpenTab(_CANNOT_OPEN_TAB_TEXT) from None
     data = resp.json()
     session["tab_id"] = data.get("tabId")
+    session["url"] = data.get("url") or url
+    session["http_status"] = data.get("httpStatus")
     return session
 
 
@@ -707,6 +730,8 @@ def _require_embedded_ready() -> None:
 
     if camofox_embedded.is_disabled():
         raise CamofoxUnreachable(_connection_error_text())
+    if _fallback_deadline.get() is not None:
+        return  # readiness was checked within the shared fallback deadline
     if not (camofox_embedded.health() or camofox_embedded.recover()):
         _mark_embedded_down()
         raise CamofoxUnreachable(_connection_error_text())
@@ -718,6 +743,14 @@ class CamofoxStaleTab(RuntimeError):
 
 def _request(method: str, *args: Any, **kwargs: Any) -> requests.Response:
     embedded = _using_embedded_camofox()
+    deadline = _fallback_deadline.get()
+    if deadline is not None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise requests.Timeout("Camofox fallback deadline exceeded")
+        # urllib3 total bounds connect + read for each step of this attempt.
+        from urllib3.util import Timeout
+        kwargs["timeout"] = Timeout(total=remaining, connect=min(5.0, remaining))
     try:
         if embedded:
             response = _embedded_session().request(method.upper(), *args, **kwargs)
@@ -824,7 +857,7 @@ def camofox_navigate(url: str, task_id: Optional[str] = None) -> str:
         if not session["tab_id"]:
             # Create tab with the target URL directly
             session = _ensure_tab(task_id, browser_url)
-            data = {"ok": True, "url": browser_url}
+            data = {"ok": True, "url": session.get("url") or browser_url, "httpStatus": session.get("http_status")}
         else:
             # Navigate existing tab — recover from stale tab 404
             try:
@@ -841,7 +874,7 @@ def camofox_navigate(url: str, task_id: Optional[str] = None) -> str:
                     )
                     session["tab_id"] = None
                     session = _ensure_tab(task_id, browser_url)
-                    data = {"ok": True, "url": browser_url}
+                    data = {"ok": True, "url": session.get("url") or browser_url, "httpStatus": session.get("http_status")}
                 else:
                     raise
         session["url"] = data.get("url", browser_url)
@@ -853,6 +886,8 @@ def camofox_navigate(url: str, task_id: Optional[str] = None) -> str:
             "url": session["url"],
             "title": data.get("title", ""),
         }
+        if data.get("httpStatus") is not None:
+            result["status"] = data["httpStatus"]
         if rewrite_info:
             result["requested_url"] = url
             result["url_rewrite"] = rewrite_info
@@ -918,7 +953,7 @@ def _navigate_with_chromium(url: str, task_id: Optional[str]) -> Optional[str]:
     over. Returns ``None`` when the call must fail as before: external server,
     server switched off by the owner (explicit Camofox then gets a clear error).
     """
-    if not _using_embedded_camofox():
+    if _fallback_deadline.get() is not None or not _using_embedded_camofox():
         return None
     from korra_cli import camofox_embedded
 

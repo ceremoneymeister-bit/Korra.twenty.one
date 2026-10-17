@@ -63,16 +63,14 @@ def test_explicit_camofox_url_and_api_key_win_over_the_bundled_server(embedded, 
 
 def test_bundled_server_is_not_used_when_another_browser_is_selected(embedded):
     choose_browser("Local Browser")
-    assert bc.get_camofox_url() == ""
-    assert bc._auth_headers() == {}
+    assert bc.get_camofox_url() == emb.BASE_URL  # available as a spare, not selected
     assert bc.is_camofox_mode() is False
 
 
 def test_profile_without_a_browser_choice_never_contacts_camofox(install, data):
     with UnixServer(emb.socket_path(), reply=REPLY) as server:
-        assert bc.get_camofox_url() == ""
+        assert bc.get_camofox_url() == emb.BASE_URL
         assert bc.is_camofox_mode() is False
-        assert bc._using_embedded_camofox() is False
     assert not server.seen
 
 
@@ -93,7 +91,7 @@ def test_explicit_choices_keep_the_default_out(install, data, browser):
 
     save_config({"browser": browser})
     with UnixServer(emb.socket_path(), reply=REPLY):
-        assert bc.get_camofox_url() == ""
+        assert bool(bc.get_camofox_url()) == emb.fallback_candidate(browser)
         assert bc.is_camofox_mode() is False
 
 
@@ -236,7 +234,7 @@ def test_server_switched_off_with_camofox_selected_explains_the_next_step(embedd
 def test_server_switched_off_profile_without_a_choice_goes_to_chromium_without_an_error(install, data):
     emb.disable(signal=False)
     assert bc.is_camofox_mode() is False
-    assert bc.get_camofox_url() == ""
+    assert bc.get_camofox_url() == emb.BASE_URL
     assert bc.embedded_fallback_note() == ""
     result, run, camofox = _navigate_through_dispatch()
     camofox.assert_not_called()
@@ -305,7 +303,7 @@ def test_two_profiles_with_different_browsers_do_not_disturb_each_other(chromium
     with in_profile(data, "b"):
         choose_browser("Local Browser")
         id_b = get_camofox_identity("b")
-        assert bc.get_camofox_url() == ""
+        assert bc.get_camofox_url() == emb.BASE_URL
         assert bc.is_camofox_mode() is False
     assert emb.is_enabled()
     with in_profile(data, "a"), UnixServer(emb.socket_path(), reply=REPLY):

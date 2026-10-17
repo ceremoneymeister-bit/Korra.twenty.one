@@ -1,12 +1,12 @@
 """Встроенный Camofox («Браузер с защитой от блокировок») в коробке Korra.
 
 Образ содержит Camofox в ``/opt/camofox`` (см. Dockerfile). Сервер запускается,
-если хотя бы один профиль использует встроенный браузер
-по явному выбору ``browser.cloud_provider: camofox``. Явный другой браузер сохраняется.
+по явному выбору ``browser.cloud_provider: camofox`` или лениво после блокировки Chromium. Явный другой браузер сохраняется.
 Состояние живёт в ``<корень данных>/camofox`` и переживает пересоздание контейнера:
 
 * ``enabled`` — кэш выбора профилей, сверяется при сохранении настроек,
   создании/импорте/удалении профиля и запуске службы;
+* ``fallback-requested`` — служба уже запрошена для запасного режима;
 * ``disabled`` — выключатель установки (поддержка, слабый сервер);
 * ``server.sock`` — Unix-сокет сервера (0600) в каталоге 0700;
 * ``access.key`` — ключ доступа этой установки (0600);
@@ -277,14 +277,24 @@ def explicit_url() -> str:
 
 
 @contextmanager
-def _selection_lock(lock_path: Path):
+def _selection_lock(lock_path: Path, deadline: Optional[float] = None):
     """Захватить блокировку; при ошибке flock открытый файл тоже закрывается."""
     import fcntl
 
     _ensure_dir()
     _create_once(lock_path, "")
     with lock_path.open("r+", encoding="utf-8") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+        if deadline is None:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+        else:
+            while True:
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError("Camofox selection lock deadline") from None
+                    time.sleep(min(0.05, max(0, deadline - time.monotonic())))
         yield
 
 
@@ -337,9 +347,6 @@ def sync(*, signal: bool = True) -> bool:
 # Один Firefox с тремя вкладками занимает ~0,5 ГиБ cgroup, тяжёлые сайты больше:
 # в контейнере меньше этого предела OOM убил бы работу агента, а не браузер.
 DEFAULT_MIN_MEMORY_BYTES = 3 * 1024 ** 3
-# K21-336: 0.21.20 stays opt-in until storage restoration is reliable. Keep
-# the memory gate for the eventual default rollout; this is not user config.
-DEFAULT_ENABLED = False
 _NO_LIMIT_BYTES = 1 << 50  # cgroup v1 без лимита отдаёт число порядка 2**63
 _CGROUP_MEMORY_FILES = (
     Path("/sys/fs/cgroup/memory.max"),  # cgroup v2
@@ -360,11 +367,6 @@ def memory_limit_bytes() -> Optional[int]:
     return None
 
 
-def _default_blocked_by_memory() -> bool:
-    limit = memory_limit_bytes()
-    return limit is not None and limit < DEFAULT_MIN_MEMORY_BYTES
-
-
 def _gib(value: float) -> str:
     text = f"{value:.1f}".rstrip("0").rstrip(".")
     return text.replace(".", ",")
@@ -376,7 +378,7 @@ def default_memory_note() -> str:
     if limit is None or limit >= DEFAULT_MIN_MEMORY_BYTES:
         return ""
     return (
-        f"Camofox не включён по умолчанию: контейнеру доступно {_gib(limit / 1024 ** 3)} ГиБ, "
+        f"Запасной Camofox выключен: контейнеру доступно {_gib(limit / 1024 ** 3)} ГиБ, "
         f"нужно от {_gib(DEFAULT_MIN_MEMORY_BYTES / 1024 ** 3)} ГиБ; можно выбрать вручную"
     )
 
@@ -389,17 +391,53 @@ def uses_embedded(browser: dict, *, external_url: str = "", cdp_url: str = "") -
         return False
     if is_truthy_value(browser.get("use_gateway"), default=False):
         return False
-    selected = str(browser.get("cloud_provider") or "").strip().lower()
-    if selected:
-        return selected == "camofox"
+    return str(browser.get("cloud_provider") or "").strip().lower() == "camofox"
+
+
+def fallback_candidate(browser: dict, *, external_url: str = "", cdp_url: str = "") -> bool:
+    """Local Chromium may retry a blocked page; other backends retain their policy."""
+    from utils import is_truthy_value
+
     return (
-        DEFAULT_ENABLED
+        not external_url and not cdp_url and not browser.get("cdp_url")
+        and str(browser.get("cloud_provider") or "").strip().lower() in ("", "local")
         and browser.get("backend") in (None, "")
-        and browser.get("engine") in (None, "", "auto")
+        and browser.get("engine") in (None, "", "auto", "chromium", "chrome")
+        and not is_truthy_value(browser.get("use_gateway"), default=False)
         and not is_truthy_value(browser.get("use_real_profile"), default=False)
-        and not is_disabled()
-        and not _default_blocked_by_memory()
     )
+
+
+def fallback_disabled_reason(browser: dict, *, external_url: str = "", cdp_url: str = "") -> str:
+    if not is_installed():
+        return "встроенный Camofox отсутствует в этой сборке"
+    if not fallback_candidate(browser, external_url=external_url, cdp_url=cdp_url):
+        return "выбран отдельный браузер, внешний сервер, CDP или облачный провайдер"
+    if is_disabled():
+        return "Camofox выключен владельцем: korra tools camofox off"
+    return default_memory_note()
+
+
+def start_for_fallback(deadline: float) -> bool:
+    """Wake the existing s6 slot on demand, keeping the installation switch authoritative."""
+    if is_disabled() or not is_installed() or socket_path_problem():
+        return False
+    ensure_state()
+    with _selection_lock(state_dir() / "selection.lock", deadline):
+        if is_disabled():
+            return False
+        _write_private(state_dir() / "fallback-requested", "1\n")
+        _sync_selection(signal=False)
+    # The slot normally sleeps in sh and notices enabled within three seconds.
+    if not socket_path().exists():
+        _s6_svc("-u")
+    while time.monotonic() < deadline and not is_disabled():
+        if health(timeout=min(1.0, deadline - time.monotonic())):
+            return True
+        if not in_container():
+            return False
+        time.sleep(min(0.2, max(0, deadline - time.monotonic())))
+    return False
 
 
 def _sync_selection(*, signal: bool) -> None:
@@ -419,9 +457,13 @@ def _sync_selection(*, signal: bool) -> None:
 
         try:
             browser = read_user_config_raw(home / "config.yaml").get("browser") or {}
-            return uses_embedded(
-                browser, external_url=_profile_setting(home, "CAMOFOX_URL", ()),
+            overrides = dict(
+                external_url=_profile_setting(home, "CAMOFOX_URL", ()),
                 cdp_url=_profile_setting(home, "BROWSER_CDP_URL", ()),
+            )
+            return uses_embedded(browser, **overrides) or (
+                (state_dir() / "fallback-requested").is_file()
+                and not fallback_disabled_reason(browser, **overrides)
             )
         except (yaml.YAMLError, TypeError, AttributeError):
             # Unknown choice is not consent to replace an explicit browser.
@@ -662,30 +704,33 @@ def status() -> Dict[str, object]:
     if is_disabled():
         return {
             "state": "switched_off",
-            "detail": "выключен на этой установке",
+            "detail": "выключен на этой установке; запасной режим: выключен владельцем",
             "next": "включить: korra tools camofox on",
         }
+    from korra_cli.config import read_raw_config_readonly
+    browser = (read_raw_config_readonly() or {}).get("browser") or {}
+    reason = fallback_disabled_reason(browser, external_url=explicit_url(), cdp_url=os.getenv("BROWSER_CDP_URL", ""))
+    fallback = "запасной режим: выключен — " + reason if reason else "запасной режим: включён"
     if not is_enabled():
-        note = default_memory_note()
-        if note:
+        if reason:
             return {
                 "state": "unused",
-                "detail": note,
+                "detail": fallback,
                 "next": "выбрать вручную: Инструменты → Браузер → Camofox или korra tools → Браузер → Camofox",
             }
         return {
             "state": "unused",
-            "detail": "выключен: ни один профиль не выбрал встроенный Camofox",
-            "next": "включить: Инструменты → Браузер → Camofox или korra tools → Браузер → Camofox",
+            "detail": "служба спит; " + fallback,
+            "next": "Chromium работает первым; Camofox запустится при блокировке сайта",
         }
     problem = socket_path_problem()
     if problem:
         return {"state": "not_responding", "detail": "не может запуститься", "next": problem}
     if health():
-        return {"state": "running", "detail": "работает", "next": ""}
+        return {"state": "running", "detail": "работает; " + fallback, "next": ""}
     return {
         "state": "not_responding",
-        "detail": "включён, но не отвечает",
+        "detail": "включён, но не отвечает; " + fallback,
         "next": (
             "подождите полминуты после запуска контейнера; если не проходит — запустите службу: "
             "s6-svc -u /run/service/camofox (если она уже работала, перезапустите: "
@@ -702,7 +747,7 @@ def tools_command(action: str) -> int:
     if action == "on":
         enable()
         sync()
-        print("Выключатель встроенного Camofox снят; сервер запускается для профилей, выбравших Camofox.")
+        print("Выключатель встроенного Camofox снят; запасной режим доступен для Chromium, если хватает памяти.")
         print("Выбрать: Инструменты → Браузер → Camofox или korra tools → Браузер → Camofox.")
         print("Проверить: korra doctor")
         return 0

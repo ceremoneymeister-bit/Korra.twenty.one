@@ -31,7 +31,8 @@ def test_url_prompt_stays_outside_the_image(tmp_path, monkeypatch):
 
 
 def test_row_text_is_russian_and_about_blocks():
-    assert "для сайтов, которые не пускают роботов" in _row("Camofox")["tag"]
+    assert "Всегда Camofox" in _row("Camofox")["tag"]
+    assert "автоматически Camofox" in _row("Local Browser")["tag"]
 
 
 def test_choosing_camofox_enables_the_service(install, data):
@@ -165,7 +166,7 @@ def test_in_the_image_camofox_is_an_explicit_option(install, data):
     rows = _rows()
     camofox = next(r for r in rows if r["name"] == "Camofox")
     assert "по умолчанию" not in camofox["badge"]
-    assert "для сайтов, которые не пускают роботов" in camofox["tag"]
+    assert "Всегда Camofox" in camofox["tag"]
     assert rows[0]["name"] == "Local Browser"
 
 
@@ -225,7 +226,7 @@ def test_new_profile_keeps_implicit_chromium(install, data, monkeypatch):
         profiles.create_profile("fresh", no_alias=True, no_skills=True)
     assert not emb.is_enabled()
     with in_profile(data, "fresh"):
-        assert bc.get_camofox_url() == ""
+        assert bc.get_camofox_url() == emb.BASE_URL
 
 
 def test_review2_finding_1_cloud_key_of_another_profile_changes_nothing(install, data, monkeypatch):

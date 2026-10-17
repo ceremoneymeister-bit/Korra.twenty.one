@@ -916,7 +916,7 @@ def check_embedded_camofox(issues: list[str]) -> None:
         check_info(info["next"])
         return
     if state == "running":
-        check_ok(name, '(работает)')
+        check_ok(name, f'({info["detail"]})')
         return
     if state == "not_responding":
         check_fail(name, f'({info["detail"]})')
