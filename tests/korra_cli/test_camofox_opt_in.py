@@ -19,9 +19,9 @@ def test_explicit_chromium_never_probes_or_starts_camofox(chromium_root, install
 
     with patch.object(emb, "health") as health, patch.object(emb, "recover") as recover:
         assert not emb.is_enabled()
-        assert bc.get_camofox_url() == ""
+        assert bc.get_camofox_url() == emb.BASE_URL
         assert not bc.is_camofox_mode()
-        with patch.object(bt, "_run_browser_command", return_value={"success": True}) as chromium:
+        with patch.object(bt, "_run_browser_command", return_value={"success": True, "data": {"title": "Example", "snapshot": "- heading \"Example\""}}) as chromium:
             result = json.loads(bt.browser_navigate("https://example.com", task_id="opt-in"))
         assert result["success"] and "note" not in result
         chromium.assert_called()
@@ -72,7 +72,8 @@ def test_subscription_view_keeps_implicit_chromium(install, data):
 def test_unused_service_is_a_normal_state_with_enable_instructions(chromium_root, install, data):
     info = emb.status()
     assert info["state"] == "unused"
-    assert "korra tools" in info["next"] and "Camofox" in info["next"]
+    assert "запасной режим: включён" in info["detail"]
+    assert "запустится при блокировке" in info["next"]
 
 
 def test_another_profiles_process_credentials_cannot_disable_an_explicit_choice(install, data, monkeypatch):
@@ -101,7 +102,7 @@ def test_picker_keeps_camofox_available_for_explicit_choice(install, data):
 
     rows = tc._visible_providers(tc.TOOL_CATEGORIES["browser"], load_config())
     row = next(r for r in rows if r.get("browser_provider") == "camofox")
-    assert "для сайтов, которые не пускают роботов" in row["tag"]
+    assert "Всегда Camofox" in row["tag"]
     assert "по умолчанию" not in row["badge"]
     assert not tc._is_provider_active(row, load_config())
     choose_browser("Camofox")
@@ -114,7 +115,7 @@ def test_profile_without_a_choice_keeps_chromium_alongside_an_explicit_profile(i
     with in_profile(data, "chosen"):
         choose_browser("Camofox")
     with in_profile(data, "plain"), patch.object(emb, "health", return_value=True) as health:
-        assert bc.get_camofox_url() == ""
+        assert bc.get_camofox_url() == emb.BASE_URL
         assert not bc.is_camofox_mode()
     health.assert_not_called()
     assert emb.is_enabled()
@@ -236,9 +237,9 @@ def test_release_hold_keeps_implicit_chromium_even_with_enough_memory(install, d
     before = config.read_bytes()
     with patch.object(emb, "health") as health, patch.object(emb, "recover") as recover:
         assert not emb.sync(signal=False)
-        assert bc.get_camofox_url() == ""
+        assert bc.get_camofox_url() == emb.BASE_URL
         assert get_nous_subscription_features({}).browser.current_provider != "Camofox"
-        with patch.object(bt, "_run_browser_command", return_value={"success": True}) as chromium:
+        with patch.object(bt, "_run_browser_command", return_value={"success": True, "data": {"title": "Example", "snapshot": "- heading \"Example\""}}) as chromium:
             assert json.loads(bt.browser_navigate("https://example.com", "release-hold"))["success"]
         chromium.assert_called()
         rows = tc._visible_providers(tc.TOOL_CATEGORIES["browser"], {})

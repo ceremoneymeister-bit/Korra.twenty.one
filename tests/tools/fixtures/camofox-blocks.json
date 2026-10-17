@@ -1,0 +1,242 @@
+[
+  {
+    "case": "chromium-ya.ru",
+    "blocked": true,
+    "payload": {
+      "success": true,
+      "url": "https://ya.ru/showcaptcha",
+      "error": "",
+      "snapshot": "- main - link \"Яндекс\" [ref=e7] - form - heading \"Подтвердите, что запросы отправляли вы, а не робот\" [level=1, ref=e8] - generic - link \"Почему это могло произойти?\" [ref=e10] - generic - checkbox \"Я не робот\" [checked=false, ref=e11] - button \"Показать ссылки\" [ref=e12] - link \"Yandex SmartCaptcha"
+    }
+  },
+  {
+    "case": "chromium-yandex-maps",
+    "blocked": true,
+    "payload": {
+      "success": true,
+      "url": "https://yandex.ru/maps/",
+      "error": "",
+      "snapshot": "(empty page)"
+    }
+  },
+  {
+    "case": "chromium-google",
+    "blocked": true,
+    "payload": {
+      "success": true,
+      "url": "https://www.google.com/sorry/index",
+      "error": "",
+      "snapshot": "- link \"Why did this happen?\" [ref=e1] - generic - StaticText \"IP address: [redacted]\" - StaticText \"Time: 2026-10-12T13:49:41Z\" - StaticText \"URL: https://www.google.com/search?q=%D0%BA%D1%83%D0%BF%D0%B8%D1%82%D1%8C%20%D0%B4%D0%B8%D0%B2%D0%B0%D0%BD%20%D0%BD%D0%BE%D0%B2%D0%BE%D1%81%D0%B8%D0%B"
+    }
+  },
+  {
+    "case": "chromium-avito",
+    "blocked": true,
+    "payload": {
+      "success": true,
+      "url": "https://www.avito.ru/novosibirsk",
+      "error": "",
+      "snapshot": "- generic - image - heading \"Доступ ограничен: проблема с IP\" [level=2, ref=e1] - form - button \"Продолжить\" [ref=e3] - paragraph - paragraph - paragraph - paragraph - paragraph - link \"напишите поддержке\" [ref=e2]"
+    }
+  },
+  {
+    "case": "chromium-ozon",
+    "blocked": true,
+    "payload": {
+      "success": true,
+      "url": "https://www.ozon.ru/search/",
+      "error": "",
+      "snapshot": "- main - generic - StaticText \"Инцидент: [redacted]\" - button \"Обновить страницу\" [ref=e1] - link \"Обратиться в поддержку\" [ref=e2]"
+    }
+  },
+  {
+    "case": "chromium-wildberries",
+    "blocked": true,
+    "payload": {
+      "success": true,
+      "url": "https://www.wildberries.ru/catalog/0/search.aspx",
+      "error": "",
+      "snapshot": "(empty page)"
+    }
+  },
+  {
+    "case": "chromium-market-yandex",
+    "blocked": true,
+    "payload": {
+      "success": true,
+      "url": "https://market.yandex.ru/",
+      "error": "",
+      "snapshot": "- generic - link \"Яндекс\" [ref=e4] - heading \"Доступ ксервису временно запрещён\" [level=1, ref=e1] - heading \"Почему это произошло?\" [level=2, ref=e2] - heading \"Что мне делать?\" [level=2, ref=e3] - paragraph - link \"форму обратной связи\" [ref=e5] - alert \"Yandex uses cookies\" - heading \"Yandex uses"
+    }
+  },
+  {
+    "case": "chromium-2gis",
+    "blocked": true,
+    "payload": {
+      "success": true,
+      "url": "https://captcha.2gis.ru/form",
+      "error": "",
+      "snapshot": "- form - button \"Отправить\" [ref=e1] - paragraph - StaticText \"IP: [redacted]\" - paragraph - StaticText \"Время: 2026-10-12 13:50 UTC\" - paragraph - StaticText \"URL: \" - link \"https://2gis.ru/novosibirsk\" [ref=e2] - paragraph - link \"https://help.2gis.ru/feedback/\" [ref=e3]"
+    }
+  },
+  {
+    "case": "chromium-hh",
+    "blocked": true,
+    "payload": {
+      "success": false,
+      "url": "https://hh.ru/search/vacancy",
+      "error": "Operation timed out. The page may still be loading or the element may not exist.",
+      "snapshot": "- generic - generic - StaticText \"Чтобы сайт был удобнее, используем\" - link \"cookies\" [ref=e3] - button \"Понятно\" [ref=e4] - StaticText \"Понятно\" - generic - banner - generic - link \"Главная страница сайта\" [ref=e23] - generic - LabelText - radio \"Ищуработу\" [checked=true, ref=e171] - generic [ref="
+    }
+  },
+  {
+    "case": "chromium-nowsecure",
+    "blocked": true,
+    "payload": {
+      "success": true,
+      "url": "https://nowsecure.nl/",
+      "error": "",
+      "snapshot": "- main - generic - heading \"NOWSECURE\" [level=2, ref=e1] - heading \"BY NODRIVER\" [level=3, ref=e2] - StaticText \"BY NODRIVER\" - generic - form - Iframe \"Widget containing a Cloudflare security challenge\" [ref=e5] - generic - alert - LabelText - checkbox \"Verify you are human\" [checked=false, ref=e10"
+    }
+  },
+  {
+    "case": "chromium-sannysoft",
+    "blocked": false,
+    "payload": {
+      "success": true,
+      "url": "https://bot.sannysoft.com/",
+      "error": "",
+      "snapshot": "- heading \"Intoli.com tests + additions\" [level=1, ref=e1] - table - row - columnheader \"Test Name\" [ref=e8] - columnheader \"Result\" [ref=e9] - row - cell \"User Agent (Old)\" [ref=e10] - cell \"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.4 Safari/53"
+    }
+  },
+  {
+    "case": "chromium-browserscan",
+    "blocked": false,
+    "payload": {
+      "success": true,
+      "url": "https://www.browserscan.net/bot-detection",
+      "error": "",
+      "snapshot": "- generic - banner - link \"logo\" [ref=e1] - navigation - link \"blog\" [ref=e122] - link \"blog\" [ref=e123] - link \"Utilities\" [ref=e135] - StaticText \"EN\" - button \"Sign In\" [ref=e136] - main - image - link \"Home\" [ref=e2] - StaticText \">\" - strong - StaticText \"Bot Detection\" - strong - StaticText \"T"
+    }
+  },
+  {
+    "case": "camofox-ya.ru",
+    "blocked": true,
+    "payload": {
+      "success": true,
+      "url": "https://ya.ru/search/",
+      "error": "",
+      "snapshot": "- main: - link \"Yandex\" [e1]: - /url: https://www.yandex.com - heading \"Please confirm that you are not a robot\" [level=1] - text: We're sorry, but it looks like requests sent from your device are automated. - link \"Why might this happen?\" [e2]: - /url: https://yandex.com/support/smart-captcha/probl"
+    }
+  },
+  {
+    "case": "camofox-yandex-maps",
+    "blocked": false,
+    "payload": {
+      "success": true,
+      "url": "https://yandex.com/maps/",
+      "error": "",
+      "snapshot": "- banner: - textbox \"Search for and select places\" [e1] - button \"Search\" [e2] - button \"Plot route\" [e3] - complementary: - link \"Restaurants\" [e4]: - /url: /maps/104520/england/search/Restaurants/ - img - heading \"Restaurants\" [level=3] - link \"Groceries\" [e5]: - /url: /maps/104520/england/search/"
+    }
+  },
+  {
+    "case": "camofox-google",
+    "blocked": false,
+    "payload": {
+      "success": true,
+      "url": "https://www.google.com/search",
+      "error": "",
+      "snapshot": "- heading \"купить диван новосибирск - Google Search\" - searchbox \"Search\" [e1]: купить диван новосибирск - link \"Купить диван на распродаже в Новосибирске недорого ...\" [e2]: - /url: https://www.google.com/goto?url=CAESggEB6zswFY8aeUGrrckeWgKKsFx8V6IFqgBHGVyjTqVxqdPSXZluQBahpzmnUb5OVYxk5jZRGbxitTLkc"
+    }
+  },
+  {
+    "case": "camofox-avito",
+    "blocked": false,
+    "payload": {
+      "success": true,
+      "url": "https://www.avito.ru/novosibirsk",
+      "error": "",
+      "snapshot": "- list: - listitem [e1]: - button \"Для бизнеса\" [e2] - listitem [e3]: - link \"Карьера в Авито\" [e4]: - /url: //career.avito.com/?utm_source=avito.ru&utm_medium=referral&utm_campaign=test_placement_to_career&utm_content=top_vacancy - listitem [e5]: - link \"Помощь\" [e6]: - /url: //support.avito.ru - l"
+    }
+  },
+  {
+    "case": "camofox-ozon",
+    "blocked": false,
+    "payload": {
+      "success": true,
+      "url": "https://www.ozon.ru/search/",
+      "error": "",
+      "snapshot": "- banner: - link \"Ozon\" [e1]: - /url: / - img \"Ozon\" - button \"Каталог\" [e2]: - img - text: Каталог - text: Диваны - img - textbox \"Искать в Диваны\" [e3]: диван - button [e4]: - img - button \"Поиск\" [e5]: - img - img - text: Войти - link \"Заказы\" [e6]: - /url: /my/orderlist/ - img - text: Заказы - l"
+    }
+  },
+  {
+    "case": "camofox-wildberries",
+    "blocked": false,
+    "payload": {
+      "success": true,
+      "url": "https://www.wildberries.ru/catalog/0/search.aspx",
+      "error": "",
+      "snapshot": "- banner: - list - link \"Wildberries\" [e1]: - /url: / - img \"Wildberries\" - main - contentinfo"
+    }
+  },
+  {
+    "case": "camofox-market-yandex",
+    "blocked": false,
+    "payload": {
+      "success": true,
+      "url": "https://market.yandex.ru/",
+      "error": "",
+      "snapshot": "- main: - img - link \"Яндекс\" [e1]: - /url: //ya.ru/ - link \"Яндекс\" [e2]: - /url: / - button \"Каталог\" [e3] - link [e4]: - /url: /catalog - search: - img - textbox \"Найти товары\" [e5] - navigation \"Главное меню\": - list: - listitem [e6]: - link [e7]: - /url: /kolesoprizov?track=menu&source=home_coi"
+    }
+  },
+  {
+    "case": "camofox-2gis",
+    "blocked": false,
+    "payload": {
+      "success": true,
+      "url": "https://id.sber.ru/CSAFront/oidc/authorize.do",
+      "error": "",
+      "snapshot": "- text: ............................................................................. ............................................................................. ............................................................................. .........................................................."
+    }
+  },
+  {
+    "case": "camofox-hh",
+    "blocked": false,
+    "payload": {
+      "success": true,
+      "url": "https://hh.ru/search/vacancy",
+      "error": "",
+      "snapshot": "- text: Чтобы сайт был удобнее, используем - link \"cookies\" [e1]: - /url: /article/cookie_policy?hhtmFrom=vacancy_search_list - button \"Понятно\" [e2] - banner: - link \"Главная страница сайта\" [e3]: - /url: / - radio \"Ищу работу\" [e4] [checked] - text: Ищу работу - radio \"Ищу сотрудника\" [e5] - text:"
+    }
+  },
+  {
+    "case": "camofox-nowsecure",
+    "blocked": false,
+    "payload": {
+      "success": true,
+      "url": "https://nowsecure.nl/",
+      "error": "",
+      "snapshot": "- main: - heading \"NOWSECURE\" [level=2] - heading \"by nodriver\" [level=3] - heading \"NOWSECURE\" [level=2] - heading \"by nodriver\" [level=3]"
+    }
+  },
+  {
+    "case": "camofox-sannysoft",
+    "blocked": false,
+    "payload": {
+      "success": true,
+      "url": "https://bot.sannysoft.com/",
+      "error": "",
+      "snapshot": "- heading \"Intoli.com tests + additions\" [level=1] - table: - rowgroup: - row \"Test Name Result\": - columnheader \"Test Name\" - columnheader \"Result\" - row \"User Agent (Old) Mozilla/5.0 (X11; Linux x86_64; rv:152.0) Gecko/20100101 Firefox/152.0\": - cell \"User Agent (Old)\" - cell \"Mozilla/5.0 (X11; Li"
+    }
+  },
+  {
+    "case": "camofox-browserscan",
+    "blocked": false,
+    "payload": {
+      "success": true,
+      "url": "https://www.browserscan.net/bot-detection",
+      "error": "",
+      "snapshot": "- banner: - link \"logo\" [e1]: - /url: / - navigation: - link \"blog\" [e2]: - /url: https://blog.browserscan.net - link \"blog\" [e3]: - /url: https://www.adspower.com/ - text: Antidetect Browser - link \"Utilities\" [e4]: - /url: /tools - text: EN - button \"Sign In\" [e5] - main: - img - link \"Home\" [e6]:"
+    }
+  }
+]

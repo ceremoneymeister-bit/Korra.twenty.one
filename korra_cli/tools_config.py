@@ -610,7 +610,7 @@ TOOL_CATEGORIES = {
             {
                 "name": "Local Browser",
                 "badge": '★ рекомендуется · бесплатно',
-                "tag": 'Фоновый Chromium, ключ API не нужен',
+                "tag": 'Chromium; если сайт не пускает — автоматически Camofox',
                 "env_vars": [],
                 "browser_provider": "local",
                 "browser_engine": "auto",
@@ -644,7 +644,7 @@ TOOL_CATEGORIES = {
             {
                 "name": "Camofox",
                 "badge": 'бесплатно · локально',
-                "tag": 'Браузер для сайтов, которые не пускают роботов; входы сохраняются отдельно от Chromium',
+                "tag": 'Всегда Camofox; входы сохраняются отдельно от Chromium',
                 # В образе Korra сервер встроен: адрес и ключ определяются сами,
                 # владельцу ничего вводить не нужно. Вне образа остаётся запрос адреса.
                 "env_vars": _camofox_env_vars(),
@@ -3507,18 +3507,11 @@ def _visible_providers(
 
         if camofox_embedded.is_installed() and not camofox_embedded.is_disabled():
             memory_note = camofox_embedded.default_memory_note()
-            implicit_camofox = camofox_embedded.uses_embedded({})
             visible = [dict(row) for row in visible]
-            for row in visible:
-                if memory_note:
+            if memory_note:
+                for row in visible:
                     if row.get("name") == "Camofox" and cfg_get(config, "browser", "cloud_provider") != "camofox":
                         row["tag"] = f'{row.get("tag", "")}. {memory_note}'
-                elif implicit_camofox and row.get("name") == "Camofox":
-                    row["badge"] = 'по умолчанию · бесплатно · локально'
-                elif implicit_camofox and row.get("name") == "Local Browser":
-                    row["badge"] = 'бесплатно · локально'
-            if implicit_camofox:
-                visible.sort(key=lambda row: row.get("name") != "Camofox")
 
     # Inject plugin-registered TTS backends (issue #30398). Plugin rows
     # render BELOW the 10 hardcoded built-in rows. Built-in shadowing

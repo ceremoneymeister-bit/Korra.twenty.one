@@ -58,7 +58,7 @@ def test_switched_off_names_the_command_and_the_effect_and_is_not_a_failure(inst
 
 def test_doctor_explains_how_to_enable_an_unused_browser(chromium_root, install, data):
     out, issues = run()
-    assert "ни один профиль" in out and "korra tools" in out and issues == []
+    assert "служба спит" in out and "запасной режим: включён" in out and issues == []
     with in_profile(data, "work"):
         choose_browser("Camofox")
     with UnixServer(emb.socket_path()):

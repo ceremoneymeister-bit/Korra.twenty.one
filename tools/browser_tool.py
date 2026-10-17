@@ -4206,6 +4206,134 @@ def _is_camofox_page(task_id: Optional[str]) -> bool:
     return backend == "camofox" if backend else _is_camofox_mode()
 
 
+# Host affinity lives only for the same profile/task, like page ownership.
+_camofox_hosts: Dict[tuple, set] = {}
+_CAMOFOX_FALLBACK_SECONDS = 45.0
+
+
+def _chromium_failure_reason(payload: dict) -> str:
+    """Strong URL/title/leading accessibility evidence, never whole-page keywords."""
+    from urllib.parse import urlsplit
+
+    if payload.get("blocked_by_policy"):
+        return ""
+    if payload.get("success") is False:
+        error = str(payload.get("error") or "").lower()
+        return "navigation timeout" if "timed out" in error or "timeout" in error else ""
+    parsed = urlsplit(str(payload.get("url") or ""))
+    path = parsed.path.lower()
+    if (re.search(r"/(?:showcaptcha|challenge)(?:/|$)", path)
+            or "/cdn-cgi/challenge" in path or path.startswith("/sorry/")
+            or (parsed.hostname or "").startswith("captcha.")):
+        return "challenge URL"
+    title = str(payload.get("title") or "").lower().strip()
+    if re.match(r"^(?:access (?:denied|to this page has been denied)|just a moment|attention required|"
+                r"verification required|please verify|are you a robot|checking your browser|"
+                r"bot detected|ddos protection|captcha[!.]?$|доступ ограничен|доступ запрещ[её]н)", title):
+        return "blocked page title"
+    if "snapshot" not in payload:
+        return ""
+    snapshot = str(payload.get("snapshot") or "").strip()
+    if snapshot.lower() in ("", "(empty page)", "- document", "- document:"):
+        return "empty page"
+    head = " ".join(snapshot.split()[:160])[:900].lower()
+    # These phrases must be page headings/controls, not prose about captcha.
+    if re.search(r'(?:heading|checkbox|iframe)[^"\n]{0,20}"(?:'
+                 r'доступ ограничен|доступ к\s*сервису временно запрещ[её]н|'
+                 r'подтвердите, что запросы|я не робот|verify you are human|'
+                 r'please confirm that you are not a robot|access denied|'
+                 r'widget containing a cloudflare security challenge)', head):
+        return "antibot heading or challenge control"
+    if ("инцидент:" in head and "обновить страницу" in head and "обратиться в поддержку" in head
+            and len(snapshot) < 1500):
+        return "incident page"
+    if (payload.get("status") in (403, 429, 503)
+            and re.search(r'(?:text|statictext)[^"\n]{0,10}"(?:unusual traffic|requests.*automated|проверка браузера)', head)):
+        return "antibot HTTP response"
+    return ""
+
+
+def _camofox_auto_policy() -> Optional[str]:
+    """None means a separate backend; an empty string means the spare is allowed."""
+    from korra_cli import camofox_embedded as emb
+    from korra_cli.config import read_raw_config_readonly
+    from tools.browser_camofox import _explicit_camofox_url
+
+    browser = (read_raw_config_readonly() or {}).get("browser") or {}
+    overrides = dict(external_url=_explicit_camofox_url(), cdp_url=_get_cdp_override_raw() or "")
+    if (not emb.fallback_candidate(browser, **overrides)
+            or _get_cloud_provider() is not None or _using_lightpanda_engine()):
+        return None
+    return emb.fallback_disabled_reason(browser, **overrides)
+
+
+def _try_camofox_page(url: str, task_id: Optional[str], original: dict, reason: str) -> dict:
+    """One bounded attempt; failure leaves Chromium's page and refs authoritative."""
+    from urllib.parse import urlsplit
+    from korra_cli import camofox_embedded as emb
+    from tools import browser_camofox as bc
+
+    host = urlsplit(url).hostname or ""
+    started = time.monotonic()
+    deadline = started + _CAMOFOX_FALLBACK_SECONDS
+    outcome = "failed"
+    previous = _page_browser_backends.get((str(get_hermes_home()), task_id or "default"))
+    token = bc._fallback_deadline.set(deadline)
+    try:
+        if emb.start_for_fallback(deadline):
+            payload = json.loads(bc.camofox_navigate(url, task_id))
+            if (time.monotonic() < deadline and payload.get("success")
+                    and "snapshot" in payload and not _chromium_failure_reason(payload)
+                    and (payload.get("status") is None or payload["status"] < 400)
+                    and evaluate_url_safety(payload.get("url") or url) is None):
+                key = (str(get_hermes_home()), task_id or "default")
+                _camofox_hosts.setdefault(key, set()).add(host)
+                _pin_page_browser(task_id, "camofox")
+                payload["browser_backend"] = "camofox"
+                payload["note"] = (
+                    f"Страница открыта через Camofox: Chromium заблокирован сайтом {host} ({reason}). "
+                    "Дальнейшие действия на этой странице и входы на этот сайт — в Camofox; "
+                    "входы Chromium в него не переносятся."
+                )
+                outcome = "success"
+                return payload
+    except Exception:
+        pass  # never expose URL-bearing exception text or start a fallback cascade
+    finally:
+        bc._fallback_deadline.reset(token)
+        if outcome != "success":
+            key = (str(get_hermes_home()), task_id or "default")
+            if previous is None:
+                _page_browser_backends.pop(key, None)
+            else:
+                _page_browser_backends[key] = previous
+        logger.info("Camofox fallback host=%s reason=%s outcome=%s elapsed=%.2fs",
+                    host, reason, outcome, time.monotonic() - started)
+    if reason == "site affinity":
+        original["bot_detection_warning"] = "Этот сайт закреплён за Camofox, но сейчас он не открыл страницу в отведённый срок."
+        return original
+    original["bot_detection_warning"] = (
+        f"Chromium не смог открыть содержимое сайта ({reason}). "
+        "Запасной Camofox не открыл страницу в отведённый срок или тоже заблокирован. "
+        "Возвращён исходный результат Chromium; автоматического повтора в этом вызове не будет."
+    )
+    return original
+
+
+def _maybe_camofox_page(url: str, task_id: Optional[str], payload: dict) -> dict:
+    reason = _chromium_failure_reason(payload)
+    if not reason:
+        return payload
+    policy = _camofox_auto_policy()
+    if policy is None:
+        payload["bot_detection_warning"] = f"Chromium не смог открыть содержимое сайта ({reason})."
+        return payload
+    if policy:
+        payload["bot_detection_warning"] = f"Chromium не смог открыть содержимое сайта ({reason}). Запасной режим недоступен: {policy}."
+        return payload
+    return _try_camofox_page(url, task_id, payload, reason)
+
+
 def _camofox_fallback_note() -> str:
     """Пометка агенту: встроенный Camofox не ответил, вызов идёт через Chromium."""
     try:
@@ -4326,6 +4454,13 @@ def _browser_navigate(url: str, task_id: Optional[str] = None) -> str:
             "blocked_by_policy": {"host": blocked["host"], "rule": blocked["rule"], "source": blocked["source"]},
         })
 
+    # Sites already rescued for this task go straight to the same bundled browser.
+    from urllib.parse import urlsplit
+    host_key = (str(get_hermes_home()), task_id or "default")
+    if urlsplit(url).hostname in _camofox_hosts.get(host_key, ()) and _camofox_auto_policy() == "":
+        payload = _try_camofox_page(url, task_id, {"success": False, "error": "Camofox site navigation failed"}, "site affinity")
+        return json.dumps(payload, ensure_ascii=False)
+
     # Camofox backend — delegate after safety checks pass
     if _is_camofox_mode():
         from tools.browser_camofox import camofox_navigate
@@ -4414,24 +4549,6 @@ def _browser_navigate(url: str, task_id: Optional[str] = None) -> str:
         _pin_page_browser(task_id, "chromium")
         _copy_fallback_warning(response, result)
 
-        # Detect common "blocked" page patterns from title/url
-        blocked_patterns = [
-            "access denied", "access to this page has been denied",
-            "blocked", "bot detected", "verification required",
-            "please verify", "are you a robot", "captcha",
-            "cloudflare", "ddos protection", "checking your browser",
-            "just a moment", "attention required"
-        ]
-        title_lower = title.lower()
-
-        if any(pattern in title_lower for pattern in blocked_patterns):
-            response["bot_detection_warning"] = (
-                f"Page title '{title}' suggests bot detection. The site may have blocked this request. "
-                "Options: 1) Try adding delays between actions, 2) Access different pages first, "
-                "3) Enable advanced stealth (BROWSERBASE_ADVANCED_STEALTH=true, requires Scale plan), "
-                "4) Some sites have very aggressive bot detection that may be unavoidable."
-            )
-
         # Include feature info on first navigation so model knows what's active
         if is_first_nav and "features" in session_info:
             features = session_info["features"]
@@ -4461,12 +4578,12 @@ def _browser_navigate(url: str, task_id: Optional[str] = None) -> str:
         except Exception as e:
             logger.debug("Auto-snapshot after navigate failed: %s", e)
 
-        return json.dumps(response, ensure_ascii=False)
+        if data.get("status") is not None:
+            response["status"] = data["status"]
+        return json.dumps(_maybe_camofox_page(url, task_id, response), ensure_ascii=False)
     else:
-        return json.dumps({
-            "success": False,
-            "error": result.get("error", "Navigation failed")
-        }, ensure_ascii=False)
+        response = {"success": False, "error": result.get("error", "Navigation failed")}
+        return json.dumps(_maybe_camofox_page(url, task_id, response), ensure_ascii=False)
 
 
 def browser_snapshot(
@@ -5900,6 +6017,7 @@ def cleanup_browser(task_id: Optional[str] = None) -> None:
             _session_cleanup_contexts.pop(session_key, None)
 
     _page_browser_backends.pop((str(get_hermes_home()), bare_task_id), None)
+    _camofox_hosts.pop((str(get_hermes_home()), bare_task_id), None)
 
     # Drop stale last-active ownership. Cleaning a bare task drops its binding;
     # cleaning a sidecar drops the binding only if that sidecar was still the
@@ -5918,17 +6036,19 @@ def _cleanup_single_browser_session(task_id: str) -> None:
     # before the backend tears down the underlying CDP endpoint.
     _stop_cdp_supervisor(task_id)
 
-    # Also clean up Camofox session if running in Camofox mode.
-    # Skip full close when managed persistence is enabled — the browser
-    # profile (and its session cookies) must survive across agent tasks.
-    # The inactivity reaper still frees idle resources.
-    if _is_camofox_mode():
-        try:
-            from tools.browser_camofox import camofox_close, camofox_soft_cleanup
-            if not camofox_soft_cleanup(task_id):
-                camofox_close(task_id)
-        except Exception as e:
-            logger.debug("Camofox cleanup for task %s: %s", task_id, e)
+    # A spare session may remain after navigating another host in Chromium.
+    # Free its tracking too; managed profile storage stays on the server.
+    try:
+        from tools import browser_camofox as bc
+        key = (str(get_hermes_home()), task_id)
+        if key in bc._sessions or _is_camofox_page(task_id):
+            if not bc.camofox_soft_cleanup(task_id):
+                bc.camofox_close(task_id)
+    except Exception as e:
+        logger.debug("Camofox cleanup for task %s: %s", task_id, e)
+    bare_task_id = task_id.removesuffix(_LOCAL_SUFFIX)
+    _page_browser_backends.pop((str(get_hermes_home()), bare_task_id), None)
+    _camofox_hosts.pop((str(get_hermes_home()), bare_task_id), None)
 
     logger.debug("cleanup_browser called for task_id: %s", task_id)
     logger.debug("Active sessions: %s", list(_active_sessions.keys()))

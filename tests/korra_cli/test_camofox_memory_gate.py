@@ -1,4 +1,4 @@
-"""K21-336: неявный Camofox включается, только если контейнеру доступно не меньше 3 ГиБ."""
+"""K21-336: запасной Camofox доступен, только если контейнеру доступно не меньше 3 ГиБ."""
 
 import contextlib
 import io
@@ -14,12 +14,6 @@ from tests.fakes.camofox_embedded import (  # noqa: F401  (фикстуры)
     in_profile,
     install,
 )
-
-@pytest.fixture(autouse=True)
-def enabled_default_policy(monkeypatch):
-    """Exercise the retained memory guard when an implicit rollout is enabled."""
-    monkeypatch.setattr(emb, "DEFAULT_ENABLED", True)
-
 
 GIB = 1024 ** 3
 
@@ -41,39 +35,39 @@ def test_small_container_does_not_get_camofox_implicitly(install, data, monkeypa
     from tools import browser_camofox as bc
 
     limit_memory(monkeypatch, tmp_path, v2=limit)
-    assert not emb.uses_embedded({})
-    assert bc.get_camofox_url() == ""
+    assert emb.fallback_disabled_reason({})
+    assert bc.get_camofox_url() == emb.BASE_URL
     assert not bc.is_camofox_mode()
     emb.sync(signal=False)
     assert not emb.is_enabled()
 
 
 @pytest.mark.parametrize("limit", [3 * GIB, 8 * GIB, "max"])
-def test_enough_memory_or_no_limit_keeps_the_default(install, data, monkeypatch, tmp_path, limit):
+def test_enough_memory_or_no_limit_allows_lazy_fallback(install, data, monkeypatch, tmp_path, limit):
     limit_memory(monkeypatch, tmp_path, v2=limit)
-    assert emb.uses_embedded({})
+    assert not emb.fallback_disabled_reason({})
     emb.sync(signal=False)
-    assert emb.is_enabled()
+    assert not emb.is_enabled()  # no eager Node/Firefox startup
 
 
 def test_cgroup_v1_is_read(install, data, monkeypatch, tmp_path):
     limit_memory(monkeypatch, tmp_path, v1=2 * GIB)
-    assert not emb.uses_embedded({})
+    assert emb.fallback_disabled_reason({})
     limit_memory(monkeypatch, tmp_path, v1=3 * GIB)
-    assert emb.uses_embedded({})
+    assert not emb.fallback_disabled_reason({})
 
 
 def test_cgroup_v1_without_limit_is_a_huge_number(install, data, monkeypatch, tmp_path):
     limit_memory(monkeypatch, tmp_path, v1=9223372036854771712)
     assert emb.memory_limit_bytes() is None
-    assert emb.uses_embedded({})
+    assert not emb.fallback_disabled_reason({})
 
 
 @pytest.mark.parametrize("content", [None, "", "не число"])
 def test_unreadable_limit_is_the_same_as_no_limit(install, data, monkeypatch, tmp_path, content):
     limit_memory(monkeypatch, tmp_path, v2=content)
     assert emb.memory_limit_bytes() is None
-    assert emb.uses_embedded({})
+    assert not emb.fallback_disabled_reason({})
 
 
 def test_explicit_camofox_works_at_any_memory(install, data, monkeypatch, tmp_path):
@@ -98,7 +92,7 @@ def test_other_explicit_choices_are_unchanged(install, data, monkeypatch, tmp_pa
 def test_note_names_the_limit_and_the_manual_way(install, data, monkeypatch, tmp_path):
     limit_memory(monkeypatch, tmp_path, v2=int(1.5 * GIB))
     assert emb.default_memory_note() == (
-        "Camofox не включён по умолчанию: контейнеру доступно 1,5 ГиБ, нужно от 3 ГиБ; можно выбрать вручную"
+        "Запасной Camofox выключен: контейнеру доступно 1,5 ГиБ, нужно от 3 ГиБ; можно выбрать вручную"
     )
     limit_memory(monkeypatch, tmp_path, v2=2 * GIB)
     assert "доступно 2 ГиБ" in emb.default_memory_note()
@@ -138,14 +132,15 @@ def test_picker_row_is_not_marked_default_and_carries_the_note(install, data, mo
 
     limit_memory(monkeypatch, tmp_path, v2=4 * GIB)
     rows = tc._visible_providers(cat, {})
-    assert rows[0]["name"] == "Camofox" and "по умолчанию" in rows[0]["badge"]
-    assert "доступно" not in rows[0]["tag"]
+    assert rows[0]["name"] == "Local Browser"
+    assert "автоматически Camofox" in rows[0]["tag"]
+    assert "доступно" not in next(r for r in rows if r["name"] == "Camofox")["tag"]
 
 
-def test_subscription_view_follows_the_gate(install, data, monkeypatch, tmp_path):
+def test_subscription_keeps_chromium_primary_at_any_memory(install, data, monkeypatch, tmp_path):
     from korra_cli.nous_subscription import get_nous_subscription_features
 
     limit_memory(monkeypatch, tmp_path, v2=2 * GIB)
     assert get_nous_subscription_features({}).browser.current_provider != "Camofox"
     limit_memory(monkeypatch, tmp_path, v2=4 * GIB)
-    assert get_nous_subscription_features({}).browser.current_provider == "Camofox"
+    assert get_nous_subscription_features({}).browser.current_provider != "Camofox"
