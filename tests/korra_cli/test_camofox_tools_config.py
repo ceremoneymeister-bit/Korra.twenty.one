@@ -186,6 +186,16 @@ def test_unconfigured_profile_does_not_show_camofox_as_active(install, data):
     assert not tc._is_provider_active(camofox, config)
 
 
+def test_unconfigured_profile_shows_chromium_as_the_selected_row(install, data):
+    """Без выбора агент работает в Chromium с запасным Camofox — это и отмечено."""
+    from korra_cli.config import load_config
+
+    config = load_config()
+    rows = _rows(config)
+    active = [r["name"] for r in rows if tc._is_provider_active(r, config)]
+    assert active == ["Local Browser"]
+
+
 def test_chromium_is_one_action_and_the_row_follows_it(install, data):
     from korra_cli.config import load_config
 

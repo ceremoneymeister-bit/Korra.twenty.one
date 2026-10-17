@@ -4149,6 +4149,10 @@ def _is_provider_active(
         if read_selection("browser") is None:
             if get_nous_subscription_features(config, force_fresh=force_fresh).browser.current_provider == "Camofox":
                 current = "camofox"
+            elif not current:
+                # Nothing chosen: the agent actually runs the local Chromium
+                # (with the bundled spare), so that row is the selected one.
+                current = "local"
         if provider["browser_provider"] != current:
             return False
         # Two local rows differ only by engine ("Local Browser" vs
