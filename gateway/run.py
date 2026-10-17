@@ -32382,7 +32382,6 @@ def _start_gateway_housekeeping(stop_event: threading.Event, adapters=None, loop
         ("Audio", cleanup_audio_cache),
         ("Video", cleanup_video_cache),
         ("Screenshot", cleanup_screenshot_cache),
-        ("Spillover", cleanup_spillover_cache),
         ("Terminal temp", cleanup_terminal_temp_cache),
         ("Bot DM", cleanup_bot_dm_cache),
         ("Bot relay", cleanup_bot_relay_artifacts),
@@ -32419,6 +32418,16 @@ def _start_gateway_housekeeping(stop_event: threading.Event, adapters=None, loop
                         logger.info("%s cache cleanup: removed %d stale file(s)", cache_name, removed)
                 except Exception as e:
                     logger.debug("%s cache cleanup error: %s", cache_name, e)
+
+        if tick_count % IMAGE_CACHE_EVERY == 0:
+            try:
+                # Full tool results follow session retention and reference ownership,
+                # not the 24h media-cache TTL (upstream #126351).
+                removed = cleanup_spillover_cache()
+                if removed:
+                    logger.info("Spillover cache cleanup: removed %d stale file(s)", removed)
+            except Exception as e:
+                logger.debug("Spillover cache cleanup error: %s", e)
 
         if tick_count % PASTE_SWEEP_EVERY == 0:
             try:

@@ -458,13 +458,14 @@ class TestSpillover:
     def test_cleanup_missing_dir_returns_zero(self):
         assert cleanup_spillover_cache() == 0
 
-    def test_first_spill_prunes_expired_files(self):
+    def test_first_spill_prunes_expired_files(self, monkeypatch):
         """The once-per-process prune fires on the first host-side spill."""
         import os
         import time as _time
 
         spill_dir = get_spillover_dir()
         spill_dir.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr("tools.tool_result_storage._spillover_retention_hours", lambda: 24)
         old = spill_dir / "ancient.txt"
         old.write_text("ancient")
         stale = _time.time() - (48 * 3600)
