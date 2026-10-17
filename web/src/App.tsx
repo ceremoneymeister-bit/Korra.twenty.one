@@ -1,4 +1,5 @@
 import { ReleaseNotice } from "@/components/ReleaseNotice";
+import { markClientUiBody } from "@/lib/client-ui-body";
 import { themeColorScheme } from "@/themes/color";
 import {
   lazy,
@@ -676,6 +677,11 @@ export default function App() {
       document.body.style.overflow = prevOverflow;
     };
   }, [mobileOpen, setMobileOpen]);
+
+  // Окна и меню рисуются порталом в <body>, вне корня с data-client-ui:
+  // без метки на body в них возвращались шрифты набора Hermes (латиница
+  // с засечками в окне выбора браузера). Одна метка — один шрифт везде.
+  useEffect(() => (isProductUiMode() ? markClientUiBody() : undefined), []);
 
   useEffect(() => {
     const mql = window.matchMedia("(min-width: 1024px)");
