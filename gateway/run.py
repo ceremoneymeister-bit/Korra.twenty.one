@@ -26917,20 +26917,28 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         if not audio_paths:
             return user_text if user_text is not None else (getattr(event, "text", None) or None), []
 
-        text = user_text if user_text is not None else (getattr(event, "text", "") or "")
-        # Interrupt monitors and clarify replies run outside the normal inbound
-        # turn scope. Always bind to THIS event, even if a different profile's
-        # turn is currently active; asyncio.to_thread carries this context.
-        source = getattr(event, "source", None)
-        if source is not None and getattr(self.config, "multiplex_profiles", False):
-            with _profile_runtime_scope(self._resolve_profile_home_for_source(source)):
+        # A second voice note can merge into this event while STT awaits I/O.
+        # Publish a cache only for the current media, keeping every retry scoped
+        # to the event's profile (upstream 07139993ce, #139222).
+        while True:
+            text = user_text if user_text is not None else (getattr(event, "text", "") or "")
+            # Interrupt monitors and clarify replies run outside the normal inbound
+            # turn scope. Always bind to THIS event, even if a different profile's
+            # turn is currently active; asyncio.to_thread carries this context.
+            source = getattr(event, "source", None)
+            if source is not None and getattr(self.config, "multiplex_profiles", False):
+                with _profile_runtime_scope(self._resolve_profile_home_for_source(source)):
+                    enriched_text, successful_transcripts = await self._enrich_message_with_transcription(
+                        text, audio_paths,
+                    )
+            else:
                 enriched_text, successful_transcripts = await self._enrich_message_with_transcription(
                     text, audio_paths,
                 )
-        else:
-            enriched_text, successful_transcripts = await self._enrich_message_with_transcription(
-                text, audio_paths,
-            )
+            current_paths = self._pending_event_audio_paths(event)
+            if current_paths == audio_paths:
+                break
+            audio_paths = current_paths
         # A clarify/interrupt path may never start a model turn after failure.
         # Give the person a usable answer here; the event cache deduplicates it.
         if not successful_transcripts and source is not None and getattr(self.config, "stt_enabled", True):
@@ -27015,7 +27023,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         try:
             enriched_text, transcripts = await self._transcribe_pending_audio_event_once(
                 event,
-                text,
             )
             echo_meta = self._thread_metadata_for_source(
                 source,
