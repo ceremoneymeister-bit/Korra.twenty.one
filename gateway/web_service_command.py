@@ -211,7 +211,8 @@ def run_web_service_command(adapter, user_message, session_id, *, profile=None,
     acquired = False
     try:
         if session_id and db is None:
-            return {"final_response": "Не удалось открыть историю диалога. Служебная команда не выполнена; проверьте доступность хранилища и повторите попытку.", "api_calls": 0, "completed": False, "failed": True}
+            reply = "Не удалось открыть историю диалога. Служебная команда не выполнена; проверьте доступность хранилища и повторите попытку."
+            return {"final_response": reply, "error": reply, "api_calls": 0, "completed": False, "failed": True}
         session = db.get_session(session_id) if db is not None else None
         if db is not None:
             if session is None:
@@ -229,11 +230,12 @@ def run_web_service_command(adapter, user_message, session_id, *, profile=None,
             db.append_messages_batch(session_id, pair, turn_lease_holder=holder, human_turn=True)
         return {"final_response": reply, "messages": pair, "api_calls": 0, "completed": True}
     except _ConfigReadFailure:
-        return {"final_response": _CONFIG_READ_ERROR_REPLY, "api_calls": 0, "completed": False, "failed": True}
+        return {"final_response": _CONFIG_READ_ERROR_REPLY, "error": _CONFIG_READ_ERROR_REPLY, "api_calls": 0, "completed": False, "failed": True}
     except Exception as exc:
         # Do not echo config/skill/DB exception text across the HTTP boundary.
         logger.warning("Web service /%s failed (%s)", parsed[0], type(exc).__name__)
-        return {"final_response": "Не удалось выполнить или сохранить служебную команду. Проверьте журнал установки и повторите попытку.", "api_calls": 0, "completed": False, "failed": True}
+        reply = "Не удалось выполнить или сохранить служебную команду. Проверьте журнал установки и повторите попытку."
+        return {"final_response": reply, "error": reply, "api_calls": 0, "completed": False, "failed": True}
     finally:
         if acquired:
             db.release_session_turn_lease(session_id, holder)

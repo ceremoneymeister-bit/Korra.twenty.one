@@ -71,8 +71,11 @@ def app_for(adapter):
 
 
 async def post_command(client, command, stream):
-    response = await client.post('/v1/chat/completions', headers={'Authorization': 'Bearer ' + KEY}, json={
-        'model': 'korra-agent', 'session_id': 'contract-session',
+    response = await client.post('/v1/chat/completions', headers={
+        'Authorization': 'Bearer ' + KEY,
+        'X-Hermes-Session-Id': 'contract-session',
+    }, json={
+        'model': 'korra-agent',
         'messages': [{'role': 'user', 'content': command}], 'stream': stream,
     })
     assert response.status == 200
@@ -95,6 +98,7 @@ async def test_service_commands_http_without_any_model_and_without_prompt_mutati
     home, db = scoped_home
     adapter = APIServerAdapter(PlatformConfig(enabled=True, extra={'key': KEY}))
     before = db.get_session('contract-session')
+    before_messages = db.get_messages('contract-session')
     before_config = (home / 'config.yaml').read_bytes()
     with no_models(adapter):
         async with TestClient(TestServer(app_for(adapter))) as client:
@@ -107,7 +111,61 @@ async def test_service_commands_http_without_any_model_and_without_prompt_mutati
     assert after['system_prompt'] == before['system_prompt']
     assert after['system_prompt_hash'] == before['system_prompt_hash']
     assert after['model'] == before['model']
+    messages = db.get_messages('contract-session')
+    assert messages[:-2] == before_messages
+    assert [(row['role'], row['content']) for row in messages[-2:]] == [
+        ('user', command), ('assistant', answer),
+    ]
     adapter._close_cached_session_dbs()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('command,failure,expected', [
+    ('/model', 'config', 'Не удалось прочитать настройки профиля.'),
+    ('/tools', 'config', 'Не удалось прочитать настройки профиля.'),
+    ('/reasoning', 'config', 'Не удалось прочитать настройки профиля.'),
+    ('/fast', 'config', 'Не удалось прочитать настройки профиля.'),
+    ('/status', 'history', 'Не удалось открыть историю диалога.'),
+    ('/reload-skills', 'reload', 'Не удалось выполнить или сохранить служебную команду.'),
+])
+async def test_service_command_failure_reaches_chat_stream(scoped_home, command, failure, expected):
+    home, db = scoped_home
+    adapter = APIServerAdapter(PlatformConfig(enabled=True, extra={'key': KEY}))
+    before_messages = db.get_messages('contract-session')
+    try:
+        with no_models(adapter), ExitStack() as stack:
+            if failure == 'config':
+                (home / 'config.yaml').write_text('model: [')
+            elif failure == 'history':
+                stack.enter_context(patch.object(adapter, '_ensure_session_db', return_value=None))
+            else:
+                stack.enter_context(patch('agent.skill_commands.reload_skills',
+                                          side_effect=RuntimeError('must-not-leak-secret')))
+            async with TestClient(TestServer(app_for(adapter))) as client:
+                response = await client.post('/v1/chat/completions', headers={
+                    'Authorization': 'Bearer ' + KEY,
+                    'X-Hermes-Session-Id': 'contract-session',
+                }, json={
+                    'model': 'korra-agent', 'stream': True,
+                    'messages': [{'role': 'user', 'content': command}],
+                })
+                assert response.status == 200
+                wire = await response.text()
+        chunks = [json.loads(line[6:]) for line in wire.splitlines()
+                  if line.startswith('data: ') and line[6:] != '[DONE]']
+        terminal = chunks[-1]
+        assert terminal['choices'][0]['finish_reason'] == 'error'
+        assert terminal['error']['message'].startswith(expected)
+        assert terminal['hermes']['error'] == terminal['error']['message']
+        assert terminal['hermes']['failed'] is True
+        assert terminal['hermes']['completed'] is False
+        assert terminal['usage']['total_tokens'] == 0
+        assert not any(c['choices'][0].get('delta', {}).get('content') for c in chunks)
+        assert 'must-not-leak-secret' not in wire
+        assert wire.rstrip().endswith('data: [DONE]')
+        assert db.get_messages('contract-session') == before_messages
+    finally:
+        adapter._close_cached_session_dbs()
 
 
 @pytest.mark.asyncio
