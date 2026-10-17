@@ -279,9 +279,12 @@ class TestCamofoxSelection:
             assert bc.is_camofox_mode() is False
 
     def test_never_configured_env_url_still_activates(self, monkeypatch):
+        """An external server named by CAMOFOX_URL (legacy, nothing selected)
+        stays primary; only the bundled server is a spare (K21-336)."""
         from tools import browser_camofox as bc
 
         monkeypatch.delenv("BROWSER_CDP_URL", raising=False)
+        monkeypatch.setenv("CAMOFOX_URL", "http://localhost:9377")
         with patch.object(bc, "_config_cdp_url", return_value=""), \
              patch.object(bc, "get_camofox_url", return_value="http://localhost:9377"), \
              patch("tools.tool_backend_helpers.read_selection", return_value=None):
@@ -331,3 +334,16 @@ class TestWriteProviderConfig:
         _write_provider_config(provider, config, managed_feature=None)
         assert config["stt"]["provider"] == "groq"
         assert "use_gateway" not in config["stt"]
+
+
+def test_bundled_server_without_selection_is_only_a_spare(monkeypatch):
+    """K21-336: nothing selected and no CAMOFOX_URL — Chromium is primary."""
+    from tools import browser_camofox as bc
+
+    monkeypatch.delenv("BROWSER_CDP_URL", raising=False)
+    monkeypatch.delenv("CAMOFOX_URL", raising=False)
+    with patch.object(bc, "_config_cdp_url", return_value=""), \
+         patch.object(bc, "get_camofox_url", return_value="unix:///opt/data/camofox/server.sock"), \
+         patch("tools.tool_backend_helpers.read_selection", return_value=None):
+        assert bc.is_camofox_mode() is False
+

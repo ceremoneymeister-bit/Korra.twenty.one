@@ -251,7 +251,9 @@ class TestListPendingLock:
             if in_func:
                 if line.startswith("    def "):
                     break  # next function
-                if "with self._lock:" in line:
+                # ``self._locked()`` takes the cross-process pairing file
+                # lock and then ``self._lock`` (Hermes 5fbc692a6b, K21-0.21.20).
+                if "with self._lock:" in line or "with self._locked():" in line:
                     seen_lock = True
                     break
         assert seen_lock, (

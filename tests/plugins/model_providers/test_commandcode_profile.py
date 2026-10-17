@@ -265,14 +265,28 @@ class TestCommandCodeFetchModelsPickerContract:
         "Unknown provider" on /model switches even though the picker listed
         them.
         """
+        from unittest.mock import patch
+
+        import agent.models_dev as models_dev
         from korra_cli.providers import resolve_provider_full
 
-        chat = resolve_provider_full("commandcode", {}, [])
+        # The regression is about plugin-only providers. The live models.dev
+        # catalog later listed "commandcode" itself (env CMD_API_KEY), so keep
+        # the test hermetic: the catalog does not know these ids here.
+        real_info = models_dev.get_provider_info
+
+        def catalog_without_commandcode(name):
+            if str(name).startswith("commandcode"):
+                return None
+            return real_info(name)
+
+        with patch.object(models_dev, "get_provider_info", catalog_without_commandcode):
+            chat = resolve_provider_full("commandcode", {}, [])
+            anth = resolve_provider_full("commandcode-anthropic", {}, [])
         assert chat is not None and chat.id == "commandcode"
         assert chat.transport == "openai_chat"
         assert "COMMANDCODE_API_KEY" in chat.api_key_env_vars
 
-        anth = resolve_provider_full("commandcode-anthropic", {}, [])
         assert anth is not None and anth.id == "commandcode-anthropic"
         assert anth.transport == "anthropic_messages"
 
