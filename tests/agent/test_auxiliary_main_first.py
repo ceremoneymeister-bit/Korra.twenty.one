@@ -24,11 +24,15 @@ class TestResolveAutoMainFirst:
     """_resolve_auto() must prefer main provider + main model for every user."""
 
     def test_title_generation_auto_honors_main_model(self):
-        """The default auto title route must not replace the selected main model."""
+        """With prefer_fast_model off, the auto title route must not replace
+        the selected main model (the fast tier is on by default since 18.10)."""
         main_model = "deepseek-v4-flash-free"
         mock_client = MagicMock()
 
         with patch(
+            "agent.auxiliary_client._get_auxiliary_task_config",
+            return_value={"prefer_fast_model": False},
+        ), patch(
             "agent.auxiliary_client._get_aux_model_for_provider",
             return_value="gemini-3-flash",
         ), patch(
@@ -52,7 +56,7 @@ class TestResolveAutoMainFirst:
         assert mock_resolve.call_args.args[:2] == ("opencode-zen", main_model)
 
     def test_title_generation_can_opt_into_provider_fast_model(self):
-        """The latency optimization remains available as an explicit opt-in."""
+        """prefer_fast_model routes titling to the provider's fast model."""
         fast_model = "gemini-3-flash"
         mock_client = MagicMock()
 

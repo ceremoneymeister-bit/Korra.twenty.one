@@ -286,6 +286,47 @@ def _check_kanban_orchestrator_mode() -> bool:
     return _profile_has_kanban_toolset() and _board_principal_allowed()
 
 
+# Run-lifecycle tools: they act on the run the caller OWNS (close it, keep it
+# alive, hand it to review, attach deliverables). The owner's main chat never
+# owns a run, so offering them there only bloats every request's tool prefix
+# (~2.5k tokens) and invites the model to "complete" cards it should route.
+KANBAN_WORKER_ONLY_TOOLS = frozenset({
+    "kanban_complete",
+    "kanban_heartbeat",
+    "kanban_request_review",
+    "kanban_request_changes",
+    "kanban_attach",
+    "kanban_attach_url",
+    "kanban_attachments",
+})
+
+
+def _profile_opts_into_kanban_toolset() -> bool:
+    """Explicit ``toolsets: [kanban]`` in the profile config (board /
+    orchestrator profiles). Unlike ``kanban.chat_tools`` this is a deliberate
+    opt-in to the full board surface, run-lifecycle tools included."""
+    try:
+        from korra_cli.config import load_config as _load_config
+        cfg = _load_config()
+        return "kanban" in (cfg.get("toolsets", []) or [])
+    except Exception:
+        return False
+
+
+@no_cache_check_fn
+def _check_kanban_worker_mode() -> bool:
+    """Run-lifecycle tools (``KANBAN_WORKER_ONLY_TOOLS``) are available to a
+    dispatcher-owned worker and to profiles that explicitly opt into the
+    ``kanban`` toolset. The ``kanban.chat_tools`` default (``main``/``all``)
+    gives an ordinary chat the planning surface only — show/list/create/
+    comment/block/unblock/edit/link — not the worker protocol."""
+    if _is_delegated_child_context():
+        return False
+    if korra_env("KORRA_KANBAN_TASK") and _is_dispatcher_owned_worker():
+        return True
+    return _profile_opts_into_kanban_toolset() and _board_principal_allowed()
+
+
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
@@ -3162,7 +3203,7 @@ registry.register(
     toolset="kanban",
     schema=KANBAN_COMPLETE_SCHEMA,
     handler=_handle_complete,
-    check_fn=_check_kanban_mode,
+    check_fn=_check_kanban_worker_mode,
     emoji="✔",
 )
 
@@ -3180,7 +3221,7 @@ registry.register(
     toolset="kanban",
     schema=KANBAN_REQUEST_REVIEW_SCHEMA,
     handler=_handle_request_review,
-    check_fn=_check_kanban_mode,
+    check_fn=_check_kanban_worker_mode,
     emoji="👀",
 )
 
@@ -3189,7 +3230,7 @@ registry.register(
     toolset="kanban",
     schema=KANBAN_REQUEST_CHANGES_SCHEMA,
     handler=_handle_request_changes,
-    check_fn=_check_kanban_mode,
+    check_fn=_check_kanban_worker_mode,
     emoji="↩",
 )
 
@@ -3198,7 +3239,7 @@ registry.register(
     toolset="kanban",
     schema=KANBAN_HEARTBEAT_SCHEMA,
     handler=_handle_heartbeat,
-    check_fn=_check_kanban_mode,
+    check_fn=_check_kanban_worker_mode,
     emoji="💓",
 )
 
@@ -3216,7 +3257,7 @@ registry.register(
     toolset="kanban",
     schema=KANBAN_ATTACH_SCHEMA,
     handler=_handle_attach,
-    check_fn=_check_kanban_mode,
+    check_fn=_check_kanban_worker_mode,
     emoji="📎",
 )
 
@@ -3225,7 +3266,7 @@ registry.register(
     toolset="kanban",
     schema=KANBAN_ATTACH_URL_SCHEMA,
     handler=_handle_attach_url,
-    check_fn=_check_kanban_mode,
+    check_fn=_check_kanban_worker_mode,
     emoji="📎",
 )
 
@@ -3234,7 +3275,7 @@ registry.register(
     toolset="kanban",
     schema=KANBAN_ATTACHMENTS_SCHEMA,
     handler=_handle_attachments,
-    check_fn=_check_kanban_mode,
+    check_fn=_check_kanban_worker_mode,
     emoji="📎",
 )
 

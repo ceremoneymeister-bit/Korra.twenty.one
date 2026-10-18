@@ -849,6 +849,10 @@ DEFAULT_CONFIG = {
                                       # triggers at the lower of the ratio-based
                                       # threshold and this token count. Clamped to
                                       # the model's context length at apply-time.
+        "large_window_threshold_tokens": 150000,  # absolute cap for models with a
+                                      # 500K+ window when threshold_tokens is unset:
+                                      # at 50% a 1M window lets messenger threads
+                                      # re-send ~500K tokens per step. 0/null = off.
         "target_ratio": 0.20,         # fraction of threshold to preserve as recent tail
         "tail_mode": "lean",          # tail retention policy (#87326):
                                       #   "lean"   — clamped 2.5%-of-window tail (default)
@@ -1229,7 +1233,8 @@ DEFAULT_CONFIG = {
             "enabled": True,
             "provider": "auto",
             "model": "",
-            "prefer_fast_model": False,  # opt in to provider fast tier; auto otherwise uses the main model
+            "prefer_fast_model": True,   # titles (~8 tokens) run on the provider's fast tier
+                                         # (e.g. claude-haiku-5-5); false = main model
             "base_url": "",
             "api_key": "",
             "timeout": 30,
@@ -1364,10 +1369,10 @@ DEFAULT_CONFIG = {
             # provider response arrives); after that it compacts an oversized
             # snapshot in memory before further provider calls. This caps the
             # SUM of input tokens replayed across the whole review tool loop
-            # (iterations are separately capped at 16). The loop stops before
+            # (iterations are separately capped at 6). The loop stops before
             # the provider call that would cross the budget. 0 or a negative
             # value = unlimited.
-            "max_input_tokens": 600000,
+            "max_input_tokens": 150000,
         },
         "moa_reference": {
             "provider": "auto",
@@ -2197,6 +2202,10 @@ DEFAULT_CONFIG = {
         # extras" without silently stripping MCP tools the parent already has.
         # Set to false for strict intersection.
         "inherit_mcp_toolsets": True,
+        # Children get a one-line skill_view pointer instead of the parent's
+        # full skills index (~2K tokens on every child step). The parent
+        # names a skill in the goal when one applies. true = full index.
+        "child_skills_index": False,
         "max_iterations": 250,  # per-subagent iteration cap (each subagent gets its own budget,
                                # independent of the parent's max_iterations)
         # Subagent summaries return to the parent's context verbatim. A batch
@@ -2913,6 +2922,9 @@ DEFAULT_CONFIG = {
         # Who plans on the board from an ordinary chat: "main" (the main
         # agent, the owner's orchestrator), "all" profiles, or "off".
         # ``toolsets: [kanban]`` in a profile's config also opts it in.
+        # Chat gets the planning surface only; run-lifecycle tools
+        # (complete/heartbeat/review handoff/attachments) stay with
+        # dispatcher workers and explicit ``toolsets: [kanban]`` profiles.
         "chat_tools": "main",
         # Run the dispatcher inside the gateway process. On by default —
         # the cost is ~300µs every `dispatch_interval_seconds` when idle,

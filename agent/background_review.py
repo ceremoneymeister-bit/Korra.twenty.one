@@ -206,8 +206,10 @@ def cancel_background_review_for_live_turn(agent: Any) -> None:
 # digest. That's the whole policy.
 # ---------------------------------------------------------------------------
 
-# Historical hardcoded iteration budget for the review fork.
-_REVIEW_MAX_ITERATIONS = 16
+# Iteration budget for the counter-driven review fork. A review is a short
+# read-then-write loop (memory/skill_manage); 16 let one review replay the
+# warm snapshot 8+ times (cost-aware 18.10). Event reviews use 2.
+_REVIEW_MAX_ITERATIONS = 6
 
 # Default aggregate INPUT-token budget for one review fork (#93057). The
 # fork's first request replays the full snapshot — a warm prompt-cache read
@@ -220,11 +222,12 @@ _REVIEW_MAX_ITERATIONS = 16
 # tokens total (four of them at 350k-384k). This budget caps the aggregate;
 # the review tool loop stops before the provider call that would cross it
 # (see ``_review_input_budget_exhausted`` in agent/conversation_loop.py).
-# 2x the historical 300k foreground trigger keeps legitimate reviews
-# comfortable while capping the pathological case. Override with
+# 150k matches the large-window compaction cap (compression.
+# large_window_threshold_tokens): one warm replay plus a few small follow-ups,
+# not 600k of re-reads (cost-aware 18.10). Override with
 # ``auxiliary.background_review.max_input_tokens``; 0 or a negative value
 # disables the cap (unbounded = pre-fix behavior).
-_REVIEW_MAX_INPUT_TOKENS_DEFAULT = 600_000
+_REVIEW_MAX_INPUT_TOKENS_DEFAULT = 150_000
 
 
 def _background_review_task_config(

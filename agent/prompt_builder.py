@@ -2281,11 +2281,6 @@ def _build_skills_system_prompt_inner(
     if not skills_by_category:
         result = ""
     else:
-        # "basic tools like web_search or terminal" — don't name web_search
-        # when the session has no web tools (dangling reference otherwise).
-        _basic_tools = "web_search or terminal"
-        if available_tools is not None and "web_search" not in available_tools:
-            _basic_tools = "terminal"
         index_lines = []
         for category in sorted(skills_by_category.keys()):
             # Deduplicate and sort skills within each category
@@ -2310,16 +2305,11 @@ def _build_skills_system_prompt_inner(
 
         result = (
             "## Skills\n"
-            "Before replying, scan the skills below. If a skill matches or is even partially relevant "
-            "to your task, you MUST load it with skill_view(name) and follow its instructions. "
-            "Err on the side of loading — it is always better to have context you don't need "
-            "than to miss critical steps, pitfalls, or established workflows. "
-            "Skills contain specialized knowledge — API endpoints, tool-specific commands, "
-            "and proven workflows that outperform general-purpose approaches. Load the skill "
-            f"even if you think you could handle the task with basic tools like {_basic_tools}. "
-            "Skills also encode the user's preferred approach, conventions, and quality standards "
-            "for tasks like code review, planning, and testing — load them even for tasks you "
-            "already know how to do, because the skill defines how it should be done here.\n"
+            "The skills below hold specialized workflows, commands, and the user's "
+            "conventions. Load a skill with skill_view(name) when the task clearly "
+            "falls within its domain and no native tool already covers it, then follow "
+            "its instructions. For short questions, conversation, and simple requests "
+            "you can handle directly, answer right away without loading a skill.\n"
             "If a skill has issues, fix it with skill_manage(action='patch').\n"
             "After difficult/iterative tasks, offer to save as a skill. "
             "If a skill you loaded was missing steps, had wrong commands, or needed "
@@ -2327,9 +2317,7 @@ def _build_skills_system_prompt_inner(
             "\n"
             "<available_skills>\n"
             + "\n".join(index_lines) + "\n"
-            "</available_skills>\n"
-            "\n"
-            "Only proceed without loading a skill if genuinely none are relevant to the task."
+            "</available_skills>"
             + hidden_note
         )
 

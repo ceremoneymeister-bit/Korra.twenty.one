@@ -2296,6 +2296,64 @@ class TestThresholdTokensCap:
         assert comp_zero.threshold_tokens == baseline.threshold_tokens
 
 
+    def test_large_window_default_cap_1m_model(self):
+        """Cost-aware 18.10: a 1M-window model compacts at the 150K default
+        cap instead of 50% = ~500K; the cap survives model switches, never
+        touches <500K windows, and an explicit threshold_tokens wins."""
+        from korra_cli.config import DEFAULT_CONFIG
+        default_cap = DEFAULT_CONFIG["compression"]["large_window_threshold_tokens"]
+        assert default_cap == 150_000
+
+        with patch("agent.context_compressor.get_model_context_length", return_value=1_000_000):
+            comp = ContextCompressor(
+                "claude-opus-5-5", threshold_percent=0.50, quiet_mode=True,
+                large_window_threshold_tokens=default_cap,
+            )
+            assert comp.threshold_tokens == 150_000
+            assert comp.effective_threshold_tokens_cap == 150_000
+            assert comp.should_compress(149_999) is False
+            assert comp.should_compress(150_000) is True
+            explicit = ContextCompressor(
+                "claude-opus-5-5", threshold_percent=0.50, quiet_mode=True,
+                threshold_tokens_cap=300_000,
+                large_window_threshold_tokens=default_cap,
+            )
+            assert explicit.threshold_tokens == 300_000
+            off = ContextCompressor(
+                "claude-opus-5-5", threshold_percent=0.50, quiet_mode=True,
+                large_window_threshold_tokens=0,
+            )
+            assert off.threshold_tokens == 500_000
+
+        # 400K window: below the large-window line, ratio + floor unchanged.
+        comp.update_model("gpt-x", context_length=400_000)
+        assert comp.effective_threshold_tokens_cap is None
+        assert comp.threshold_tokens == 300_000
+        # Back to a 1M window: the cap re-applies.
+        comp.update_model("claude-sonnet-5-5", context_length=1_000_000)
+        assert comp.threshold_tokens == 150_000
+
+    def test_large_window_cap_wired_from_config(self):
+        """agent_init passes compression.large_window_threshold_tokens to the
+        compressor (the AIAgent a 1M-window session actually runs with)."""
+        import socket
+        from run_agent import AIAgent
+
+        cfg = {"compression": {"large_window_threshold_tokens": 150_000}}
+        with patch("korra_cli.config.load_config", return_value=cfg), \
+                patch("agent.context_compressor.get_model_context_length", return_value=1_000_000), \
+                patch.object(socket.socket, "connect", side_effect=OSError("offline")):
+            agent = AIAgent(
+                model="claude-opus-5-5", base_url="http://127.0.0.1:9/v1",
+                api_key="qa-dummy", provider="custom", quiet_mode=True,
+                enabled_toolsets=[], skip_context_files=True, skip_memory=True,
+            )
+            comp = agent.context_compressor
+            assert comp.large_window_threshold_tokens == 150_000
+            assert comp.context_length == 1_000_000
+            assert comp.threshold_tokens == 150_000
+
+
 
 class TestTruncateToolCallArgsJson:
     """Regression tests for #11762.
