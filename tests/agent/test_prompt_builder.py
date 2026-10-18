@@ -318,6 +318,28 @@ class TestBuildSkillsSystemPrompt:
         assert result.count("- search") == 1
 
 
+    def test_skills_index_does_not_force_loading(self, monkeypatch, tmp_path):
+        """Cost-aware wording: no blanket "MUST load / err on the side of
+        loading" pressure; load only for the skill's domain, answer short
+        questions directly (every forced skill_view is an extra model step)."""
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        d = tmp_path / "skills" / "tools" / "search"
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text("---\ndescription: Search stuff\n---\n")
+        result = build_skills_system_prompt()
+        assert "- search: Search stuff" in result
+        for stale in (
+            "MUST load",
+            "Err on the side of loading",
+            "even partially relevant",
+            "even for tasks you",
+            "Only proceed without loading a skill",
+        ):
+            assert stale not in result, stale
+        assert "skill_view(name)" in result
+        assert "clearly falls within its domain" in result.replace("\n", " ")
+        assert "answer right away without loading a skill" in result
+
     def test_compact_categories_demote_nested_and_miss_cache_separately(
         self, monkeypatch, tmp_path
     ):
