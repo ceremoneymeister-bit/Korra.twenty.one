@@ -1066,3 +1066,24 @@ describe("K21-383: фокус в поле после явного выбора �
     }
   });
 });
+
+describe("имя главного агента в подписях чата (UX 17.10)", () => {
+  it("переименованный агент называется своим именем в поле, подписи и пустом экране", async () => {
+    await render(
+      <>
+        <BubbleChatTranscript messages={[]} sessionId={null} agentLabel="Аня" />
+        <BubbleChatComposer onSend={vi.fn()} agentLabel="Аня" streaming responding />
+      </>,
+    );
+    const textarea = container.querySelector("textarea")!;
+    expect(textarea.labels?.[0]?.textContent).toBe("Сообщение агенту «Аня»");
+    expect(container.textContent).toContain("Это чат с агентом «Аня» — напишите ему.");
+    expect(container.textContent).not.toContain("Корре");
+    expect(container.querySelector('[role="status"]')?.textContent).toContain("«Аня» отвечает");
+  });
+
+  it("без имени остаются склонённые фразы Корры", async () => {
+    await render(<BubbleChatTranscript messages={[]} sessionId={null} />);
+    expect(container.textContent).toContain("Напишите Корре своими словами");
+  });
+});

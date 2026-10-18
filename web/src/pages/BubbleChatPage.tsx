@@ -68,6 +68,7 @@ import { publishAgentConversation } from "@/lib/agent-conversations";
 import { ChatWorking, type BusyKind } from "@/components/ChatWorking";
 import { loadChatOutbox, loadChatOutboxRecords, type ChatOutboxRecord } from "@/lib/chat-outbox";
 import { useProfileScope } from "@/contexts/useProfileScope";
+import { chatAgentPhrases, DEFAULT_AGENT_NAME } from "./chat-agent-phrases";
 import {
   ChatArtifactList,
   type ArtifactDecisionHandler,
@@ -612,7 +613,7 @@ export function BubbleChatTranscript({
   voiceSettings?: AgentVoiceSettings | null;
   profile?: string;
   active?: boolean;
-  /** Имя агента вкладки для пустого экрана; пусто — главная Корра. */
+  /** Имя агента для пустого экрана; пусто — главная Корра с именем по умолчанию. */
   agentLabel?: string;
   /** Черновик этого профиля из другого чата — напоминаем баннером. */
   pendingElsewhere?: ChatOutboxRecord | null;
@@ -669,7 +670,7 @@ export function BubbleChatTranscript({
           {messages.length === 0 ? (
             <div className="flex min-h-[40vh] items-center justify-center">
               <p className="text-base text-muted-foreground">
-                {agentLabel ? `Это чат с агентом «${agentLabel}» — напишите ему.` : "Напишите Корре своими словами — она на связи."}
+                {chatAgentPhrases(agentLabel).empty}
               </p>
             </div>
           ) : (
@@ -798,7 +799,7 @@ function ChatArchive({
 
 interface BubbleChatComposerProps {
   active?: boolean;
-  /** Имя агента вкладки для подсказок; пусто — главная Корра. */
+  /** Имя агента для подсказок; пусто — главная Корра с именем по умолчанию. */
   agentLabel?: string;
   disabled?: boolean;
   streaming?: boolean;
@@ -1167,10 +1168,11 @@ export function BubbleChatComposer({
   const micDisabled =
     !dictation.supported ||
     (!recording && (Boolean(disabled) || submitting || dictationBusy || keptFailed));
+  const phrases = chatAgentPhrases(agentLabel);
   const secondsLeft = dictation.recordingLimitSeconds - dictation.elapsedSeconds;
   const activity = streaming
     ? responding
-      ? "Корра отвечает"
+      ? phrases.responding
       : "Отправляется"
     : submitting
       ? "Отправляется"
@@ -1262,7 +1264,7 @@ export function BubbleChatComposer({
           className="korra-chat-composer__surface overflow-hidden"
         >
           <label htmlFor={textareaId} className="sr-only">
-            Сообщение Корре
+            {phrases.fieldLabel}
           </label>
           <textarea
             ref={taRef}
@@ -1296,7 +1298,7 @@ export function BubbleChatComposer({
               }
             }}
             placeholder={
-              recording ? "Слушаю…" : transcribing ? "Распознаю запись…" : streaming ? "Можно написать следующее сообщение — отправите после ответа…" : agentLabel ? `Напишите агенту «${agentLabel}»…` : "Напишите Корре…"
+              recording ? "Слушаю…" : transcribing ? "Распознаю запись…" : streaming ? "Можно написать следующее сообщение — отправите после ответа…" : phrases.placeholder
             }
             disabled={disabled || submitting}
             className="korra-chat-composer__textarea min-w-0 w-full resize-none bg-transparent text-sm leading-6 normal-case tracking-normal"
@@ -1605,7 +1607,10 @@ export default function BubbleChatPage({
   // Подпись в шторке «Чаты»: у главного агента своё имя тоже есть
   // (display_name профиля `default`), «Корра» — только по умолчанию.
   const historyAgentLabel = agentLabel
-    ?? (scopeProfiles.find((item) => item.name === "default")?.display_name?.trim() || "Корра");
+    ?? (scopeProfiles.find((item) => item.name === "default")?.display_name?.trim() || DEFAULT_AGENT_NAME);
+  // Подписи чата: агент вкладки или переименованный главный агент. Пусто —
+  // имя по умолчанию, тогда остаются склонённые «Корре/Коррой».
+  const chatLabel = historyAgentLabel === DEFAULT_AGENT_NAME ? undefined : historyAgentLabel;
   const pendingElsewhere = useMemo(() => {
     const currentPending = sessionId ? loadChatOutbox(agentProfile ?? "", sessionId) : null;
     if (currentPending && !messages.some(message => message.clientMessageId === currentPending.messageId)) return currentPending;
@@ -1994,7 +1999,7 @@ export default function BubbleChatPage({
         title={t.sessions.confirmDeleteTitle}
         description={t.sessions.confirmDeleteMessage}
       />
-      <section className="flex-1 flex flex-col min-w-0 min-h-0" aria-label="Разговор с Коррой">
+      <section className="flex-1 flex flex-col min-w-0 min-h-0" aria-label={chatAgentPhrases(chatLabel).region}>
         {!mobileHistory && <div className="flex min-h-12 items-center border-b border-border/60 px-3 lg:hidden">
           <Button type="button" ghost size="sm" onClick={() => setMobileHistoryOpen(true)} prefix={<MessageSquare aria-hidden />} aria-label="Открыть историю чатов">
             Чаты
@@ -2013,7 +2018,7 @@ export default function BubbleChatPage({
         )}
         {archiveOpen && sessionId ? (
           <ChatArchive key={recoveryKey} sessionId={sessionId} profile={agentProfile || "default"}
-            active={active !== false} voiceSettings={voiceSettings} agentLabel={agentLabel}
+            active={active !== false} voiceSettings={voiceSettings} agentLabel={chatLabel}
             onClose={() => setArchiveFor(null)} />
         ) : <BubbleChatTranscript
           voiceSettings={voiceSettings} profile={agentProfile || "default"} active={active !== false}
@@ -2030,7 +2035,7 @@ export default function BubbleChatPage({
           onRetry={handleRetry}
           onDiscard={target => discardPending(target)}
           pendingElsewhere={pendingElsewhere}
-          agentLabel={agentLabel}
+          agentLabel={chatLabel}
           approvals={approvals}
           onApprovalDecision={handleApprovalDecision}
         />}
@@ -2042,7 +2047,7 @@ export default function BubbleChatPage({
           key={sessionId ?? "new"}
           focusSignal={newChatFocus}
           draftKey={chatViewKey(agentProfile, sessionId)}
-          agentLabel={agentLabel}
+          agentLabel={chatLabel}
           onSend={send}
           disabled={isLoading || handoffSwitching || searchParams.get("new_chat") === "1" || Boolean(searchParams.get("resume") && searchParams.get("resume") !== sessionId)}
           prefill={prefill}
