@@ -1,4 +1,5 @@
 import { useStore } from "@nanostores/react";
+import { startVisibleInterval } from "@/lib/visible-interval";
 import { $chatRuns } from "@/lib/chat-runs";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
@@ -50,20 +51,19 @@ export function useSidebarStatus(profile: string | null = null): SidebarStatus {
         });
     };
     load();
-    const id = setInterval(load, POLL_MS);
+    // Тик в скрытой вкладке пропускается; visibilitychange обновляет сразу.
+    const stop = startVisibleInterval(load, POLL_MS);
     const resume = () => {
       if (typeof document === "undefined" || !document.hidden) load();
     };
     window.addEventListener("focus", resume);
     window.addEventListener("online", resume);
-    document.addEventListener("visibilitychange", resume);
     return () => {
       cancelled = true;
       request += 1;
-      clearInterval(id);
+      stop();
       window.removeEventListener("focus", resume);
       window.removeEventListener("online", resume);
-      document.removeEventListener("visibilitychange", resume);
     };
   }, [profile]);
 

@@ -1,4 +1,5 @@
 import { clearChatAttachmentDraft } from "@/hooks/useChatAttachmentDraft";
+import { startVisibleInterval } from "@/lib/visible-interval";
 import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
 import { chatViewKey, clearChatDraft, forgetChatSelection, readChatSelection, writeChatSelection } from "@/lib/chat-view-state";
 import { $viewedChat, markChatViewed, chatRunHeaders, chatRunUrl, getChatRuns, isRunBusy, refreshChatRuns, type ChatRun } from "@/lib/chat-runs";
@@ -2281,10 +2282,11 @@ export function useChatStream(
       }
     };
     void load();
-    const timer = window.setInterval(() => void load(), APPROVAL_POLL_MS);
+    // Скрытая вкладка не опрашивает; возврат на неё обновляет сразу.
+    const stop = startVisibleInterval(() => void load(), APPROVAL_POLL_MS);
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      stop();
     };
   }, [active, currentSessionId, isStreaming, profile]);
 

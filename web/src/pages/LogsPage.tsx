@@ -5,6 +5,7 @@ import {
   useCallback,
   useRef,
 } from "react";
+import { startVisibleInterval } from "@/lib/visible-interval";
 import { FileText, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
 import { Badge } from "@nous-research/ui/ui/components/badge";
@@ -150,8 +151,8 @@ export default function LogsPage() {
 
   useEffect(() => {
     if (!autoRefresh) return;
-    const interval = setInterval(fetchLogs, 5000);
-    return () => clearInterval(interval);
+    // Скрытая вкладка не опрашивает; возврат на неё обновляет сразу.
+    return startVisibleInterval(fetchLogs, 5000);
   }, [autoRefresh, fetchLogs]);
 
   return (
