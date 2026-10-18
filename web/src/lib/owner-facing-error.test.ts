@@ -39,8 +39,11 @@ describe("specific recovery advice", () => {
       },
     }));
     expect(text).toContain("Лимит использования модели исчерпан");
-    expect(text).toContain("2026");
-    expect(text).toContain("10:30");
+    // Время показывается в часовом поясе владельца: ожидаемое считаем тем же
+    // Intl, чтобы тест не зависел от TZ машины (в UTC+7 это 17:30, а не 10:30).
+    const expected = new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" })
+      .format(new Date("2026-09-19T10:30:00Z"));
+    expect(text).toContain(expected);
     expect(text).not.toContain("когда он обновится");
   });
   it("uses structured rate-limit reason even after the server localized its message", () => {
