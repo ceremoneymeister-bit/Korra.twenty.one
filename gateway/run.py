@@ -17831,6 +17831,48 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             "version": self._handle_version_command,
         }
 
+    def _unrecognized_busy_slash_reply(self, command: str, source) -> Optional[str]:
+        """Reply for an unknown /command while busy, or None to keep routing.
+
+        Plugin, quick, bundle and skill commands keep their existing path.
+        """
+        try:
+            from korra_cli.commands import GATEWAY_KNOWN_COMMANDS
+            from korra_cli.plugins import get_plugin_command_handler
+            from agent.skill_bundles import resolve_bundle_command_key
+            from agent.skill_commands import resolve_skill_command_key
+
+            normalized = command.replace("_", "-")
+            if normalized in GATEWAY_KNOWN_COMMANDS:
+                return None
+            try:
+                quick_commands = self.config.get("quick_commands", {}) or {}
+            except Exception:
+                quick_commands = getattr(self.config, "quick_commands", {}) or {}
+            if isinstance(quick_commands, dict) and command in quick_commands:
+                return None
+            if (
+                get_plugin_command_handler(normalized)
+                or resolve_bundle_command_key(command)
+                or resolve_skill_command_key(command)
+            ):
+                return None
+            unavailable = _check_unavailable_skill(command)
+            if unavailable:
+                return unavailable
+        except Exception as exc:
+            logger.debug("Busy slash check failed (non-fatal): %s", exc)
+            return None
+        logger.warning(
+            "Unrecognized slash command /%s from %s while agent busy — "
+            "replying with unknown-command notice without interrupt",
+            command,
+            source.platform.value if source.platform else "?",
+        )
+        return (
+            f'''Неизвестная команда `/{command}`. Список команд: /commands. Чтобы отправить обычное сообщение, уберите косую черту в начале.'''
+        )
+
     async def _dispatch_busy_slash_command(
         self, event: MessageEvent, cmd_def, quick_key: str, source,
     ):
@@ -18749,6 +18791,13 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 return await self._dispatch_busy_slash_command(
                     event, _cmd_def_inner, _quick_key, source,
                 )
+
+            # A genuinely unrecognized /command must not interrupt the live
+            # turn as free text; answer like the idle path does.
+            if _evt_cmd:
+                _unknown_reply = self._unrecognized_busy_slash_reply(_evt_cmd, source)
+                if _unknown_reply is not None:
+                    return _unknown_reply
 
             if event.message_type == MessageType.PHOTO:
                 logger.debug("PRIORITY photo follow-up for session %s — queueing without interrupt", _quick_key)
