@@ -122,3 +122,35 @@ async def test_plain_exception_still_notifies_without_propagating():
 
     assert adapter.sent, "platform send must be called on a plain Exception"
     assert 'ошибка' in adapter.sent[0].lower()
+
+
+@pytest.mark.asyncio
+async def test_exception_notification_hides_class_name_and_details():
+    """QA 17-18.10: the chat gets a friendly text, never the exception
+    class name or str(e); details stay in the log."""
+    adapter = _make_adapter(_raising_handler(
+        RuntimeError("sqlite3 locked at /home/u/.korra/state.db token=abc123")
+    ))
+    event = _event()
+
+    await adapter._process_message_background(event, build_session_key(event.source))
+
+    assert adapter.sent
+    text = adapter.sent[0]
+    assert "RuntimeError" not in text
+    assert "state.db" not in text and "abc123" not in text
+    assert 'ошибка' in text.lower()
+
+
+@pytest.mark.asyncio
+async def test_provider_exception_notification_uses_safe_category():
+    adapter = _make_adapter(_raising_handler(
+        RuntimeError("Error code: 429 - insufficient_quota: You exceeded your current quota")
+    ))
+    event = _event()
+
+    await adapter._process_message_background(event, build_session_key(event.source))
+
+    text = adapter.sent[0]
+    assert "RuntimeError" not in text and "insufficient_quota" not in text
+    assert "Лимит подписки модели исчерпан" in text

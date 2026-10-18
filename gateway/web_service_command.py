@@ -29,6 +29,33 @@ _SERVICE_COMMANDS = frozenset({
     "stop", "restart", "quit",
 })
 _COMMAND = re.compile(r"/([A-Za-z][A-Za-z0-9_-]*)(?:[ \t]+([^\r\n]*))?")
+_LEADING_SLASH = re.compile(r"/([A-Za-z][A-Za-z0-9_-]*)(?=\s|$)")
+# Pseudo-command for a leading /word that nothing on this surface handles.
+_UNKNOWN = "\x00unknown"
+
+
+def _is_unknown_slash(name: str) -> bool:
+    """True only when /name is neither a registry command, skill, bundle nor plugin."""
+    from korra_cli.commands import resolve_command
+    from gateway.web_mcp_command import is_web_mcp_command
+
+    # /cancel and /always answer a pending MCP confirmation (web_mcp_command).
+    if resolve_command(name) is not None or is_web_mcp_command(f"/{name}"):
+        return False
+    try:
+        from agent.skill_commands import resolve_skill_command_key
+        from agent.skill_bundles import resolve_bundle_command_key
+        from korra_cli.plugins import get_plugin_command_handler
+
+        return not (
+            resolve_skill_command_key(name)
+            or resolve_bundle_command_key(name)
+            or get_plugin_command_handler(name.replace("_", "-"))
+        )
+    except Exception:
+        # Lookup failure: keep the ordinary routing rather than guessing.
+        logger.warning("Web slash lookup for /%s failed", name, exc_info=True)
+        return False
 
 
 def parse_web_service_command(message: Any) -> tuple[str, str] | None:
@@ -36,11 +63,18 @@ def parse_web_service_command(message: Any) -> tuple[str, str] | None:
         return None
     match = _COMMAND.fullmatch(message.strip())
     if match is None:
+        leading = _LEADING_SLASH.match(message.strip())
+        if leading is not None and _is_unknown_slash(leading[1]):
+            return _UNKNOWN, leading[1]
         return None
     from korra_cli.commands import resolve_command
 
     command = resolve_command(match[1])
-    if command is None or command.name not in _SERVICE_COMMANDS:
+    if command is None:
+        if _is_unknown_slash(match[1]):
+            return _UNKNOWN, match[1]
+        return None
+    if command.name not in _SERVICE_COMMANDS:
         return None
     return command.name, (match[2] or "").strip()
 
@@ -57,6 +91,8 @@ def _text(value: Any, fallback: str = "не задано") -> str:
 
 def _reply(adapter, command, args, session, profile, requested_model,
            requested_provider, model_options, route, session_model):
+    if command == _UNKNOWN:
+        return f"Команда /{args} неизвестна или недоступна в веб-чате. Список — /help"
     if args:
         return (
             f"В веб-чате /{command} выполняется без аргументов. "
@@ -204,7 +240,7 @@ def run_web_service_command(adapter, user_message, session_id, *, profile=None,
     parsed = parse_web_service_command(user_message)
     if parsed is None:
         return None
-    if not owner:
+    if not owner and parsed[0] != _UNKNOWN:
         return {"final_response": "Служебные команды установки доступны только владельцу; в групповом диалоге используйте управление комнатой.", "api_calls": 0, "completed": True}
     db = adapter._ensure_session_db() if session_id else None
     holder = f"api-service:{uuid.uuid4().hex}"

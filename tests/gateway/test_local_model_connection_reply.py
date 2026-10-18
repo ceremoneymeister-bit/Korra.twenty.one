@@ -61,3 +61,23 @@ class TestGatewayConnectionErrorReply:
         assert 'ограничил частоту' in _gateway_provider_error_reply(
             "rate limited after 3 retries"
         ).lower()
+
+
+class TestGatewaySubscriptionLimitReply:
+    @pytest.mark.parametrize("text,reset", [
+        ("API call failed after 3 retries: HTTP 429: You have hit your usage limit. Try again in 2 hours.", "2 hours"),
+        ("Error code: 429 - insufficient_quota: You exceeded your current quota", None),
+        ("HTTP 429: usage_limit_reached, resets at 14:30 UTC", "14:30 UTC"),
+    ])
+    def test_quota_exhaustion_is_reported_as_subscription_limit(self, text, reset):
+        assert _looks_like_gateway_provider_error(text)
+        reply = _gateway_provider_error_reply(text)
+        assert "Лимит подписки модели исчерпан" in reply
+        assert "Немного подождите" not in reply
+        if reset:
+            assert reset in reply
+
+    def test_plain_rate_limit_keeps_short_wait_reply(self):
+        reply = _gateway_provider_error_reply("rate limited after 3 retries")
+        assert "ограничил частоту" in reply.lower()
+        assert "Лимит подписки" not in reply

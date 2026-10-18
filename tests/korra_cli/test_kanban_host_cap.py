@@ -175,15 +175,40 @@ def test_max_in_progress_partial_budget_across_boards(
     assert len(res.spawned) == 1
 
 
-def test_count_running_tasks_other_boards_fails_open(
-    kanban_home, monkeypatch,
+def test_count_running_tasks_other_boards_is_conservative_on_failure(
+    kanban_home, monkeypatch, caplog,
 ):
-    """A broken board enumeration must not brick dispatch (returns 0)."""
+    """A broken board enumeration must not report an idle host (0): it
+    returns a conservative non-zero estimate and warns (QA 17-18.10)."""
+    import logging
+
     monkeypatch.setattr(
         kb, "list_boards",
         lambda **k: (_ for _ in ()).throw(RuntimeError("boom")),
     )
-    assert kb.count_running_tasks_other_boards() == 0
+    with caplog.at_level(logging.WARNING, logger=kb._log.name):
+        assert kb.count_running_tasks_other_boards() >= 1
+    assert any(r.levelno == logging.WARNING for r in caplog.records)
+
+
+def test_board_enumeration_failure_limits_host_budget(
+    kanban_home, monkeypatch, all_assignees_spawnable,
+):
+    """With the other boards unknown, max_in_progress=2 admits one spawn,
+    not two; dispatch is limited, not bricked."""
+    monkeypatch.setattr(
+        kb, "list_boards",
+        lambda **k: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    spawns: list = []
+    with kb.connect() as conn:
+        for title in ("a", "b", "c"):
+            kb.create_task(conn, title=title, assignee="alice")
+        res = kb.dispatch_once(
+            conn, spawn_fn=_fake_spawn_factory(spawns), max_in_progress=2,
+        )
+    assert len(spawns) == 1
+    assert len(res.spawned) == 1
 
 
 def test_max_spawn_stays_per_board(kanban_home, all_assignees_spawnable):

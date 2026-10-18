@@ -612,6 +612,19 @@ _GATEWAY_RATE_LIMIT_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Subscription/plan quota exhaustion: waiting a little does not help, the
+# limit has to reset (checked before the generic rate-limit branch).
+_GATEWAY_QUOTA_RE = re.compile(
+    r"(quota|usage[\s_]+limit|subscription|plan\s+limit|limit[\s_]+reached"
+    r"|out\s+of\s+credits|credits?\s+exhausted)",
+    re.IGNORECASE,
+)
+
+_GATEWAY_LIMIT_RESET_RE = re.compile(
+    r"(?:resets?|try\s+again)\s+(?:at|in|after)\s+([^\n.;,()]{1,40})",
+    re.IGNORECASE,
+)
+
 _GATEWAY_CONNECTION_ERROR_RE = re.compile(
     r"("
     r"(?:\w+\.)?(?:api\s*)?connection\s*(?:error|timeout)"
@@ -922,6 +935,13 @@ def _gateway_provider_error_reply(text: str) -> str:
     if _GATEWAY_PROVIDER_POLICY_RE.search(text):
         return (
             '''⚠️ Сервис модели отклонил запрос. Попробуйте сформулировать его иначе. Подробности ошибки сохранены в журнале шлюза.'''
+        )
+    if _GATEWAY_QUOTA_RE.search(text):
+        reset = _GATEWAY_LIMIT_RESET_RE.search(text)
+        if reset and reset.group(1).strip():
+            return f'''⛔ Лимит подписки модели исчерпан. Лимит обновится: {reset.group(1).strip()}.'''
+        return (
+            '''⛔ Лимит подписки модели исчерпан. Повторите после обновления лимита или выберите другую модель в настройках.'''
         )
     if _GATEWAY_RATE_LIMIT_RE.search(text):
         return '''⏱️ Сервис модели ограничил частоту запросов. Немного подождите и повторите попытку.'''
@@ -4094,9 +4114,12 @@ def _load_gateway_config(config_path: "Path | None" = None) -> dict:
                 import yaml
                 with open(config_path, 'r', encoding='utf-8') as f:
                     raw = yaml.safe_load(f) or {}
-        except Exception:
+        except Exception as exc:
             logger.debug("Could not load gateway config from %s", config_path)
-            raw = {}
+            # Still an empty dict to every caller; the marker lets
+            # fail-closed readers tell a failed read from an empty config.
+            from korra_cli.config import FailedConfigRead
+            raw = FailedConfigRead(error=exc)
 
     # Overlay managed scope. read_raw_config() returns the user's raw YAML
     # WITHOUT the managed merge (that lives in load_config/_load_config_impl),
@@ -4121,6 +4144,31 @@ def _load_gateway_config(config_path: "Path | None" = None) -> dict:
     except Exception:
         pass
     return raw
+
+
+def _gateway_redact_pii_setting() -> bool:
+    """Return ``privacy.redact_pii`` for this turn, failing closed.
+
+    A config that could not be read (no last-known-good copy) or a malformed
+    ``privacy`` section must not silently switch redaction off: use the safe
+    mode (redact) and warn.
+    """
+    try:
+        from korra_cli.config import FailedConfigRead
+
+        cfg = _load_gateway_config()
+        if isinstance(cfg, FailedConfigRead) and not cfg:
+            raise RuntimeError("config read failed") from getattr(cfg, "read_error", None)
+        privacy = cfg.get("privacy") or {}
+        if not isinstance(privacy, dict):
+            raise TypeError("privacy section is not a mapping")
+        return bool(privacy.get("redact_pii", False))
+    except Exception as exc:
+        logger.warning(
+            "Could not read privacy.redact_pii (%s); redacting PII for this turn",
+            type(exc).__name__,
+        )
+        return True
 
 
 def _checkpoint_agent_kwargs(config: dict | None) -> dict:
@@ -17831,6 +17879,48 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             "version": self._handle_version_command,
         }
 
+    def _unrecognized_busy_slash_reply(self, command: str, source) -> Optional[str]:
+        """Reply for an unknown /command while busy, or None to keep routing.
+
+        Plugin, quick, bundle and skill commands keep their existing path.
+        """
+        try:
+            from korra_cli.commands import GATEWAY_KNOWN_COMMANDS
+            from korra_cli.plugins import get_plugin_command_handler
+            from agent.skill_bundles import resolve_bundle_command_key
+            from agent.skill_commands import resolve_skill_command_key
+
+            normalized = command.replace("_", "-")
+            if normalized in GATEWAY_KNOWN_COMMANDS:
+                return None
+            try:
+                quick_commands = self.config.get("quick_commands", {}) or {}
+            except Exception:
+                quick_commands = getattr(self.config, "quick_commands", {}) or {}
+            if isinstance(quick_commands, dict) and command in quick_commands:
+                return None
+            if (
+                get_plugin_command_handler(normalized)
+                or resolve_bundle_command_key(command)
+                or resolve_skill_command_key(command)
+            ):
+                return None
+            unavailable = _check_unavailable_skill(command)
+            if unavailable:
+                return unavailable
+        except Exception as exc:
+            logger.debug("Busy slash check failed (non-fatal): %s", exc)
+            return None
+        logger.warning(
+            "Unrecognized slash command /%s from %s while agent busy — "
+            "replying with unknown-command notice without interrupt",
+            command,
+            source.platform.value if source.platform else "?",
+        )
+        return (
+            f'''Неизвестная команда `/{command}`. Список команд: /commands. Чтобы отправить обычное сообщение, уберите косую черту в начале.'''
+        )
+
     async def _dispatch_busy_slash_command(
         self, event: MessageEvent, cmd_def, quick_key: str, source,
     ):
@@ -18749,6 +18839,13 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 return await self._dispatch_busy_slash_command(
                     event, _cmd_def_inner, _quick_key, source,
                 )
+
+            # A genuinely unrecognized /command must not interrupt the live
+            # turn as free text; answer like the idle path does.
+            if _evt_cmd:
+                _unknown_reply = self._unrecognized_busy_slash_reply(_evt_cmd, source)
+                if _unknown_reply is not None:
+                    return _unknown_reply
 
             if event.message_type == MessageType.PHOTO:
                 logger.debug("PRIORITY photo follow-up for session %s — queueing without interrupt", _quick_key)
@@ -20678,11 +20775,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         persist_user_display_kind = (
             "internal_notification" if getattr(event, "internal", False) else None
         )
-        try:
-            _pcfg = _load_gateway_config()
-            _redact_pii = bool((_pcfg.get("privacy") or {}).get("redact_pii", False))
-        except Exception:
-            pass
+        _redact_pii = _gateway_redact_pii_setting()
 
         # Build the context prompt to inject.  The render is pinned per
         # session, keyed by a hash of the exact renderer inputs
@@ -22951,12 +23044,24 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                             _user_entry["display_kind"] = persist_user_display_kind
                         if getattr(event, "message_id", None):
                             _user_entry["message_id"] = str(event.message_id)
-                        await self.async_session_store.append_to_transcript(
-                            session_entry.session_id,
-                            _user_entry,
-                        )
+                        # One retry: a transient store error (locked DB) must
+                        # not silently lose the user's message.
+                        for _persist_attempt in (1, 2):
+                            try:
+                                await self.async_session_store.append_to_transcript(
+                                    session_entry.session_id,
+                                    _user_entry,
+                                )
+                                break
+                            except Exception:
+                                if _persist_attempt == 2:
+                                    raise
+                                logger.warning(
+                                    "Saving inbound user message after agent exception failed; retrying",
+                                    exc_info=True,
+                                )
             except Exception:
-                logger.debug("Failed to persist inbound user message after agent exception", exc_info=True)
+                logger.error("Failed to persist inbound user message after agent exception", exc_info=True)
             # Log full details server-side only; never expose raw exception
             # types or messages to end users (info-leakage risk).
             status_hint = ""

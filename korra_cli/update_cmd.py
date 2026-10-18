@@ -4699,8 +4699,19 @@ def _run_pre_update_backup(args) -> Optional[str]:
                 "Sibling profile snapshots failed: %s", _sib_exc
             )
     except Exception as exc:
-        # Never let a snapshot failure block an update.
-        logging.getLogger(__name__).debug("Pre-update snapshot failed: %s", exc)
+        # Never let a snapshot failure block an update, but make it visible:
+        # the user is about to update without a rollback point.
+        logging.getLogger(__name__).warning("Pre-update snapshot failed: %s", exc)
+        print(
+            f'⚠ Не удалось создать резервный снимок перед обновлением ({type(exc).__name__}). '
+            'Обновление продолжится без точки отката.'
+        )
+        try:
+            from korra_cli.update_receipt import record_step
+
+            record_step("pre_update_snapshot", False, type(exc).__name__)
+        except Exception:
+            pass
 
     if mode != "full":
         if snapshot_id:
