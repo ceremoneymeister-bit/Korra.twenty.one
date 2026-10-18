@@ -23044,12 +23044,24 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                             _user_entry["display_kind"] = persist_user_display_kind
                         if getattr(event, "message_id", None):
                             _user_entry["message_id"] = str(event.message_id)
-                        await self.async_session_store.append_to_transcript(
-                            session_entry.session_id,
-                            _user_entry,
-                        )
+                        # One retry: a transient store error (locked DB) must
+                        # not silently lose the user's message.
+                        for _persist_attempt in (1, 2):
+                            try:
+                                await self.async_session_store.append_to_transcript(
+                                    session_entry.session_id,
+                                    _user_entry,
+                                )
+                                break
+                            except Exception:
+                                if _persist_attempt == 2:
+                                    raise
+                                logger.warning(
+                                    "Saving inbound user message after agent exception failed; retrying",
+                                    exc_info=True,
+                                )
             except Exception:
-                logger.debug("Failed to persist inbound user message after agent exception", exc_info=True)
+                logger.error("Failed to persist inbound user message after agent exception", exc_info=True)
             # Log full details server-side only; never expose raw exception
             # types or messages to end users (info-leakage risk).
             status_hint = ""
