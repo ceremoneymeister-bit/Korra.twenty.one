@@ -370,3 +370,44 @@ def test_multiplex_closure_handler_without_callback_falls_back_to_env(monkeypatc
     assert adapter._is_user_authorized_from_message(
         _make_message(from_user_id=555, chat_id=-100123, chat_type="group")
     ) is False
+
+
+def test_runner_auth_exception_denies_instead_of_env_fallback(monkeypatch, caplog):
+    """QA 17-18.10: a failing auth chain must deny (fail closed), not fall
+    back to the env-only allowlist that would admit the sender."""
+    import logging
+
+    monkeypatch.setenv("TELEGRAM_ALLOWED_USERS", "111")
+
+    class Runner:
+        def _is_user_authorized(self, source):
+            raise RuntimeError("pairing store unavailable")
+
+        async def handle(self, event):
+            return None
+
+    runner = Runner()
+    adapter = _make_adapter()
+    adapter._message_handler = runner.handle
+    msg = _make_message(from_user_id=111, chat_id=111, chat_type="private")
+
+    with caplog.at_level(logging.WARNING):
+        assert adapter._is_user_authorized_from_message(msg) is False
+    assert any("auth" in r.getMessage().lower() for r in caplog.records
+               if r.levelno >= logging.WARNING)
+
+
+def test_injected_auth_exception_denies(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_ALLOWED_USERS", "111")
+
+    def broken(*_a, **_kw):
+        raise RuntimeError("boom")
+
+    async def handle(event):
+        return None
+
+    adapter = _make_adapter(callback_auth=broken)
+    adapter._message_handler = handle
+    msg = _make_message(from_user_id=111, chat_id=111, chat_type="private")
+
+    assert adapter._is_user_authorized_from_message(msg) is False
