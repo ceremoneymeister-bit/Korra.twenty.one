@@ -2583,6 +2583,28 @@ describe('UX 17.10: «Стоп» в первые секунды, пока ход
     runs.mockImplementation(async () => []);
   });
 
+  it('фоновое перечитывание истории не отменяет намерение остановить', async () => {
+    const { getChatRuns } = await import('@/lib/chat-runs');
+    const runs = vi.mocked(getChatRuns);
+    const io = openStream();
+    await act(async () => { void current.send('Посчитай смету'); });
+    const record = loadChatOutbox()!;
+    const sessionId = current.sessionId!;
+    runs.mockImplementation(async () => []);
+    await act(async () => { current.abort(); });
+    // Возврат на вкладку: история перечитывается в фоне и забирает лок.
+    await act(async () => { await current.loadSession(sessionId, { background: true }); });
+    runs.mockImplementation(async () => [{
+      message_id: record.messageId, session_id: sessionId, profile: '',
+      status: 'running', updated_at: 1, history_count: 0,
+      user_message: { role: 'user', content: record.text },
+    }]);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 700)); });
+    expect(io.cancelUrls).toHaveLength(1);
+    expect(loadChatOutbox()).toMatchObject({ status: 'failed', terminal: true });
+    runs.mockImplementation(async () => []);
+  });
+
   it('не отменяет чужой прошлый ход, пока свой ещё не записан', async () => {
     const { getChatRuns } = await import('@/lib/chat-runs');
     const runs = vi.mocked(getChatRuns);

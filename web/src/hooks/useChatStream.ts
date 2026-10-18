@@ -1162,6 +1162,9 @@ export function useChatStream(
       let owner = generation;
       let detached = false;
       const current = () => mountedRef.current && activeStreamIdRef.current === owner;
+      // Экран этого разговора можно обновить: либо лок наш, либо фоновое
+      // перечитывание истории уже забрало его и нового хода нет.
+      const canShow = () => mountedRef.current && (current() || (!streamingRef.current && stateRef.current.sessionId === sessionId));
       const findRun = async () => {
         const runs = await getChatRuns(profile ?? "", sessionId);
         return target ? runs.find((item) => item.message_id === target) : runs[0];
@@ -1180,24 +1183,27 @@ export function useChatStream(
           detached = true;
           abortControllerRef.current?.abort();
           const deadline = Date.now() + STOP_INTENT_WAIT_MS;
+          // Фоновое перечитывание истории может забрать лок, пока ждём, —
+          // намерение остановить от этого не отменяется: ждём ход до конца.
           while (!run && Date.now() < deadline) {
             await new Promise((resolve) => window.setTimeout(resolve, STOP_INTENT_POLL_MS));
-            if (!current()) return;
+            if (!mountedRef.current) return;
             run = await findRun();
           }
         }
         if (!run) {
-          if (!current()) return;
           // Ход так и не появился: запрос отправки прерван до того, как
           // сервер его принял. Текст остаётся в браузере для повтора.
-          activeStreamIdRef.current = null;
-          streamingRef.current = false;
-          const kept = target ? loadChatOutboxRecords(profile ?? "").find((record) => record.messageId === target) : undefined;
-          if (kept) {
-            saveChatOutbox({ ...kept, status: "failed", error: STOPPED_BEFORE_START });
-            dispatch({ type: "MARK_DELIVERY", messageId: kept.messageId, delivery: "failed", error: STOPPED_BEFORE_START });
+          if (current()) {
+            activeStreamIdRef.current = null;
+            streamingRef.current = false;
           }
-          dispatch({ type: "SET_ERROR", error: "Отправка остановлена до начала ответа. Текст сохранён — его можно вернуть в поле или повторить." });
+          const kept = target ? loadChatOutboxRecords(profile ?? "").find((record) => record.messageId === target) : undefined;
+          if (kept) saveChatOutbox({ ...kept, status: "failed", error: STOPPED_BEFORE_START });
+          if (canShow()) {
+            if (kept) dispatch({ type: "MARK_DELIVERY", messageId: kept.messageId, delivery: "failed", error: STOPPED_BEFORE_START });
+            dispatch({ type: "SET_ERROR", error: "Отправка остановлена до начала ответа. Текст сохранён — его можно вернуть в поле или повторить." });
+          }
           void refreshChatRuns();
           return;
         }
@@ -1212,10 +1218,12 @@ export function useChatStream(
         const kept = loadChatOutboxRecords(profile ?? "").find((record) => record.messageId === run.message_id);
         const stopped = kept?.terminal && kept.error ? kept.error : STOPPED_BY_USER;
         if (kept) saveChatOutbox({ ...kept, status: "failed", terminal: true, error: stopped });
-        if (current()) {
-          activeStreamIdRef.current = null;
-          abortControllerRef.current?.abort();
-          streamingRef.current = false;
+        if (current() || (detached && canShow())) {
+          if (current()) {
+            activeStreamIdRef.current = null;
+            abortControllerRef.current?.abort();
+            streamingRef.current = false;
+          }
           if (kept) dispatch({ type: "MARK_DELIVERY", messageId: kept.messageId, delivery: "failed", terminal: true, error: stopped });
           dispatch({ type: "SET_ERROR", error: "Ход остановлен. Можно написать новое сообщение." });
         }
