@@ -612,6 +612,19 @@ _GATEWAY_RATE_LIMIT_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Subscription/plan quota exhaustion: waiting a little does not help, the
+# limit has to reset (checked before the generic rate-limit branch).
+_GATEWAY_QUOTA_RE = re.compile(
+    r"(quota|usage[\s_]+limit|subscription|plan\s+limit|limit[\s_]+reached"
+    r"|out\s+of\s+credits|credits?\s+exhausted)",
+    re.IGNORECASE,
+)
+
+_GATEWAY_LIMIT_RESET_RE = re.compile(
+    r"(?:resets?|try\s+again)\s+(?:at|in|after)\s+([^\n.;,()]{1,40})",
+    re.IGNORECASE,
+)
+
 _GATEWAY_CONNECTION_ERROR_RE = re.compile(
     r"("
     r"(?:\w+\.)?(?:api\s*)?connection\s*(?:error|timeout)"
@@ -922,6 +935,13 @@ def _gateway_provider_error_reply(text: str) -> str:
     if _GATEWAY_PROVIDER_POLICY_RE.search(text):
         return (
             '''⚠️ Сервис модели отклонил запрос. Попробуйте сформулировать его иначе. Подробности ошибки сохранены в журнале шлюза.'''
+        )
+    if _GATEWAY_QUOTA_RE.search(text):
+        reset = _GATEWAY_LIMIT_RESET_RE.search(text)
+        if reset and reset.group(1).strip():
+            return f'''⛔ Лимит подписки модели исчерпан. Лимит обновится: {reset.group(1).strip()}.'''
+        return (
+            '''⛔ Лимит подписки модели исчерпан. Повторите после обновления лимита или выберите другую модель в настройках.'''
         )
     if _GATEWAY_RATE_LIMIT_RE.search(text):
         return '''⏱️ Сервис модели ограничил частоту запросов. Немного подождите и повторите попытку.'''
