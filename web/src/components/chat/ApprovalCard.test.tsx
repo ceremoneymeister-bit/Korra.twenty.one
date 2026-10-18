@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ChatArtifact } from "@/lib/chat-artifacts";
-import { ChatArtifactView } from "@/components/ChatArtifact";
+import { ArtifactDecisionBlock } from "@/components/ChatArtifact";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -52,7 +52,7 @@ afterEach(async () => {
 describe("ApprovalCard — протокол решений не изменился", () => {
   it("выбор варианта отправляет решение только по «Продолжить»", async () => {
     const onDecision = vi.fn(async () => true);
-    await render(<ChatArtifactView item={ITEM} onDecision={onDecision} />);
+    await render(<ArtifactDecisionBlock items={[ITEM]} onDecision={onDecision} />);
 
     expect(container.textContent).toContain("Что делаем с «Пакет недели.pptx»?");
 
@@ -68,7 +68,7 @@ describe("ApprovalCard — протокол решений не изменилс
 
   it("«Отложить» уходит тем же обработчиком", async () => {
     const onDecision = vi.fn(async () => true);
-    await render(<ChatArtifactView item={ITEM} onDecision={onDecision} />);
+    await render(<ArtifactDecisionBlock items={[ITEM]} onDecision={onDecision} />);
 
     await click(buttonByText("Отложить"));
     await click(buttonByText("Продолжить"));
@@ -79,7 +79,7 @@ describe("ApprovalCard — протокол решений не изменилс
 
   it("«Изменить» ничего не помечает решённым — это начало разговора", async () => {
     const onDecision = vi.fn(async () => undefined);
-    await render(<ChatArtifactView item={ITEM} onDecision={onDecision} />);
+    await render(<ArtifactDecisionBlock items={[ITEM]} onDecision={onDecision} />);
 
     await click(buttonByText("Изменить"));
     await click(buttonByText("Продолжить"));
@@ -91,7 +91,7 @@ describe("ApprovalCard — протокол решений не изменилс
 
   it("недоставленное решение не выдаёт себя за отправленное", async () => {
     const onDecision = vi.fn(async () => false);
-    await render(<ChatArtifactView item={ITEM} onDecision={onDecision} />);
+    await render(<ArtifactDecisionBlock items={[ITEM]} onDecision={onDecision} />);
 
     await click(buttonByText("Согласовать"));
     await click(buttonByText("Продолжить"));
@@ -105,7 +105,7 @@ describe("ApprovalCard — протокол решений не изменилс
 
   it("«Пропустить» прячет карточку, но оставляет путь к решению", async () => {
     const onDecision = vi.fn(async () => true);
-    await render(<ChatArtifactView item={ITEM} onDecision={onDecision} />);
+    await render(<ArtifactDecisionBlock items={[ITEM]} onDecision={onDecision} />);
 
     await click(buttonByText("Пропустить"));
     expect(onDecision).not.toHaveBeenCalled();
@@ -117,8 +117,8 @@ describe("ApprovalCard — протокол решений не изменилс
 
   it("уже принятое решение из истории показывается отметкой, а не вопросом", async () => {
     await render(
-      <ChatArtifactView
-        item={ITEM}
+      <ArtifactDecisionBlock
+        items={[ITEM]}
         onDecision={vi.fn()}
         decided={new Map([[ITEM.path, "approve" as const]])}
       />,
