@@ -663,7 +663,17 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
             stable_parts.append(execution_guidance_text(agent.valid_tool_names))
 
     has_skills_tools = any(name in agent.valid_tool_names for name in ['skills_list', 'skill_view', 'skill_manage'])
-    if has_skills_tools:
+    if has_skills_tools and getattr(agent, "_skills_index_disabled", False):
+        # delegate_task children (tools/delegate_tool.py): the parent already
+        # chose the approach from its own index and names a skill in the goal
+        # when one applies. The full index (~2K tokens) would ride on every
+        # child step; keep a one-line pointer so skills stay reachable.
+        skills_prompt = (
+            "## Skills\n"
+            "If your task names a skill, load it with skill_view(name); "
+            "skills_list shows what is available."
+        )
+    elif has_skills_tools:
         avail_toolsets = {
             toolset
             for toolset in (
