@@ -10823,6 +10823,10 @@ def count_running_tasks(conn: sqlite3.Connection) -> int:
         return 0
 
 
+# Host-cap estimate for other boards when they cannot be enumerated.
+_OTHER_BOARDS_UNKNOWN_RUNNING = 1
+
+
 def count_running_tasks_other_boards(board: Optional[str] = None) -> int:
     """Total ``running`` tasks across every board EXCEPT ``board``.
 
@@ -10835,7 +10839,10 @@ def count_running_tasks_other_boards(board: Optional[str] = None) -> int:
     Boards are matched by resolved DB path, so the ``HERMES_KANBAN_DB``
     override (which pins every board to one file) naturally yields 0.
     Fails open per board: one broken/corrupt board must not brick dispatch
-    on the healthy ones.
+    on the healthy ones. If the boards cannot be enumerated at all, the
+    other boards are unknown: return a conservative non-zero estimate
+    (``_OTHER_BOARDS_UNKNOWN_RUNNING``) so the host cap still limits
+    fan-out, and warn.
     """
     try:
         current_path = str(kanban_db_path(board=board).expanduser().resolve())
@@ -10843,8 +10850,13 @@ def count_running_tasks_other_boards(board: Optional[str] = None) -> int:
         current_path = None
     try:
         boards = list_boards(include_archived=False)
-    except Exception:
-        return 0
+    except Exception as exc:
+        _log.warning(
+            "kanban dispatch: could not list boards (%s); assuming %d "
+            "running worker(s) on other boards for the host cap",
+            type(exc).__name__, _OTHER_BOARDS_UNKNOWN_RUNNING,
+        )
+        return _OTHER_BOARDS_UNKNOWN_RUNNING
     total = 0
     for meta in boards:
         slug = meta.get("slug") or DEFAULT_BOARD
