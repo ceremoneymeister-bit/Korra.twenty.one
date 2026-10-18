@@ -1087,3 +1087,13 @@ describe("имя главного агента в подписях чата (UX 
     expect(container.textContent).toContain("Напишите Корре своими словами");
   });
 });
+
+describe("«Стоп» до подтверждения сервера (UX 17.10)", () => {
+  it("сразу говорит «Останавливаю…» и не принимает второе нажатие", async () => {
+    const onAbort = vi.fn();
+    await render(<BubbleChatComposer onSend={vi.fn()} onAbort={onAbort} streaming stopping />);
+    const stop = container.querySelector<HTMLButtonElement>('button[aria-label="Останавливаю…"]')!;
+    expect(stop.disabled).toBe(true);
+    expect(container.querySelector('[role="status"]')?.textContent).toContain("Останавливаю…");
+  });
+});

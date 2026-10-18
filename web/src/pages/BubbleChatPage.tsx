@@ -806,6 +806,8 @@ interface BubbleChatComposerProps {
   /** Поток уже прислал текст или событие инструмента. До этого честнее
    *  показывать «Отправляется», хотя остановка уже доступна. */
   responding?: boolean;
+  /** «Стоп» нажат, сервер ещё не подтвердил остановку. */
+  stopping?: boolean;
   onSend: (
     text: string,
     attachments: UploadedAttachment[],
@@ -841,6 +843,7 @@ export function BubbleChatComposer({
   disabled,
   streaming,
   responding,
+  stopping = false,
   onSend,
   onAbort,
   prefill,
@@ -1171,7 +1174,9 @@ export function BubbleChatComposer({
   const phrases = chatAgentPhrases(agentLabel);
   const secondsLeft = dictation.recordingLimitSeconds - dictation.elapsedSeconds;
   const activity = streaming
-    ? responding
+    ? stopping
+      ? "Останавливаю…"
+      : responding
       ? phrases.responding
       : "Отправляется"
     : submitting
@@ -1459,10 +1464,10 @@ export function BubbleChatComposer({
               <button
                 type="button"
                 onClick={onAbort}
-                disabled={!onAbort}
+                disabled={!onAbort || stopping}
                 className="korra-chat-composer__control korra-chat-composer__submit"
-                aria-label="Остановить генерацию"
-                title="Остановить генерацию"
+                aria-label={stopping ? "Останавливаю…" : "Остановить генерацию"}
+                title={stopping ? "Останавливаю…" : "Остановить генерацию"}
               >
                 <Square size={15} fill="currentColor" aria-hidden />
               </button>
@@ -1588,6 +1593,7 @@ export default function BubbleChatPage({
     isLoading,
     discardPending,
     abort,
+    stopping,
     loadSession,
     reset,
     older,
@@ -2060,6 +2066,7 @@ export default function BubbleChatPage({
                 messages[messages.length - 1]?.toolCalls?.length),
           )}
           onAbort={abort}
+          stopping={stopping}
           profile={agentProfile}
           allowAttachments
           // Draft stays editable; the composer blocks Enter while a turn runs.
