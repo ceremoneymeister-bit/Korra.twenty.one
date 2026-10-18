@@ -1066,3 +1066,67 @@ describe("K21-383: фокус в поле после явного выбора �
     }
   });
 });
+
+describe("имя главного агента в подписях чата (UX 17.10)", () => {
+  it("переименованный агент называется своим именем в поле, подписи и пустом экране", async () => {
+    await render(
+      <>
+        <BubbleChatTranscript messages={[]} sessionId={null} agentLabel="Аня" />
+        <BubbleChatComposer onSend={vi.fn()} agentLabel="Аня" streaming responding />
+      </>,
+    );
+    const textarea = container.querySelector("textarea")!;
+    expect(textarea.labels?.[0]?.textContent).toBe("Сообщение агенту «Аня»");
+    expect(container.textContent).toContain("Это чат с агентом «Аня» — напишите ему.");
+    expect(container.textContent).not.toContain("Корре");
+    expect(container.querySelector('[role="status"]')?.textContent).toContain("«Аня» отвечает");
+  });
+
+  it("без имени остаются склонённые фразы Корры", async () => {
+    await render(<BubbleChatTranscript messages={[]} sessionId={null} />);
+    expect(container.textContent).toContain("Напишите Корре своими словами");
+  });
+});
+
+describe("«Стоп» до подтверждения сервера (UX 17.10)", () => {
+  it("сразу говорит «Останавливаю…» и не принимает второе нажатие", async () => {
+    const onAbort = vi.fn();
+    await render(<BubbleChatComposer onSend={vi.fn()} onAbort={onAbort} streaming stopping />);
+    const stop = container.querySelector<HTMLButtonElement>('button[aria-label="Останавливаю…"]')!;
+    expect(stop.disabled).toBe(true);
+    expect(container.querySelector('[role="status"]')?.textContent).toContain("Останавливаю…");
+    // Видимая подсказка, а не только строка для диктора.
+    expect(container.querySelector("textarea")?.placeholder).toBe("Останавливаю…");
+  });
+});
+
+describe("ожидание решения владельца (UX 17.10)", () => {
+  const userMessage: ChatMessage = { id: "u1", role: "user", content: "Удали старые логи", timestamp: 1 };
+  const reply: ChatMessage = { id: "a1", role: "assistant", content: "", timestamp: Date.now() };
+  const request = { request_id: "r1", command: "rm -rf /var/log/old", description: "Удаление файлов", choices: ["once", "deny"] as const };
+
+  it("пока вопрос открыт, пузырь говорит «Ждёт вашего решения», а не «Агент работает»", async () => {
+    await render(
+      <BubbleChatTranscript
+        messages={[userMessage, reply]}
+        sessionId="s1"
+        streaming
+        approvals={[{ request: { ...request, choices: [...request.choices] }, status: "pending" }]}
+      />,
+    );
+    expect(container.textContent).toContain("Ждёт вашего решения");
+    expect(container.textContent).not.toContain("Агент работает");
+  });
+
+  it("после ответа на вопрос снова «Агент работает»", async () => {
+    await render(
+      <BubbleChatTranscript
+        messages={[userMessage, reply]}
+        sessionId="s1"
+        streaming
+        approvals={[{ request: { ...request, choices: [...request.choices] }, status: "settled", decision: "once" }]}
+      />,
+    );
+    expect(container.textContent).toContain("Агент работает");
+  });
+});

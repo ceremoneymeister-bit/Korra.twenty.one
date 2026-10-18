@@ -68,11 +68,12 @@ import { publishAgentConversation } from "@/lib/agent-conversations";
 import { ChatWorking, type BusyKind } from "@/components/ChatWorking";
 import { loadChatOutbox, loadChatOutboxRecords, type ChatOutboxRecord } from "@/lib/chat-outbox";
 import { useProfileScope } from "@/contexts/useProfileScope";
+import { chatAgentPhrases, DEFAULT_AGENT_NAME } from "./chat-agent-phrases";
 import {
   ChatArtifactList,
   type ArtifactDecisionHandler,
 } from "@/components/ChatArtifact";
-import { splitArtifacts } from "@/lib/chat-artifacts";
+import { asksForDecision, splitArtifacts } from "@/lib/chat-artifacts";
 import {
   AttachmentCardList,
   AttachmentChip,
@@ -342,6 +343,7 @@ function AssistantBubble({
             active={Boolean(streaming)}
             answering={Boolean(message.content)}
             startedAt={message.timestamp}
+            awaiting={busyState === "awaiting"}
           />
         )}
         {message.content && (
@@ -355,6 +357,7 @@ function AssistantBubble({
               <>
                 <ChatArtifactList
                   items={artifactSplit.artifacts}
+                  askDecision={asksForDecision(artifactSplit.text)}
                   onDecision={message.readOnly ? undefined : onDecision}
                   busy={decisionsBusy}
                   decided={decided}
@@ -612,7 +615,7 @@ export function BubbleChatTranscript({
   voiceSettings?: AgentVoiceSettings | null;
   profile?: string;
   active?: boolean;
-  /** Имя агента вкладки для пустого экрана; пусто — главная Корра. */
+  /** Имя агента для пустого экрана; пусто — главная Корра с именем по умолчанию. */
   agentLabel?: string;
   /** Черновик этого профиля из другого чата — напоминаем баннером. */
   pendingElsewhere?: ChatOutboxRecord | null;
@@ -636,13 +639,16 @@ export function BubbleChatTranscript({
     lastIdx >= 0 && messages[lastIdx]!.role === "assistant";
 
   const lastUser = [...messages].reverse().find(message => message.role === "user");
+  // Ход стоит на вопросе владельцу: живой пузырь говорит «Ждёт вашего
+  // решения», а не «Агент работает» (UX 17.10).
+  const awaitingDecision = approvals?.some(entry => entry.status === "pending") ?? false;
 
   return (
     <TranscriptViewport
       key={scrollKey ?? messages[0]?.id ?? "empty"}
       storageKey={scrollKey}
       followKey={lastUser?.delivery === "sending" ? lastUser.id : undefined}
-      awaitingApproval={approvals?.some(entry => entry.status === "pending")}
+      awaitingApproval={awaitingDecision}
       anchorKey={messages[0]?.id}
       historyReady={messages.some(message => message.historyIdentity !== undefined || message.historyId !== undefined)}
       older={older && onLoadOlder ? { ...older, load: onLoadOlder } : undefined}
@@ -669,7 +675,7 @@ export function BubbleChatTranscript({
           {messages.length === 0 ? (
             <div className="flex min-h-[40vh] items-center justify-center">
               <p className="text-base text-muted-foreground">
-                {agentLabel ? `Это чат с агентом «${agentLabel}» — напишите ему.` : "Напишите Корре своими словами — она на связи."}
+                {chatAgentPhrases(agentLabel).empty}
               </p>
             </div>
           ) : (
@@ -703,7 +709,9 @@ export function BubbleChatTranscript({
                   decisionsBusy={busy}
                   decided={decided}
                   busyState={
-                    messages[i - 1]?.role === "user" &&
+                    awaitingDecision
+                      ? "awaiting"
+                      : messages[i - 1]?.role === "user" &&
                     ((messages[i - 1]?.attachments?.length ?? 0) > 0 ||
                       messages[i - 1]?.content.includes("[вложения]"))
                       ? "reading"
@@ -798,13 +806,15 @@ function ChatArchive({
 
 interface BubbleChatComposerProps {
   active?: boolean;
-  /** Имя агента вкладки для подсказок; пусто — главная Корра. */
+  /** Имя агента для подсказок; пусто — главная Корра с именем по умолчанию. */
   agentLabel?: string;
   disabled?: boolean;
   streaming?: boolean;
   /** Поток уже прислал текст или событие инструмента. До этого честнее
    *  показывать «Отправляется», хотя остановка уже доступна. */
   responding?: boolean;
+  /** «Стоп» нажат, сервер ещё не подтвердил остановку. */
+  stopping?: boolean;
   onSend: (
     text: string,
     attachments: UploadedAttachment[],
@@ -840,6 +850,7 @@ export function BubbleChatComposer({
   disabled,
   streaming,
   responding,
+  stopping = false,
   onSend,
   onAbort,
   prefill,
@@ -1167,10 +1178,13 @@ export function BubbleChatComposer({
   const micDisabled =
     !dictation.supported ||
     (!recording && (Boolean(disabled) || submitting || dictationBusy || keptFailed));
+  const phrases = chatAgentPhrases(agentLabel);
   const secondsLeft = dictation.recordingLimitSeconds - dictation.elapsedSeconds;
   const activity = streaming
-    ? responding
-      ? "Корра отвечает"
+    ? stopping
+      ? "Останавливаю…"
+      : responding
+      ? phrases.responding
       : "Отправляется"
     : submitting
       ? "Отправляется"
@@ -1262,7 +1276,7 @@ export function BubbleChatComposer({
           className="korra-chat-composer__surface overflow-hidden"
         >
           <label htmlFor={textareaId} className="sr-only">
-            Сообщение Корре
+            {phrases.fieldLabel}
           </label>
           <textarea
             ref={taRef}
@@ -1296,7 +1310,7 @@ export function BubbleChatComposer({
               }
             }}
             placeholder={
-              recording ? "Слушаю…" : transcribing ? "Распознаю запись…" : streaming ? "Можно написать следующее сообщение — отправите после ответа…" : agentLabel ? `Напишите агенту «${agentLabel}»…` : "Напишите Корре…"
+              recording ? "Слушаю…" : transcribing ? "Распознаю запись…" : streaming && stopping ? "Останавливаю…" : streaming ? "Можно написать следующее сообщение — отправите после ответа…" : phrases.placeholder
             }
             disabled={disabled || submitting}
             className="korra-chat-composer__textarea min-w-0 w-full resize-none bg-transparent text-sm leading-6 normal-case tracking-normal"
@@ -1457,10 +1471,10 @@ export function BubbleChatComposer({
               <button
                 type="button"
                 onClick={onAbort}
-                disabled={!onAbort}
+                disabled={!onAbort || stopping}
                 className="korra-chat-composer__control korra-chat-composer__submit"
-                aria-label="Остановить генерацию"
-                title="Остановить генерацию"
+                aria-label={stopping ? "Останавливаю…" : "Остановить генерацию"}
+                title={stopping ? "Останавливаю…" : "Остановить генерацию"}
               >
                 <Square size={15} fill="currentColor" aria-hidden />
               </button>
@@ -1586,6 +1600,7 @@ export default function BubbleChatPage({
     isLoading,
     discardPending,
     abort,
+    stopping,
     loadSession,
     reset,
     older,
@@ -1605,7 +1620,10 @@ export default function BubbleChatPage({
   // Подпись в шторке «Чаты»: у главного агента своё имя тоже есть
   // (display_name профиля `default`), «Корра» — только по умолчанию.
   const historyAgentLabel = agentLabel
-    ?? (scopeProfiles.find((item) => item.name === "default")?.display_name?.trim() || "Корра");
+    ?? (scopeProfiles.find((item) => item.name === "default")?.display_name?.trim() || DEFAULT_AGENT_NAME);
+  // Подписи чата: агент вкладки или переименованный главный агент. Пусто —
+  // имя по умолчанию, тогда остаются склонённые «Корре/Коррой».
+  const chatLabel = historyAgentLabel === DEFAULT_AGENT_NAME ? undefined : historyAgentLabel;
   const pendingElsewhere = useMemo(() => {
     const currentPending = sessionId ? loadChatOutbox(agentProfile ?? "", sessionId) : null;
     if (currentPending && !messages.some(message => message.clientMessageId === currentPending.messageId)) return currentPending;
@@ -1690,7 +1708,9 @@ export default function BubbleChatPage({
       // («Пакет недели.pptx»), и решение, опознанное по имени, применялось бы
       // к однофамильцу из другой папки. Агенту путь тоже нужен — иначе он
       // угадывает, что именно согласовали (находка ревью 20.08.2026).
-      return await send(`${word}: «${item.name}»\nФайл: ${item.path}`);
+      // Общий блок по нескольким файлам отдаёт пути через перевод строки.
+      const files = item.path.includes("\n") ? "Файлы" : "Файл";
+      return await send(`${word}: «${item.name}»\n${files}: ${item.path}`);
     },
     [send, isStreaming],
   );
@@ -1703,7 +1723,7 @@ export default function BubbleChatPage({
     const map = new Map<string, "approve" | "defer">();
     for (const message of messages) {
       if (message.role !== "user" || typeof message.content !== "string") continue;
-      const match = /^(Согласовано|Отложено):\s*«(.+?)»(?:\s*\nФайл:\s*(\S.*?))?\s*$/.exec(
+      const match = /^(Согласовано|Отложено):\s*«([^\n]+?)»(?:\s*\nФайлы?:\s*(\S[\s\S]*?))?\s*$/.exec(
         message.content.trim(),
       );
       if (!match) continue;
@@ -1711,7 +1731,7 @@ export default function BubbleChatPage({
       // Ключ — путь: он уникален. Имя кладём тоже, но только для решений,
       // принятых до появления пути в сообщении, иначе старая история
       // перестала бы отображаться как решённая.
-      if (match[3]) map.set(match[3], decision);
+      if (match[3]) for (const path of match[3].split("\n")) { if (path.trim()) map.set(path.trim(), decision); }
       else map.set(match[2], decision);
     }
     return map;
@@ -1994,7 +2014,7 @@ export default function BubbleChatPage({
         title={t.sessions.confirmDeleteTitle}
         description={t.sessions.confirmDeleteMessage}
       />
-      <section className="flex-1 flex flex-col min-w-0 min-h-0" aria-label="Разговор с Коррой">
+      <section className="flex-1 flex flex-col min-w-0 min-h-0" aria-label={chatAgentPhrases(chatLabel).region}>
         {!mobileHistory && <div className="flex min-h-12 items-center border-b border-border/60 px-3 lg:hidden">
           <Button type="button" ghost size="sm" onClick={() => setMobileHistoryOpen(true)} prefix={<MessageSquare aria-hidden />} aria-label="Открыть историю чатов">
             Чаты
@@ -2013,7 +2033,7 @@ export default function BubbleChatPage({
         )}
         {archiveOpen && sessionId ? (
           <ChatArchive key={recoveryKey} sessionId={sessionId} profile={agentProfile || "default"}
-            active={active !== false} voiceSettings={voiceSettings} agentLabel={agentLabel}
+            active={active !== false} voiceSettings={voiceSettings} agentLabel={chatLabel}
             onClose={() => setArchiveFor(null)} />
         ) : <BubbleChatTranscript
           voiceSettings={voiceSettings} profile={agentProfile || "default"} active={active !== false}
@@ -2030,7 +2050,7 @@ export default function BubbleChatPage({
           onRetry={handleRetry}
           onDiscard={target => discardPending(target)}
           pendingElsewhere={pendingElsewhere}
-          agentLabel={agentLabel}
+          agentLabel={chatLabel}
           approvals={approvals}
           onApprovalDecision={handleApprovalDecision}
         />}
@@ -2042,7 +2062,7 @@ export default function BubbleChatPage({
           key={sessionId ?? "new"}
           focusSignal={newChatFocus}
           draftKey={chatViewKey(agentProfile, sessionId)}
-          agentLabel={agentLabel}
+          agentLabel={chatLabel}
           onSend={send}
           disabled={isLoading || handoffSwitching || searchParams.get("new_chat") === "1" || Boolean(searchParams.get("resume") && searchParams.get("resume") !== sessionId)}
           prefill={prefill}
@@ -2055,6 +2075,7 @@ export default function BubbleChatPage({
                 messages[messages.length - 1]?.toolCalls?.length),
           )}
           onAbort={abort}
+          stopping={stopping}
           profile={agentProfile}
           allowAttachments
           // Draft stays editable; the composer blocks Enter while a turn runs.

@@ -22,7 +22,7 @@ import { themeColorScheme } from "@/themes/color";
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { ChevronDown, ChevronUp, Cpu, PenLine, Settings2 } from "lucide-react";
 import { ThinkingOrb } from "thinking-orbs";
 import { H2 } from "@nous-research/ui/ui/components/typography/h2";
@@ -262,6 +262,14 @@ export default function ProfileBuilderPage() {
   const idProblem = profileIdProblem(profileId, takenIds);
   const nameReady = displayName.trim() !== "";
   const idReady = profileId !== "" && idProblem === null;
+  // Имя для людей не обязано быть уникальным (системное имя — да), но два
+  // «Секретаря» в списках не различить — предупреждаем, не запрещаем.
+  const duplicateName = useMemo(() => {
+    const wanted = displayName.trim().toLocaleLowerCase("ru");
+    if (!wanted) return null;
+    return (profiles ?? []).find((profile) =>
+      (profile.display_name?.trim() || profile.name).toLocaleLowerCase("ru") === wanted) ?? null;
+  }, [displayName, profiles]);
 
   /** Профиль, с которого мастер снимает модель по умолчанию: выбранный
    *  источник, а без копирования — главный агент. */
@@ -300,6 +308,8 @@ export default function ProfileBuilderPage() {
     () => modelChoices?.find((choice) => choiceKey(choice) === modelChoice) ?? null,
     [modelChoices, modelChoice],
   );
+  /** Ни одной подключённой модели: создать можно, но ответить агент не сможет. */
+  const noModel = modelChoices !== null && modelChoices.length === 0;
 
   /** Владелец выбрал провайдера: модель — его же у источника, иначе первая. */
   const chooseProvider = (provider: string) => {
@@ -773,6 +783,12 @@ export default function ProfileBuilderPage() {
               <Input id="pb-name" placeholder="Например, Анна — помощник по работе" value={displayName} maxLength={64}
                 onChange={(event: React.ChangeEvent<HTMLInputElement>) => setDisplayName(event.target.value)} />
               {idProblem && <p role="alert" className="text-xs text-destructive">{idProblem}</p>}
+              {!idProblem && duplicateName && (
+                <p role="status" className="text-sm text-[var(--neo-text-secondary)]">
+                  Агент с именем «{duplicateName.display_name?.trim() || duplicateName.name}» уже есть — в списках их
+                  будет трудно различить. Можно оставить или выбрать другое имя.
+                </p>
+              )}
             </div>
 
             {!selectedTemplate && <div className="grid gap-3">
@@ -977,9 +993,18 @@ export default function ProfileBuilderPage() {
 
         {createError && <p role="alert" className="text-sm text-destructive">{createError}</p>}
         <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-3 rounded-[var(--neo-radius-control)] bg-[var(--neo-surface)] p-4 shadow-[var(--neo-depth-2)]">
-          <p className="text-xs text-[var(--neo-text-secondary)]">{!nameReady ? "Укажите имя, чтобы продолжить" : "После создания проверим первый ответ агента"}</p>
+          {noModel ? (
+            <p role="status" className="min-w-0 flex-1 text-sm text-[var(--neo-text-secondary)]">
+              Модель не подключена — агент будет создан, но не ответит, пока в разделе{" "}
+              <Link to="/models" className="underline">«Модели»</Link> не появится подписка.
+            </p>
+          ) : (
+            <p className="text-xs text-[var(--neo-text-secondary)]">{!nameReady ? "Укажите имя, чтобы продолжить" : "После создания проверим первый ответ агента"}</p>
+          )}
           <Button onClick={() => void handleCreate()} disabled={!nameReady || !idReady || creating || profiles === null}>
-            {creating ? "Создаю…" : selectedTemplate ? "Добавить агента" : "Создать агента"}
+            {creating ? "Создаю…" : noModel
+              ? (selectedTemplate ? "Добавить без модели" : "Создать без модели")
+              : selectedTemplate ? "Добавить агента" : "Создать агента"}
           </Button>
         </div>
       </>}

@@ -55,7 +55,7 @@ const OPTIONS: ApprovalOption[] = [
 /** Отметка о принятом решении — вопрос уступает ей место. */
 export function ApprovalSettled({ decision }: { decision: "approve" | "defer" }) {
   return (
-    <div className="mt-1.5 flex items-center gap-1.5 font-sans text-[11px] normal-case tracking-normal text-[var(--neo-text-secondary)]">
+    <div className="mt-1.5 flex items-center gap-1.5 font-sans text-[13px] normal-case tracking-normal text-[var(--neo-text-secondary)]">
       <Check size={12} aria-hidden className="text-[var(--neo-accent)]" />
       {decision === "approve" ? "Согласовано" : "Отложено"}
     </div>
@@ -92,7 +92,7 @@ export function ApprovalCard({
       role="group"
       aria-label="Решение по артефакту"
     >
-      <p className="mb-2 text-xs leading-snug text-[var(--neo-text-primary)]">
+      <p className="mb-2 text-[13px] leading-snug text-[var(--neo-text-primary)]">
         {question}
       </p>
 
@@ -108,9 +108,9 @@ export function ApprovalCard({
               onClick={() => setChoice(option.value)}
               className={cn(
                 "korra-approval__option",
-                "flex w-full items-center gap-2 rounded-[var(--neo-radius-control)] px-2 py-1.5",
+                "flex w-full flex-wrap items-baseline gap-x-2 gap-y-0.5 rounded-[var(--neo-radius-control)] px-2 py-1.5",
                 "border-0 bg-transparent text-left outline-0",
-                "text-xs text-[var(--neo-text-secondary)]",
+                "text-[13px] text-[var(--neo-text-secondary)]",
                 busy ? "cursor-not-allowed opacity-60" : "cursor-pointer",
                 selected &&
                   "shadow-[var(--neo-inset-compact)] text-[var(--neo-text-primary)]",
@@ -119,7 +119,7 @@ export function ApprovalCard({
               <span className="flex-none">{option.icon}</span>
               <span className="font-medium">{option.label}</span>
               {option.hint && (
-                <span className="min-w-0 flex-1 truncate text-[10.5px] text-[var(--neo-text-secondary)]">
+                <span className="min-w-0 flex-1 basis-40 whitespace-normal break-words text-[13px] text-[var(--neo-text-secondary)]">
                   {option.hint}
                 </span>
               )}
@@ -129,7 +129,7 @@ export function ApprovalCard({
       </div>
 
       {failed && (
-        <p className="mt-2 text-[11px] text-[var(--destructive)]">
+        <p className="mt-2 text-[13px] text-[var(--destructive)]">
           Решение не отправилось — попробуйте ещё раз
         </p>
       )}

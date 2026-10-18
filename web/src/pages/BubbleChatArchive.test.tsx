@@ -148,7 +148,7 @@ it("K21-203: архивный артефакт доступен для чтен�
   const onDecision = vi.fn();
   const messages: ChatMessage[] = [
     { ...archived[1]!, content: "[артефакт] /opt/data/workspace/archive.xlsx" },
-    { id: "live-artifact", role: "assistant", content: "[артефакт] /opt/data/workspace/live.xlsx", timestamp: 3 },
+    { id: "live-artifact", role: "assistant", content: "Согласуйте, пожалуйста.\n[артефакт] /opt/data/workspace/live.xlsx", timestamp: 3 },
   ];
   await render(<BubbleChatTranscript messages={messages} sessionId="session-a" onDecision={onDecision} />);
   expect(container.querySelectorAll("[data-chat-message]")).toHaveLength(2);
