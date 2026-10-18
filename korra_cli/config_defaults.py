@@ -849,6 +849,10 @@ DEFAULT_CONFIG = {
                                       # triggers at the lower of the ratio-based
                                       # threshold and this token count. Clamped to
                                       # the model's context length at apply-time.
+        "large_window_threshold_tokens": 150000,  # absolute cap for models with a
+                                      # 500K+ window when threshold_tokens is unset:
+                                      # at 50% a 1M window lets messenger threads
+                                      # re-send ~500K tokens per step. 0/null = off.
         "target_ratio": 0.20,         # fraction of threshold to preserve as recent tail
         "tail_mode": "lean",          # tail retention policy (#87326):
                                       #   "lean"   — clamped 2.5%-of-window tail (default)

@@ -1380,6 +1380,10 @@ _MAX_KEEP_TOOL_IMAGES = 3
 # turns and the session spends most of its wall-clock summarizing.
 _SMALL_CTX_WINDOW_LIMIT = 512_000
 _SMALL_CTX_THRESHOLD_PERCENT = 0.75
+# Windows at/above this size get ``compression.large_window_threshold_tokens``
+# as their absolute trigger cap unless ``threshold_tokens`` is set explicitly:
+# a 1M window at 50% lets a messenger thread re-send ~500K tokens per step.
+_LARGE_CTX_CAP_MIN_WINDOW = 500_000
 
 
 _PATH_MENTION_RE = re.compile(r"(?:/|~/?|[A-Za-z]:\\)[^\s`'\")\]}<>]+")
@@ -3338,10 +3342,27 @@ class ContextCompressor(ContextEngine):
         is clamped to the current context length so a cap larger than
         the model's window is a no-op (the ratio-based threshold wins).
         """
-        if self.threshold_tokens_cap is not None and self.threshold_tokens_cap > 0:
-            _effective_cap = min(self.threshold_tokens_cap, self.context_length)
+        _cap = self.effective_threshold_tokens_cap
+        if _cap is not None and _cap > 0:
+            _effective_cap = min(_cap, self.context_length)
             if _effective_cap < self.threshold_tokens:
                 self.threshold_tokens = _effective_cap
+
+    @property
+    def effective_threshold_tokens_cap(self) -> int | None:
+        """Absolute trigger cap in force for the current window.
+
+        An explicit ``compression.threshold_tokens`` always wins (lower or
+        higher). Without it, windows of ``_LARGE_CTX_CAP_MIN_WINDOW``+ use
+        ``compression.large_window_threshold_tokens`` so a 1M-window model
+        compacts at ~150K instead of ~500K. Smaller windows: no cap.
+        """
+        if self.threshold_tokens_cap is not None:
+            return self.threshold_tokens_cap
+        _large = getattr(self, "large_window_threshold_tokens", None)
+        if _large and (self.context_length or 0) >= _LARGE_CTX_CAP_MIN_WINDOW:
+            return _large
+        return None
 
     @staticmethod
     def _effective_threshold_percent(
@@ -3433,6 +3454,7 @@ class ContextCompressor(ContextEngine):
         max_tokens: int | None = None,
         model_thresholds: dict[str, float] | None = None,
         threshold_tokens_cap: Any = None,
+        large_window_threshold_tokens: Any = None,
         proactive_prune_tokens: int = 0,
         proactive_prune_min_result_chars: int = 8000,
         proactive_prune_min_reclaim_tokens: int = 4096,
@@ -3468,6 +3490,10 @@ class ContextCompressor(ContextEngine):
         # re-applied in update_model() so it survives model switches/fallbacks.
         self.threshold_tokens_cap = self._coerce_threshold_tokens_cap(
             threshold_tokens_cap,
+        )
+        # Default cap for large windows (see effective_threshold_tokens_cap).
+        self.large_window_threshold_tokens = self._coerce_threshold_tokens_cap(
+            large_window_threshold_tokens,
         )
         self.protect_first_n = protect_first_n
         self.protect_last_n = protect_last_n
