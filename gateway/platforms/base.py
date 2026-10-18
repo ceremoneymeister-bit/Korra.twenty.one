@@ -7395,15 +7395,26 @@ class BasePlatformAdapter(ABC):
             await self._run_processing_hook("on_processing_complete", event, ProcessingOutcome.FAILURE)
             logger.error("[%s] Error handling message: %s", self.name, e, exc_info=True)
             # Send the error to the user so they aren't left with radio silence
+            # Class name and str(e) stay in the log above; the chat only
+            # gets a safe category (provider errors) or a generic notice.
             try:
-                error_type = type(e).__name__
-                error_detail = str(e)[:300] if str(e) else '''подробности недоступны'''
+                error_text = '''⚠️ Произошла внутренняя ошибка, сообщение не обработано. Подробности сохранены в журнале шлюза.\nПовторите попытку или начните новый диалог через /reset.'''
+                try:
+                    from gateway.run import (
+                        _gateway_provider_error_reply,
+                        _looks_like_gateway_provider_error,
+                        _redact_gateway_user_facing_secrets,
+                    )
+
+                    detail = _redact_gateway_user_facing_secrets(str(e))
+                    if _looks_like_gateway_provider_error(detail):
+                        error_text = _gateway_provider_error_reply(detail)
+                except Exception:
+                    logger.debug("[%s] Provider error mapping failed", self.name, exc_info=True)
                 _thread_metadata = _thread_metadata_for_source(event.source, _reply_anchor_for_event(event))
                 await self.send(
                     chat_id=event.source.chat_id,
-                    content=(
-                        f'''Произошла ошибка ({error_type}).\n{error_detail}\nПовторите попытку или начните новый диалог через /reset.'''
-                    ),
+                    content=error_text,
                     metadata=_thread_metadata,
                 )
             except Exception as notify_err:
