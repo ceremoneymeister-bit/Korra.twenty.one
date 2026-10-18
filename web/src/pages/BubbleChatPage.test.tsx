@@ -1095,6 +1095,8 @@ describe("«Стоп» до подтверждения сервера (UX 17.10)
     const stop = container.querySelector<HTMLButtonElement>('button[aria-label="Останавливаю…"]')!;
     expect(stop.disabled).toBe(true);
     expect(container.querySelector('[role="status"]')?.textContent).toContain("Останавливаю…");
+    // Видимая подсказка, а не только строка для диктора.
+    expect(container.querySelector("textarea")?.placeholder).toBe("Останавливаю…");
   });
 });
 

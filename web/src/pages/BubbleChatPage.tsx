@@ -1310,7 +1310,7 @@ export function BubbleChatComposer({
               }
             }}
             placeholder={
-              recording ? "Слушаю…" : transcribing ? "Распознаю запись…" : streaming ? "Можно написать следующее сообщение — отправите после ответа…" : phrases.placeholder
+              recording ? "Слушаю…" : transcribing ? "Распознаю запись…" : streaming && stopping ? "Останавливаю…" : streaming ? "Можно написать следующее сообщение — отправите после ответа…" : phrases.placeholder
             }
             disabled={disabled || submitting}
             className="korra-chat-composer__textarea min-w-0 w-full resize-none bg-transparent text-sm leading-6 normal-case tracking-normal"
