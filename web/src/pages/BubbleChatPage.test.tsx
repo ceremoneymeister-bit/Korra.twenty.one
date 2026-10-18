@@ -1097,3 +1097,34 @@ describe("«Стоп» до подтверждения сервера (UX 17.10)
     expect(container.querySelector('[role="status"]')?.textContent).toContain("Останавливаю…");
   });
 });
+
+describe("ожидание решения владельца (UX 17.10)", () => {
+  const userMessage: ChatMessage = { id: "u1", role: "user", content: "Удали старые логи", timestamp: 1 };
+  const reply: ChatMessage = { id: "a1", role: "assistant", content: "", timestamp: Date.now() };
+  const request = { request_id: "r1", command: "rm -rf /var/log/old", description: "Удаление файлов", choices: ["once", "deny"] as const };
+
+  it("пока вопрос открыт, пузырь говорит «Ждёт вашего решения», а не «Агент работает»", async () => {
+    await render(
+      <BubbleChatTranscript
+        messages={[userMessage, reply]}
+        sessionId="s1"
+        streaming
+        approvals={[{ request: { ...request, choices: [...request.choices] }, status: "pending" }]}
+      />,
+    );
+    expect(container.textContent).toContain("Ждёт вашего решения");
+    expect(container.textContent).not.toContain("Агент работает");
+  });
+
+  it("после ответа на вопрос снова «Агент работает»", async () => {
+    await render(
+      <BubbleChatTranscript
+        messages={[userMessage, reply]}
+        sessionId="s1"
+        streaming
+        approvals={[{ request: { ...request, choices: [...request.choices] }, status: "settled", decision: "once" }]}
+      />,
+    );
+    expect(container.textContent).toContain("Агент работает");
+  });
+});

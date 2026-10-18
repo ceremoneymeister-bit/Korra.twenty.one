@@ -124,6 +124,8 @@ export interface AgentTraceProps {
   answering?: boolean;
   /** Момент начала хода — от него считается «Думал N с». */
   startedAt: number;
+  /** Ход стоит на вопросе владельцу — вместо «Думаю…» «Ждёт вашего решения». */
+  awaiting?: boolean;
 }
 
 export function AgentTrace({
@@ -132,6 +134,7 @@ export function AgentTrace({
   active = false,
   answering = false,
   startedAt,
+  awaiting = false,
 }: AgentTraceProps) {
   const { theme } = useTheme();
   const writing = active && answering && !tools.some(tool => tool.status === "running");
@@ -154,7 +157,7 @@ export function AgentTrace({
   const hasReasoning = trimmedReasoning.length > 0;
   if (tools.length === 0 && !hasReasoning) return null;
 
-  const summary = headerSummary({
+  const summary = active && awaiting ? "Ждёт вашего решения" : headerSummary({
     active,
     writing,
     elapsedMs,

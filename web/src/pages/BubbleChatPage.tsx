@@ -343,6 +343,7 @@ function AssistantBubble({
             active={Boolean(streaming)}
             answering={Boolean(message.content)}
             startedAt={message.timestamp}
+            awaiting={busyState === "awaiting"}
           />
         )}
         {message.content && (
@@ -637,13 +638,16 @@ export function BubbleChatTranscript({
     lastIdx >= 0 && messages[lastIdx]!.role === "assistant";
 
   const lastUser = [...messages].reverse().find(message => message.role === "user");
+  // Ход стоит на вопросе владельцу: живой пузырь говорит «Ждёт вашего
+  // решения», а не «Агент работает» (UX 17.10).
+  const awaitingDecision = approvals?.some(entry => entry.status === "pending") ?? false;
 
   return (
     <TranscriptViewport
       key={scrollKey ?? messages[0]?.id ?? "empty"}
       storageKey={scrollKey}
       followKey={lastUser?.delivery === "sending" ? lastUser.id : undefined}
-      awaitingApproval={approvals?.some(entry => entry.status === "pending")}
+      awaitingApproval={awaitingDecision}
       anchorKey={messages[0]?.id}
       historyReady={messages.some(message => message.historyIdentity !== undefined || message.historyId !== undefined)}
       older={older && onLoadOlder ? { ...older, load: onLoadOlder } : undefined}
@@ -704,7 +708,9 @@ export function BubbleChatTranscript({
                   decisionsBusy={busy}
                   decided={decided}
                   busyState={
-                    messages[i - 1]?.role === "user" &&
+                    awaitingDecision
+                      ? "awaiting"
+                      : messages[i - 1]?.role === "user" &&
                     ((messages[i - 1]?.attachments?.length ?? 0) > 0 ||
                       messages[i - 1]?.content.includes("[вложения]"))
                       ? "reading"
