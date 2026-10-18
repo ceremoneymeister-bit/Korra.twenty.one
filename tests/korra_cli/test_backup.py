@@ -1750,6 +1750,28 @@ class TestRunPreUpdateBackup:
 
 
 
+    def test_quick_snapshot_failure_is_visible(self, hermes_home, capsys, monkeypatch):
+        """QA 17-18.10: a failed pre-update snapshot must be visible to the
+        user and recorded in the update receipt, not only a debug log."""
+        import korra_cli.backup as backup_mod
+        import korra_cli.update_receipt as receipt_mod
+
+        self._set_mode(hermes_home, "quick")
+
+        def boom(**_kw):
+            raise OSError("no space left on device")
+
+        steps = []
+        monkeypatch.setattr(backup_mod, "create_quick_snapshot", boom)
+        monkeypatch.setattr(receipt_mod, "record_step",
+                            lambda name, ok, detail="": steps.append((name, ok, detail)))
+        from korra_cli.main import _run_pre_update_backup
+        snap_id = _run_pre_update_backup(Namespace(no_backup=False, backup=False))
+        out = capsys.readouterr().out
+        assert snap_id is None
+        assert "⚠" in out and "снимок" in out.lower()
+        assert any(name == "pre_update_snapshot" and ok is False for name, ok, _ in steps)
+
     def test_config_full_mode(self, hermes_home, capsys):
         self._set_mode(hermes_home, "full")
         from korra_cli.main import _run_pre_update_backup
