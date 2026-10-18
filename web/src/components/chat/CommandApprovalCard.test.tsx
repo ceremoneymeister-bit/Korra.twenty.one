@@ -259,3 +259,27 @@ it("приёмка в чате не возвращает результат бе
   await click(buttonByText("Принять результат"));
   expect(onDecide).toHaveBeenCalledWith("once", "");
 });
+
+/** Классы мельче 13px и обрезка подсказок — запрещены в карточках решений. */
+function smallOrTruncated(host: HTMLElement): string[] {
+  return [...host.querySelectorAll<HTMLElement>("*")]
+    .map((node) => node.getAttribute("class") ?? "")
+    .filter((cls) => /\btruncate\b|\btext-xs\b|text-\[(?:\d|1[0-2])(?:\.\d+)?px\]/.test(cls));
+}
+
+describe("читаемость карточки решения (UX 17.10)", () => {
+  it("подсказки не обрезаются и шрифт не мельче 13px", async () => {
+    await render(
+      <MemoryRouter>
+        <CommandApprovalCard
+          command="rm -rf /var/log/old"
+          description="Удаление старых журналов на сервере, которое нельзя отменить"
+          choices={["once", "session", "always", "deny"]}
+          onDecide={vi.fn()}
+          error="Не удалось отправить решение"
+        />
+      </MemoryRouter>,
+    );
+    expect(smallOrTruncated(container)).toEqual([]);
+  });
+});
