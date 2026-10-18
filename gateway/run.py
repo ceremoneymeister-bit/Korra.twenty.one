@@ -4114,9 +4114,12 @@ def _load_gateway_config(config_path: "Path | None" = None) -> dict:
                 import yaml
                 with open(config_path, 'r', encoding='utf-8') as f:
                     raw = yaml.safe_load(f) or {}
-        except Exception:
+        except Exception as exc:
             logger.debug("Could not load gateway config from %s", config_path)
-            raw = {}
+            # Still an empty dict to every caller; the marker lets
+            # fail-closed readers tell a failed read from an empty config.
+            from korra_cli.config import FailedConfigRead
+            raw = FailedConfigRead(error=exc)
 
     # Overlay managed scope. read_raw_config() returns the user's raw YAML
     # WITHOUT the managed merge (that lives in load_config/_load_config_impl),
@@ -4141,6 +4144,31 @@ def _load_gateway_config(config_path: "Path | None" = None) -> dict:
     except Exception:
         pass
     return raw
+
+
+def _gateway_redact_pii_setting() -> bool:
+    """Return ``privacy.redact_pii`` for this turn, failing closed.
+
+    A config that could not be read (no last-known-good copy) or a malformed
+    ``privacy`` section must not silently switch redaction off: use the safe
+    mode (redact) and warn.
+    """
+    try:
+        from korra_cli.config import FailedConfigRead
+
+        cfg = _load_gateway_config()
+        if isinstance(cfg, FailedConfigRead) and not cfg:
+            raise RuntimeError("config read failed") from getattr(cfg, "read_error", None)
+        privacy = cfg.get("privacy") or {}
+        if not isinstance(privacy, dict):
+            raise TypeError("privacy section is not a mapping")
+        return bool(privacy.get("redact_pii", False))
+    except Exception as exc:
+        logger.warning(
+            "Could not read privacy.redact_pii (%s); redacting PII for this turn",
+            type(exc).__name__,
+        )
+        return True
 
 
 def _checkpoint_agent_kwargs(config: dict | None) -> dict:
@@ -20747,11 +20775,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         persist_user_display_kind = (
             "internal_notification" if getattr(event, "internal", False) else None
         )
-        try:
-            _pcfg = _load_gateway_config()
-            _redact_pii = bool((_pcfg.get("privacy") or {}).get("redact_pii", False))
-        except Exception:
-            pass
+        _redact_pii = _gateway_redact_pii_setting()
 
         # Build the context prompt to inject.  The render is pinned per
         # session, keyed by a hash of the exact renderer inputs
