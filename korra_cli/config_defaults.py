@@ -2913,6 +2913,9 @@ DEFAULT_CONFIG = {
         # Who plans on the board from an ordinary chat: "main" (the main
         # agent, the owner's orchestrator), "all" profiles, or "off".
         # ``toolsets: [kanban]`` in a profile's config also opts it in.
+        # Chat gets the planning surface only; run-lifecycle tools
+        # (complete/heartbeat/review handoff/attachments) stay with
+        # dispatcher workers and explicit ``toolsets: [kanban]`` profiles.
         "chat_tools": "main",
         # Run the dispatcher inside the gateway process. On by default —
         # the cost is ~300µs every `dispatch_interval_seconds` when idle,
