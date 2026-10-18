@@ -224,11 +224,11 @@ def test_review_input_budget_exhausted_predicate_edge_cases():
 @pytest.mark.parametrize(
     ("config_value", "expected"),
     [
-        ({}, 600_000),
+        ({}, 150_000),
         ({"max_input_tokens": 1_000_000}, 1_000_000),
         ({"max_input_tokens": 0}, None),
         ({"max_input_tokens": -5}, None),
-        ({"max_input_tokens": "not-a-number"}, 600_000),
+        ({"max_input_tokens": "not-a-number"}, 150_000),
         ({"max_input_tokens": "300000"}, 300_000),
     ],
 )

@@ -1233,7 +1233,8 @@ DEFAULT_CONFIG = {
             "enabled": True,
             "provider": "auto",
             "model": "",
-            "prefer_fast_model": False,  # opt in to provider fast tier; auto otherwise uses the main model
+            "prefer_fast_model": True,   # titles (~8 tokens) run on the provider's fast tier
+                                         # (e.g. claude-haiku-5-5); false = main model
             "base_url": "",
             "api_key": "",
             "timeout": 30,
@@ -1368,10 +1369,10 @@ DEFAULT_CONFIG = {
             # provider response arrives); after that it compacts an oversized
             # snapshot in memory before further provider calls. This caps the
             # SUM of input tokens replayed across the whole review tool loop
-            # (iterations are separately capped at 16). The loop stops before
+            # (iterations are separately capped at 6). The loop stops before
             # the provider call that would cross the budget. 0 or a negative
             # value = unlimited.
-            "max_input_tokens": 600000,
+            "max_input_tokens": 150000,
         },
         "moa_reference": {
             "provider": "auto",
