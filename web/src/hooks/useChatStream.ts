@@ -1066,6 +1066,8 @@ export function useChatStream(
   const stopIntentRef = useRef<string | null>(null);
   /** Последняя отправка этой вкладки: по ней «Стоп» находит свой ход. */
   const lastSendRef = useRef<{ generation: string; sessionId: string; messageId: string } | null>(null);
+  /** Свежий loadSession для «Стопа» и опроса: объявлен до abort(), который его вызывает. */
+  const loadSessionRef = useRef<UseChatStreamReturn["loadSession"] | null>(null);
   // Synchronous mirror of state.isStreaming so concurrent send() calls
   // can guard against re-entry without waiting for a re-render. React
   // state updates are async — without this ref, two send() calls fired
@@ -1238,7 +1240,7 @@ export function useChatStream(
             activeStreamIdRef.current = null;
             streamingRef.current = false;
             dispatch({ type: "RESET_STREAMING" });
-            void loadSessionRef.current(sessionId, { background: true });
+            void loadSessionRef.current?.(sessionId, { background: true });
           }
         }
       } finally {
@@ -2254,7 +2256,6 @@ export function useChatStream(
   // вопросы команд во время живого хода остаются под управлением SSE.
   // Только видимая вкладка: скрытые чаты не опрашивают сервер (ревью 0.21.16, R3).
   const { sessionId: currentSessionId, isStreaming } = state;
-  const loadSessionRef = useRef(loadSession);
   useEffect(() => { loadSessionRef.current = loadSession; }, [loadSession]);
   useEffect(() => {
     if (!active || !currentSessionId || turnsDelivered === 0) return;
@@ -2265,7 +2266,7 @@ export function useChatStream(
       timer = window.setTimeout(async () => {
         if (cancelled) return;
         if (!document.hidden && !streamingRef.current) {
-          try { await loadSessionRef.current(currentSessionId, { background: true }); } catch { /* следующая проверка */ }
+          try { await loadSessionRef.current?.(currentSessionId, { background: true }); } catch { /* следующая проверка */ }
         }
         if (!cancelled) schedule(step + 1);
       }, LEARNING_FOLLOW_UP_MS[step]);
