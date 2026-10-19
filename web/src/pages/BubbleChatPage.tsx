@@ -73,7 +73,7 @@ import {
   ChatArtifactList,
   type ArtifactDecisionHandler,
 } from "@/components/ChatArtifact";
-import { asksForDecision, splitArtifacts } from "@/lib/chat-artifacts";
+import { splitArtifacts } from "@/lib/chat-artifacts";
 import {
   AttachmentCardList,
   AttachmentChip,
@@ -357,7 +357,6 @@ function AssistantBubble({
               <>
                 <ChatArtifactList
                   items={artifactSplit.artifacts}
-                  askDecision={asksForDecision(artifactSplit.text)}
                   onDecision={message.readOnly ? undefined : onDecision}
                   busy={decisionsBusy}
                   decided={decided}
@@ -1708,9 +1707,7 @@ export default function BubbleChatPage({
       // («Пакет недели.pptx»), и решение, опознанное по имени, применялось бы
       // к однофамильцу из другой папки. Агенту путь тоже нужен — иначе он
       // угадывает, что именно согласовали (находка ревью 20.08.2026).
-      // Общий блок по нескольким файлам отдаёт пути через перевод строки.
-      const files = item.path.includes("\n") ? "Файлы" : "Файл";
-      return await send(`${word}: «${item.name}»\n${files}: ${item.path}`);
+      return await send(`${word}: «${item.name}»\nФайл: ${item.path}`);
     },
     [send, isStreaming],
   );
@@ -1723,7 +1720,7 @@ export default function BubbleChatPage({
     const map = new Map<string, "approve" | "defer">();
     for (const message of messages) {
       if (message.role !== "user" || typeof message.content !== "string") continue;
-      const match = /^(Согласовано|Отложено):\s*«([^\n]+?)»(?:\s*\nФайлы?:\s*(\S[\s\S]*?))?\s*$/.exec(
+      const match = /^(Согласовано|Отложено):\s*«(.+?)»(?:\s*\nФайл:\s*(\S.*?))?\s*$/.exec(
         message.content.trim(),
       );
       if (!match) continue;
@@ -1731,7 +1728,7 @@ export default function BubbleChatPage({
       // Ключ — путь: он уникален. Имя кладём тоже, но только для решений,
       // принятых до появления пути в сообщении, иначе старая история
       // перестала бы отображаться как решённая.
-      if (match[3]) for (const path of match[3].split("\n")) { if (path.trim()) map.set(path.trim(), decision); }
+      if (match[3]) map.set(match[3], decision);
       else map.set(match[2], decision);
     }
     return map;

@@ -23,46 +23,29 @@ export type ArtifactDecisionHandler = (
   item: ChatArtifact,
 ) => void | boolean | Promise<void | boolean>;
 
-/** Несколько файлов одного решения — одним «артефактом» для обработчика:
- *  пути через перевод строки, имена через «», «». Протокол обработчика тот же. */
-export function artifactGroup(items: ChatArtifact[]): ChatArtifact {
-  if (items.length === 1) return items[0]!;
-  return {
-    path: items.map((item) => item.path).join("\n"),
-    name: items.map((item) => item.name).join("», «"),
-    kind: "group",
-    isImage: false,
-  };
-}
-
 /**
- * Вопрос владельцу по результату — один на сообщение.
+ * Вопрос владельцу под артефактом.
  *
  * Это не украшение: именно он заменяет владельцу поход в таблицу. Решение
  * уходит обычным сообщением в чат, агент подхватывает его штатным правилом
  * «подтверждение → обновить статус → вернуть сводку».
  *
- * Показывается только когда агент в этом сообщении явно просит решение
- * (`asksForDecision`). Раньше карточка «Согласовать/Изменить/Отложить» висела
- * под каждым файлом, даже под справкой, которую никто не просил согласовывать
- * (UX-аудит 17.10).
- *
  * Форма — карточка по эталону владельца (03.09.2026), протокол прежний:
  * `onDecision("approve" | "change" | "defer", item)`, «Изменить» по-прежнему
  * не отправляет ничего, а подставляет черновик в поле ввода.
  */
-export function ArtifactDecisionBlock({
-  items,
+function DecisionRow({
+  item,
   onDecision,
   busy,
-  decided,
+  already,
 }: {
-  items: ChatArtifact[];
+  item: ChatArtifact;
   onDecision: ArtifactDecisionHandler;
   /** Идёт ответ агента: отправить решение сейчас нельзя. */
   busy?: boolean;
-  /** Решения, уже принятые в этом разговоре — восстановлены из истории. */
-  decided?: Map<string, ArtifactDecision>;
+  /** Решение, уже принятое в этом разговоре — восстановлено из истории. */
+  already?: ArtifactDecision;
 }) {
   const [sent, setSent] = useState<ArtifactDecision | null>(null);
   const [failed, setFailed] = useState(false);
@@ -71,15 +54,9 @@ export function ArtifactDecisionBlock({
   // артефакт так и остался бы нерешённым, и владелец узнал бы об этом только
   // от агента.
   const [skipped, setSkipped] = useState(false);
-  if (items.length === 0) return null;
   // Своё состояние живёт до перезагрузки, история — всегда. Показываем то, что
-  // знает история, если она знает — и только если решено по всем файлам.
-  const known = items.map((item) => decided?.get(item.path) ?? decided?.get(item.name));
-  const already = known.every((value) => value && value === known[0]) ? known[0] : undefined;
+  // знает история, если она знает.
   const done = already ?? sent;
-  const label = items.length === 1
-    ? `«${shortName(items[0]!.name, 44)}»`
-    : `файлами: ${items.map((item) => `«${shortName(item.name, 28)}»`).join(", ")}`;
 
   if (done === "approve" || done === "defer") {
     return <ApprovalSettled decision={done} />;
@@ -93,24 +70,23 @@ export function ArtifactDecisionBlock({
         className={cn(
           "mt-1.5 rounded-[var(--neo-radius-round)] px-2 py-1",
           "border-0 bg-transparent outline-0 cursor-pointer",
-          "font-sans text-[13px] normal-case tracking-normal",
+          "font-sans text-[11px] normal-case tracking-normal",
           "text-[var(--neo-text-secondary)]",
           "hover:shadow-[var(--neo-inset-compact)]",
         )}
       >
-        Решить по {items.length === 1 ? `«${shortName(items[0]!.name, 28)}»` : "файлам"}
+        Решить по «{shortName(item.name, 28)}»
       </button>
     );
   }
 
   return (
     <ApprovalCard
-      question={`Что делаем с ${label}?`}
+      question={`Что делаем с «${shortName(item.name, 44)}»?`}
       busy={busy}
       failed={failed}
       onSkip={() => setSkipped(true)}
       onSubmit={async (choice) => {
-        const item = artifactGroup(items);
         if (choice === "change") {
           // «Изменить» — не решение, а начало разговора: наверх уходит тот же
           // вызов, и хозяин чата подставляет черновик в поле.
@@ -129,11 +105,22 @@ export function ArtifactDecisionBlock({
   );
 }
 
-/** Файл в ленте: только «открыть» и «скачать». Решение — отдельным блоком. */
-export function ChatArtifactView({ item }: { item: ChatArtifact }) {
+export function ChatArtifactView({
+  item,
+  onDecision,
+  busy,
+  decided,
+}: {
+  item: ChatArtifact;
+  onDecision?: ArtifactDecisionHandler;
+  busy?: boolean;
+  decided?: Map<string, ArtifactDecision>;
+}) {
   if (item.isImage) {
     return <div>
       <FileAttachment path={item.path} name={item.name} />
+      {onDecision && <DecisionRow item={item} onDecision={onDecision} busy={busy}
+        already={decided?.get(item.path) ?? decided?.get(item.name)} />}
     </div>;
   }
 
@@ -166,6 +153,14 @@ export function ChatArtifactView({ item }: { item: ChatArtifact }) {
         <Download size={12} aria-hidden /> скачать
       </a>
       </div>
+      {onDecision && (
+        <DecisionRow
+          item={item}
+          onDecision={onDecision}
+          busy={busy}
+          already={decided?.get(item.path) ?? decided?.get(item.name)}
+        />
+      )}
     </div>
   );
 }
@@ -173,14 +168,11 @@ export function ChatArtifactView({ item }: { item: ChatArtifact }) {
 export function ChatArtifactList({
   items,
   onDecision,
-  askDecision = false,
   busy,
   decided,
 }: {
   items: ChatArtifact[];
   onDecision?: ArtifactDecisionHandler;
-  /** Агент в этом сообщении явно просит решение — см. `asksForDecision`. */
-  askDecision?: boolean;
   busy?: boolean;
   decided?: Map<string, ArtifactDecision>;
 }) {
@@ -188,11 +180,14 @@ export function ChatArtifactList({
   return (
     <div className="flex flex-col">
       {items.map((item) => (
-        <ChatArtifactView key={item.path} item={item} />
+        <ChatArtifactView
+          key={item.path}
+          item={item}
+          onDecision={onDecision}
+          busy={busy}
+          decided={decided}
+        />
       ))}
-      {askDecision && onDecision && (
-        <ArtifactDecisionBlock items={items} onDecision={onDecision} busy={busy} decided={decided} />
-      )}
     </div>
   );
 }
