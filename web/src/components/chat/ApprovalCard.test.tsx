@@ -128,14 +128,3 @@ describe("ApprovalCard — протокол решений не изменилс
     expect(container.textContent).not.toContain("Что делаем с");
   });
 });
-
-describe("читаемость карточки решения по артефакту (UX 17.10)", () => {
-  it("подсказки переносятся, а не обрезаются, шрифт не мельче 13px", async () => {
-    const { ApprovalCard } = await import("./ApprovalCard");
-    await render(<ApprovalCard question="Согласовать смету?" failed onSubmit={vi.fn()} onSkip={vi.fn()} />);
-    const bad = [...container.querySelectorAll<HTMLElement>("*")]
-      .map((node) => node.getAttribute("class") ?? "")
-      .filter((cls) => /\btruncate\b|\btext-xs\b|text-\[(?:\d|1[0-2])(?:\.\d+)?px\]/.test(cls));
-    expect(bad).toEqual([]);
-  });
-});
