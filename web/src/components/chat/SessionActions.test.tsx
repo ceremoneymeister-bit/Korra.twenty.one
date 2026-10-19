@@ -40,7 +40,9 @@ it("renames exactly the row's session and profile, then refreshes only the list"
   expect(api.renameSession).toHaveBeenCalledWith("chat-1", "Договор — согласовать с юристом", "designer");
   expect(renamed).toHaveBeenCalledOnce(); expect(deleted).not.toHaveBeenCalled();
   expect(document.querySelector('[role="dialog"]')).toBeNull();
-  expect(document.activeElement).toBe(host.querySelector('button'));
+  // Radix возвращает фокус в onCloseAutoFocus через таймер; под нагрузкой
+  // полного прогона он срабатывает позже act — ждём, а не угадываем.
+  await vi.waitFor(() => expect(document.activeElement).toBe(host.querySelector('button')));
 });
 it("cancels with Escape without touching the server", async () => {
   await render(); await open(); await type("Отмена");

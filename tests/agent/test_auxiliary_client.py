@@ -710,7 +710,7 @@ class TestAnthropicOAuthFlag:
             client, model = _try_anthropic()
 
         assert client is not None
-        assert model == "claude-haiku-4-5-20251001"
+        assert model == "claude-haiku-5-5"
         assert mock_build.call_args.args[0] == "sk-ant-oat01-pooled"
 
 

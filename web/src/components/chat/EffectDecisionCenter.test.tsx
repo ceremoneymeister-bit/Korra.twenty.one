@@ -178,3 +178,26 @@ it("старые результаты можно закрыть без отпр�
   await click("Закрыть без отправки");
   expect(sendApprovalDecision).toHaveBeenCalledWith({ sessionId: "old", requestId: "legacy", choice: "deny", profile: "sales" });
 });
+
+describe("EffectDecisionCenter в скрытой вкладке (UX 17.10)", () => {
+  it("не опрашивает сервер, пока вкладка скрыта, и обновляется при возврате", async () => {
+    vi.useFakeTimers();
+    const setHidden = (hidden: boolean) => {
+      Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
+      document.dispatchEvent(new Event("visibilitychange"));
+    };
+    try {
+      await act(async () => root.render(<EffectDecisionCenter profile="" active currentSessionId={null} />));
+      const calls = () => vi.mocked(fetchEffectDecisions).mock.calls.length;
+      const initial = calls();
+      setHidden(true);
+      await act(async () => { vi.advanceTimersByTime(30_000); });
+      expect(calls()).toBe(initial);
+      await act(async () => { setHidden(false); });
+      expect(calls()).toBe(initial + 1);
+    } finally {
+      setHidden(false);
+      vi.useRealTimers();
+    }
+  });
+});

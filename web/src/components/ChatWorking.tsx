@@ -14,14 +14,27 @@ import { ThinkingOrb } from "thinking-orbs";
 import { useTheme } from "@/themes";
 
 /** Что показываем и каким состоянием сферы. */
-export type BusyKind = "working" | "reading" | "searching" | "listening";
+/** `awaiting` — ход стоит на вопросе владельцу: «работает» было бы неправдой. */
+export type BusyKind = "working" | "reading" | "searching" | "listening" | "awaiting";
 
 const BUSY: Record<BusyKind, { label: string; orb: "working" | "searching" | "listening" }> = {
   working: { label: "Агент работает", orb: "working" },
   reading: { label: "Читаю вложения", orb: "searching" },
   searching: { label: "Ищу", orb: "searching" },
   listening: { label: "Слушаю", orb: "listening" },
+  awaiting: { label: "Ждёт вашего решения", orb: "listening" },
 };
+
+/** «45 с», «2 мин 5 с», «1 ч 3 мин» — минуты читать проще, чем «125 с». */
+export function formatWaitSeconds(total: number): string {
+  const seconds = Math.max(0, Math.floor(total));
+  if (seconds < 60) return `${seconds} с`;
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const rest = seconds % 60;
+  if (hours > 0) return minutes > 0 ? `${hours} ч ${minutes} мин` : `${hours} ч`;
+  return rest > 0 ? `${minutes} мин ${rest} с` : `${minutes} мин`;
+}
 
 export function ChatWorking({
   startedAt,
@@ -56,7 +69,9 @@ export function ChatWorking({
         {busy.label}
         {/* Счётчик только когда ждать уже заметно — таймер с нуля делает
             каждый ответ медленным на вид. */}
-        {seconds >= 3 && <span className="tabular-nums"> · {seconds} с</span>}
+        {/* Секунды тикают каждую секунду — диктору их не читаем, иначе
+            aria-live объявлял бы статус заново раз в секунду. */}
+        {seconds >= 3 && <span className="tabular-nums" aria-hidden="true"> · {formatWaitSeconds(seconds)}</span>}
       </span>
     </div>
   );

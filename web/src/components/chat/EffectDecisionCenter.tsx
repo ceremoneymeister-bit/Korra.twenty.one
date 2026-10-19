@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { startVisibleInterval } from "@/lib/visible-interval";
 import { ChevronDown, Inbox } from "lucide-react";
 
 import { CommandApprovalCard } from "@/components/chat/CommandApprovalCard";
@@ -92,10 +93,11 @@ export function EffectDecisionCenter({
       }
     };
     void load();
-    const timer = window.setInterval(() => void load(), POLL_MS);
+    // Скрытая вкладка не опрашивает; возврат на неё обновляет сразу.
+    const stop = startVisibleInterval(() => void load(), POLL_MS);
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      stop();
     };
   }, [active, profile]);
 

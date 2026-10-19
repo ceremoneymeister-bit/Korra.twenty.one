@@ -1149,6 +1149,15 @@ def _preserve_parent_mcp_toolsets(
 
 
 DEFAULT_MAX_ITERATIONS = 250
+
+
+def _child_skills_index_enabled() -> bool:
+    """``delegation.child_skills_index`` (default False): give children the
+    parent's full skills index instead of a one-line skill_view pointer."""
+    try:
+        return is_truthy_value(_load_config().get("child_skills_index"), default=False)
+    except Exception:
+        return False
 # Hard per-summary character ceiling layered on top of the dynamic
 # headroom budget (see _apply_summary_budget). Belt-and-suspenders for
 # models that ignore the "be concise" instruction. 0 disables the ceiling.
@@ -1860,7 +1869,7 @@ def _build_child_agent(
     )
 
     # Each subagent gets its own iteration budget capped at max_iterations
-    # (configurable via delegation.max_iterations, default 50).  This means
+    # (configurable via delegation.max_iterations, default 250).  This means
     # total iterations across parent + subagents can exceed the parent's
     # max_iterations.  The user controls the per-subagent cap in config.yaml.
 
@@ -2141,6 +2150,10 @@ def _build_child_agent(
     child_session_ref["session_id"] = getattr(child, "session_id", "") or ""
     # Set delegation depth so children can't spawn grandchildren
     child._delegate_depth = child_depth
+    # No full skills index in the child's prompt (it rides on every child
+    # step); agent/system_prompt.py keeps a one-line skill_view pointer.
+    # delegation.child_skills_index: true restores the full index.
+    child._skills_index_disabled = not _child_skills_index_enabled()
     # Stash the post-degrade role for introspection (leaf if the
     # kill switch or depth bounded the caller's requested role).
     child._delegate_role = effective_role

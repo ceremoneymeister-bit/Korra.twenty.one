@@ -190,6 +190,10 @@ async def test_unsupported_service_mutations_are_explicit_local_restrictions(sco
     'Расскажи про /help', 'Продолжи исходную задачу',
 ])
 async def test_ordinary_slash_paths_multiline_and_followup_keep_agent_routing(scoped_home, text):
+    home, _db = scoped_home
+    skill = home / 'skills' / 'custom-skill'
+    skill.mkdir(parents=True)
+    (skill / 'SKILL.md').write_text('---\nname: custom-skill\ndescription: Test skill\n---\nDo work.\n')
     adapter = APIServerAdapter(PlatformConfig(enabled=True, extra={'key': KEY}))
     history = [{'role': 'user', 'content': 'до'}, {'role': 'assistant', 'content': 'результат'}]
     agent = MagicMock()
@@ -464,3 +468,32 @@ async def test_responses_service_reply_then_ordinary_continuation_keeps_old_pref
         assert agent.run_conversation.call_args.kwargs['user_message'] == 'Продолжи исходную задачу'
         assert agent.run_conversation.call_args.kwargs['conversation_history'] == stored
     adapter._close_cached_session_dbs()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('command', ['/nosuchcmd', '/mcp-relod', '/nosuchcmd с аргументом'])
+@pytest.mark.parametrize('stream', [False, True])
+async def test_unknown_slash_command_gets_local_reply_without_model(scoped_home, command, stream):
+    home, db = scoped_home
+    adapter = APIServerAdapter(PlatformConfig(enabled=True, extra={'key': KEY}))
+    before_messages = db.get_messages('contract-session')
+    with no_models(adapter):
+        async with TestClient(TestServer(app_for(adapter))) as client:
+            answer = await post_command(client, command, stream)
+    name = command.split()[0]
+    assert answer == f'Команда {name} неизвестна или недоступна в веб-чате. Список — /help'
+    messages = db.get_messages('contract-session')
+    assert messages[:-2] == before_messages
+    assert [(row['role'], row['content']) for row in messages[-2:]] == [
+        ('user', command), ('assistant', answer),
+    ]
+    adapter._close_cached_session_dbs()
+
+
+@pytest.mark.parametrize('alias', ['/mcp-reload', '/reload-mcps'])
+def test_reload_mcp_aliases_resolve_and_reach_web_mcp_command(alias):
+    from korra_cli.commands import resolve_command
+    from gateway.web_mcp_command import is_web_mcp_command, run_web_mcp_command
+    assert resolve_command(alias).name == 'reload-mcp'
+    assert is_web_mcp_command(alias)
+    assert 'без аргументов' in run_web_mcp_command(None, alias + ' extra', 's1')

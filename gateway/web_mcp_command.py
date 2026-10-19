@@ -8,12 +8,20 @@ from contextvars import ContextVar
 _MCP_SERVICE_COMMANDS = frozenset({'/reload-mcp', '/reload_mcp', '/approve', '/always', '/cancel'})
 
 
+_RELOAD_ALIASES = frozenset({'/mcp-reload', '/reload-mcps'})
+
+
+def _command_token(token):
+    token = token.lower()
+    return '/reload-mcp' if token in _RELOAD_ALIASES else token
+
+
 def is_web_mcp_command(user_message):
     """Cheap gate: ordinary API turns need no command executor or gateway import."""
     if not isinstance(user_message, str):
         return False
     parts = user_message.strip().split(maxsplit=1)
-    return bool(parts and parts[0].lower() in _MCP_SERVICE_COMMANDS)
+    return bool(parts and _command_token(parts[0]) in _MCP_SERVICE_COMMANDS)
 
 
 _active_command_run = ContextVar("mcp_command_run", default=None)
@@ -89,7 +97,7 @@ def run_web_mcp_command(adapter, user_message, session_id, active_run_id=None, *
     if not isinstance(user_message, str):
         return None
     parts = user_message.strip().split(maxsplit=1)
-    command = parts[0].lower() if parts else ''
+    command = _command_token(parts[0]) if parts else ''
     if command not in _MCP_SERVICE_COMMANDS:
         return None
     if not owner:

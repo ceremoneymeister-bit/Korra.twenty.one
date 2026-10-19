@@ -810,3 +810,29 @@ describe("ProfileBuilderPage — мастер создания агента", ()
     });
   });
 });
+
+describe("ProfileBuilderPage — без модели и с повторным именем (UX 17.10)", () => {
+  it("без подключённой модели предупреждает, ведёт в «Модели» и честно называет кнопку", async () => {
+    apiMocks.getModelOptions.mockResolvedValue({ providers: [], provider: null, model: null });
+    await openWizard();
+    await enterText(nameInput(), "Бухгалтер");
+    expect(container.textContent).toContain("Модель не подключена — агент будет создан, но не ответит");
+    expect(container.querySelector('a[href="/models"]')).not.toBeNull();
+    expect(findButton("Создать без модели")).toBeTruthy();
+    expect(findButton("Создать агента")).toBeUndefined();
+  });
+
+  it("с моделью кнопка обычная и ссылки-предупреждения нет", async () => {
+    await openWizard();
+    await enterText(nameInput(), "Бухгалтер");
+    expect(findButton("Создать агента")).toBeTruthy();
+    expect(container.textContent).not.toContain("Модель не подключена — агент будет создан");
+  });
+
+  it("предупреждает, что агент с таким именем уже есть, но не запрещает", async () => {
+    await openWizard();
+    await enterText(nameInput(), "секретарь");
+    expect(container.textContent).toContain("Агент с именем «Секретарь» уже есть");
+    expect(findButton("Создать агента")?.disabled).toBe(false);
+  });
+});

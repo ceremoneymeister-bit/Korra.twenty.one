@@ -255,3 +255,12 @@ describe("AgentTrace — размышление", () => {
     expect(detail?.textContent).toBe(long);
   });
 });
+
+describe("AgentTrace — ожидание решения (UX 17.10)", () => {
+  it("на вопросе владельцу заголовок говорит «Ждёт вашего решения» вместо «Думаю…»", async () => {
+    const running = tool({ id: "1", name: "terminal", status: "running" });
+    await render(<AgentTrace tools={[running]} active awaiting startedAt={0} />);
+    expect(text()).toContain("Ждёт вашего решения");
+    expect(text()).not.toContain("Думаю…");
+  });
+});

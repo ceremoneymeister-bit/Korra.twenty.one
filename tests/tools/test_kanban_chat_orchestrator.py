@@ -316,3 +316,48 @@ def test_chat_guidance_asks_to_check_the_source_before_disputing(chat_env):
     from agent.prompt_builder import KANBAN_CHAT_GUIDANCE
     assert "session_search" in KANBAN_CHAT_GUIDANCE and "dispute" in KANBAN_CHAT_GUIDANCE
     assert len(KANBAN_CHAT_GUIDANCE) < 3500
+
+
+def _kanban_tool_names():
+    from model_tools import get_tool_definitions
+
+    return {
+        t["function"]["name"]
+        for t in get_tool_definitions(enabled_toolsets=["kanban"], quiet_mode=True)
+    }
+
+
+def test_main_chat_gets_planning_surface_without_worker_protocol(chat_env, monkeypatch):
+    """Cost-aware 18.10: the owner's main chat plans on the board but never
+    owns a run, so run-lifecycle tools stay out of its tool prefix."""
+    kt = _mode(monkeypatch, "main")
+    names = _kanban_tool_names()
+    assert {"kanban_show", "kanban_list", "kanban_create", "kanban_comment",
+            "kanban_block", "kanban_unblock", "kanban_edit", "kanban_link"} <= names
+    assert not (names & kt.KANBAN_WORKER_ONLY_TOOLS), names & kt.KANBAN_WORKER_ONLY_TOOLS
+    assert kt._check_kanban_worker_mode() is False
+
+
+def test_chat_tools_all_does_not_grant_worker_protocol(chat_env, monkeypatch):
+    kt = _mode(monkeypatch, "all", profile="designer")
+    assert kt._check_kanban_mode() is True
+    assert kt._check_kanban_worker_mode() is False
+
+
+def test_worker_keeps_run_lifecycle_tools(chat_env, monkeypatch):
+    kt = _mode(monkeypatch, "main", profile="designer")
+    monkeypatch.setenv("KORRA_KANBAN_TASK", "t_abc")
+    monkeypatch.setattr(kt, "_is_dispatcher_owned_worker", lambda: True)
+    names = _kanban_tool_names()
+    assert kt.KANBAN_WORKER_ONLY_TOOLS <= names
+    # Board routing stays hidden from a task worker, as before.
+    assert "kanban_list" not in names
+
+
+def test_explicit_kanban_toolset_profile_keeps_full_surface(chat_env, monkeypatch):
+    from tools import kanban_tools as kt
+    cfg = {"toolsets": ["kanban"], "kanban": {"chat_tools": "off"}}
+    monkeypatch.setattr("korra_cli.config.load_config", lambda: cfg)
+    monkeypatch.setattr("korra_cli.profiles.get_active_profile_name", lambda: "techlead")
+    assert kt._check_kanban_worker_mode() is True
+    assert kt.KANBAN_WORKER_ONLY_TOOLS <= _kanban_tool_names()

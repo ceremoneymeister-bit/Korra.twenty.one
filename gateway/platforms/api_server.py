@@ -6689,8 +6689,11 @@ class APIServerAdapter(BasePlatformAdapter):
                 }
                 await response.write(_sse_frame(error_chunk))
                 await response.write(b"data: [DONE]\n\n")
-            except Exception:
-                pass
+            except Exception as write_exc:
+                logger.warning(
+                    "Could not send error chunk to client for %s (%s)",
+                    completion_id, type(write_exc).__name__,
+                )
 
         return response
 
@@ -7306,8 +7309,11 @@ class APIServerAdapter(BasePlatformAdapter):
                     "type": "response.failed",
                     "response": failed_env,
                 })
-            except Exception:
-                pass
+            except Exception as write_exc:
+                logger.warning(
+                    "Could not send response.failed to client for %s (%s)",
+                    response_id, type(write_exc).__name__,
+                )
             logger.error("Agent crashed mid-stream for %s: %s", response_id, str(agent_error)[:300])
         finally:
             if _batch_timer and not _batch_timer.done():

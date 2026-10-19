@@ -2306,6 +2306,11 @@ def init_agent(
                 compression_threshold_tokens = None
         except (TypeError, ValueError):
             compression_threshold_tokens = None
+    # Default absolute cap for 500K+ windows when threshold_tokens is unset
+    # (cost: a 1M window at 50% re-sends ~500K tokens per step). 0/null = off.
+    compression_large_window_threshold_tokens = _compression_cfg.get(
+        "large_window_threshold_tokens"
+    )
     compression_checkpoint_required = is_truthy_value(
         _compression_cfg.get("checkpoint_required"), default=False
     )
@@ -2849,6 +2854,7 @@ def init_agent(
             max_tokens=_compressor_max_tokens,
             model_thresholds=compression_model_thresholds,
             threshold_tokens_cap=compression_threshold_tokens,
+            large_window_threshold_tokens=compression_large_window_threshold_tokens,
             proactive_prune_tokens=compression_proactive_prune_tokens,
             proactive_prune_min_result_chars=compression_proactive_prune_min_chars,
             proactive_prune_min_reclaim_tokens=compression_proactive_prune_min_reclaim,
@@ -3144,7 +3150,10 @@ def init_agent(
                 agent.context_compressor, "threshold_percent", compression_threshold
             )
             _cap_note = ""
-            _cap = getattr(agent.context_compressor, "threshold_tokens_cap", None)
+            _cap = getattr(
+                agent.context_compressor, "effective_threshold_tokens_cap",
+                getattr(agent.context_compressor, "threshold_tokens_cap", None),
+            )
             if _cap and _cap > 0:
                 _cap_note = f" (capped at {_cap:,} tokens)"
             print(f"📊 Context limit: {agent.context_compressor.context_length:,} tokens (compress at {int(_active_threshold_pct*100)}% = {agent.context_compressor.threshold_tokens:,}{_cap_note})")

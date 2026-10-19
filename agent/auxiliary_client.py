@@ -1118,7 +1118,7 @@ _API_KEY_PROVIDER_AUX_MODELS_FALLBACK: Dict[str, str] = {
     "stepfun": "step-3.5-flash",
     "kimi-coding-cn": "kimi-k2-turbo-preview",
     "gmi": "google/gemini-3.1-flash-lite-preview",
-    "anthropic": "claude-haiku-4-5-20251001",
+    "anthropic": "claude-haiku-5-5",
     "ai-gateway": "google/gemini-3-flash",
     "opencode-zen": "gemini-3-flash",
     "opencode-go": "glm-5",
@@ -4231,7 +4231,7 @@ def _try_anthropic(explicit_api_key: str = None) -> Tuple[Optional[Any], Optiona
 
     from agent.anthropic_adapter import _is_oauth_token
     is_oauth = _is_oauth_token(token)
-    model = _get_aux_model_for_provider("anthropic") or "claude-haiku-4-5-20251001"
+    model = _get_aux_model_for_provider("anthropic") or "claude-haiku-5-5"
     if _aux_probe_active():
         # Availability probe — token + SDK adapter import resolved; skip
         # real client construction.
