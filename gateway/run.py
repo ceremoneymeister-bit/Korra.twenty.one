@@ -612,6 +612,22 @@ _GATEWAY_RATE_LIMIT_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Subscription/plan quota exhaustion: waiting a little does not help, the
+# limit has to reset (checked before the generic rate-limit branch).
+_GATEWAY_QUOTA_RE = re.compile(
+    r"(insufficient[\s_]+quota|quota[^\n]{0,40}(?:exceed|exhaust)"
+    r"|(?:exceed|exhaust)[^\n]{0,40}quota|usage[\s_]+limit|plan\s+limit|limit[\s_]+reached"
+    r"|out\s+of\s+credits|credits?\s+exhausted)",
+    re.IGNORECASE,
+)
+
+_GATEWAY_LIMIT_RESET_RE = re.compile(
+    r"(?:resets?|try\s+again)\s+(?:at|in|after)\s+("
+    r"(?:\d{4}-\d{2}-\d{2}[T ])?\d{1,2}:\d{2}(?::\d{2})?(?:Z|\s+(?:UTC|GMT))?"
+    r"|\d+(?:\.\d+)?\s*(?:seconds?|minutes?|hours?|days?)\b)",
+    re.IGNORECASE,
+)
+
 _GATEWAY_CONNECTION_ERROR_RE = re.compile(
     r"("
     r"(?:\w+\.)?(?:api\s*)?connection\s*(?:error|timeout)"
@@ -922,6 +938,13 @@ def _gateway_provider_error_reply(text: str) -> str:
     if _GATEWAY_PROVIDER_POLICY_RE.search(text):
         return (
             '''⚠️ Сервис модели отклонил запрос. Попробуйте сформулировать его иначе. Подробности ошибки сохранены в журнале шлюза.'''
+        )
+    if _GATEWAY_QUOTA_RE.search(text):
+        reset = _GATEWAY_LIMIT_RESET_RE.search(text)
+        if reset and reset.group(1).strip():
+            return f'''⛔ Лимит подписки модели исчерпан. Лимит обновится: {reset.group(1).strip()}.'''
+        return (
+            '''⛔ Лимит подписки модели исчерпан. Повторите после обновления лимита или выберите другую модель в настройках.'''
         )
     if _GATEWAY_RATE_LIMIT_RE.search(text):
         return '''⏱️ Сервис модели ограничил частоту запросов. Немного подождите и повторите попытку.'''
@@ -4094,9 +4117,15 @@ def _load_gateway_config(config_path: "Path | None" = None) -> dict:
                 import yaml
                 with open(config_path, 'r', encoding='utf-8') as f:
                     raw = yaml.safe_load(f) or {}
-        except Exception:
+        except Exception as exc:
             logger.debug("Could not load gateway config from %s", config_path)
-            raw = {}
+            # Still an empty dict to every caller; the marker lets
+            # fail-closed readers tell a failed read from an empty config.
+            from korra_cli.config import FailedConfigRead
+            raw = FailedConfigRead(error=exc)
+
+    from korra_cli.config import FailedConfigRead
+    failed_read = raw if isinstance(raw, FailedConfigRead) else None
 
     # Overlay managed scope. read_raw_config() returns the user's raw YAML
     # WITHOUT the managed merge (that lives in load_config/_load_config_impl),
@@ -4120,7 +4149,41 @@ def _load_gateway_config(config_path: "Path | None" = None) -> dict:
         raw = _normalize_root_model_keys(raw)
     except Exception:
         pass
+    # Managed model defaults can make the failed read nonempty, and model
+    # normalization can copy it into a plain dict. Keep the failure marker
+    # so privacy readers do not mistake those defaults for the user's file.
+    if failed_read is not None and not isinstance(raw, FailedConfigRead):
+        raw = FailedConfigRead(raw, error=failed_read.read_error)
     return raw
+
+
+def _gateway_redact_pii_setting() -> bool:
+    """Return ``privacy.redact_pii`` for this turn, failing closed.
+
+    A config that could not be read (no last-known-good copy) or a malformed
+    ``privacy`` section must not silently switch redaction off: use the safe
+    mode (redact) and warn.
+    """
+    try:
+        from korra_cli.config import FailedConfigRead
+
+        cfg = _load_gateway_config()
+        privacy = cfg.get("privacy")
+        if isinstance(cfg, FailedConfigRead) and (
+            not isinstance(privacy, dict) or "redact_pii" not in privacy
+        ):
+            raise RuntimeError("config read failed") from getattr(cfg, "read_error", None)
+        if privacy is None:
+            privacy = {}
+        if not isinstance(privacy, dict):
+            raise TypeError("privacy section is not a mapping")
+        return bool(privacy.get("redact_pii", False))
+    except Exception as exc:
+        logger.warning(
+            "Could not read privacy.redact_pii (%s); redacting PII for this turn",
+            type(exc).__name__,
+        )
+        return True
 
 
 def _checkpoint_agent_kwargs(config: dict | None) -> dict:
@@ -4383,6 +4446,20 @@ def _format_gateway_process_notification(evt: dict) -> "str | None":
     return None
 
 
+def _wake_idempotency_key(evt: dict) -> str:
+    """Устойчивый ключ служебного пробуждения веб-панели для ``deliver_wake``.
+
+    Тот же производитель, что и в ``GatewayRunner._completion_delivery_identity``:
+    id делегирования или процесс с эпохой запуска. Повторная доставка того же
+    события присоединяется к уже идущему ходу, а не запускает второй. Без
+    устойчивого id — пусто (ключ свой на вызов).
+    """
+    identity = GatewayRunner._completion_delivery_identity(evt)
+    if identity is None:
+        return ""
+    return ":".join(str(part) for part in identity if part != "")
+
+
 def _drain_gateway_watch_events(completion_queue) -> "list[dict]":
     """Drain gateway-owned watch events without spinning on requeued events.
 
@@ -4539,7 +4616,13 @@ def _is_gateway_hidden_reasoning_incomplete_turn(agent_result: dict) -> bool:
     if not agent_result.get("partial"):
         return False
     error_text = str(agent_result.get("error", "") or "").strip()
-    if "remained incomplete after" not in error_text.lower():
+    # Сентинел цикла — русская константа; английский текст — от прежних версий.
+    from agent.conversation_loop import HIDDEN_REASONING_INCOMPLETE_SENTINELS
+
+    if (
+        error_text not in HIDDEN_REASONING_INCOMPLETE_SENTINELS
+        and "remained incomplete after" not in error_text.lower()
+    ):
         return False
     final_response = str(agent_result.get("final_response") or "").strip()
     return not final_response or final_response == error_text
@@ -17831,6 +17914,48 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             "version": self._handle_version_command,
         }
 
+    def _unrecognized_busy_slash_reply(self, command: str, source) -> Optional[str]:
+        """Reply for an unknown /command while busy, or None to keep routing.
+
+        Plugin, quick, bundle and skill commands keep their existing path.
+        """
+        try:
+            from korra_cli.commands import GATEWAY_KNOWN_COMMANDS
+            from korra_cli.plugins import get_plugin_command_handler
+            from agent.skill_bundles import resolve_bundle_command_key
+            from agent.skill_commands import resolve_skill_command_key
+
+            normalized = command.replace("_", "-")
+            if normalized in GATEWAY_KNOWN_COMMANDS:
+                return None
+            try:
+                quick_commands = self.config.get("quick_commands", {}) or {}
+            except Exception:
+                quick_commands = getattr(self.config, "quick_commands", {}) or {}
+            if isinstance(quick_commands, dict) and command in quick_commands:
+                return None
+            if (
+                get_plugin_command_handler(normalized)
+                or resolve_bundle_command_key(command)
+                or resolve_skill_command_key(command)
+            ):
+                return None
+            unavailable = _check_unavailable_skill(command)
+            if unavailable:
+                return unavailable
+        except Exception as exc:
+            logger.debug("Busy slash check failed (non-fatal): %s", exc)
+            return None
+        logger.warning(
+            "Unrecognized slash command /%s from %s while agent busy — "
+            "replying with unknown-command notice without interrupt",
+            command,
+            source.platform.value if source.platform else "?",
+        )
+        return (
+            f'''Неизвестная команда `/{command}`. Список команд: /commands. Чтобы отправить обычное сообщение, уберите косую черту в начале.'''
+        )
+
     async def _dispatch_busy_slash_command(
         self, event: MessageEvent, cmd_def, quick_key: str, source,
     ):
@@ -18749,6 +18874,16 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 return await self._dispatch_busy_slash_command(
                     event, _cmd_def_inner, _quick_key, source,
                 )
+
+            # A genuinely unrecognized /command must not interrupt the live
+            # turn as free text; answer like the idle path does.
+            if _evt_cmd and re.fullmatch(
+                r"/[A-Za-z][A-Za-z0-9_-]*(?:@[A-Za-z0-9_]+)?(?:[ \t]+[^\r\n]*)?",
+                (event.text or "").strip(),
+            ):
+                _unknown_reply = self._unrecognized_busy_slash_reply(_evt_cmd, source)
+                if _unknown_reply is not None:
+                    return _unknown_reply
 
             if event.message_type == MessageType.PHOTO:
                 logger.debug("PRIORITY photo follow-up for session %s — queueing without interrupt", _quick_key)
@@ -20678,11 +20813,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         persist_user_display_kind = (
             "internal_notification" if getattr(event, "internal", False) else None
         )
-        try:
-            _pcfg = _load_gateway_config()
-            _redact_pii = bool((_pcfg.get("privacy") or {}).get("redact_pii", False))
-        except Exception:
-            pass
+        _redact_pii = _gateway_redact_pii_setting()
 
         # Build the context prompt to inject.  The render is pinned per
         # session, keyed by a hash of the exact renderer inputs
@@ -22830,6 +22961,22 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 )
                 response = UNEXPECTED_SILENCE_REPLY
                 agent_result["already_sent"] = False
+            elif (
+                not response
+                and _is_gateway_hidden_reasoning_incomplete_turn(agent_result)
+                and persist_user_display_kind is None
+                and (getattr(event, "metadata", None) or {}).get("reply_expected") is not False
+            ):
+                # Модель так и не дала видимого ответа (одни рассуждения): сентинел
+                # цикла владельцу не шлём (#51628), но человек без ответа не остаётся.
+                # Служебный ход здесь молчит — второго сообщения владельцу нет.
+                from gateway.response_filters import UNEXPECTED_SILENCE_REPLY
+                logger.warning(
+                    "Hidden-reasoning-only turn for a human in session %s; sending a notice",
+                    session_entry.session_id,
+                )
+                response = UNEXPECTED_SILENCE_REPLY
+                agent_result["already_sent"] = False
 
             # Auto voice reply: send TTS audio before the text response
             _already_sent = bool(agent_result.get("already_sent"))
@@ -22951,12 +23098,14 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                             _user_entry["display_kind"] = persist_user_display_kind
                         if getattr(event, "message_id", None):
                             _user_entry["message_id"] = str(event.message_id)
+                        # SessionStore owns its retry queue. Re-enqueuing here
+                        # would duplicate that mechanism rather than heal DB I/O.
                         await self.async_session_store.append_to_transcript(
                             session_entry.session_id,
                             _user_entry,
                         )
             except Exception:
-                logger.debug("Failed to persist inbound user message after agent exception", exc_info=True)
+                logger.error("Failed to persist inbound user message after agent exception", exc_info=True)
             # Log full details server-side only; never expose raw exception
             # types or messages to end users (info-leakage risk).
             status_hint = ""
@@ -27159,7 +27308,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 logger.error("Watch notification injection error: %s", exc)
 
     async def _inject_watch_notification(
-        self, synth_text: str, evt: dict,
+        self, synth_text: str, evt: dict, *, silence_allowed: Optional[bool] = None,
     ) -> Optional[bool]:
         """Inject a watch/completion notification as a synthetic message event.
 
@@ -27170,6 +27319,20 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         is not a transactional boundary: a process crash after adapter
         acceptance can still cause durable at-least-once replay.
         """
+        # Служебный ход о фоновой работе (процесс, дочерний агент): при успехе модели
+        # можно промолчать — NO_REPLY глушит шлюз мессенджера и веб-панель. Сбой
+        # (упал, убит, не запустился, неуспешный помощник) и совпадение watch идут без
+        # подсказки: о них модель обязана сообщить. Одна точка для всех веток ниже
+        # (push-адаптер и self-post api_server); пакет решает за всех (silence_allowed).
+        from gateway.response_filters import (
+            is_successful_background_completion,
+            with_service_turn_silence_hint,
+        )
+
+        if silence_allowed is None:
+            silence_allowed = is_successful_background_completion(evt)
+        if silence_allowed:
+            synth_text = with_service_turn_silence_hint(synth_text)
         source = await asyncio.to_thread(self._build_process_event_source, evt)
         if not source:
             # API-server-originated sessions bind a RAW session key (the
@@ -27194,7 +27357,10 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                             "session %s via self-post",
                             raw_sid,
                         )
-                        await deliver_wake(adapter, text=synth_text, session_id=raw_sid)
+                        await deliver_wake(
+                            adapter, text=synth_text, session_id=raw_sid,
+                            idempotency_key=_wake_idempotency_key(evt),
+                        )
                         return True
                     except Exception as e:
                         logger.warning(
@@ -27287,7 +27453,10 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     "%s via self-post",
                     raw_sid,
                 )
-                await deliver_wake(adapter, text=synth_text, session_id=raw_sid)
+                await deliver_wake(
+                    adapter, text=synth_text, session_id=raw_sid,
+                    idempotency_key=_wake_idempotency_key(evt),
+                )
                 return True
             except Exception as e:
                 logger.warning(
@@ -27302,6 +27471,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             if parent_session_id:
                 metadata["gateway_session_id"] = parent_session_id
             synth_event = MessageEvent(
+                # Служебный ход: подсказка о NO_REPLY уже дописана в начале метода.
                 text=synth_text,
                 message_type=MessageType.TEXT,
                 source=source,
@@ -27419,7 +27589,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         return "deliver"
 
     async def _deliver_completion_notification(
-        self, synth_text: str, evt: dict,
+        self, synth_text: str, evt: dict, *, silence_allowed: Optional[bool] = None,
     ) -> Optional[bool]:
         """Deliver once per live gateway, or return False for a retry.
 
@@ -27537,7 +27707,13 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
         accepted = False
         try:
-            injection_result = await self._inject_watch_notification(synth_text, evt)
+            injection_result = await (
+                self._inject_watch_notification(synth_text, evt)
+                if silence_allowed is None
+                else self._inject_watch_notification(
+                    synth_text, evt, silence_allowed=silence_allowed,
+                )
+            )
             if injection_result is not True:
                 return injection_result
             accepted = True
@@ -27672,9 +27848,17 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             # lifecycle dedupe seam.  Try the next batch identity so a
             # fresh sibling is never discarded with that duplicate.
             delivered = None
+            # Пакет: молчать можно, только если успешны все завершения в нём.
+            _batch_kwargs = {}
+            if len(entries) > 1:
+                from gateway.response_filters import is_successful_background_completion
+
+                _batch_kwargs["silence_allowed"] = all(
+                    is_successful_background_completion(evt) for _t, evt, _f in entries
+                )
             for _text, candidate_evt, _future in entries:
                 delivered = await self._deliver_completion_notification(
-                    synth_text, candidate_evt,
+                    synth_text, candidate_evt, **_batch_kwargs,
                 )
                 if delivered is not None:
                     break
@@ -27946,8 +28130,15 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         consolidated = self._format_coalesced_async_delegations(blocks)
         delivered: Optional[bool] = False
         try:
+            from gateway.response_filters import is_successful_background_completion
+
+            # Пакет помощников: молчать можно, только если успешны все.
             delivered = await self._deliver_completion_notification(
                 consolidated, primary_evt,
+                silence_allowed=all(
+                    is_successful_background_completion(evt)
+                    for evt in [primary_evt, *(e for e, _c in siblings)]
+                ),
             )
         finally:
             if delivered is True:

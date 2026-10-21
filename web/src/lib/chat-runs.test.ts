@@ -82,3 +82,30 @@ it("K21-234: leaving the page cancels polling and a late response cannot change 
   off(); await vi.advanceTimersByTimeAsync(1000);
   vi.unstubAllGlobals(); vi.useRealTimers();
 });
+
+it("частичный ETag сохраняет неизвестность при смене авторизации и не затрагивается опросом чата", async () => {
+  const { getChatRuns, $chatRunsUnavailableProfiles } = await import("./chat-runs");
+  const fetcher = vi.fn()
+    .mockResolvedValueOnce(Response.json({ runs: [], unavailable_profiles: ["blocked"] }, { headers: { ETag: '"partial"' } }))
+    .mockResolvedValueOnce(Response.json({ runs: [] }))
+    .mockResolvedValueOnce(Response.json({ runs: [] }))
+    .mockResolvedValueOnce(new Response(null, { status: 304 }));
+  vi.stubGlobal("fetch", fetcher);
+  window.__HERMES_SESSION_TOKEN__ = "partial-test-token";
+  try {
+    await getChatRuns();
+    expect($chatRunsUnavailableProfiles.get()).toEqual(["blocked"]);
+    await getChatRuns("healthy", "chat");
+    expect($chatRunsUnavailableProfiles.get()).toEqual(["blocked"]);
+    window.__HERMES_SESSION_TOKEN__ = "complete-test-token";
+    await getChatRuns();
+    expect($chatRunsUnavailableProfiles.get()).toEqual([]);
+    window.__HERMES_SESSION_TOKEN__ = "partial-test-token";
+    await getChatRuns();
+    expect($chatRunsUnavailableProfiles.get()).toEqual(["blocked"]);
+  } finally {
+    delete window.__HERMES_SESSION_TOKEN__;
+    $chatRunsUnavailableProfiles.set([]);
+    vi.unstubAllGlobals();
+  }
+});

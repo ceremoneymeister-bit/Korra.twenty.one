@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { startVisibleInterval } from "@/lib/visible-interval";
 import { ChevronDown, Inbox } from "lucide-react";
 
 import { CommandApprovalCard } from "@/components/chat/CommandApprovalCard";
+import { DecisionAge } from "@/components/chat/DecisionAge";
 import {
   fetchEffectDecisions,
   sendApprovalDecision,
@@ -65,7 +67,7 @@ export function EffectDecisionCenter({
   expandRequest = 0,
 }: EffectDecisionCenterProps) {
   const [items, setItems] = useState<SSEApprovalRequestData[]>([]);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(expandRequest > 0);
   const handledExpand = useRef(expandRequest);
   useEffect(() => {
     if (handledExpand.current === expandRequest) return;
@@ -74,10 +76,16 @@ export function EffectDecisionCenter({
   }, [expandRequest]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [pollError, setPollError] = useState("");
 
-  const refresh = useCallback(async () => {
-    const next = await fetchEffectDecisions(profile);
+  const refresh = useCallback(async (isCurrent: () => boolean = () => true) => {
+    let unavailable: string[] = [];
+    const next = await fetchEffectDecisions(profile, names => { unavailable = names; });
+    if (!isCurrent()) return;
     setItems(next);
+    setPollError(unavailable.length
+      ? `Недоступны профили: ${unavailable.join(", ")}. Список решений неполный; ответы временно недоступны.`
+      : "");
   }, [profile]);
 
   useEffect(() => {
@@ -85,19 +93,19 @@ export function EffectDecisionCenter({
     let cancelled = false;
     const load = async () => {
       try {
-        const next = await fetchEffectDecisions(profile);
-        if (!cancelled) setItems(next);
+        await refresh(() => !cancelled);
       } catch {
-        // Existing cards remain usable. A later poll heals a transient outage.
+        if (!cancelled) setPollError("Решения этого профиля временно недоступны. Список не подтверждён; повторно отправлять действия не нужно.");
       }
     };
     void load();
-    const timer = window.setInterval(() => void load(), POLL_MS);
+    // Скрытая вкладка не опрашивает; возврат на неё обновляет сразу.
+    const stop = startVisibleInterval(() => void load(), POLL_MS);
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      stop();
     };
-  }, [active, profile]);
+  }, [active, refresh]);
 
   const pending = useMemo(
     () => items.filter((item) => item.effect_status === "pending"),
@@ -147,8 +155,8 @@ export function EffectDecisionCenter({
     [busyId, currentSessionId, onCurrentDecision, profile, refresh],
   );
 
-  if (items.length === 0) return null;
-  const settled = pending.length === 0 && legacy.length === 0;
+  if (items.length === 0 && !pollError) return null;
+  const settled = !pollError && pending.length === 0 && legacy.length === 0;
 
   return (
     <section
@@ -160,6 +168,7 @@ export function EffectDecisionCenter({
       data-decision-center
       data-decisions-settled={settled ? "true" : undefined}
     >
+      {pollError && <p role="status" className="mb-2 text-xs text-[var(--neo-text-secondary)]">{pollError}</p>}
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
@@ -171,7 +180,7 @@ export function EffectDecisionCenter({
       >
         <Inbox size={14} aria-hidden />
         <span className="font-medium text-[var(--neo-text-primary)]">Решения</span>
-        <span>{pending.length > 0 ? `${pending.length} ждёт` : "нет ожидающих"}</span>
+        <span>{pollError ? "требуют проверки" : pending.length > 0 ? `${pending.length} ждёт` : "нет ожидающих"}</span>
         {legacy.length > 0 && <span>· {legacy.length} в старой очереди</span>}
         <ChevronDown
           size={14}
@@ -183,15 +192,18 @@ export function EffectDecisionCenter({
       {open && (
         <div className="mt-2 max-h-[min(60vh,34rem)] space-y-3 overflow-auto rounded-[var(--neo-radius-card)] bg-[var(--neo-surface)] p-2 shadow-[var(--neo-depth-2)]">
           {pending.map((item) => (
-            <CommandApprovalCard
-              key={item.request_id}
-              decisionKind={item.decision_kind}
-              command={item.command}
-              description={item.description}
-              choices={item.choices ?? ["once", "deny"]}
-              sending={busyId === item.request_id}
-              onDecide={(choice) => void decide(item, choice)}
-            />
+            <div key={item.request_id}>
+              {item.decision_fallback && <p className="mb-2 px-1 text-xs text-[var(--neo-text-secondary)]">{item.decision_reason || "Исходный чат недоступен. Ответьте здесь."}</p>}
+              <CommandApprovalCard
+                decisionKind={item.decision_kind}
+                timestamp={item.timestamp}
+                command={item.command}
+                description={item.description}
+                choices={pollError ? [] : item.choices ?? ["once", "deny"]}
+                sending={busyId === item.request_id}
+                onDecide={(choice) => void decide(item, choice)}
+              />
+            </div>
           ))}
 
           {legacy.length > 0 && (
@@ -201,11 +213,13 @@ export function EffectDecisionCenter({
               {legacy.map((item) => (
                 <details key={item.request_id} className="rounded-[var(--neo-radius-control)] p-2 shadow-[var(--neo-inset-compact)]">
                   <summary className="cursor-pointer break-words text-xs">{shortTarget(item)}</summary>
+                  <DecisionAge timestamp={item.timestamp} />
+                  {item.decision_fallback && <p className="my-2 text-xs text-[var(--neo-text-secondary)]">{item.decision_reason || "Исходный чат недоступен. Ответьте здесь."}</p>}
                   <pre className="my-2 max-h-40 overflow-auto whitespace-pre-wrap break-words text-xs">{item.command}</pre>
-                  <button type="button" disabled={busyId !== null} onClick={() => void decide(item, "deny")}
+                  {!pollError && (!item.choices || item.choices.includes("deny")) && <button type="button" disabled={busyId !== null} onClick={() => void decide(item, "deny")}
                     className="min-h-10 rounded-[var(--neo-radius-control)] bg-[var(--neo-surface)] px-3 text-xs shadow-[var(--neo-depth-1)] disabled:opacity-50">
                     {busyId === item.request_id ? "Закрываем…" : "Закрыть без отправки"}
-                  </button>
+                  </button>}
                 </details>
               ))}
             </div>
@@ -225,6 +239,7 @@ export function EffectDecisionCenter({
                     </span>{" "}
                     · {shortTarget(item)}
                   </summary>
+                  <DecisionAge timestamp={item.timestamp} />
                   {item.command && (
                     <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap break-words px-1 font-mono text-[10.5px] text-[var(--neo-text-secondary)]">
                       {item.command}

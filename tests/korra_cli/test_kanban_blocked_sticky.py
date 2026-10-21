@@ -14,8 +14,9 @@ These tests pin down:
 * Worker / operator-initiated blocks are sticky and survive
   ``recompute_ready``.
 * Circuit-breaker blocks (``gave_up`` event, status flipped via
-  ``_record_task_failure``) still auto-recover — the original intent
-  of #40c1decb3 is preserved.
+  ``_record_task_failure``) no longer auto-recover: the owner was told
+  «сдался», so only an explicit unblock resumes the task.
+* A card created ``blocked`` (R3) is sticky too, with or without parents.
 * An explicit ``kanban_unblock`` clears the sticky state.
 * The full block → promote → crash → ``gave_up`` loop is broken after
   this fix: subsequent ticks leave the task blocked.
@@ -161,3 +162,85 @@ def test_protocol_violation_loop_is_broken(kanban_home: Path) -> None:
 # (landed via #28754 / #28781).  The original PR shipped a duplicate test
 # here; dropped during salvage to avoid two assertions of the same contract.
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# A card created ``blocked`` waits for a human (R3)
+# ---------------------------------------------------------------------------
+
+
+def _spawner(spawns: list) :
+    def fake_spawn(task, workspace, board=None):
+        spawns.append(task.id)
+        return 4242
+    return fake_spawn
+
+
+@pytest.mark.parametrize("with_done_parent", [False, True])
+def test_card_created_blocked_is_not_started_by_the_dispatcher(
+    kanban_home: Path, all_assignees_spawnable, with_done_parent: bool,
+) -> None:
+    """Without parents ``recompute_ready`` saw no sticky event, promoted the
+    card (``all([])`` is True) and the same pass spawned a worker."""
+    spawns: list[str] = []
+    with kb.connect() as conn:
+        parents: tuple[str, ...] = ()
+        if with_done_parent:
+            parent = kb.create_task(conn, title="parent", assignee="bob")
+            kb.complete_task(conn, parent, result="done")
+            parents = (parent,)
+        tid = kb.create_task(
+            conn, title="нужен человек", assignee="alice",
+            initial_status="blocked", parents=parents,
+        )
+        for _ in range(3):
+            kb.dispatch_once(conn, spawn_fn=_spawner(spawns))
+        assert kb.get_task(conn, tid).status == "blocked"
+        kinds = [e.kind for e in kb.list_events(conn, tid)]
+        assert "promoted" not in kinds and "claimed" not in kinds
+        assert spawns == []
+
+        assert kb.unblock_task(conn, tid)
+        assert kb.get_task(conn, tid).status == "ready"
+        kb.dispatch_once(conn, spawn_fn=_spawner(spawns))
+    assert spawns == [tid]
+
+
+# ---------------------------------------------------------------------------
+# «Сдался» (gave_up) is final until an explicit unblock
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("forced", [False, True])
+def test_gave_up_task_is_not_respawned_by_the_same_pass(
+    kanban_home: Path, all_assignees_spawnable, forced: bool,
+) -> None:
+    """Crash/timeout paths trip the breaker at DEFAULT_FAILURE_LIMIT (or a
+    forced trip below any limit), while the dispatcher passes the configured
+    ``kanban.failure_limit`` to ``recompute_ready``. The counter check alone
+    let the very pass that wrote ``gave_up`` promote and respawn the task,
+    and the owner later heard «сдался» a second time."""
+    spawns: list[str] = []
+    with kb.connect() as conn:
+        tid = kb.create_task(conn, title="падает", assignee="alice")
+        if forced:
+            assert kb._record_task_failure(
+                conn, tid, "protocol violation", outcome="crashed", force_trip=True,
+            )
+        else:
+            assert not kb._record_task_failure(conn, tid, "boom", outcome="crashed")
+            assert kb._record_task_failure(conn, tid, "boom", outcome="crashed")
+        assert kb.get_task(conn, tid).status == "blocked"
+        for _ in range(3):
+            kb.dispatch_once(conn, spawn_fn=_spawner(spawns), failure_limit=5)
+        assert kb.get_task(conn, tid).status == "blocked"
+        kinds = [e.kind for e in kb.list_events(conn, tid)]
+        assert kinds.count("gave_up") == 1
+        assert "promoted" not in kinds
+        assert spawns == []
+
+        # The owner's unblock is the way back; it resets the counter.
+        assert kb.unblock_task(conn, tid)
+        assert kb.get_task(conn, tid).consecutive_failures == 0
+        kb.dispatch_once(conn, spawn_fn=_spawner(spawns), failure_limit=5)
+    assert spawns == [tid]

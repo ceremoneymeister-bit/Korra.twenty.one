@@ -286,6 +286,42 @@ def _check_kanban_orchestrator_mode() -> bool:
     return _profile_has_kanban_toolset() and _board_principal_allowed()
 
 
+# Only the worker closes its run, keeps it alive, or submits it for review.
+# Owner rework and attachments also serve the chat: return a result under
+# the same ID (K21-335), supply inputs, and inspect the delivered files.
+KANBAN_WORKER_ONLY_TOOLS = frozenset({
+    "kanban_complete",
+    "kanban_heartbeat",
+    "kanban_request_review",
+})
+
+
+def _profile_opts_into_kanban_toolset() -> bool:
+    """Explicit ``toolsets: [kanban]`` in the profile config (board /
+    orchestrator profiles). Unlike ``kanban.chat_tools`` this is a deliberate
+    opt-in to the full board surface, run-lifecycle tools included."""
+    try:
+        from korra_cli.config import load_config as _load_config
+        cfg = _load_config()
+        return "kanban" in (cfg.get("toolsets", []) or [])
+    except Exception:
+        return False
+
+
+@no_cache_check_fn
+def _check_kanban_worker_mode() -> bool:
+    """Run-lifecycle tools (``KANBAN_WORKER_ONLY_TOOLS``) are available to a
+    dispatcher-owned worker and to profiles that explicitly opt into the
+    ``kanban`` toolset. The ``kanban.chat_tools`` default (``main``/``all``)
+    gives an ordinary chat planning, owner rework, and attachments — not the
+    worker's complete/heartbeat/request_review protocol."""
+    if _is_delegated_child_context():
+        return False
+    if korra_env("KORRA_KANBAN_TASK") and _is_dispatcher_owned_worker():
+        return True
+    return _profile_opts_into_kanban_toolset() and _board_principal_allowed()
+
+
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
@@ -331,7 +367,9 @@ def _stamp_worker_session_metadata(
     return stamped
 
 
-def _enforce_worker_task_ownership(tid: str) -> Optional[str]:
+def _enforce_worker_task_ownership(
+    tid: str, *, allow_own_self_card: bool = False,
+) -> Optional[str]:
     """Reject worker-driven destructive calls on foreign task IDs.
 
     A process spawned by the dispatcher has ``HERMES_KANBAN_TASK`` set
@@ -346,6 +384,11 @@ def _enforce_worker_task_ownership(tid: str) -> Optional[str]:
     tasks or reopen blocked ones. Workers are narrowly scoped to their
     one task.
 
+    ``allow_own_self_card`` (complete / block): a worker may also close a
+    «веду сам» card it recorded itself — created with
+    ``initial_status='self'`` from this worker's task. Any other foreign
+    task stays refused.
+
     Returns ``None`` when the call is allowed, or a tool-error string
     when it must be rejected. Callers should ``return`` the error
     verbatim.
@@ -354,6 +397,8 @@ def _enforce_worker_task_ownership(tid: str) -> Optional[str]:
     if not env_tid:
         # Orchestrator or CLI context — no task-scope restriction.
         return None
+    if tid != env_tid and allow_own_self_card and _is_own_self_card(tid, env_tid):
+        return None
     if tid != env_tid:
         return tool_error(
             f"worker is scoped to task {env_tid}; refusing to mutate "
@@ -361,6 +406,17 @@ def _enforce_worker_task_ownership(tid: str) -> Optional[str]:
             f"tasks, or kanban_create to spawn follow-up work."
         )
     return None
+
+
+def _is_own_self_card(tid: str, worker_task: str) -> bool:
+    """Whether ``tid`` is a «веду сам» card this worker's task recorded."""
+    try:
+        from korra_cli import kanban_db as kb
+        with kb.connect_closing() as conn:
+            return kb.self_card_creator_task(conn, tid) == worker_task
+    except Exception:
+        logger.debug("self-card ownership lookup failed for %s", tid, exc_info=True)
+        return False
 
 
 def _connect(board: Optional[str] = None):
@@ -1013,7 +1069,7 @@ def _handle_complete(args: dict, **kw) -> str:
         return tool_error(
             "task_id is required (or set HERMES_KANBAN_TASK in the env)"
         )
-    ownership_err = _enforce_worker_task_ownership(tid)
+    ownership_err = _enforce_worker_task_ownership(tid, allow_own_self_card=True)
     if ownership_err:
         return ownership_err
     summary = args.get("summary")
@@ -1184,7 +1240,7 @@ def _handle_block(args: dict, **kw) -> str:
         return tool_error(
             "task_id is required (or set HERMES_KANBAN_TASK in the env)"
         )
-    ownership_err = _enforce_worker_task_ownership(tid)
+    ownership_err = _enforce_worker_task_ownership(tid, allow_own_self_card=True)
     if ownership_err:
         return ownership_err
     reason = args.get("reason")
@@ -1757,7 +1813,19 @@ def _handle_create(args: dict, **kw) -> str:
         return tool_error("title is required")
     assignee = args.get("assignee")
     actor_kind = args.get("actor_kind")
-    human_step = str(actor_kind or "").strip().lower() == "human"
+    initial_status = str(args.get("initial_status") or "running").strip().lower()
+    self_work = initial_status == "self"
+    human_step = str(actor_kind or "").strip().lower() == "human" or self_work
+    if self_work and not _check_kanban_worker_mode():
+        # A «веду сам» card is closed with kanban_complete; a chat without
+        # the run-lifecycle tools could only leave it «в работе» forever
+        # (no watchdog touches a self card). Say so before creating it.
+        return tool_error(
+            "initial_status='self' is not available here: this chat has no "
+            "kanban_complete to close such a card, and it would stay «in "
+            "progress» forever. Do the work directly — your own work needs "
+            "no card — or queue it to an agent with initial_status='queued'."
+        )
     if not assignee and not human_step:
         return tool_error(
             "assignee is required — name the profile that should execute this "
@@ -1824,7 +1892,6 @@ def _handle_create(args: dict, **kw) -> str:
         # A card made from an owner chat must not run unbounded: the default
         # keeps a stuck executor from holding the slot for hours.
         max_runtime_seconds = CHAT_CARD_MAX_RUNTIME_SECONDS
-    initial_status = args.get("initial_status") or "running"
     skills = args.get("skills")
     if isinstance(skills, str):
         # Accept a single skill name as a string for convenience.
@@ -1904,12 +1971,18 @@ def _handle_create(args: dict, **kw) -> str:
                 goal_max_turns=(
                     int(goal_max_turns) if goal_max_turns is not None else None
                 ),
-                initial_status=str(initial_status),
+                initial_status=initial_status,
                 created_by=korra_env("KORRA_PROFILE") or "worker",
                 session_id=session_id,
+                self_creator_task=(
+                    korra_env("KORRA_KANBAN_TASK")
+                    if self_work and _dispatcher_worker_turn() else None
+                ),
             )
             new_task = kb.get_task(conn, new_tid)
-            subscribed = _maybe_auto_subscribe(conn, new_tid)
+            # «Веду сам»: the author closes the card itself — no subscription,
+            # so its completion neither wakes the author nor pings the owner.
+            subscribed = False if self_work else _maybe_auto_subscribe(conn, new_tid)
             execution = _created_card_execution(
                 kb, conn, new_task, subscribed=bool(subscribed),
             )
@@ -1951,6 +2024,13 @@ def _created_card_execution(kb: Any, conn: Any, task: Any, *, subscribed: bool) 
     status = task.status
     if (getattr(task, "actor_kind", None) or "") == "human":
         out.update(state="human_step", reason="A step for the owner: nothing is started.")
+    elif (getattr(task, "actor_kind", None) or "") == "self":
+        out.update(
+            state="self", notify="not_needed",
+            reason=("Your own work: the card is in progress, nothing is started. "
+                    f"Close it with kanban_complete(task_id='{task.id}') when done."),
+        )
+        return out
     elif status == "running":
         alive = bool(task.current_run_id and task.claim_lock and kb._pid_alive(task.worker_pid))
         out.update(
@@ -2965,12 +3045,18 @@ KANBAN_CREATE_SCHEMA = {
             },
             "initial_status": {
                 "type": "string",
-                "enum": ["running", "blocked"],
+                "enum": ["queued", "running", "self", "blocked"],
                 "description": (
-                    "Initial card status. Use 'blocked' for tasks that "
-                    "require immediate human ops (R3 gate) to skip the "
-                    "brief running-to-blocked transition. Defaults to "
-                    "'running', which preserves the usual dispatch path."
+                    "What happens to the card. 'queued' (default; 'running' "
+                    "is the old name, same behaviour): it waits in the queue "
+                    "and the dispatcher starts the assignee. 'self': you record "
+                    "work you are doing yourself — the card is in progress at "
+                    "once, no worker is started, assignee is not needed, no "
+                    "notification is sent; close it with kanban_complete. Only "
+                    "where kanban_complete is available (a dispatcher worker "
+                    "or a profile with the kanban toolset); refused elsewhere. "
+                    "'blocked': needs a human at once (R3 gate) — the "
+                    "dispatcher does not start it until it is unblocked."
                 ),
             },
             "skills": {
@@ -3162,7 +3248,7 @@ registry.register(
     toolset="kanban",
     schema=KANBAN_COMPLETE_SCHEMA,
     handler=_handle_complete,
-    check_fn=_check_kanban_mode,
+    check_fn=_check_kanban_worker_mode,
     emoji="✔",
 )
 
@@ -3180,7 +3266,7 @@ registry.register(
     toolset="kanban",
     schema=KANBAN_REQUEST_REVIEW_SCHEMA,
     handler=_handle_request_review,
-    check_fn=_check_kanban_mode,
+    check_fn=_check_kanban_worker_mode,
     emoji="👀",
 )
 
@@ -3198,7 +3284,7 @@ registry.register(
     toolset="kanban",
     schema=KANBAN_HEARTBEAT_SCHEMA,
     handler=_handle_heartbeat,
-    check_fn=_check_kanban_mode,
+    check_fn=_check_kanban_worker_mode,
     emoji="💓",
 )
 

@@ -19,7 +19,7 @@ export interface NavEntry {
 
 /** Что видит пользователь продукта. Порядок задаёт и порядок в сайдбаре. */
 const PRODUCT_NAV_PATHS: Record<ProductUiMode, string[]> = {
-  fleet: ["/dashboard", "/agents", "/files", "/cron"],
+  fleet: ["/dashboard", "/agents", "/files", "/cron", "/marketplace"],
 };
 
 /** Язык продукта, а не панели администратора. */
@@ -29,6 +29,7 @@ const PRODUCT_NAV_LABELS: Record<ProductUiMode, Record<string, string>> = {
     "/agents": "Агенты",
     "/files": "Файлы",
     "/cron": "Задачи",
+    "/marketplace": "Маркетплейс",
   },
 };
 

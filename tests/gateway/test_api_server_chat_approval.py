@@ -15,6 +15,7 @@
 
 import json
 import logging
+import sqlite3
 import threading
 
 import pytest
@@ -282,6 +283,34 @@ class TestSessionApprovalEndpoints:
         assert db_path.read_bytes() == damaged_bytes
 
     @pytest.mark.asyncio
+    async def test_creation_time_survives_sse_reload_and_center(
+        self, adapter, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        pending, _ = effect_decisions.create_pending(
+            kind="outbound_message", owner_id="k21b-owner", profile="default",
+            source_session_id="k21b-age", source_session_key="api:k21b-age",
+            payload={"target_label": "k21b-no-transport", "message": "Тестовый текст"},
+        )
+        created_at = pending["created_at"] - 16 * 86400
+        with sqlite3.connect(tmp_path / "effect_decisions.sqlite3") as conn:
+            conn.execute(
+                "UPDATE effect_decisions SET created_at=? WHERE id=?",
+                (created_at, pending["id"]),
+            )
+        row = effect_decisions.get_decision(pending["id"])
+        event = _chat_approval_event(effect_decisions.approval_payload(row), session_id="k21b-age")
+        async with TestClient(TestServer(_create_app(adapter))) as cli:
+            session = await cli.get("/api/sessions/k21b-age/approvals")
+            center = await cli.get("/api/effect-decisions")
+            assert session.status == center.status == 200
+            items = [event, (await session.json())["data"][0], (await center.json())["data"][0]]
+        for item in items:
+            assert item["timestamp"] == created_at
+            assert item["updated_at"] == pending["updated_at"]
+            assert item["timestamp"] != item["updated_at"]
+
+    @pytest.mark.asyncio
     async def test_durable_external_decision_survives_without_live_listener(
         self, adapter, tmp_path, monkeypatch
     ):
@@ -355,7 +384,10 @@ class TestSessionApprovalEndpoints:
         assert session_resp.status == center_resp.status == 200
         session_item = session_body["data"][0]
         center_item = center_body["data"][0]
-        assert len(center_body["data"]) == 1
+        # Physical ledger records remain visible even when their historical
+        # profile cannot be verified. The panel disables ambiguous answers.
+        assert len(center_body["data"]) == 2
+        center_item = next(item for item in center_body["data"] if item["request_id"] == pending["id"])
         for item in (session_item, center_item):
             assert item["request_id"] == pending["id"]
             assert item["source_session_id"] == "s-history"

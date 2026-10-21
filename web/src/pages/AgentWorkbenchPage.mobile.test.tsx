@@ -63,17 +63,20 @@ vi.mock("@/pages/BubbleChatPage", async () => {
       active,
       mobileHistory,
       decisionsRequest = 0,
+      resumeSession,
     }: {
       agentProfile?: string;
       active?: boolean;
       mobileHistory?: { open: boolean; onOpenChange: (open: boolean) => void; host: HTMLElement | null };
       decisionsRequest?: number;
+      resumeSession?: { sessionId: string };
     }) => (
       <div
         data-testid={`chat-${agentProfile || "default"}`}
         data-active={String(Boolean(active))}
         data-history-open={String(Boolean(mobileHistory?.open))}
         data-decisions-request={decisionsRequest}
+        data-resume-session={resumeSession?.sessionId}
       >
         <textarea aria-label={`Сообщение ${agentProfile || "default"}`} />
         {mobileHistory?.open && mobileHistory.host
@@ -87,7 +90,7 @@ vi.mock("@/pages/BubbleChatPage", async () => {
 import AgentWorkbenchPage from "./AgentWorkbenchPage";
 import { $agentConversations } from "@/lib/agent-conversations";
 import { $agentsView, resetAgentsViewForTests } from "@/lib/agents-view";
-import { $chatRuns, $dismissedRunToasts, $failedChatRuns, $unreadChatRuns, $viewedChat, refreshChatRuns, type ChatRun } from "@/lib/chat-runs";
+import { $chatRuns, $chatRunsUnavailableProfiles, $dismissedRunToasts, $failedChatRuns, $unreadChatRuns, $viewedChat, refreshChatRuns, type ChatRun } from "@/lib/chat-runs";
 import { $mobileNavOpen } from "@/lib/mobile-nav";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -100,12 +103,12 @@ function LocationProbe() {
   return <output data-testid="location" data-state={JSON.stringify(location.state ?? null)}>{location.pathname}</output>;
 }
 
-function stubViewport(desktop: boolean) {
+function stubViewport(desktop: boolean, finePointer = false) {
   Object.defineProperty(window, "matchMedia", {
     configurable: true,
     writable: true,
     value: (query: string) => ({
-      matches: query.includes("min-width: 1024px") ? desktop : false,
+      matches: query.includes("min-width: 1024px") ? desktop : query === "(pointer: fine)" && finePointer,
       media: query,
       onchange: null,
       addEventListener: () => {},
@@ -198,6 +201,7 @@ afterEach(async () => {
   container.remove();
   document.body.innerHTML = "";
   $chatRuns.set([]);
+  $chatRunsUnavailableProfiles.set([]);
   $unreadChatRuns.set([]);
   $failedChatRuns.set([]);
   $dismissedRunToasts.set([]);
@@ -316,7 +320,7 @@ describe("«Вкладки» на телефоне", () => {
     expect(works.textContent).toContain("Ждут вашего решения");
     expect(works.textContent).toContain("Не завершились");
     await click([...works.querySelectorAll("button")].find((button) => button.textContent === "Решить")!);
-    expect(container.querySelector("[data-testid=chat-bitrix]")?.getAttribute("data-decisions-request")).toBe("1");
+    expect(container.querySelector("[data-testid=chat-bitrix]")?.getAttribute("data-resume-session")).toBe("bitrix-chat");
   });
 
   it("новый ответ другого агента — под шапкой, без рода, касание открывает ответ", async () => {
@@ -352,6 +356,15 @@ describe("«Вкладки» на телефоне", () => {
     expect(container.querySelector("[data-agent-notice]")).toBeNull();
     expect($unreadChatRuns.get().map((item) => item.message_id)).toEqual(unreadBefore);
     expect(fetcher.mock.calls.filter(([, init]) => init?.method && init.method !== "GET")).toHaveLength(0);
+  });
+
+  it("фокус композера при обычной клавиатуре не прячет навигацию узкого окна", async () => {
+    stubViewport(false, true);
+    await render(page());
+    const field = container.querySelector<HTMLTextAreaElement>("[aria-label='Сообщение designer']")!;
+    await act(async () => field.focus());
+    expect(document.activeElement).toBe(field);
+    expect(container.querySelector("[data-agents-mobile]")?.hasAttribute("data-typing")).toBe(false);
   });
 
   it("при наборе полоса уходит, строка разговора остаётся", async () => {
@@ -407,5 +420,81 @@ describe("десктоп не меняется", () => {
     expect(container.querySelector("[data-agents-mobile]")).toBeNull();
     expect(container.querySelector("[data-agent-list-home]")).toBeNull();
     expect(container.textContent).toContain("В работе");
+    const waitingLink = container.querySelector<HTMLAnchorElement>("[data-agent-tab-profile='bitrix'] [data-waiting-link]")!;
+    expect(waitingLink.closest("button")).toBeNull();
+    expect(waitingLink.getAttribute("aria-label")).toContain("Нюра | Bitrix ждёт вас · Поздравить без указания имени");
+    await click(waitingLink);
+    expect(container.querySelector("[data-testid=chat-bitrix]")?.getAttribute("data-resume-session")).toBe("bitrix-chat");
+    await act(async () => $chatRuns.set([...BUSY_RUNS, run("bitrix", "waiting_decision", { message_id: "second-decision", session_id: "second-chat", title: "Второй исходный чат" })]));
+    const multiple = container.querySelector<HTMLButtonElement>("[data-agent-tab-profile='bitrix'] button[data-waiting-link]")!;
+    expect(multiple.getAttribute("aria-label")).toContain("Второй исходный чат");
+    await click(multiple);
+    const activity = container.querySelector('[aria-label="Работающие чаты"]')!;
+    expect(activity.closest("details")?.open).toBe(true);
+    expect(activity.querySelectorAll('a[href*="agent=bitrix"]')).toHaveLength(2);
+  });
+});
+
+
+it("ссылка недоступного чата раскрывает решения нужного агента без создания чата", async () => {
+  await render(page("/agents?agent=bitrix&decisions=1"));
+  const target = container.querySelector("[data-testid=chat-bitrix]");
+  expect(target?.getAttribute("data-active")).toBe("true");
+  expect(target?.getAttribute("data-decisions-request")).toBe("1");
+  expect(target?.getAttribute("data-resume-session")).toBeNull();
+});
+
+
+describe.each(["tabs", "list"] as const)("недоступный профиль на мобильной поверхности: %s", (mode) => {
+  it("не объявляет пустой опрос отсутствием работ и называет недоступного агента", async () => {
+    setView(mode);
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) =>
+      String(input).includes("/api/chat/runs")
+        ? Response.json({ runs: [], unavailable_profiles: ["bitrix"] })
+        : Response.json({ ok: true })));
+    await render(page(mode === "list" ? "/agents" : "/agents?agent=designer"));
+    const trigger = container.querySelector<HTMLButtonElement>(".k-act")!;
+    expect(trigger.textContent).toBe("?");
+    await click(trigger);
+    const sheet = container.querySelector("[role=dialog]")!;
+    expect(sheet.textContent).toContain("Недоступны агенты: Нюра | Bitrix");
+    expect(sheet.textContent).toContain("Их активность и решения пока неизвестны");
+    expect(sheet.textContent).not.toContain("Сейчас агенты ничего не выполняют");
+    expect(trigger.getAttribute("aria-label")).toContain("часть профилей недоступна");
+    await click(sheet.querySelector("[aria-label='Закрыть']")!);
+    if (mode === "list") {
+      expect(container.querySelector("[data-agent-list-item='bitrix']")?.textContent).toContain("Статус требует проверки");
+    } else {
+      await click(byLabel("Все агенты:"));
+      expect(container.querySelector("[data-agent-list-item='bitrix']")?.textContent).toContain("Статус требует проверки");
+    }
+  });
+
+  it("сохраняет работу здорового агента и навигацию, снимает неизвестность после восстановления", async () => {
+    setView(mode);
+    const snapshot = { runs: [run("designer", "running", { title: "Проверка доступного агента" })], unavailable_profiles: ["bitrix"] };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) =>
+      String(input).includes("/api/chat/runs") ? Response.json(snapshot) : Response.json({ ok: true })));
+    await render(page(mode === "list" ? "/agents" : "/agents?agent=bitrix"));
+    expect(container.querySelector(".k-act__n")?.textContent).toBe("1");
+    await click(container.querySelector(".k-act")!);
+    const sheet = container.querySelector("[role=dialog]")!;
+    expect(sheet.textContent).toContain("Недоступны агенты: Нюра | Bitrix");
+    expect(sheet.textContent).toContain("Работает");
+    const open = [...sheet.querySelectorAll("button")].find(button => button.textContent === "Открыть")!;
+    await click(open);
+    expect(container.querySelector("[role=dialog]")).toBeNull();
+    const chat = container.querySelector("[data-testid=chat-designer]")!;
+    expect(chat.getAttribute("data-active")).toBe("true");
+    expect(chat.getAttribute("data-resume-session")).toBe("designer-chat");
+    snapshot.unavailable_profiles = [];
+    snapshot.runs = [];
+    await act(async () => { await refreshChatRuns(); });
+    if (mode === "list") await click(byLabel("Все агенты"));
+    const trigger = container.querySelector<HTMLButtonElement>(".k-act")!;
+    expect(trigger.getAttribute("aria-label")).toBe("Сейчас агенты ничего не выполняют");
+    await click(trigger);
+    expect(container.querySelector("[role=dialog]")?.textContent).not.toContain("Недоступны агенты");
+    expect(container.querySelector("[role=dialog]")?.textContent).toContain("Сейчас агенты ничего не выполняют");
   });
 });

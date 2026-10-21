@@ -112,6 +112,7 @@ def test_deliver_wake_non_push_self_posts_raw_session_id(monkeypatch):
     async def handler(request):
         seen["session_id"] = request.headers.get("X-Hermes-Session-Id")
         seen["auth"] = request.headers.get("Authorization")
+        seen["idem"] = request.headers.get("Idempotency-Key")
         seen["body"] = await request.json()
         return web.json_response({"choices": [{"message": {"content": "ok"}}]})
 
@@ -119,13 +120,16 @@ def test_deliver_wake_non_push_self_posts_raw_session_id(monkeypatch):
         runner, port = await _serve(handler)
         try:
             adapter = ApiServerLikeAdapter(host="0.0.0.0", port=port, key="sekrit")
-            await deliver_wake(adapter, text="task done — wake", session_id="raw-sid-42")
+            await deliver_wake(adapter, text="task done — wake", session_id="raw-sid-42",
+                               idempotency_key="async_delegation:d1")
         finally:
             await runner.cleanup()
 
     asyncio.run(run())
     assert seen["session_id"] == "raw-sid-42"
     assert seen["auth"] == "Bearer sekrit"
+    # Повтор доставки того же уведомления — тот же ход на сервере.
+    assert seen["idem"] == "korra-wake:raw-sid-42:async_delegation:d1"
     assert seen["body"]["stream"] is False
     assert seen["body"]["messages"] == [
         {"role": "user", "content": "task done — wake"}

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import sqlite3
 import time
 from pathlib import Path
 from typing import Any, Iterable
@@ -74,29 +73,6 @@ def _gateway_heartbeat_live(home: Path, now: float) -> bool:
         return bool(psutil.pid_exists(pid))
     except (OSError, psutil.Error, ValueError, TypeError, json.JSONDecodeError):
         return False
-
-
-def _pending_decisions(home: Path) -> list[dict[str, Any]]:
-    from tools.effect_decisions import EffectDecisionStoreUnavailable
-
-    path = home / "effect_decisions.sqlite3"
-    if not path.is_file():
-        return []
-    connection: sqlite3.Connection | None = None
-    try:
-        connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1.0)
-        connection.row_factory = sqlite3.Row
-        rows = connection.execute(
-            "SELECT id, source_session_id, source_session_key, created_at, updated_at "
-            "FROM effect_decisions WHERE status = 'pending' "
-            "ORDER BY created_at DESC LIMIT 100"
-        ).fetchall()
-        return [dict(row) for row in rows]
-    except (OSError, sqlite3.Error) as exc:
-        raise EffectDecisionStoreUnavailable() from exc
-    finally:
-        if connection is not None:
-            connection.close()
 
 
 def _session_meta(row: dict[str, Any] | None) -> dict[str, Any]:
@@ -276,8 +252,7 @@ def _load_profile_snapshot(profile: str, home: Path, now: float) -> dict[str, An
             "unread": False,
         })
 
-    decisions = _pending_decisions(home)
-    decisions.extend(kanban_pending)
+    decisions = kanban_pending
     # One row per conversation keeps «работ» honest, but the owner must still
     # see how many decisions wait: four birthday greetings in one chat are
     # four answers, not one (Birukova, 27.09).
@@ -355,11 +330,15 @@ def project_chat_activity(
     profile: str | None,
     session_id: str | None,
     now: float | None = None,
+    unavailable_profiles: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Enrich browser runs and add cross-channel global activity rows."""
     current = time.time() if now is None else float(now)
     snapshots: dict[str, dict[str, Any]] = {}
-    for wire_profile, home in _profile_targets(profile):
+    targets = _profile_targets(None)
+    for wire_profile, home in targets:
+        if profile is not None and wire_profile != profile:
+            continue
         try:
             snapshots[wire_profile] = _load_profile_snapshot(wire_profile, home, current)
         except Exception as exc:
@@ -369,20 +348,65 @@ def project_chat_activity(
                 # A missing pending decision is not optional enrichment: it can
                 # invite the user to repeat an external effect. Surface the
                 # degraded store instead of presenting a false empty state.
-                raise
+                if unavailable_profiles is None:
+                    raise
+            if unavailable_profiles is not None:
+                unavailable_profiles.add(wire_profile or "default")
             # Status polling must survive one damaged/locked profile.  The
             # browser ledger remains visible and the caller can mark the poll
             # reachable; it just lacks optional cross-channel enrichment.
             continue
 
+    from korra_cli.effect_decision_routes import effect_routes
+    groups: dict[tuple[str, str], list[dict]] = {}
+    routes = effect_routes(targets=targets, pending_only=True, unavailable_profiles=unavailable_profiles)
+    for route in routes:
+        wire = _wire_profile(route["profile"])
+        if profile is not None and wire != profile:
+            continue
+        key = (wire, route["id"] if route["decision_fallback"] else route["session_id"])
+        groups.setdefault(key, []).append(route)
+    for (wire, _key), decisions in groups.items():
+        route = max(decisions, key=lambda r: r["updated_at"])
+        sid = route["session_id"]
+        snapshot = snapshots.setdefault(wire, {"metadata": {}, "activity": []})
+        meta = _session_meta(route["session"])
+        if not route["decision_fallback"]:
+            snapshot["metadata"].setdefault(sid, meta)
+            snapshot["activity"] = [item for item in snapshot["activity"] if not (
+                item["session_id"] == sid and item["status"] in {"running", "stale"}
+            )]
+        existing = next((item for item in snapshot["activity"] if
+                         item["session_id"] == sid and item["status"] == "waiting_decision"
+                         and not route["decision_fallback"]), None)
+        if existing:
+            existing["pending_decisions"] += len(decisions)
+            continue
+        snapshot["activity"].append({
+            **meta,
+            "message_id": _stable_id("decision", route["ledger_profile"], route["id"]),
+            "session_id": sid, "profile": wire, "status": "waiting_decision",
+            "pending_decisions": len(decisions),
+            "decision_fallback": route["decision_fallback"],
+            "decision_reason": route["decision_reason"],
+            "updated_at": float(route["updated_at"] or route["created_at"] or 0),
+            "started_at": float(route["created_at"] or 0),
+            "delivery": "pending", "unread": False,
+            "user_message": {"role": "user", "content": "Ожидает вашего решения"},
+        })
+
     by_session_status: dict[tuple[str, str], str] = {}
     by_session_decisions: dict[tuple[str, str], int] = {}
     by_session_boards: dict[tuple[str, str], list[str]] = {}
+    by_session_route: dict[tuple[str, str], dict] = {}
     for wire_profile, snapshot in snapshots.items():
         for item in snapshot["activity"]:
+            if item.get("decision_fallback"):
+                continue  # An unresolved origin is not the browser chat with this raw ID.
             status = item["status"]
             key = (wire_profile, item["session_id"])
             if status == "waiting_decision":
+                by_session_route[key] = {field: item[field] for field in ("decision_fallback", "decision_reason") if field in item}
                 by_session_decisions[key] = int(item.get("pending_decisions") or 1)
                 if item.get("kanban_task_urls"):
                     by_session_boards[key] = list(item["kanban_task_urls"])
@@ -409,6 +433,7 @@ def project_chat_activity(
             "interrupted", "queued", "running", "waiting_decision"
         }:
             item["status"] = durable_status
+            item.update(by_session_route.get(key, {}))
             item["pending_decisions"] = by_session_decisions.get(key, 1)
             if key in by_session_boards:
                 item["kanban_task_urls"] = by_session_boards[key]
@@ -444,6 +469,7 @@ def project_chat_activity(
                 continue
             if (
                 item["status"] in {"running", "stale", "waiting_decision"}
+                and not item.get("decision_fallback")
                 and key in browser_active_sessions
             ):
                 continue

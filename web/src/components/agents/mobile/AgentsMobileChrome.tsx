@@ -54,6 +54,7 @@ import type { AgentTabConfig } from "@/lib/agent-tabs";
 import { $agentsView, type AgentsMobileMode } from "@/lib/agents-view";
 import {
   $chatRuns,
+  $chatRunsUnavailableProfiles,
   $dismissedRunToasts,
   $failedChatRuns,
   $unreadChatRuns,
@@ -165,6 +166,7 @@ export function useAgentsMobileChrome({
   actions,
 }: AgentsMobileChromeOptions): AgentsMobileChrome {
   const runs = useStore($chatRuns);
+  const unavailable = useStore($chatRunsUnavailableProfiles);
   const unread = useStore($unreadChatRuns);
   const failed = useStore($failedChatRuns);
   const dismissed = useStore($dismissedRunToasts);
@@ -177,7 +179,11 @@ export function useAgentsMobileChrome({
     () => buildAgentStatuses(allTabs.map((tab) => tab.profile), runs, unread, failed),
     [allTabs, runs, unread, failed],
   );
-  const statusOf = useCallback((profile: string): AgentStatus => statuses.get(profile) ?? IDLE_STATUS, [statuses]);
+  const statusOf = useCallback((profile: string): AgentStatus => {
+    const status = statuses.get(profile) ?? IDLE_STATUS;
+    // Unknown profile data is not evidence of an additional task.
+    return unavailable.includes(profile) ? { ...status, stale: true } : status;
+  }, [statuses, unavailable]);
   const lastActive = useMemo(
     () => new Map(Object.entries(conversations).map(([profile, summary]) => [profile, summary.lastActive ?? 0])),
     [conversations],
@@ -290,6 +296,9 @@ export function useAgentsMobileChrome({
   const onFocusCapture = (event: { target: EventTarget }) => {
     const target = event.target as HTMLElement;
     if (target.tagName !== "TEXTAREA" || !target.closest("[data-agent-panel]")) return;
+    // Узкое окно с мышью тоже использует эту шапку. Автофокус композера
+    // там не открывает экранную клавиатуру и не должен убирать навигацию.
+    if (window.matchMedia?.("(pointer: fine)").matches) return;
     if (blurTimer.current !== null) window.clearTimeout(blurTimer.current);
     setTyping(true);
   };
@@ -350,7 +359,7 @@ export function useAgentsMobileChrome({
         <h1 className="k-home-title">
           Агенты<span className="k-sheet__n">{allTabs.length}</span>
         </h1>
-        <ActivityRing count={works} aria-haspopup="dialog" aria-expanded={sheet?.kind === "activity"} onClick={() => toggleSheet("activity")} />
+        <ActivityRing count={works} unavailable={unavailable.length > 0} aria-haspopup="dialog" aria-expanded={sheet?.kind === "activity"} onClick={() => toggleSheet("activity")} />
         <button type="button" className="k-ib k-add" aria-label="Добавить агента" onClick={actions.addAgent}>
           <Plus size={20} aria-hidden className="k-icon" />
         </button>
@@ -449,7 +458,7 @@ export function useAgentsMobileChrome({
             )}
           </button>
         </div>
-        <ActivityRing count={works} aria-haspopup="dialog" aria-expanded={sheet?.kind === "activity"} onClick={() => toggleSheet("activity")} />
+        <ActivityRing count={works} unavailable={unavailable.length > 0} aria-haspopup="dialog" aria-expanded={sheet?.kind === "activity"} onClick={() => toggleSheet("activity")} />
       </nav>
     </div>
   );
@@ -474,6 +483,8 @@ export function useAgentsMobileChrome({
   } else if (sheet?.kind === "activity") {
     sheetNode = (
       <ActivitySheet
+        count={works}
+        unavailableProfiles={unavailable}
         runs={runs}
         failed={failed}
         tabs={allTabs}

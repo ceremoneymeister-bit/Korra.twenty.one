@@ -27,6 +27,7 @@ import type { ComponentType } from "react";
 import { translateApprovalDescription } from "@/lib/approval-descriptions";
 import type { ApprovalChoiceValue, EffectDecisionKind } from "@/lib/chat-types";
 import { cn } from "@/lib/utils";
+import { DecisionAge } from "./DecisionAge";
 // Переходы элементов чата живут в одном файле — там же единственный на всю
 // папку блок prefers-reduced-motion.
 import "./agent-trace.css";
@@ -77,6 +78,8 @@ const SETTLED_LABEL: Record<ApprovalChoiceValue, string> = {
 export interface CommandApprovalCardProps {
   /** Exact external effect; missing means a dangerous-command approval. */
   decisionKind?: EffectDecisionKind;
+  /** Время создания решения, Unix seconds. */
+  timestamp?: number;
   /** Команда как её показывает движок: секреты уже вырезаны на сервере. */
   command?: string;
   taskUrl?: string;
@@ -99,6 +102,7 @@ export interface CommandApprovalCardProps {
 
 export function CommandApprovalCard({
   decisionKind,
+  timestamp,
   command,
   taskUrl,
   description,
@@ -174,7 +178,7 @@ export function CommandApprovalCard({
   return (
     <div
       className={cn(
-        "korra-trace__row max-w-[34rem] rounded-[var(--neo-radius-card)] p-3",
+        "korra-trace__row min-w-0 max-w-[34rem] rounded-[var(--neo-radius-card)] p-3",
         "bg-[var(--neo-surface)] shadow-[var(--neo-depth-2)]",
         "font-sans normal-case tracking-normal",
       )}
@@ -194,7 +198,7 @@ export function CommandApprovalCard({
           className="mt-0.5 flex-none text-[var(--neo-text-secondary)]"
         />
         <div className="min-w-0">
-          <p className="text-xs leading-snug font-medium text-[var(--neo-text-primary)]">
+          <p className="text-[13px] leading-snug font-medium text-[var(--neo-text-primary)]">
             {board ? "Ждёт вас" : payment
               ? "Проверьте оплату"
               : recipients
@@ -202,19 +206,21 @@ export function CommandApprovalCard({
                 : outbound ? "Проверьте внешнюю отправку" : "Агент просит разрешение на команду"}
           </p>
           {trimmedDescription && (
-            <p className="mt-0.5 text-[11px] leading-snug text-[var(--neo-text-secondary)]">
+            <p className="mt-0.5 text-[13px] leading-snug text-[var(--neo-text-secondary)]">
               {trimmedDescription}
             </p>
           )}
         </div>
       </div>
 
+      <DecisionAge timestamp={timestamp} warningKind={!settled && !expired ? decisionKind : undefined} />
+
       {trimmedCommand && !settled && !expired && (
         <pre
           className={cn(
             "mb-2 max-h-32 overflow-auto rounded-[var(--neo-radius-control)] px-2.5 py-2",
             "bg-[var(--neo-surface)] shadow-[var(--neo-inset-compact)]",
-            "font-mono text-[10.5px] leading-relaxed whitespace-pre-wrap break-words",
+            "font-mono text-[13px] leading-relaxed whitespace-pre-wrap break-words",
             "text-[var(--neo-text-secondary)]",
           )}
         >
@@ -223,19 +229,19 @@ export function CommandApprovalCard({
       )}
 
       {board && taskUrl && (
-        <Link className="mb-2 block text-xs underline" to={taskUrl}>Открыть карточку поручения</Link>
+        <Link className="mb-2 block text-[13px] underline" to={taskUrl}>Открыть карточку поручения</Link>
       )}
       {board && !settled && !expired && (
-        <label className="mb-2 block text-xs">
+        <label className="mb-2 block text-[13px]">
           {boardAccept ? "Что исправить (для возврата)" : boardApproval ? "Комментарий (необязательно)" : "Ваш ответ"}
           <textarea className="mt-1 w-full rounded border p-2" rows={3} value={answer}
             disabled={sending} onChange={event => setAnswer(event.target.value)} />
-          {boardAccept && !answer.trim() && <span className="block text-[11px]">Для возврата напишите, что исправить.</span>}
+          {boardAccept && !answer.trim() && <span className="block text-[13px]">Для возврата напишите, что исправить.</span>}
         </label>
       )}
       {settled ? (
         <div>
-          <p className="flex items-center gap-1.5 text-[11px] text-[var(--neo-text-secondary)]">
+          <p className="flex items-center gap-1.5 text-[13px] text-[var(--neo-text-secondary)]">
             {decision === "deny" ? (
               <Ban size={12} aria-hidden />
             ) : (
@@ -244,13 +250,13 @@ export function CommandApprovalCard({
             {settledLabel}
           </p>
           {note && (
-            <p className="mt-1 text-[10.5px] leading-snug text-[var(--neo-text-secondary)]">
+            <p className="mt-1 text-[13px] leading-snug text-[var(--neo-text-secondary)]">
               {note}
             </p>
           )}
         </div>
       ) : expired ? (
-        <p className="text-[11px] leading-snug text-[var(--neo-text-secondary)]">
+        <p className="text-[13px] leading-snug text-[var(--neo-text-secondary)]">
           Агент больше не ждёт ответа: ход закончился или истекло время.
         </p>
       ) : (
@@ -276,9 +282,9 @@ export function CommandApprovalCard({
                 }}
                 className={cn(
                   "korra-approval__option",
-                  "flex w-full items-center gap-2 rounded-[var(--neo-radius-control)] px-2 py-1.5",
+                  "flex w-full flex-wrap items-baseline gap-x-2 gap-y-0.5 rounded-[var(--neo-radius-control)] px-2 py-1.5",
                   "border-0 bg-transparent text-left outline-0",
-                  "text-xs text-[var(--neo-text-secondary)]",
+                  "text-[13px] text-[var(--neo-text-secondary)]",
                   sending ? "cursor-not-allowed opacity-60" : "cursor-pointer",
                   awaiting &&
                     "shadow-[var(--neo-inset-compact)] text-[var(--neo-text-primary)]",
@@ -295,7 +301,7 @@ export function CommandApprovalCard({
                 >
                   {awaiting ? `${meta.label} — точно?` : meta.label}
                 </span>
-                <span className="min-w-0 flex-1 truncate text-[10.5px] text-[var(--neo-text-secondary)]">
+                <span className="min-w-0 flex-1 basis-40 whitespace-normal break-words text-[13px] text-[var(--neo-text-secondary)]">
                   {awaiting ? "Нажмите ещё раз, чтобы записать правило" : meta.hint}
                 </span>
               </button>
@@ -305,7 +311,7 @@ export function CommandApprovalCard({
       )}
 
       {error && !settled && (
-        <p className="mt-2 text-[11px] text-[var(--destructive)]">{error}</p>
+        <p className="mt-2 text-[13px] text-[var(--destructive)]">{error}</p>
       )}
     </div>
   );

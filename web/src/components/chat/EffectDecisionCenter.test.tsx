@@ -74,6 +74,28 @@ afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
   vi.clearAllMocks();
+  vi.restoreAllMocks();
+  delete window.__KORRA_OWNER_TIMEZONE__;
+});
+
+it("центр сохраняет дату создания pending, старой очереди и истории", async () => {
+  vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-10-19T05:30:00Z"));
+  window.__KORRA_OWNER_TIMEZONE__ = "Asia/Novosibirsk";
+  const timestamp = Date.parse("2026-10-03T11:49:00Z") / 1000;
+  vi.mocked(fetchEffectDecisions).mockResolvedValue(
+    (["pending", "needs_review", "denied"] as const).map(effect_status => ({
+      request_id: effect_status, decision_kind: "outbound_message", effect_status,
+      source_session_id: "chat-b", timestamp, updated_at: Date.now() / 1000,
+      command: "Кому: k21b-no-transport\nТестовый черновик", choices: ["once", "deny"],
+    })),
+  );
+  await act(async () => root.render(<EffectDecisionCenter />));
+  await settle();
+  await click("Решения");
+  expect([...container.querySelectorAll("time")].map(time => time.textContent)).toEqual(
+    Array(3).fill("03.10.2026 в 18:49"),
+  );
+  expect(container.querySelectorAll('[role="note"]')).toHaveLength(1);
 });
 
 describe("EffectDecisionCenter", () => {
@@ -177,4 +199,59 @@ it("старые результаты можно закрыть без отпр�
   expect([...container.querySelectorAll("button")].some((b) => b.textContent === "Отправить")).toBe(false);
   await click("Закрыть без отправки");
   expect(sendApprovalDecision).toHaveBeenCalledWith({ sessionId: "old", requestId: "legacy", choice: "deny", profile: "sales" });
+});
+
+
+it("диплинк сразу раскрывает решение и объясняет потерянный исходный чат", async () => {
+  vi.mocked(fetchEffectDecisions).mockResolvedValue([{
+    request_id: "effect_missing", decision_kind: "outbound_message", effect_status: "pending",
+    source_session_id: "deleted-chat", command: "Тестовый черновик",
+    decision_fallback: true, decision_reason: "Исходный чат удалён. Ответьте здесь.",
+  }]);
+  await act(async () => root.render(<EffectDecisionCenter profile="sales" expandRequest={1} />));
+  await settle();
+  expect(container.querySelector("button")?.getAttribute("aria-expanded")).toBe("true");
+  expect(container.textContent).toContain("Исходный чат удалён. Ответьте здесь.");
+  await click("Не отправлять");
+  expect(sendApprovalDecision).toHaveBeenCalledWith({ sessionId: "deleted-chat", requestId: "effect_missing", choice: "deny", profile: "sales" });
+});
+
+
+it.each(["pending", "needs_review"] as const)("не предлагает ответ для %s с неоднозначным ledger", async (status) => {
+  vi.mocked(fetchEffectDecisions).mockResolvedValue([{
+    request_id: "effect_blocked", decision_kind: "outbound_message", effect_status: status,
+    source_session_id: "old-chat", command: "Сохранённый черновик", choices: [],
+    decision_fallback: true, decision_reason: "Найдено несколько записей решения. Нужна проверка.",
+  }]);
+  await act(async () => root.render(<EffectDecisionCenter profile="sales" expandRequest={1} />));
+  await settle();
+  if (status === "needs_review") container.querySelector("details")!.open = true;
+  expect(container.textContent).toContain("Найдено несколько записей решения. Нужна проверка.");
+  expect(container.textContent).not.toContain("Закрыть без отправки");
+  expect(container.textContent).not.toContain("Не отправлять");
+  expect(container.textContent).not.toContain("Отправить");
+  expect(sendApprovalDecision).not.toHaveBeenCalled();
+});
+
+describe("EffectDecisionCenter в скрытой вкладке (UX 17.10)", () => {
+  it("не опрашивает сервер, пока вкладка скрыта, и обновляется при возврате", async () => {
+    vi.useFakeTimers();
+    const setHidden = (hidden: boolean) => {
+      Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
+      document.dispatchEvent(new Event("visibilitychange"));
+    };
+    try {
+      await act(async () => root.render(<EffectDecisionCenter profile="" active currentSessionId={null} />));
+      const calls = () => vi.mocked(fetchEffectDecisions).mock.calls.length;
+      const initial = calls();
+      setHidden(true);
+      await act(async () => { vi.advanceTimersByTime(30_000); });
+      expect(calls()).toBe(initial);
+      await act(async () => { setHidden(false); });
+      expect(calls()).toBe(initial + 1);
+    } finally {
+      setHidden(false);
+      vi.useRealTimers();
+    }
+  });
 });

@@ -8,6 +8,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 import gateway.run as gateway_run
+from agent.conversation_loop import CODEX_INCOMPLETE_SENTINEL, SCRATCHPAD_INCOMPLETE_SENTINEL
+from gateway.response_filters import UNEXPECTED_SILENCE_REPLY
 from gateway.config import GatewayConfig, Platform, PlatformConfig
 from gateway.platforms.base import BasePlatformAdapter, MessageEvent, ProcessingOutcome, SendResult
 from gateway.session import SessionEntry, SessionSource, build_session_key
@@ -49,11 +51,13 @@ class CaptureSlackAdapter(BasePlatformAdapter):
         self.processing_hooks.append(("complete", event.message_id, outcome))
 
 
-def _make_incomplete_result() -> dict:
+_EN_SENTINEL = "Codex response remained incomplete after 3 continuation attempts"
+
+
+def _make_incomplete_result(_sentinel: str = _EN_SENTINEL) -> dict:
     # Mirror the REAL conversation-loop exhaustion shape: the sentinel text is
     # returned as BOTH final_response and error (agent/conversation_loop.py's
-    # "remained incomplete after 3 continuation attempts" return).
-    _sentinel = "Codex response remained incomplete after 3 continuation attempts"
+    # CODEX_INCOMPLETE_SENTINEL return; English — legacy builds).
     return {
         "final_response": _sentinel,
         "messages": [
@@ -71,7 +75,7 @@ def _make_incomplete_result() -> dict:
     }
 
 
-def _make_runner(adapter: CaptureSlackAdapter) -> gateway_run.GatewayRunner:
+def _make_runner(adapter: CaptureSlackAdapter, sentinel: str = _EN_SENTINEL) -> gateway_run.GatewayRunner:
     runner = object.__new__(gateway_run.GatewayRunner)
     runner.config = GatewayConfig(
         platforms={Platform.SLACK: PlatformConfig(enabled=True, token="fake-token")}
@@ -103,11 +107,11 @@ def _make_runner(adapter: CaptureSlackAdapter) -> gateway_run.GatewayRunner:
     runner._session_db = None
     runner._is_user_authorized = lambda _source: True
     runner._set_session_env = lambda _context: None
-    runner._run_agent = AsyncMock(return_value=_make_incomplete_result())
+    runner._run_agent = AsyncMock(return_value=_make_incomplete_result(sentinel))
     return runner
 
 
-def _make_event() -> MessageEvent:
+def _make_event(**extra) -> MessageEvent:
     return MessageEvent(
         text="hello",
         source=SessionSource(
@@ -118,13 +122,15 @@ def _make_event() -> MessageEvent:
             user_id="U123",
         ),
         message_id="m-1",
+        **extra,
     )
 
 
 @pytest.mark.asyncio
-async def test_incomplete_codex_turn_stays_out_of_slack_transcript(monkeypatch, tmp_path):
+@pytest.mark.parametrize("sentinel", [_EN_SENTINEL, CODEX_INCOMPLETE_SENTINEL, SCRATCHPAD_INCOMPLETE_SENTINEL])
+async def test_incomplete_codex_turn_stays_out_of_slack_transcript(monkeypatch, tmp_path, sentinel):
     adapter = CaptureSlackAdapter()
-    runner = _make_runner(adapter)
+    runner = _make_runner(adapter, sentinel)
 
     monkeypatch.setattr(gateway_run, "_hermes_home", tmp_path)
     monkeypatch.setattr(gateway_run, "_resolve_runtime_agent_kwargs", lambda: {"api_key": "fake"})
@@ -140,7 +146,8 @@ async def test_incomplete_codex_turn_stays_out_of_slack_transcript(monkeypatch, 
     event = _make_event()
     await adapter._process_message_background(event, build_session_key(event.source))
 
-    assert adapter.sent == []
+    # Сентинел цикла (и русский, В1) человеку не уходит, но без ответа он не остаётся.
+    assert [m["content"] for m in adapter.sent] == [UNEXPECTED_SILENCE_REPLY]
     assert runner.session_store.update_session.called
 
     transcript_roles = [
@@ -153,3 +160,36 @@ async def test_incomplete_codex_turn_stays_out_of_slack_transcript(monkeypatch, 
         ("start", "m-1"),
         ("complete", "m-1", ProcessingOutcome.SUCCESS),
     ]
+
+
+def test_russian_sentinel_is_recognized():
+    for sentinel in (_EN_SENTINEL, CODEX_INCOMPLETE_SENTINEL, SCRATCHPAD_INCOMPLETE_SENTINEL):
+        assert gateway_run._is_gateway_hidden_reasoning_incomplete_turn(_make_incomplete_result(sentinel))
+    # Настоящий ответ модели при той же ошибке — это ответ, его доставляют.
+    real = _make_incomplete_result(CODEX_INCOMPLETE_SENTINEL)
+    real["final_response"] = "Готово: отчёт проверен"
+    assert not gateway_run._is_gateway_hidden_reasoning_incomplete_turn(real)
+
+
+@pytest.mark.asyncio
+async def test_incomplete_service_turn_stays_silent(monkeypatch, tmp_path):
+    """Служебный ход (уведомление о фоновой работе) из одних рассуждений молчит."""
+    adapter = CaptureSlackAdapter()
+    runner = _make_runner(adapter, CODEX_INCOMPLETE_SENTINEL)
+
+    monkeypatch.setattr(gateway_run, "_hermes_home", tmp_path)
+    monkeypatch.setattr(gateway_run, "_resolve_runtime_agent_kwargs", lambda: {"api_key": "fake"})
+    monkeypatch.setattr(
+        "agent.model_metadata.get_model_context_length",
+        lambda *_args, **_kwargs: 100,
+    )
+    monkeypatch.setenv("SLACK_HOME_CHANNEL", "C123")
+
+    adapter.set_message_handler(runner._handle_message)
+    adapter._keep_typing = lambda *_args, **_kwargs: asyncio.Event().wait()
+
+    event = _make_event(internal=True)
+    await adapter._process_message_background(event, build_session_key(event.source))
+
+    runner._run_agent.assert_awaited_once()
+    assert adapter.sent == []

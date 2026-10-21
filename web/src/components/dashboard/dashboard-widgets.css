@@ -22,6 +22,18 @@
     -2px -2px 5px color-mix(in srgb, var(--neo-highlight) 70%, transparent);
   --kdw-warn: var(--warning, #c98a00);
   --kdw-danger: var(--destructive, #c2410c);
+  /* Линия лимита: настоящие зелёный, оранжевый и красный (светлая тема); тёмная — ниже. */
+  --kdw-quota-green: #1f8a3b;
+  --kdw-quota-orange: #b85f00;
+  --kdw-quota-red: #c81e1e;
+}
+
+@supports (color: light-dark(#000000, #ffffff)) {
+  .korra-dashboard {
+    --kdw-quota-green: light-dark(#1f8a3b, #3fcf5f);
+    --kdw-quota-orange: light-dark(#b85f00, #ff9f1a);
+    --kdw-quota-red: light-dark(#c81e1e, #ff5252);
+  }
 }
 
 /* ── Общие мелочи ─────────────────────────────────────────────────────── */
@@ -1115,12 +1127,16 @@
   font-weight: 600;
 }
 
-.kdw-limit-pct[data-level="warn"] strong {
-  color: var(--kdw-warn);
+.kdw-limit-pct[data-tone="green"] strong {
+  color: var(--kdw-quota-green);
 }
 
-.kdw-limit-pct[data-level="critical"] strong {
-  color: var(--kdw-danger);
+.kdw-limit-pct[data-tone="orange"] strong {
+  color: var(--kdw-quota-orange);
+}
+
+.kdw-limit-pct[data-tone="red"] strong {
+  color: var(--kdw-quota-red);
 }
 
 .kdw-limit--thin .kdw-limit-pct strong {
@@ -1148,12 +1164,16 @@
   background: var(--kdw-limit-color);
 }
 
-.kdw-limit-bar[data-level="warn"] {
-  --kdw-limit-color: var(--kdw-warn);
+.kdw-limit-bar[data-tone="green"] {
+  --kdw-limit-color: var(--kdw-quota-green);
 }
 
-.kdw-limit-bar[data-level="critical"] {
-  --kdw-limit-color: var(--kdw-danger);
+.kdw-limit-bar[data-tone="orange"] {
+  --kdw-limit-color: var(--kdw-quota-orange);
+}
+
+.kdw-limit-bar[data-tone="red"] {
+  --kdw-limit-color: var(--kdw-quota-red);
 }
 
 .kdw-limit--thin .kdw-limit-bar {

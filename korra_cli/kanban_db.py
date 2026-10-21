@@ -101,7 +101,17 @@ _log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 VALID_STATUSES = {"triage", "todo", "scheduled", "ready", "running", "blocked", "review", "done", "archived"}
-VALID_INITIAL_STATUSES = {"running", "blocked"}
+# Initial card states (K21: «Оператор терминала» 19.10):
+#   queued  — в очередь исполнителю: статус ready, диспетчер запустит assignee;
+#   running — прежнее имя queued, поведение то же (статус ready, не «уже идёт»);
+#   self    — «веду сам»: агент записывает собственную работу, карточка сразу
+#             running без исполнителя-процесса, диспетчер и сторожа её не трогают;
+#   blocked — сразу ждёт человека (R3).
+VALID_INITIAL_STATUSES = {"queued", "running", "self", "blocked"}
+QUEUED_INITIAL_STATUSES = {"queued", "running"}
+# actor_kind карточек, которые никогда не запускает диспетчер: шаг владельца и
+# собственная работа агента («веду сам»).
+NON_DISPATCH_ACTORS_SQL = "('human', 'self')"
 
 # Typed block reasons. Distinguishes the two fundamentally different things a
 # worker (or human) means by "blocked", so each can be routed differently
@@ -2858,7 +2868,8 @@ def _migrate_add_optional_columns(conn: sqlite3.Connection) -> None:
                 "SELECT id, assignee, claim_lock, claim_expires, worker_pid, "
                 "       max_runtime_seconds, last_heartbeat_at, started_at "
                 "FROM tasks "
-                "WHERE status = 'running' AND current_run_id IS NULL"
+                "WHERE status = 'running' AND current_run_id IS NULL "
+                "AND COALESCE(actor_kind, '') != 'self'"
             ).fetchall()
             for row in inflight:
                 started = row["started_at"] or int(time.time())
@@ -3279,8 +3290,17 @@ def create_task(
     actor_kind: Optional[str] = None,
     plan_id: Optional[str] = None,
     plan_title: Optional[str] = None,
+    self_creator_task: Optional[str] = None,
 ) -> str:
     """Create a new task and optionally link it under parent tasks.
+
+    ``initial_status`` (case-insensitive): ``queued``/``running`` — the queue;
+    ``self`` — the author's own work («веду сам»), ``running`` at once and
+    never dispatched; ``blocked`` — waits for a human until an explicit
+    unblock (the dispatcher never promotes it on its own). For a ``self``
+    card made by a dispatcher worker, ``self_creator_task`` is that worker's
+    task: the worker may close the card it recorded (see
+    :func:`self_card_creator_task`).
 
     Owner journey fields: ``acceptance="owner"`` holds a worker's result for
     the owner's acceptance; ``actor_kind="human"`` makes a step the owner
@@ -3333,6 +3353,7 @@ def create_task(
     assignee = _canonical_assignee(assignee)
     if not title or not title.strip():
         raise ValueError("title is required")
+    initial_status = str(initial_status or "running").strip().lower()
     if initial_status not in VALID_INITIAL_STATUSES:
         raise ValueError(
             f"initial_status must be one of {sorted(VALID_INITIAL_STATUSES)}"
@@ -3511,7 +3532,9 @@ def create_task(
             return row["id"]
 
     acceptance = _normalize_choice(acceptance, "acceptance", {"owner"}, none={"auto", "agent"})
-    actor_kind = _normalize_choice(actor_kind, "actor_kind", {"human"}, none={"agent"})
+    actor_kind = _normalize_choice(actor_kind, "actor_kind", {"human", "self"}, none={"agent"})
+    if initial_status == "self":
+        actor_kind = "self"
     if actor_kind == "human":
         # The owner does this step; no profile may claim it.
         assignee = None
@@ -3559,7 +3582,14 @@ def create_task(
                 # Determine task status from parent status, unless the caller
                 # parks it directly in blocked for human-ops review or in
                 # triage for a specifier.
-                if initial_status == "blocked":
+                if initial_status == "self":
+                    # «Веду сам»: работа уже идёт силами автора карточки.
+                    task_status = "running"
+                    if parents:
+                        missing = _find_missing_parents(conn, parents)
+                        if missing:
+                            raise ValueError(f"unknown parent task(s): {', '.join(missing)}")
+                elif initial_status == "blocked":
                     task_status = "blocked"
                     if parents:
                         missing = _find_missing_parents(conn, parents)
@@ -3649,6 +3679,13 @@ def create_task(
                         plan_title,
                     ),
                 )
+                if initial_status == "self":
+                    # Метка владельца работы вместо claim исполнителя; без
+                    # claim_expires — TTL-сторож и диспетчер её не трогают.
+                    conn.execute(
+                        "UPDATE tasks SET claim_lock = ?, started_at = ? WHERE id = ?",
+                        (f"self:{created_by or assignee or 'agent'}", now, task_id),
+                    )
                 for pid in parents:
                     conn.execute(
                         "INSERT OR IGNORE INTO task_links (parent_id, child_id) VALUES (?, ?)",
@@ -3675,9 +3712,18 @@ def create_task(
                         "goal_mode": bool(goal_mode) or None,
                         "model_override": model_override,
                         "provider_override": provider_override,
+                        **(
+                            {"self_creator_task": self_creator_task}
+                            if initial_status == "self" and self_creator_task
+                            else {}
+                        ),
                     },
                 )
-                _inherit_notify_subs(conn, task_id, parents, created_at=now)
+                if initial_status != "self":
+                    # A «веду сам» card is the author's own work: its
+                    # completion must not ping the parent's chat or wake
+                    # the author with a turn about what it just did.
+                    _inherit_notify_subs(conn, task_id, parents, created_at=now)
             return task_id
         except sqlite3.IntegrityError:
             if attempt == 1:
@@ -4577,9 +4623,9 @@ def _has_sticky_block(conn: sqlite3.Connection, task_id: str) -> bool:
 
     * **Circuit-breaker** — ``_record_task_failure`` tripped after
       repeated crashes / spawn failures / timeouts.  This emits
-      ``"gave_up"``, *not* ``"blocked"``, and is meant to recover
-      automatically once the underlying conditions change (e.g. parents
-      finish, transient infra error clears).
+      ``"gave_up"``, *not* ``"blocked"``. It is not sticky here, but
+      ``recompute_ready`` holds it via :func:`_breaker_tripped_since_unblock`
+      (the owner was told «сдался»; only an explicit unblock resumes it).
 
     The cheapest signal that distinguishes the two is the most recent
     ``"blocked"`` / ``"unblocked"`` event for the task.  If the most
@@ -4587,18 +4633,99 @@ def _has_sticky_block(conn: sqlite3.Connection, task_id: str) -> bool:
     no ``"unblocked"`` event has fired since), the task is sticky and
     ``recompute_ready`` must *not* auto-promote it.
 
+    A card *created* ``blocked`` (``initial_status="blocked"``, R3: needs a
+    human at once) is sticky the same way until its first ``unblocked``:
+    without this a parentless card was promoted and spawned on the first
+    dispatcher pass.
+
     Returns ``False`` when there is no such event at all (e.g. the task
     was set to ``status='blocked'`` by the circuit breaker or by direct
     DB manipulation) — preserves the pre-#28712 auto-recover semantics
     for that path.
     """
     row = conn.execute(
-        "SELECT kind FROM task_events "
-        "WHERE task_id = ? AND kind IN ('blocked', 'unblocked') "
+        "SELECT kind, payload FROM task_events "
+        "WHERE task_id = ? AND kind IN ('blocked', 'unblocked', 'created') "
         "ORDER BY id DESC LIMIT 1",
         (task_id,),
     ).fetchone()
-    return bool(row) and row["kind"] == "blocked"
+    if not row:
+        return False
+    if row["kind"] == "created":
+        try:
+            payload = json.loads(row["payload"]) if row["payload"] else {}
+        except (json.JSONDecodeError, TypeError):
+            payload = {}
+        return isinstance(payload, dict) and payload.get("status") == "blocked"
+    return row["kind"] == "blocked"
+
+
+def _breaker_tripped_since_unblock(conn: sqlite3.Connection, task_id: str) -> bool:
+    """True when the failure breaker gave up on the task and nobody has
+    unblocked it since.
+
+    ``gave_up`` is what the owner is told («сдался»). The thresholds that
+    trip it (crash/timeout paths, forced protocol-violation trips, per-call
+    limits) do not always match the limit ``recompute_ready`` is called
+    with, so the counter check alone let the same dispatcher pass promote
+    and respawn the task — and the owner later heard «сдался» again.
+    Only an explicit unblock (which resets the counter) resumes it.
+    """
+    row = conn.execute(
+        "SELECT kind FROM task_events "
+        "WHERE task_id = ? AND kind IN ('gave_up', 'unblocked') "
+        "ORDER BY id DESC LIMIT 1",
+        (task_id,),
+    ).fetchone()
+    return bool(row) and row["kind"] == "gave_up"
+
+
+def _self_card_lock(conn: sqlite3.Connection, task_id: str) -> Optional[str]:
+    """``self:<author>`` for a «веду сам» card, ``None`` for any other."""
+    row = conn.execute(
+        "SELECT actor_kind, created_by, assignee FROM tasks WHERE id = ?",
+        (task_id,),
+    ).fetchone()
+    if row is None or (row["actor_kind"] or "") != "self":
+        return None
+    return f"self:{row['created_by'] or row['assignee'] or 'agent'}"
+
+
+def _resume_self_card(conn: sqlite3.Connection, task_id: str, *, from_status: str) -> bool:
+    """Return a resumable «веду сам» card to its author: ``running`` with
+    the ``self:`` mark, never ``ready`` (the dispatcher never takes a self
+    card, so ``ready`` would be a queue nobody serves)."""
+    lock = _self_card_lock(conn, task_id)
+    if lock is None:
+        return False
+    cur = conn.execute(
+        "UPDATE tasks SET status = 'running', claim_lock = ?, claim_expires = NULL, "
+        "worker_pid = NULL, current_run_id = NULL, "
+        "started_at = COALESCE(started_at, ?) "
+        "WHERE id = ? AND status = ?",
+        (lock, int(time.time()), task_id, from_status),
+    )
+    return cur.rowcount == 1
+
+
+def self_card_creator_task(conn: sqlite3.Connection, task_id: str) -> Optional[str]:
+    """The dispatcher task whose worker recorded this «веду сам» card."""
+    task = conn.execute(
+        "SELECT actor_kind FROM tasks WHERE id = ?", (task_id,),
+    ).fetchone()
+    if task is None or (task["actor_kind"] or "") != "self":
+        return None
+    row = conn.execute(
+        "SELECT payload FROM task_events WHERE task_id = ? AND kind = 'created' "
+        "ORDER BY id ASC LIMIT 1",
+        (task_id,),
+    ).fetchone()
+    try:
+        payload = json.loads(row["payload"]) if row and row["payload"] else {}
+    except (json.JSONDecodeError, TypeError):
+        return None
+    creator = payload.get("self_creator_task") if isinstance(payload, dict) else None
+    return str(creator) if creator else None
 
 
 def _resume_status_from_events(conn: sqlite3.Connection, task_id: str) -> str:
@@ -4673,9 +4800,13 @@ def recompute_ready(
         for row in todo_rows:
             task_id = row["id"]
             cur_status = row["status"]
-            if cur_status == "blocked" and _has_sticky_block(conn, task_id):
-                # Worker / operator asked for explicit human intervention — do not
-                # silently auto-recover.  ``unblock_task`` is the only
+            if cur_status == "blocked" and (
+                _has_sticky_block(conn, task_id)
+                or _breaker_tripped_since_unblock(conn, task_id)
+            ):
+                # Worker / operator asked for explicit human intervention, or
+                # the failure breaker gave up and the owner was told so — do
+                # not silently auto-recover.  ``unblock_task`` is the only
                 # legitimate exit (it emits ``"unblocked"`` which flips
                 # this predicate back).
                 continue
@@ -4707,6 +4838,14 @@ def recompute_ready(
                     )
                     if failures >= effective_limit:
                         continue
+                if resume_status == "ready" and _resume_self_card(
+                    conn, task_id, from_status=cur_status,
+                ):
+                    # «Веду сам» back to its author, not into a queue.
+                    _append_event(conn, task_id, "promoted", {"status": "running"})
+                    promoted += 1
+                    continue
+                if cur_status == "blocked":
                     conn.execute(
                         "UPDATE tasks SET status = ? "
                         "WHERE id = ? AND status = 'blocked'",
@@ -4834,7 +4973,7 @@ def claim_task(
              WHERE id = ?
                AND status = 'ready'
                AND claim_lock IS NULL
-               AND COALESCE(actor_kind, '') != 'human'
+               AND COALESCE(actor_kind, '') NOT IN ('human', 'self')
             """,
             (lock, expires, now, task_id),
         )
@@ -4936,7 +5075,7 @@ def claim_review_task(
                AND status = 'review'
                AND claim_lock IS NULL
                AND COALESCE(acceptance, '') != 'owner'
-               AND COALESCE(actor_kind, '') != 'human'
+               AND COALESCE(actor_kind, '') NOT IN ('human', 'self')
             """,
             (lock, expires, now, task_id),
         )
@@ -7349,6 +7488,10 @@ def _unblock_in_txn(conn: sqlite3.Connection, task_id: str, *, now: int) -> Opti
     )
     if cur.rowcount != 1:
         return None
+    if new_status == "ready" and _resume_self_card(conn, task_id, from_status="ready"):
+        # «Веду сам» returns to its author «в работе», not to a queue the
+        # dispatcher never serves for a self card.
+        new_status = "running"
     _append_event(
         conn, task_id, "unblocked",
         (
@@ -9524,7 +9667,7 @@ def detect_stale_running(
         "       COALESCE(r.started_at, t.started_at) AS active_started_at "
         "FROM tasks t "
         "LEFT JOIN task_runs r ON r.id = t.current_run_id "
-        "WHERE t.status = 'running'"
+        "WHERE t.status = 'running' AND COALESCE(t.actor_kind, '') != 'self'"
     ).fetchall()
 
     for row in rows:
@@ -9643,6 +9786,7 @@ def reconcile_orphaned_running(
     rows = conn.execute(
         "SELECT id, claim_lock, claim_expires, worker_pid FROM tasks "
         "WHERE status = 'running' "
+        "  AND COALESCE(actor_kind, '') != 'self' "
         "  AND (claim_lock IS NULL OR claim_expires IS NULL)"
     ).fetchall()
     for row in rows:
@@ -10638,7 +10782,7 @@ def has_spawnable_ready(conn: sqlite3.Connection) -> bool:
     rows = conn.execute(
         "SELECT DISTINCT assignee FROM tasks "
         "WHERE status = 'ready' AND assignee IS NOT NULL "
-        "    AND COALESCE(actor_kind, '') != 'human' "
+        "    AND COALESCE(actor_kind, '') NOT IN ('human', 'self') "
         "    AND claim_lock IS NULL"
     ).fetchall()
     if not rows:
@@ -10816,11 +10960,16 @@ def count_running_tasks(conn: sqlite3.Connection) -> int:
     try:
         return int(
             conn.execute(
-                "SELECT COUNT(*) FROM tasks WHERE status = 'running'"
+                "SELECT COUNT(*) FROM tasks WHERE status = 'running' "
+                "AND COALESCE(actor_kind, '') != 'self'"
             ).fetchone()[0]
         )
     except Exception:
         return 0
+
+
+# Host-cap estimate for other boards when they cannot be enumerated.
+_OTHER_BOARDS_UNKNOWN_RUNNING = 1
 
 
 def count_running_tasks_other_boards(board: Optional[str] = None) -> int:
@@ -10835,7 +10984,10 @@ def count_running_tasks_other_boards(board: Optional[str] = None) -> int:
     Boards are matched by resolved DB path, so the ``HERMES_KANBAN_DB``
     override (which pins every board to one file) naturally yields 0.
     Fails open per board: one broken/corrupt board must not brick dispatch
-    on the healthy ones.
+    on the healthy ones. If the boards cannot be enumerated at all, the
+    other boards are unknown: return a conservative non-zero estimate
+    (``_OTHER_BOARDS_UNKNOWN_RUNNING``) so the host cap still limits
+    fan-out, and warn.
     """
     try:
         current_path = str(kanban_db_path(board=board).expanduser().resolve())
@@ -10843,8 +10995,13 @@ def count_running_tasks_other_boards(board: Optional[str] = None) -> int:
         current_path = None
     try:
         boards = list_boards(include_archived=False)
-    except Exception:
-        return 0
+    except Exception as exc:
+        _log.warning(
+            "kanban dispatch: could not list boards (%s); assuming %d "
+            "running worker(s) on other boards for the host cap",
+            type(exc).__name__, _OTHER_BOARDS_UNKNOWN_RUNNING,
+        )
+        return _OTHER_BOARDS_UNKNOWN_RUNNING
     total = 0
     for meta in boards:
         slug = meta.get("slug") or DEFAULT_BOARD
@@ -10947,7 +11104,7 @@ _EXACT_SCAN_SQL = (
     f"AND e.kind IN ({', '.join('?' for _ in _EXACT_BOUNDARY_KINDS)})) AS bnd, "
     "(SELECT MAX(e.id) FROM task_events e WHERE e.task_id = t.id AND e.kind = ?) AS lapsed "
     "FROM tasks t WHERE t.status = 'ready' AND t.claim_lock IS NULL "
-    "AND COALESCE(t.assignee, '') != '' AND COALESCE(t.actor_kind, '') != 'human' "
+    "AND COALESCE(t.assignee, '') != '' AND COALESCE(t.actor_kind, '') NOT IN ('human', 'self') "
     "AND EXISTS (SELECT 1 FROM task_events e WHERE e.task_id = t.id AND e.kind = ?) "
     "ORDER BY t.priority DESC, t.created_at ASC"
 )
@@ -11342,7 +11499,7 @@ def _dispatch_once_locked(
     ready_rows = conn.execute(
         "SELECT id, assignee FROM tasks "
         "WHERE status = 'ready' AND claim_lock IS NULL "
-        "AND COALESCE(actor_kind, '') != 'human' "
+        "AND COALESCE(actor_kind, '') NOT IN ('human', 'self') "
         "ORDER BY priority DESC, created_at ASC"
     ).fetchall()
     if _only_ids is not None:
@@ -11357,7 +11514,7 @@ def _dispatch_once_locked(
             "SELECT id, assignee FROM tasks "
             "WHERE status = 'review' AND claim_lock IS NULL "
             "AND COALESCE(acceptance, '') != 'owner' "
-            "AND COALESCE(actor_kind, '') != 'human' "
+            "AND COALESCE(actor_kind, '') NOT IN ('human', 'self') "
             "ORDER BY priority DESC, created_at ASC"
         ).fetchall()
         if _only_ids is not None:
@@ -11407,6 +11564,7 @@ def _dispatch_once_locked(
         for prow in conn.execute(
             "SELECT assignee, COUNT(*) AS n FROM tasks "
             "WHERE status = 'running' AND assignee IS NOT NULL "
+            "AND COALESCE(actor_kind, '') != 'self' "
             "GROUP BY assignee"
         ):
             _per_profile_running[prow["assignee"]] = int(prow["n"])

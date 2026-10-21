@@ -34,7 +34,6 @@ import {
 import { AgentSheet } from "@/components/agents/mobile/AgentSheet";
 import { AgentFace } from "@/components/agents/mobile/AgentFace";
 import {
-  activityCount,
   attentionOf,
   decisionsWaitPhrase,
   groupByAttention,
@@ -45,7 +44,7 @@ import {
 } from "@/lib/agent-status";
 import { filterAgentTabs, MAIN_AGENT_TAB, type AgentSettingsKind, type AgentTabConfig } from "@/lib/agent-tabs";
 import { togglePinnedAgent, type AgentsMobileMode } from "@/lib/agents-view";
-import { isRunBusy, type ChatRun } from "@/lib/chat-runs";
+import { isRunBusy, waitingDecisionRuns, type ChatRun } from "@/lib/chat-runs";
 import { cn } from "@/lib/utils";
 
 import "./agents-mobile.css";
@@ -252,6 +251,8 @@ function ViewHint({ mode, onClick }: { mode: AgentsMobileMode; onClick: () => vo
 /* ------------------------------------------------------------------ */
 
 interface ActivitySheetProps {
+  count: number;
+  unavailableProfiles?: string[];
   runs: ChatRun[];
   failed: ChatRun[];
   tabs: AgentTabConfig[];
@@ -270,14 +271,13 @@ function sinceText(run: ChatRun): string {
   return new Date(started * 1000).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
 }
 
-export function ActivitySheet({ runs, failed, tabs, statusOf, onClose, onOpenChat, onDecide }: ActivitySheetProps) {
+export function ActivitySheet({ count, unavailableProfiles = [], runs, failed, tabs, statusOf, onClose, onOpenChat, onDecide }: ActivitySheetProps) {
   const titleId = useId();
   const name = (profile: string) => labelOf(tabs, profile);
-  const waiting = [...new Set(runs.filter((run) => run.status === "waiting_decision").map((run) => run.profile))];
+  const waiting = waitingDecisionRuns(runs);
   const running = runs.filter((run) => run.status === "running");
   const queued = runs.filter((run) => run.status === "queued");
   const stale = runs.filter((run) => run.status === "stale");
-  const count = activityCount(tabs.map((tab) => statusOf(tab.profile)));
   const work = (key: string, profile: string, question: ReactNode, state: ReactNode, button: ReactNode) => (
     <div key={key} className="k-work">
       <AgentFace label={name(profile)} status={statusOf(profile)} />
@@ -292,20 +292,22 @@ export function ActivitySheet({ runs, failed, tabs, statusOf, onClose, onOpenCha
   const open = (run: ChatRun) => (
     <button type="button" className="k-work__open" onClick={() => onOpenChat(run.profile, run.session_id)}>Открыть</button>
   );
-  const empty = !waiting.length && !running.length && !queued.length && !stale.length && !failed.length;
+  const empty = !unavailableProfiles.length && !waiting.length && !running.length && !queued.length && !stale.length && !failed.length;
   return (
     <AgentSheet titleId={titleId} title={<>Идут работы {count > 0 && <span className="k-sheet__n">{count}</span>}</>} onClose={onClose}>
+      {unavailableProfiles.length > 0 && <p className="k-empty" role="status">Недоступны агенты: {unavailableProfiles.map(name).join(", ")}. Их активность и решения пока неизвестны.</p>}
       {empty && <p className="k-empty">Сейчас агенты ничего не выполняют. Когда работа начнётся, кольцо в полосе оживёт.</p>}
       {waiting.length > 0 && <div className="k-sec">Ждут вашего решения</div>}
-      {waiting.map((profile) => {
-        const n = statusOf(profile).decisions;
-        const first = runs.find((run) => run.profile === profile && run.status === "waiting_decision");
+      {waiting.map((run) => {
+        const n = run.pending_decisions ?? 1;
         return work(
-          `decision:${profile}`,
-          profile,
-          first?.title || "Отправка ждёт разрешения",
-          <><span className="k-tag k-tag--dec">{n}</span>{pluralRu(n, "решение ждёт", "решения ждут", "решений ждут")} вашего ответа</>,
-          <button type="button" className="k-work__open is-decision" onClick={() => onDecide(profile)}>Решить</button>,
+          `decision:${run.message_id}`,
+          run.profile,
+          run.title || "Отправка ждёт разрешения",
+          run.decision_fallback
+            ? run.decision_reason || "Исходный чат недоступен. Ответьте в центре решений."
+            : <><span className="k-tag k-tag--dec">{n}</span>{pluralRu(n, "решение ждёт", "решения ждут", "решений ждут")} вашего ответа</>,
+          <button type="button" className="k-work__open is-decision" onClick={() => run.decision_fallback ? onDecide(run.profile) : onOpenChat(run.profile, run.session_id)}>{run.decision_fallback ? "Решения" : "Решить"}</button>,
         );
       })}
       {running.length > 0 && <div className="k-sec">Выполняются</div>}
@@ -368,6 +370,7 @@ export function AgentMenuSheet({ tab, index, count, hidden, mode, pinned, status
     ? `Ждёт ${status.decisions} ${pluralRu(status.decisions, "решение", "решения", "решений")}`
     : status.error ? "Последняя работа не завершилась"
       : status.running > 0 ? "Работает"
+        : status.stale ? "Статус требует проверки"
         : lastActive ? `Последний разговор ${formatListTime(lastActive)}` : "Разговоров пока нет";
   const item = (icon: ReactNode, text: string, onClick: () => void, options: { danger?: boolean; disabled?: boolean } = {}) => (
     <button type="button" className={cn(options.danger && "is-danger")} disabled={options.disabled} onClick={onClick}>
@@ -467,6 +470,7 @@ export function AgentListHome({ tabs, statusOf, conversations, runs, onOpen, lon
       default:
         if (status.running > 0) return <span className="k-st"><span className="k-live">Работает</span>{busy?.title ? ` · ${busy.title}` : ""}</span>;
         if (status.queued > 0) return <span className="k-st">В очереди, начнёт сам</span>;
+        if (status.stale) return <span className="k-st">Статус требует проверки</span>;
         return <span className="k-st">{summary?.latestTitle ?? (summary ? "Разговоров пока нет" : "")}</span>;
     }
   };

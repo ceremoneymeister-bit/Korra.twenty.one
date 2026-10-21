@@ -24,6 +24,7 @@ const BUILTIN: Record<string, keyof Translations["app"]["nav"]> = {
 const BUILTIN_LITERAL: Record<string, string> = {
   "/dashboard": "Дашборд",
   "/files": "Файлы",
+  "/marketplace": "Маркетплейс",
   "/mcp": "MCP",
   "/channels": "Каналы",
   "/webhooks": "Вебхуки",
@@ -49,6 +50,7 @@ export function resolvePageTitle(
     return t.app.nav.sessions;
   }
   if (normalized === "/profiles/new") return BUILTIN_LITERAL[normalized];
+  if (normalized.startsWith("/marketplace/")) return BUILTIN_LITERAL["/marketplace"];
   if (PLUGIN_LITERAL[normalized]) return PLUGIN_LITERAL[normalized];
   const plugin = pluginTabs.find((p) => p.path === normalized);
   if (plugin) {

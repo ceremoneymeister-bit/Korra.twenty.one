@@ -368,7 +368,7 @@ COMMAND_REGISTRY: list[CommandDef] = [
     CommandDef("reload", 'Перезагрузить переменные .env в текущую беседу', "Tools & Skills",
                cli_only=True, desktop="terminal"),
     CommandDef("reload-mcp", 'Перезагрузить серверы MCP из настроек', "Tools & Skills",
-               aliases=("reload_mcp",), desktop="advanced"),
+               aliases=("reload_mcp", "mcp-reload", "reload-mcps"), desktop="advanced"),
     CommandDef("reload-skills", 'Обновить список установленных и удалённых навыков профиля',
                "Tools & Skills", aliases=("reload_skills",), desktop="advanced"),
     CommandDef("browser", 'Подключить ваш браузер на Chromium через CDP или переключиться в Browser Use', "Tools & Skills",

@@ -153,6 +153,12 @@ def _store():
     return load_on_disk_store()
 
 
+def _memory_delta(receipt):
+    """The undo contract is independent of optional display provenance."""
+    return [{key: item[key] for key in ("target", "added", "removed")}
+            for item in receipt["memory"]]
+
+
 def _memory_call(call_id="r1", **args):
     """Вызов инструмента ``memory`` и его настоящий ответ — как в сообщениях форка."""
     from tools.memory_tool import memory_tool
@@ -177,7 +183,7 @@ def test_memory_add_is_reported_and_undone(env):
         _memory_call(action="add", target="memory", content="Отчёты сдаём по пятницам"), []
     )
 
-    assert receipt["memory"] == [
+    assert _memory_delta(receipt) == [
         {"target": "memory", "added": ["Отчёты сдаём по пятницам"], "removed": []}
     ]
     assert "«Отчёты сдаём по пятницам». Сохранено в памяти агента." in format_notice(receipt)
@@ -271,7 +277,7 @@ def test_merged_refinement_restores_content_that_was_there_before_both_writes(en
         [],
     )
     merged = merge_receipts(first, second)
-    assert merged["memory"] == [
+    assert _memory_delta(merged) == [
         {"target": "user", "added": ["Планы встреч с минутами"], "removed": []}
     ]
     assert undo_receipt(merged)["status"] == "undone"
@@ -301,11 +307,11 @@ def test_turn_receipt_describes_replace_remove_and_batch_exactly(env):
     replaced = build_turn_receipt(
         _messages(action="replace", old_text="Старая запись", content="Новая запись")
     )
-    assert replaced["memory"] == [
+    assert _memory_delta(replaced) == [
         {"target": "user", "added": ["Новая запись"], "removed": ["Старая запись"]}
     ]
     removed = build_turn_receipt(_messages(action="remove", old_text="Лишняя запись"))
-    assert removed["memory"] == [
+    assert _memory_delta(removed) == [
         {"target": "user", "added": [], "removed": ["Лишняя запись"]}
     ]
     batch = build_turn_receipt(
@@ -317,7 +323,7 @@ def test_turn_receipt_describes_replace_remove_and_batch_exactly(env):
             ]
         )
     )
-    assert batch["memory"] == [
+    assert _memory_delta(batch) == [
         {"target": "user", "added": ["Из пакета, версия 2"], "removed": ["Нетронутая запись"]}
     ]
     assert undo_receipt(batch)["status"] == "undone"
@@ -338,7 +344,7 @@ def test_background_undo_preserves_another_chat_write(env):
     own_messages = _memory_call("review-m1", action="add", target="user", content=own_rule)
     assert _store().add("user", other_rule)["success"]
     receipt = build_review_receipt(own_messages, [])
-    assert receipt["memory"] == [{"target": "user", "added": [own_rule], "removed": []}]
+    assert _memory_delta(receipt) == [{"target": "user", "added": [own_rule], "removed": []}]
     outcome = undo_receipt(receipt)
     assert outcome["status"] == "undone"
     assert snapshot_memory()["user"] == [other_rule]
@@ -352,3 +358,259 @@ def test_review_without_fork_messages_gives_no_memory_receipt(env):
 def test_review_receipt_ignores_memory_calls_from_the_parent_history(env):
     messages = _memory_call("old", action="add", target="user", content="Старое правило")
     assert build_review_receipt(messages, [messages[1]]) is None
+
+
+@pytest.mark.parametrize("mode", ["on", "verbose"])
+def test_compaction_reports_new_fact_and_undo_restores_every_old_note(env, mode):
+    from tools.memory_tool import memory_tool
+
+    old = [
+        "Контекст: /opt/data/home/k21b-context/INDEX.md; сверять список активных работ.",
+        "Проект Альфа: консультация, заказ не подтверждён; работы приостановлены.",
+        "Проект Бета: подробный архив обсуждений; вернуться после согласования бюджета.",
+    ]
+    short = [
+        "Контекст: /opt/data/home/k21b-context/INDEX.md.",
+        "Проект Альфа: консультация, пауза.",
+        "Проект Бета: ждём бюджет.",
+    ]
+    fact = "Оплату принимаем по пятницам"
+    store = _store()
+    for entry in old:
+        assert store.add("memory", entry)["success"]
+    before = snapshot_memory()
+
+    operations = [
+        {"action": "replace", "old_text": entry, "content": compact}
+        for entry, compact in zip(old, short)
+    ] + [{"action": "add", "content": fact}]
+    # The failed attempt has no effect and must not enter either notice or undo.
+    failed_args = {"target": "memory", "operations": operations + [
+        {"action": "add", "content": "Не поместится " * 500},
+    ]}
+    failed = memory_tool(store=store, **failed_args)
+    assert not json.loads(failed)["success"]
+    messages = [{"role": "user", "content": f"Запомни: {fact}"},
+                {"role": "assistant", "tool_calls": [{"id": "failed", "function": {
+                    "name": "memory", "arguments": json.dumps(failed_args)}}]},
+                {"role": "tool", "tool_call_id": "failed", "content": failed}]
+    messages += _memory_call(target="memory", operations=operations)
+    receipt = build_turn_receipt(messages)
+
+    text = format_notice(receipt, mode)
+    assert fact in text
+    assert "сжал 3 старые заметки" in text
+    for entry in old + short:
+        assert entry not in text
+    assert "Альфа" not in text and "Бета" not in text and "/opt/" not in text
+    assert receipt["memory"][0]["added"] == short + [fact]
+    assert receipt["memory"][0]["removed"] == old
+    from agent.learning_receipt import receipt_has_undo
+
+    assert receipt_has_undo(receipt)
+    assert undo_receipt(receipt)["status"] == "undone"
+    assert snapshot_memory() == before
+
+
+def test_explicit_edit_and_deletion_keep_the_named_fact_and_path(env):
+    old = "Отчёты храним в /srv/customer/reports, каждый пятничный отчёт в своей папке"
+    new = "Отчёты храним в /srv/customer/reports"
+    assert _store().add("memory", old)["success"]
+    edited = build_turn_receipt([
+        {"role": "user", "content": f"Замени «{old}» на «{new}»"},
+        *_memory_call(action="replace", target="memory", old_text=old, content=new),
+    ])
+    text = format_notice(edited)
+    assert new in text and old in text and "вместо" in text
+    assert "сжал" not in text
+    removed = build_turn_receipt([
+        {"role": "user", "content": f"Забудь «{new}»"},
+        *_memory_call(action="remove", target="memory", old_text=new),
+    ])
+    assert new in format_notice(removed)
+    assert "Удалено" in format_notice(removed)
+    assert undo_receipt(removed)["status"] == "undone"
+    assert undo_receipt(edited)["status"] == "undone"
+    assert snapshot_memory()["memory"] == [old]
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_three_removals_with_one_addition_respect_the_named_request(env, explicit):
+    old = ["Архив Альфа", "Архив Бета", "Архив Гамма"]
+    fact = "Оплату принимаем по пятницам"
+    for entry in old:
+        assert _store().add("memory", entry)["success"]
+    request = f"Запомни: {fact}"
+    if explicit:
+        request += ". Забудь: " + "; ".join(old)
+    receipt = build_turn_receipt([
+        {"role": "user", "content": request},
+        *_memory_call(target="memory", operations=[
+            *[{"action": "remove", "old_text": entry} for entry in old],
+            {"action": "add", "content": fact},
+        ]),
+    ])
+    text = format_notice(receipt)
+    assert fact in text
+    if explicit:
+        assert all(entry in text for entry in old)
+        assert "сжал" not in text
+    else:
+        assert all(entry not in text for entry in old)
+        assert "сжал 3 старые заметки" in text
+    assert undo_receipt(receipt)["status"] == "undone"
+    assert snapshot_memory()["memory"] == old
+
+
+def test_explicit_shortening_next_to_addition_is_not_hidden_in_review(env):
+    old = "Отчёты: /opt/data/home/reports; подробное описание расписания"
+    new = "Отчёты: /opt/data/home/reports"
+    assert _store().add("memory", old)["success"]
+    receipt = build_review_receipt(_memory_call(target="memory", operations=[
+        {"action": "replace", "old_text": "Отчёты:", "content": new},
+        {"action": "add", "content": "Новая встреча по вторникам"},
+    ]), [{"role": "user", "content": f"Замени заметку Отчёты: на «{new}» и запомни встречу"}])
+    text = format_notice(receipt)
+    assert old in text and new in text and "Новая встреча" in text
+    assert "сжал" not in text
+
+
+def test_merged_compaction_chain_counts_original_notes_once(env):
+    old = "Архив Альфа: /opt/data/home/alpha/INDEX.md; подробный список ожидающих задач"
+    middle = "Архив Альфа: /opt/data/home/alpha/INDEX.md; ожидает"
+    short = "Архив Альфа: /opt/data/home/alpha/INDEX.md"
+    assert _store().add("memory", old)["success"]
+    receipts = []
+    for index, (before, after) in enumerate([(old, middle), (middle, short)]):
+        receipts.append(build_review_receipt(_memory_call(
+            f"m{index}", target="memory", operations=[
+                {"action": "replace", "old_text": before, "content": after},
+                {"action": "add", "content": f"Новый факт {index}"},
+            ],
+        ), []))
+    merged = merge_receipts(*receipts)
+    text = format_notice(merged)
+    assert "сжал 1 старую заметку" in text
+    assert "Архив" not in text and "/opt/" not in text
+    assert "Новый факт 0" in text and "Новый факт 1" in text
+    assert undo_receipt(merged)["status"] == "undone"
+    assert snapshot_memory()["memory"] == [old]
+
+
+def test_merged_shortening_of_new_fact_keeps_that_fact_visible(env):
+    old = "Отчёты по пятницам: всегда отправлять после обеда"
+    short = "Отчёты по пятницам после обеда"
+    first = build_review_receipt(_memory_call(action="add", target="memory", content=old), [])
+    second = build_review_receipt(_memory_call(target="memory", operations=[
+        {"action": "replace", "old_text": old, "content": short},
+        {"action": "add", "content": "Оплату принимаем по вторникам"},
+    ]), [])
+    merged = merge_receipts(first, second)
+    text = format_notice(merged)
+    assert short in text and "Оплату принимаем" in text
+    assert "сжал" not in text
+    assert undo_receipt(merged)["status"] == "undone"
+    assert snapshot_memory()["memory"] == []
+
+
+def test_separate_compaction_calls_and_add_alias_keep_only_new_fact(env):
+    old = "Архив: /opt/data/home/archive/INDEX.md; подробное описание задач"
+    middle = "Архив: /opt/data/home/archive/INDEX.md; ожидает"
+    short = "Архив: /opt/data/home/archive/INDEX.md"
+    assert _store().add("memory", old)["success"]
+    first = build_review_receipt(_memory_call(target="memory", operations=[
+        {"action": "replace", "old_text": old, "content": middle},
+        {"action": "add", "new_text": "Оплату принимаем по пятницам"},
+    ]), [])
+    second = build_review_receipt(_memory_call(
+        action="replace", target="memory", old_text=middle, content=short,
+    ), [])
+    merged = merge_receipts(first, second)
+    text = format_notice(merged)
+    assert "Оплату принимаем по пятницам" in text
+    assert "сжал 1 старую заметку" in text
+    assert "Архив" not in text and "/opt/" not in text
+    assert undo_receipt(merged)["status"] == "undone"
+    assert snapshot_memory()["memory"] == [old]
+
+
+def test_merged_explicit_removals_never_use_legacy_compaction_fallback(env):
+    for entry in ("Альфа", "Бета"):
+        assert _store().add("memory", entry)["success"]
+    receipts = []
+    for index, entry in enumerate(("Альфа", "Бета")):
+        operations = [{"action": "remove", "old_text": entry}]
+        if index == 0:
+            operations.append({"action": "add", "content": "Оплату принимаем по пятницам"})
+        receipts.append(build_review_receipt(
+            _memory_call(f"m{index}", target="memory", operations=operations),
+            [{"role": "user", "content": f"Забудь {entry}"}],
+        ))
+    text = format_notice(merge_receipts(*receipts))
+    assert "Альфа" in text and "Бета" in text
+    assert "сжал" not in text
+
+
+def test_remove_exact_match_does_not_hide_an_explicit_sibling_edit(env):
+    for entry in ("temp", "temp important X"):
+        assert _store().add("memory", entry)["success"]
+    receipt = build_turn_receipt([
+        {"role": "user", "content": "Замени X на Y и запомни новый факт"},
+        *_memory_call(target="memory", operations=[
+            {"action": "remove", "old_text": "temp"},
+            {"action": "replace", "old_text": "X", "content": "Y"},
+            {"action": "add", "content": "Новый факт"},
+        ]),
+    ])
+    text = format_notice(receipt)
+    assert "temp important X" in text and "«Y»" in text
+    assert "сжал 1 старую заметку" in text
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_replace_then_remove_tracks_the_actual_intermediate_entry(env, explicit):
+    old = "Архив X: подробное описание старого проекта"
+    assert _store().add("memory", old)["success"]
+    receipt = build_turn_receipt([
+        {"role": "user", "content": "Замени X и запомни новый факт" if explicit else "Запомни новый факт"},
+        *_memory_call(target="memory", operations=[
+            {"action": "replace", "old_text": "X", "content": "temp"},
+            {"action": "remove", "old_text": "temp"},
+            {"action": "add", "content": "Новый факт"},
+        ]),
+    ])
+    text = format_notice(receipt)
+    assert "Новый факт" in text
+    if explicit:
+        assert old in text and "сжал" not in text
+    else:
+        assert old not in text and "сжал 1 старую заметку" in text
+    assert undo_receipt(receipt)["status"] == "undone"
+    assert snapshot_memory()["memory"] == [old]
+
+
+def test_batch_of_only_edits_does_not_mistake_a_longer_replacement_for_add(env):
+    old = ["Проект Альфа: длинное описание", "Бета"]
+    new = ["Альфа", "Проект Бета: уточнённое длинное описание"]
+    for entry in old:
+        assert _store().add("memory", entry)["success"]
+    receipt = build_review_receipt(_memory_call(target="memory", operations=[
+        {"action": "replace", "old_text": before, "content": after}
+        for before, after in zip(old, new)
+    ]), [])
+    text = format_notice(receipt)
+    assert all(entry in text for entry in old + new)
+    assert "сжал" not in text
+
+
+def test_duplicate_add_of_a_shortened_note_is_not_an_independent_new_fact(env):
+    old = "Отчёты по пятницам: отправлять после обеда"
+    short = "Отчёты по пятницам"
+    assert _store().add("memory", old)["success"]
+    receipt = build_review_receipt(_memory_call(target="memory", operations=[
+        {"action": "replace", "old_text": old, "content": short},
+        {"action": "add", "content": short},
+    ]), [])
+    text = format_notice(receipt)
+    assert old in text and short in text
+    assert "сжал" not in text

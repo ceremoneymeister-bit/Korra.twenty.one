@@ -142,8 +142,8 @@ def test_session_stamped_for_another_profile_does_not_link_a_foreign_ledger(dire
     assert not [url for method, url in calls if method == "POST"]
 
 
-@pytest.mark.parametrize("stored_profile", ["default", "other-sender"])
-def test_row_profile_cannot_redirect_the_physical_sender(direct_send, monkeypatch, stored_profile):
+def test_unrelated_row_profile_cannot_redirect_the_physical_sender(direct_send, monkeypatch):
+    stored_profile = "other-sender"
     home, effect_id = direct_send
     with sqlite3.connect(home / "profiles" / "sender" / "effect_decisions.sqlite3") as conn:
         conn.execute("UPDATE effect_decisions SET profile=? WHERE id=?", (stored_profile, effect_id))
@@ -269,3 +269,13 @@ def test_repeating_a_succeeded_decision_keeps_its_original_ledger_and_receipt(di
     with sqlite3.connect(path) as conn:
         assert conn.execute("SELECT status, outcome_json, execution_started_at FROM effect_decisions WHERE id=?",
                             (effect_id,)).fetchone() == ("succeeded", receipt, None)
+
+
+def test_historical_origin_profile_keeps_the_physical_sender(direct_send, monkeypatch):
+    home, effect_id = direct_send
+    with sqlite3.connect(home / "profiles/sender/effect_decisions.sqlite3") as conn:
+        conn.execute("UPDATE effect_decisions SET profile='default' WHERE id=?", (effect_id,))
+    response, calls = _post(monkeypatch, home, effect_id)
+    assert response.status_code == 200
+    assert [url for method, url in calls if method == "POST"] == [
+        "http://127.0.0.1:8642/p/sender/api/sessions/origin/approval"]

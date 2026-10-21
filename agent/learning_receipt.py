@@ -108,7 +108,7 @@ def build_review_receipt(
     """
     return _assemble(
         _skill_changes(review_messages, prior_snapshot),
-        _memory_changes(review_messages, prior_snapshot),
+        _memory_changes(review_messages, prior_snapshot, _last_user_text(prior_snapshot)),
     )
 
 
@@ -129,8 +129,54 @@ def _cancel(added: List[str], removed: List[str]) -> None:
             removed.remove(entry)
 
 
+def _last_user_text(messages: List[Dict]) -> str:
+    for msg in reversed(messages or []):
+        if isinstance(msg, dict) and msg.get("role") == "user":
+            content = msg.get("content") or ""
+            if isinstance(content, list):
+                content = " ".join(p.get("text", "") for p in content if isinstance(p, dict))
+            return " ".join(str(content).casefold().split())
+    return ""
+
+
+def _notice_operations(args: Dict, data: Dict, request: str) -> List[Dict]:
+    """Происхождение записей для показа; added/removed остаются контрактом отмены.
+
+    Сохраняем реальные связи, а не угадываем похожесть текстов: новая запись
+    может пройти несколько замен в этом ходе. Названный человеком old_text
+    защищает соответствующую цепочку от скрытия как служебного сжатия.
+    """
+    batch = args.get("operations")
+    operations = batch or [args]
+    result = []
+    for index, op in enumerate(operations):
+        if not isinstance(op, dict):
+            continue
+        action = op.get("action")
+        old = None
+        new = str(op.get("content") or op.get("new_text") or "").strip() or None
+        if action in {"replace", "remove"}:
+            if batch:
+                entries = data.get("replaced_entries" if action == "replace" else "removed_entries") or {}
+                old = entries.get(str(index), entries.get(index))
+            elif action == "replace":
+                old = data.get("replaced_entry")
+            else:
+                entries = data["changes"].get("removed") or []
+                old = entries[0] if len(entries) == 1 else None
+            if old is None:
+                continue  # Older tool results lack per-operation provenance.
+        elif action != "add":
+            continue
+        if action == "remove":
+            new = None
+        needle = " ".join(str(op.get("old_text") or "").casefold().split())
+        result.append({"old": old, "new": new, "requested": bool(needle and needle in request)})
+    return result
+
+
 def _memory_changes(
-    turn_messages: List[Dict], prior_snapshot: Optional[List[Dict]] = None
+    turn_messages: List[Dict], prior_snapshot: Optional[List[Dict]] = None, request: str = ""
 ) -> List[Dict[str, Any]]:
     """Изменения памяти, которые вернули успешные вызовы ``memory`` этого хода или разбора.
 
@@ -138,13 +184,17 @@ def _memory_changes(
     (``changes``), поэтому чужие записи других чатов в квитанцию не попадают.
     """
     seen_ids = _seen_tool_ids(prior_snapshot or [])
-    memory_calls = set()
+    memory_calls = {}
     for msg in turn_messages:
         if isinstance(msg, dict) and msg.get("role") == "assistant":
             for tc in msg.get("tool_calls", []) or []:
                 fn = (tc.get("function") or {}) if isinstance(tc, dict) else {}
                 if fn.get("name") == "memory":
-                    memory_calls.add(tc.get("id"))
+                    try:
+                        args = json.loads(fn.get("arguments") or "{}")
+                    except (json.JSONDecodeError, TypeError):
+                        args = {}
+                    memory_calls[tc.get("id")] = args if isinstance(args, dict) else {}
     by_target: Dict[str, Dict[str, Any]] = {}
     for msg in turn_messages:
         if not isinstance(msg, dict) or msg.get("role") != "tool":
@@ -161,10 +211,13 @@ def _memory_changes(
         target = data.get("target")
         if target not in _MEMORY_FILES or not isinstance(changes, dict):
             continue
-        item = by_target.setdefault(target, {"target": target, "added": [], "removed": []})
+        item = by_target.setdefault(target, {"target": target, "added": [], "removed": [], "notice_operations": []})
         item["added"].extend(str(e) for e in changes.get("added") or [])
         item["removed"].extend(str(e) for e in changes.get("removed") or [])
         _cancel(item["added"], item["removed"])
+        operations = _notice_operations(memory_calls[msg.get("tool_call_id")], data, request)
+        # Even an empty list distinguishes explicit edits from legacy deltas.
+        item["notice_operations"].extend(operations)
     return [item for item in by_target.values() if item["added"] or item["removed"]]
 
 
@@ -176,7 +229,7 @@ def build_turn_receipt(messages: List[Dict]) -> Optional[Dict[str, Any]]:
     разбора этому ходу не приписываются.
     """
     turn = current_turn_messages(messages)
-    return _assemble(_skill_changes(turn, []), _memory_changes(turn))
+    return _assemble(_skill_changes(turn, []), _memory_changes(turn, request=_last_user_text(messages)))
 
 
 def merge_receipts(base: Dict[str, Any], extra: Dict[str, Any]) -> Dict[str, Any]:
@@ -198,6 +251,8 @@ def merge_receipts(base: Dict[str, Any], extra: Dict[str, Any]) -> Dict[str, Any
         known["added"].extend(item.get("added") or [])
         known["removed"].extend(item.get("removed") or [])
         _cancel(known["added"], known["removed"])
+        if "notice_operations" in item:
+            known.setdefault("notice_operations", []).extend(item["notice_operations"])
     return {
         "version": 1,
         "id": base.get("id") or extra.get("id"),
@@ -251,13 +306,55 @@ def _memory_sentence(item: Dict[str, Any], limit: int) -> str:
     place_from = _PLACE_FROM.get(target, "из памяти")
     added = [e for e in item.get("added") or [] if str(e).strip()]
     removed = [e for e in item.get("removed") or [] if str(e).strip()]
+    compacted = set()
+    hidden = set()
+    new_facts = set()
+    operations = item.get("notice_operations") or []
+    for index, operation in enumerate(operations):
+        start, end = operation["old"], operation["new"]
+        requested = operation["requested"]
+        for later in operations[index + 1:]:
+            if end is not None and later["old"] == end:
+                end = later["new"]
+                requested = requested or later["requested"]
+        if start is None:
+            # A duplicate add of an existing, subsequently replaced note is
+            # not a new fact. A newly added then refined fact is.
+            if operation["new"] not in removed and end in added:
+                new_facts.add(end)
+        elif start in removed and not requested:
+            if end is None or (end in added and len(end) < len(start)):
+                compacted.add(start)
+                hidden.add(end)
+    if not new_facts.difference(hidden):
+        # Edits/deletions without a separate addition still name what changed.
+        compacted.clear()
+        hidden.clear()
+    if "notice_operations" not in item and len(added) == 1 and len(removed) > 1:
+        # Old persisted receipts have only the aggregate delta. A many-to-one
+        # consolidation must not quote every old note as the new fact's past.
+        compacted.update(removed)
+    added = [e for e in added if e not in hidden]
+    removed = [e for e in removed if e not in compacted]
+    suffix = ""
+    if compacted:
+        count = len(compacted)
+        form = "старых заметок"
+        if count % 100 not in range(11, 15):
+            if count % 10 == 1:
+                form = "старую заметку"
+            elif count % 10 in (2, 3, 4):
+                form = "старые заметки"
+        suffix = f"Освободил место: сжал {count} {form}."
     if added and removed:
-        return f"{_quoted(added, limit)} (вместо {_quoted(removed, limit)}). Обновлено {place_in}."
-    if added:
-        return f"{_quoted(added, limit)}. Сохранено {place_in}."
-    if removed:
-        return f"{_quoted(removed, limit)}. Удалено {place_from}."
-    return f"Обновлено {place_in}."
+        sentence = f"{_quoted(added, limit)} (вместо {_quoted(removed, limit)}). Обновлено {place_in}."
+    elif added:
+        sentence = f"{_quoted(added, limit)}. Сохранено {place_in}."
+    elif removed:
+        sentence = f"{_quoted(removed, limit)}. Удалено {place_from}."
+    else:
+        sentence = f"Обновлено {place_in}."
+    return " ".join(part for part in (sentence, suffix) if part)
 
 
 def format_notice(receipt: Dict[str, Any], mode: str = "on") -> str:

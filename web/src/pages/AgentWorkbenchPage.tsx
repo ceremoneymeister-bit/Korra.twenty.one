@@ -212,6 +212,14 @@ export default function AgentWorkbenchPage() {
   const [chatsOpen, setChatsOpen] = useState(false);
   const [chatsHost, setChatsHost] = useState<HTMLElement | null>(null);
   const [decisionsRequestByProfile, setDecisionsRequestByProfile] = useState<Record<string, number>>({});
+  const handledAgentLink = useRef<string | null>(null);
+  const activityPanelRef = useRef<HTMLDetailsElement>(null);
+  const showWaitingChats = () => {
+    if (activityPanelRef.current) {
+      activityPanelRef.current.open = true;
+      activityPanelRef.current.querySelector("summary")?.focus();
+    }
+  };
   // В режиме «Список» агент открыт поверх списка. Открытие из списка —
   // отдельная запись в истории браузера: «‹» и жест «назад» Safari
   // возвращают к списку. Ссылка из уведомления или дашборда открывает
@@ -431,6 +439,9 @@ export default function AgentWorkbenchPage() {
       void refresh();
       return;
     }
+    // Роутер может отложить снятие query: один переход обрабатываем один раз.
+    if (handledAgentLink.current === location.key) return;
+    handledAgentLink.current = location.key;
     setActiveId(agent);
     setDirectAgentOpen(true);
     const resume = searchParams.get("resume");
@@ -439,6 +450,9 @@ export default function AgentWorkbenchPage() {
       setResumeByProfile(previous => { const next = { ...previous }; delete next[agent]; return next; });
     }
     else if (resume) setResumeByProfile(previous => ({ ...previous, [agent]: { sessionId: resume } }));
+    if (searchParams.get("decisions") === "1") {
+      setDecisionsRequestByProfile(previous => ({ ...previous, [agent]: (previous[agent] ?? 0) + 1 }));
+    }
     if (draft) setDraftByProfile((previous) => ({ ...previous, [agent]: draft }));
     // Параметры снимаем сразу: иначе возврат на экран назад-вперёд подставил
     // бы тот же текст поверх уже набранного.
@@ -449,11 +463,12 @@ export default function AgentWorkbenchPage() {
         next.delete("resume");
         next.delete("new_chat");
         next.delete("draft");
+        next.delete("decisions");
         return next;
       },
       { replace: true },
     );
-  }, [onAgentsRoute, searchParams, setSearchParams, tabs, hiddenTabs, showTab, refresh]);
+  }, [onAgentsRoute, searchParams, setSearchParams, tabs, hiddenTabs, showTab, refresh, location.key]);
 
   const clearDraft = useCallback((profile: string) => {
     setDraftByProfile((previous) => {
@@ -834,8 +849,8 @@ export default function AgentWorkbenchPage() {
                     )}
                   >
                     <span>{tab.label}</span>
-                    <AgentRunBadge profile={tab.profile} />
                   </button>
+                  <AgentRunBadge profile={tab.profile} label={tab.label} onShowWaiting={showWaitingChats} />
                   <button
                     type="button"
                     className="neo-tab ml-0.5 flex size-8 items-center justify-center p-0"
@@ -896,7 +911,7 @@ export default function AgentWorkbenchPage() {
             <Plus size={18} aria-hidden />
           </button>
         </div>
-        <SessionRunActivity tabs={mountedTabs} />
+        <SessionRunActivity tabs={mountedTabs} panelRef={activityPanelRef} />
       </div>
   );
 
@@ -1208,7 +1223,7 @@ export default function AgentWorkbenchPage() {
                 const active = tab.profile === activeId;
                 const hidden = hiddenProfiles.has(tab.profile);
                 return (
-                  <li key={tab.profile}>
+                  <li key={tab.profile} className="flex items-center">
                     <button
                       type="button"
                       data-agent-list-item={tab.profile}
@@ -1226,9 +1241,9 @@ export default function AgentWorkbenchPage() {
                           вкладка скрыта
                         </span>
                       )}
-                      <AgentRunBadge profile={tab.profile} />
                       {active && <Check size={15} className="shrink-0" aria-hidden />}
                     </button>
+                    <AgentRunBadge profile={tab.profile} label={tab.label} onNavigate={() => setOpenMenu(null)} onShowWaiting={showWaitingChats} />
                   </li>
                 );
               })}

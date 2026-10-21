@@ -38,6 +38,15 @@ export function percentLeft(window: QuotaWindow): number {
   return Math.max(0, Math.min(100, Math.round(window.remaining_percent)));
 }
 
+export type QuotaTone = "green" | "orange" | "red";
+
+/** Цвет линии лимита зависит только от остатка окна: ≤20 % — оранжевый, ≤10 % или блокировка — красный. */
+export function quotaTone(window: QuotaWindow, blocked = false): QuotaTone {
+  const left = percentLeft(window);
+  if (blocked || left <= 10) return "red";
+  return left <= 20 ? "orange" : "green";
+}
+
 /** «Сброс ср, 14 окт. в 11:00 · через 5 дн. 16 ч». */
 export function resetLine(resetsAt: number, now: number, timeZone: string): string {
   const wait = resetsAt - now;

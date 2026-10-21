@@ -1446,6 +1446,50 @@ async def test_messenger_gets_human_learning_notice(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_telegram_compaction_notice_matches_the_web_text(monkeypatch, tmp_path):
+    import json
+
+    from agent.learning_receipt import build_turn_receipt, format_notice
+    from gateway.platforms.api_server import APIServerAdapter
+    from korra_state import SessionDB
+    from tools.memory_tool import load_on_disk_store, memory_tool
+
+    store = load_on_disk_store()
+    old = "Архив: /opt/data/home/k21b/INDEX.md; старые работы ждут подтверждения."
+    short = "Архив: /opt/data/home/k21b/INDEX.md."
+    fact = "Оплату принимаем по пятницам"
+    assert store.add("memory", old)["success"]
+    args = {"target": "memory", "operations": [
+        {"action": "replace", "old_text": old, "content": short},
+        {"action": "add", "content": fact},
+    ]}
+    raw = memory_tool(store=store, **args)
+    receipt = build_turn_receipt([
+        {"role": "user", "content": f"Запомни: {fact}"},
+        {"role": "assistant", "tool_calls": [{"id": "m", "function": {
+            "name": "memory", "arguments": json.dumps(args)}}]},
+        {"role": "tool", "tool_call_id": "m", "content": raw},
+    ])
+    monkeypatch.setattr(LearningReceiptAgent, "receipt", receipt)
+    sent = await _released_background_notices(monkeypatch, tmp_path, LearningReceiptAgent)
+    text, = sent
+    assert fact in text and "сжал 1 старую заметку" in text
+    assert "Архив" not in text and "/opt/" not in text
+
+    db = SessionDB(db_path=tmp_path / "web.db")
+    try:
+        db.create_session("web-compare", "api_server")
+        agent = SimpleNamespace(session_id="web-compare", _session_db=db)
+        api = APIServerAdapter(PlatformConfig(enabled=True, extra={"key": "k" * 32}))
+        api._wire_learning_notice(agent, {})
+        agent._post_turn_learning_receipt(receipt)
+        row, = db.get_messages("web-compare")
+        assert row["content"] == text == format_notice(receipt)
+    finally:
+        db.close()
+
+
+@pytest.mark.asyncio
 async def test_messenger_learning_notice_without_receipt_is_short_russian(monkeypatch, tmp_path):
     sent = await _released_background_notices(monkeypatch, tmp_path, LearningNoReceiptAgent)
 

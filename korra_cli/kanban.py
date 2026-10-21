@@ -82,6 +82,10 @@ def _task_to_dict(t: kb.Task) -> dict[str, Any]:
         "session_id": t.session_id,
         "workflow_template_id": t.workflow_template_id,
         "current_step_key": t.current_step_key,
+        "actor_kind": t.actor_kind,
+        "claim_lock": t.claim_lock,
+        # «Веду сам»: собственная работа автора, диспетчер её не запускает.
+        "self_work": (t.actor_kind or "") == "self",
     }
 
 
@@ -386,9 +390,10 @@ def build_parser(parent_subparsers: argparse._SubParsersAction) -> argparse.Argu
                           metavar="N", dest="goal_max_turns",
                           help='Лимит ходов для --goal (по умолчанию 20); без --goal не действует')
     p_create.add_argument("--initial-status",
+                          type=lambda v: str(v).strip().lower(),
                           choices=sorted(kb.VALID_INITIAL_STATUSES),
                           default="running",
-                          help='Начальное состояние карточки. blocked — для задач, сразу требующих вмешательства человека (R3), без промежуточного запуска.')
+                          help='Что будет с карточкой (по умолчанию running — то же, что queued): queued/running — в очередь, диспетчер запустит исполнителя --assignee; self — «веду сам»: записать собственную работу, карточка сразу «в работе» у автора, никто её не запускает и уведомлений нет, закрыть — korra kanban complete <id>; после паузы и снятия блокировки возвращается автору; blocked — сразу ждёт человека (R3): диспетчер не запустит её до korra kanban unblock.')
     p_create.add_argument("--json", action="store_true", help='Вывести JSON')
 
     # --- swarm ---
@@ -1615,6 +1620,15 @@ def _cmd_create(args: argparse.Namespace) -> int:
     else:
         # Created is the protocol marker consumed by gateway/slash_commands.py.
         print(f"Created {task_id}  ({task.status}, исполнитель={task.assignee or '-'})")
+        requested = str(getattr(args, "initial_status", "running") or "running").lower()
+        if (task.actor_kind or "") == "self":
+            print("  веду сам: карточка в работе у автора, диспетчер её не запускает; "
+                  f"закрыть — korra kanban complete {task_id}")
+        elif requested == "blocked" and task.status == "blocked":
+            print(f"  ждёт человека: диспетчер не запустит её до korra kanban unblock {task_id}")
+        elif requested in kb.QUEUED_INITIAL_STATUSES and task.status == "ready" and task.assignee:
+            print(f"  в очереди: диспетчер запустит исполнителя {task.assignee}. "
+                  "Чтобы записать собственную работу без запуска — --initial-status self")
 
         # Warn when the task would sit in `ready` because no dispatcher is
         # present. Only warn on ready+assigned tasks — triage/todo are
@@ -1774,6 +1788,8 @@ def _cmd_show(args: argparse.Namespace) -> int:
     print(f'Задача {task.id}: {task.title}')
     print(f'  состояние:    {task.status}')
     print(f"  исполнитель:  {task.assignee or '-'}")
+    if (task.actor_kind or "") == "self":
+        print(f"  веду сам:     работу ведёт автор ({task.claim_lock or '-'}), диспетчер её не запускает")
     if task.tenant:
         print(f'  область:      {task.tenant}')
     print(f'  рабочая папка: {task.workspace_kind}' +

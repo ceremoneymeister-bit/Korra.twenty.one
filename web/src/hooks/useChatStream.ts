@@ -1,4 +1,5 @@
 import { clearChatAttachmentDraft } from "@/hooks/useChatAttachmentDraft";
+import { startVisibleInterval } from "@/lib/visible-interval";
 import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
 import { chatViewKey, clearChatDraft, forgetChatSelection, readChatSelection, writeChatSelection } from "@/lib/chat-view-state";
 import { $viewedChat, markChatViewed, chatRunHeaders, chatRunUrl, getChatRuns, isRunBusy, refreshChatRuns, type ChatRun } from "@/lib/chat-runs";
@@ -780,6 +781,10 @@ function reducer(state: StreamState, action: StreamAction): StreamState {
 // ---------------------------------------------------------------------------
 
 const STOPPED_BY_USER = "Ход остановлен. Текст сохранён: его можно вернуть в поле.";
+const STOPPED_BEFORE_START = "Отправка остановлена до начала ответа";
+/** Сколько ждать появления хода после «Стоп» в первые секунды. */
+const STOP_INTENT_WAIT_MS = 15_000;
+const STOP_INTENT_POLL_MS = 500;
 
 export interface PendingMessageTarget { sessionId: string; messageId: string }
 
@@ -808,6 +813,8 @@ export interface UseChatStreamReturn {
   loadOlder: () => Promise<void>;
   reset: () => void;
   abort: () => void;
+  /** «Стоп» нажат, а ход ещё не остановлен. */
+  stopping: boolean;
 }
 
 export interface OlderHistoryState {
@@ -855,6 +862,8 @@ export function sessionMessagesToChat(
   /** Незакрытый ход агента: в него дописываются вызовы и текст. */
   let turn: ChatMessage | null = null;
   let turnOrigin: string | undefined;
+  /** Ход отвечает на служебное уведомление (фоновая работа), а не человеку. */
+  let serviceTurn = false;
 
   /** `complete` — ход закрыл ответ агента без вызовов. Иначе в истории лишь
    *  его промежуточный снимок («Сейчас проверю» и вызов инструмента): ход
@@ -863,7 +872,10 @@ export function sessionMessagesToChat(
   const closeTurn = (complete = false) => {
     if (!turn) return;
     // Ход без текста и без вызовов показывать нечего (служебные строки).
-    if (turn.content || turn.toolCalls?.length || turn.reasoning || turn.commentary?.length) {
+    // Служебный ход из одних рассуждений — это молчание (NO_REPLY сервер уже
+    // скрыл): второго сообщения владельцу нет. Ход человека показывается как раньше.
+    const visible = turn.content || turn.toolCalls?.length || turn.commentary?.length;
+    if (visible || (turn.reasoning && !serviceTurn)) {
       result.push({ ...turn, turnComplete: complete });
     }
     turn = null;
@@ -877,6 +889,7 @@ export function sessionMessagesToChat(
     // Keep the turn boundary while omitting their technical text from chat.
     if (message.display_kind === "internal_notification") {
       closeTurn();
+      serviceTurn = true;
       return;
     }
     const timestamp = message.timestamp ?? Date.now();
@@ -901,6 +914,7 @@ export function sessionMessagesToChat(
 
     if (message.role === "user") {
       closeTurn();
+      serviceTurn = false;
       const clientMessageId = message.display_metadata?.client_message_id;
       result.push({
         id,
@@ -1053,7 +1067,13 @@ export function useChatStream(
   /** Догрузка более ранней страницы: одна за раз, отменяется открытием чата. */
   const olderRequestRef = useRef<AbortController | null>(null);
   const backgroundLoadRef = useRef<AbortController | null>(null);
+  const loadSessionRef = useRef<UseChatStreamReturn["loadSession"] | null>(null);
   const [olderStatus, setOlderStatus] = useState<"idle" | "loading" | "failed">("idle");
+  // «Стоп» нажат, ответ сервера ещё не пришёл — композер показывает «Останавливаю…».
+  const [stopRequested, setStopRequested] = useState(false);
+  const stopIntentRef = useRef<string | null>(null);
+  /** Последняя отправка этой вкладки: по ней «Стоп» находит свой ход. */
+  const lastSendRef = useRef<{ generation: string; sessionId: string; messageId: string } | null>(null);
   // Synchronous mirror of state.isStreaming so concurrent send() calls
   // can guard against re-entry without waiting for a re-render. React
   // state updates are async — without this ref, two send() calls fired
@@ -1138,11 +1158,63 @@ export function useChatStream(
   const abort = useCallback(() => {
     const generation = activeStreamIdRef.current;
     const sessionId = state.sessionId;
-    if (!sessionId) return;
+    if (!sessionId || stopIntentRef.current) return;
+    // Свой ход этой вкладки узнаём по client message id: в первые секунды
+    // список ходов может показывать только прошлый, уже завершённый ход.
+    const sent = lastSendRef.current;
+    const target = sent && sent.generation === generation && sent.sessionId === sessionId ? sent.messageId : undefined;
+    stopIntentRef.current = generation ?? "stop";
+    setStopRequested(true);
     void (async () => {
+      // Владелец лока: сначала поток, после отцепления — сама остановка.
+      let owner = generation;
+      let detached = false;
+      const current = () => mountedRef.current && activeStreamIdRef.current === owner;
+      // Экран этого разговора можно обновить: либо лок наш, либо фоновое
+      // перечитывание истории уже забрало его и нового хода нет.
+      const canShow = () => mountedRef.current && (current() || (!streamingRef.current && stateRef.current.sessionId === sessionId));
+      const findRun = async () => {
+        const runs = await getChatRuns(profile ?? "", sessionId);
+        return target ? runs.find((item) => item.message_id === target) : runs[0];
+      };
       try {
-        const run = (await getChatRuns(profile ?? "", sessionId))[0];
-        if (!run) throw new Error("Ход пока отправляется. Попробуйте остановить ещё раз.");
+        let run = await findRun();
+        if (!run) {
+          // «Стоп» в первые секунды: сервер ещё не записал ход. Намерение
+          // запоминаем, локальный поток отцепляем сразу (чтобы ответ не
+          // продолжал печататься), а отмену отправляем, как только ход
+          // появится в списке. Лок отправки держим до конца: новое сообщение
+          // нельзя начинать, пока прежний ход не остановлен.
+          if (!current()) return;
+          owner = crypto.randomUUID();
+          activeStreamIdRef.current = owner;
+          detached = true;
+          abortControllerRef.current?.abort();
+          const deadline = Date.now() + STOP_INTENT_WAIT_MS;
+          // Фоновое перечитывание истории может забрать лок, пока ждём, —
+          // намерение остановить от этого не отменяется: ждём ход до конца.
+          while (!run && Date.now() < deadline) {
+            await new Promise((resolve) => window.setTimeout(resolve, STOP_INTENT_POLL_MS));
+            if (!mountedRef.current) return;
+            run = await findRun();
+          }
+        }
+        if (!run) {
+          // Ход так и не появился: запрос отправки прерван до того, как
+          // сервер его принял. Текст остаётся в браузере для повтора.
+          if (current()) {
+            activeStreamIdRef.current = null;
+            streamingRef.current = false;
+          }
+          const kept = target ? loadChatOutboxRecords(profile ?? "").find((record) => record.messageId === target) : undefined;
+          if (kept) saveChatOutbox({ ...kept, status: "failed", error: STOPPED_BEFORE_START });
+          if (canShow()) {
+            if (kept) dispatch({ type: "MARK_DELIVERY", messageId: kept.messageId, delivery: "failed", error: STOPPED_BEFORE_START });
+            dispatch({ type: "SET_ERROR", error: "Отправка остановлена до начала ответа. Текст сохранён — его можно вернуть в поле или повторить." });
+          }
+          void refreshChatRuns();
+          return;
+        }
         // Ход, принятый до сжатия, записан под прежним id разговора.
         const response = await fetch(chatRunUrl(`/${encodeURIComponent(run.message_id)}/cancel`, profile ?? "", run.session_id || sessionId), {
           method: "POST", headers: chatRunHeaders(),
@@ -1154,25 +1226,41 @@ export function useChatStream(
         const kept = loadChatOutboxRecords(profile ?? "").find((record) => record.messageId === run.message_id);
         const stopped = kept?.terminal && kept.error ? kept.error : STOPPED_BY_USER;
         if (kept) saveChatOutbox({ ...kept, status: "failed", terminal: true, error: stopped });
-        if (mountedRef.current && activeStreamIdRef.current === generation) {
-          activeStreamIdRef.current = null;
-          abortControllerRef.current?.abort();
-          streamingRef.current = false;
+        if (current() || (detached && canShow())) {
+          if (current()) {
+            activeStreamIdRef.current = null;
+            abortControllerRef.current?.abort();
+            streamingRef.current = false;
+          }
           if (kept) dispatch({ type: "MARK_DELIVERY", messageId: kept.messageId, delivery: "failed", terminal: true, error: stopped });
           dispatch({ type: "SET_ERROR", error: "Ход остановлен. Можно написать новое сообщение." });
         }
         void refreshChatRuns();
       } catch (error) {
-        if (mountedRef.current && activeStreamIdRef.current === generation) {
+        if (current()) {
           // A failed Stop is not evidence that the agent stopped.
           dispatch({ type: "STOP_FAILED", error: ownerFacingError(error, "Не удалось остановить ход.") });
+          if (detached) {
+            // Поток уже отцеплен — отпускаем лок и переподключаемся к ходу
+            // по серверному состоянию, чтобы ответ не потерялся.
+            activeStreamIdRef.current = null;
+            streamingRef.current = false;
+            dispatch({ type: "RESET_STREAMING" });
+            void loadSessionRef.current?.(sessionId, { background: true });
+          }
         }
+      } finally {
+        stopIntentRef.current = null;
+        if (mountedRef.current) setStopRequested(false);
       }
     })();
   }, [profile, state.sessionId]);
 
   const loadSession = useCallback(async (sessionId: string, options?: LoadSessionOptions): Promise<void> => {
     if (!mountedRef.current || scopeRef.current !== selectionKey) return;
+    // «Стоп» владеет этим ходом до подтверждения: обновление истории не
+    // должно снимать блокировку отправки или заново подключать его поток.
+    if (stopIntentRef.current && stateRef.current.sessionId === sessionId) return;
     const cacheKey = chatHistoryKey(HERMES_BASE_PATH, profile, sessionId);
     const sameSession = stateRef.current.cacheKey === cacheKey;
     const cached = sameSession ? undefined : chatHistoryCache.get(cacheKey);
@@ -1586,6 +1674,7 @@ export function useChatStream(
 
       // Build user message
       const messageId = retryRecord?.messageId ?? crypto.randomUUID();
+      lastSendRef.current = { generation: localStreamId, sessionId, messageId };
       const createdAt = retryRecord?.createdAt ?? Date.now();
       const outboxRecord: ChatOutboxRecord = {
         messageId,
@@ -2176,7 +2265,6 @@ export function useChatStream(
   // вопросы команд во время живого хода остаются под управлением SSE.
   // Только видимая вкладка: скрытые чаты не опрашивают сервер (ревью 0.21.16, R3).
   const { sessionId: currentSessionId, isStreaming } = state;
-  const loadSessionRef = useRef(loadSession);
   useEffect(() => { loadSessionRef.current = loadSession; }, [loadSession]);
   useEffect(() => {
     if (!active || !currentSessionId || turnsDelivered === 0) return;
@@ -2187,7 +2275,7 @@ export function useChatStream(
       timer = window.setTimeout(async () => {
         if (cancelled) return;
         if (!document.hidden && !streamingRef.current) {
-          try { await loadSessionRef.current(currentSessionId, { background: true }); } catch { /* следующая проверка */ }
+          try { await loadSessionRef.current?.(currentSessionId, { background: true }); } catch { /* следующая проверка */ }
         }
         if (!cancelled) schedule(step + 1);
       }, LEARNING_FOLLOW_UP_MS[step]);
@@ -2212,10 +2300,11 @@ export function useChatStream(
       }
     };
     void load();
-    const timer = window.setInterval(() => void load(), APPROVAL_POLL_MS);
+    // Скрытая вкладка не опрашивает; возврат на неё обновляет сразу.
+    const stop = startVisibleInterval(() => void load(), APPROVAL_POLL_MS);
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      stop();
     };
   }, [active, currentSessionId, isStreaming, profile]);
 
@@ -2240,5 +2329,6 @@ export function useChatStream(
     loadSession,
     reset,
     abort,
+    stopping: stopRequested && state.isStreaming,
   };
 }

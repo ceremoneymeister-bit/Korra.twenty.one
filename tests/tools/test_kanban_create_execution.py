@@ -228,3 +228,88 @@ def test_guidance_ties_a_started_claim_to_the_execution_block():
     assert "execution.started" in g
     assert "within about a minute" not in g
     assert len(g) <= 3500
+
+
+# --- «веду сам» (initial_status=self) через инструмент -------------------------
+
+
+@pytest.fixture
+def can_close(monkeypatch):
+    """A profile that has kanban_complete (explicit kanban toolset)."""
+    from tools import kanban_tools as kt
+
+    monkeypatch.setattr(kt, "_check_kanban_worker_mode", lambda: True)
+    return kt
+
+
+@pytest.mark.parametrize("value", ["self", "Self", " SELF "])
+def test_self_card_needs_no_assignee_and_is_not_started(env, can_close, monkeypatch, value):
+    _config(env, general=False, exact=True)
+    monkeypatch.setenv("KORRA_PROFILE", "operator")
+    subscribed: list[str] = []
+    monkeypatch.setattr(can_close, "_maybe_auto_subscribe",
+                        lambda conn, tid: subscribed.append(tid) or True)
+    out = json.loads(can_close._handle_create({"title": "моя работа", "initial_status": value}))
+    assert "error" not in out, out
+    ex = out["execution"]
+    assert ex["state"] == "self"
+    assert ex["started"] is False and ex["will_start"] is False and ex["run_id"] is None
+    assert f"kanban_complete(task_id='{out['task_id']}')" in ex["reason"]
+    assert "not subscribed" not in ex["reason"]
+    assert out["max_runtime_seconds"] is None
+    # No subscription: finishing one's own work wakes nobody and pings nobody.
+    assert out["subscribed"] is False and subscribed == []
+    assert _requests(out["task_id"]) == []
+    with kb.connect_closing() as conn:
+        task = kb.get_task(conn, out["task_id"])
+        assert task.status == "running" and task.assignee is None
+        assert task.actor_kind == "self" and task.claim_lock == "self:operator"
+        assert kb.list_notify_subs(conn, out["task_id"]) == []
+
+
+def test_self_card_is_refused_in_a_chat_without_kanban_complete(env, monkeypatch):
+    """The owner's main chat has no kanban_complete (cost-aware 18.10): a self
+    card it made would stay «в работе» forever, so it is refused up front."""
+    from tools import kanban_tools as kt
+
+    monkeypatch.setattr(kt, "_check_kanban_worker_mode", lambda: False)
+    out = json.loads(kt._handle_create({"title": "моя работа", "initial_status": "self"}))
+    assert "error" in out and "kanban_complete" in out["error"]
+    with kb.connect_closing() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] == 0
+
+
+def test_create_schema_does_not_promise_an_unavailable_close_path():
+    from tools import kanban_tools as kt
+
+    desc = kt.KANBAN_CREATE_SCHEMA["parameters"]["properties"]["initial_status"]["description"]
+    assert "close it with kanban_complete" in desc
+    assert "refused elsewhere" in desc
+    assert "until it is unblocked" in desc
+
+
+def test_worker_closes_the_self_card_it_recorded_but_nothing_foreign(env, can_close, monkeypatch):
+    kt = can_close
+    with kb.connect_closing() as conn:
+        mine = kb.create_task(conn, title="задача исполнителя", assignee="pm")
+        other = kb.create_task(conn, title="чужая задача", assignee="pm")
+    monkeypatch.setattr(kt, "_is_dispatcher_owned_worker", lambda: True)
+    monkeypatch.setenv("KORRA_PROFILE", "pm")
+
+    monkeypatch.setenv("KORRA_KANBAN_TASK", other)
+    foreign = json.loads(kt._handle_create({"title": "чужая self", "initial_status": "self"}))
+    assert foreign["execution"]["state"] == "self"
+
+    monkeypatch.setenv("KORRA_KANBAN_TASK", mine)
+    own = json.loads(kt._handle_create({"title": "моя self", "initial_status": "self"}))
+    done = json.loads(kt._handle_complete({"task_id": own["task_id"], "summary": "готово"}))
+    assert "error" not in done, done
+    # A self card recorded by another worker's task and a plain foreign task
+    # stay out of reach.
+    for tid in (foreign["task_id"], other):
+        refused = json.loads(kt._handle_complete({"task_id": tid, "summary": "x"}))
+        assert "worker is scoped to task" in refused.get("error", ""), refused
+    with kb.connect_closing() as conn:
+        assert kb.get_task(conn, own["task_id"]).status == "done"
+        assert kb.get_task(conn, foreign["task_id"]).status == "running"
+        assert kb.get_task(conn, other).status == "ready"

@@ -178,13 +178,19 @@ async def chat_runs(profile: str | None = None, session_id: str | None = None):
         result.append(summary)
     from korra_cli.chat_activity import project_chat_activity
 
+    unavailable_profiles: set[str] = set()
     try:
         projected = await server.run_in_threadpool(
             project_chat_activity,
             result,
             profile=profile,
             session_id=session_id,
+            unavailable_profiles=unavailable_profiles,
         )
+        if profile is not None and (profile or "default") in unavailable_profiles:
+            from tools.effect_decisions import EffectDecisionStoreUnavailable
+
+            raise EffectDecisionStoreUnavailable()
     except Exception as exc:
         from tools.effect_decisions import EffectDecisionStoreUnavailable
 
@@ -197,7 +203,7 @@ async def chat_runs(profile: str | None = None, session_id: str | None = None):
                 "изменялись; требуется восстановление базы."
             ),
         ) from None
-    return {"runs": projected}
+    return {"runs": projected, **({"unavailable_profiles": sorted(unavailable_profiles)} if unavailable_profiles else {})}
 
 
 @router.get("/api/chat/runs")

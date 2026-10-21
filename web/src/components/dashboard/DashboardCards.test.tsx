@@ -599,7 +599,7 @@ describe("«Лимит Codex»", () => {
     expect(text()).toContain("Тратится в 1,5 раза быстрее ровного темпа.");
     expect(text()).toMatch(/Так лимит кончится в пн, 28 сент\.? около 02:00 — за 2,5 дня до сброса\./);
     expect(container.querySelector("[data-quota-level]")?.getAttribute("data-quota-level")).toBe("warn");
-    expect(container.querySelector(".kdw-limit-bar")?.getAttribute("data-level")).toBe("warn");
+    expect(container.querySelector(".kdw-limit-bar")?.getAttribute("data-tone")).toBe("green");
   });
 
   it("спокойный темп: одна короткая строка", async () => {
@@ -787,6 +787,96 @@ describe("«Лимит Codex»", () => {
     expect(text()).toContain("71 % осталось");
     expect(text()).toMatch(/Сброс сегодня в 16:00 · через 3 ч/);
     expect(text()).not.toMatch(/кредит|баланс/i);
+  });
+
+  const tones = () =>
+    Array.from(container.querySelectorAll(".kdw-limit")).map((line) => [
+      line.querySelector(".kdw-limit-bar")?.getAttribute("data-tone"),
+      line.querySelector(".kdw-limit-pct")?.getAttribute("data-tone"),
+    ]);
+
+  it.each([
+    [21, "green"],
+    [20, "orange"],
+    [11, "orange"],
+    [10, "red"],
+    [0, "red"],
+  ])("цвет линии и числа при остатке %i %% — %s, на любом размере", async (left, tone) => {
+    for (const size of ["s", "m", "l"] as const) {
+      serveQuota(quotaOf([win({ used_percent: 100 - left, remaining_percent: left, level: "normal" })]));
+      await mount(CODEX_QUOTA_WIDGET, size);
+      expect(tones()).toEqual([[tone, tone]]);
+      await act(async () => root?.unmount());
+      root = null;
+      container.remove();
+    }
+  });
+
+  it("цвет не зависит от уровня сервера: critical при 50 % остатка — зелёный", async () => {
+    serveQuota(quotaOf([win({ used_percent: 50, remaining_percent: 50, level: "critical" })]));
+    await mount(CODEX_QUOTA_WIDGET, "m");
+    expect(tones()).toEqual([["green", "green"]]);
+  });
+
+  it("прогноз «кончится до сброса» при 50 % остатка: линия зелёная, предупреждение в тексте остаётся", async () => {
+    serveQuota(
+      quotaOf([
+        win({
+          used_percent: 50,
+          remaining_percent: 50,
+          level: "warn",
+          forecast: { pace: 1.8, exhausts_at: RESETS_AT - 60 * 3600, exhausts_before_reset: true },
+        }),
+      ]),
+    );
+    await mount(CODEX_QUOTA_WIDGET, "m");
+    expect(tones()).toEqual([["green", "green"]]);
+    expect(text()).toContain("Тратится в 1,8 раза быстрее ровного темпа.");
+    expect(container.querySelector(".kdw-limit-say")?.getAttribute("data-level")).toBe("warn");
+  });
+
+  it("заблокированное окно красное, даже если процент остатка выше 10", async () => {
+    serveQuota(
+      quotaOf([win({ used_percent: 85, remaining_percent: 15, level: "critical" })], { limit_reached: true }),
+    );
+    await mount(CODEX_QUOTA_WIDGET, "m");
+    expect(tones()).toEqual([["red", "red"]]);
+  });
+
+  it("два окна: каждое красится по своему остатку, тонкие линии", async () => {
+    serveQuota(
+      quotaOf([
+        win({ key: "primary", window_minutes: 300, label: "5 ч", used_percent: 82, remaining_percent: 18, level: "warn" }),
+        win({ key: "secondary", used_percent: 94, remaining_percent: 6, level: "critical" }),
+      ]),
+    );
+    await mount(CODEX_QUOTA_WIDGET, "l");
+    expect(container.querySelectorAll(".kdw-limit--thin")).toHaveLength(2);
+    expect(tones()).toEqual([
+      ["orange", "orange"],
+      ["red", "red"],
+    ]);
+    expect(meters().map((meter) => meter.getAttribute("aria-valuetext"))).toEqual(["осталось 18 %", "осталось 6 %"]);
+  });
+
+  it("стили: у каждого цвета свой токен, у токенов есть значения для светлой и тёмной темы", () => {
+    const rule = (selector: string) => {
+      const block = widgetStyles.split("}").find((chunk) => chunk.includes(selector));
+      expect(block, selector).toBeDefined();
+      return block as string;
+    };
+    const bar = (tone: string) => rule(`.kdw-limit-bar[data-tone="${tone}"]`);
+    const pct = (tone: string) => rule(`.kdw-limit-pct[data-tone="${tone}"] strong`);
+    expect(bar("green")).toContain("var(--kdw-quota-green)");
+    expect(bar("orange")).toContain("var(--kdw-quota-orange)");
+    expect(bar("red")).toContain("var(--kdw-quota-red)");
+    expect(pct("green")).toContain("var(--kdw-quota-green)");
+    expect(pct("orange")).toContain("var(--kdw-quota-orange)");
+    expect(pct("red")).toContain("var(--kdw-quota-red)");
+    for (const name of ["green", "orange", "red"]) {
+      expect(widgetStyles).toMatch(new RegExp(`--kdw-quota-${name}:\\s*light-dark\\(#[0-9a-f]{6},\\s*#[0-9a-f]{6}\\)`, "i"));
+    }
+    expect(widgetStyles).not.toMatch(/\.kdw-limit-(bar|pct)\[data-level/);
   });
 
   it("размер S: проценты, линия, короткий сброс и короткий прогноз", async () => {

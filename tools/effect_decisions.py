@@ -464,6 +464,18 @@ def list_profile_decisions(
             """,
             params,
         ).fetchall()
+        # A history limit must never hide an unanswered decision. Keep the
+        # bounded history and add any pending/review rows beyond its first page.
+        attention = [status for status in (PENDING, NEEDS_REVIEW) if status in statuses]
+        if attention:
+            attention_marks = ",".join("?" for _ in attention)
+            attention_rows = conn.execute(
+                f"SELECT * FROM effect_decisions WHERE status IN ({attention_marks}){profile_where} "
+                "ORDER BY (status = 'pending') DESC, created_at DESC, id DESC",
+                [*attention, *([profile] if profile else [])],
+            ).fetchall()
+            attention_ids = {row["id"] for row in attention_rows}
+            rows = [*attention_rows, *(row for row in rows if row["id"] not in attention_ids)]
         conn.commit()
         return [_row_dict(row) for row in rows]  # type: ignore[misc]
 

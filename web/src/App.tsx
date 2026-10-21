@@ -53,6 +53,7 @@ import {
   ShieldCheck,
   Sparkles,
   Star,
+  Store,
   Terminal,
   Users,
   Webhook,
@@ -89,6 +90,7 @@ const ClientHelpPage = lazy(() => import("@/pages/ClientHelpPage"));
 const EnvPage = lazy(() => import("@/pages/EnvPage"));
 const ConnectionsRedirect = lazy(() => import("@/pages/ConnectionsRedirect"));
 const FilesPage = lazy(() => import("@/pages/FilesPage"));
+const MarketplacePage = lazy(() => import("@/pages/MarketplacePage"));
 const SessionsPage = lazy(() => import("@/pages/SessionsPage"));
 const LogsPage = lazy(() => import("@/pages/LogsPage"));
 const AnalyticsPage = lazy(() => import("@/pages/AnalyticsPage"));
@@ -231,6 +233,9 @@ const BUILTIN_ROUTES_CORE: Record<string, ComponentType> = {
   "/agents": AgentsRouteSink,
   "/sessions": SessionsPage,
   "/files": FilesPage,
+  "/marketplace": MarketplacePage,
+  "/marketplace/:section": MarketplacePage,
+  "/marketplace/:section/:item": MarketplacePage,
   "/analytics": AnalyticsPage,
   "/models": ModelsPage,
   "/logs": LogsPage,
@@ -274,6 +279,7 @@ function AgentsRouteSink() {
 const BUILTIN_NAV_REST: NavItem[] = [
   { path: "/dashboard", label: "Дашборд", icon: LayoutDashboard },
   { path: "/agents", label: "Агенты", icon: Users },
+  { path: "/marketplace", label: "Маркетплейс", icon: Store },
   {
     path: "/sessions",
     labelKey: "sessions",

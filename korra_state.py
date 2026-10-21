@@ -11872,6 +11872,57 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
 
         return bool(self._execute_write(_do))
 
+    def hide_latest_service_turn_rows(
+        self, session_id: str, *, assistant_contents, user_contents=(),
+    ) -> int:
+        """Скрыть из показа строки молчаливого служебного хода (веб-панель).
+
+        Ход — строки после последнего ``internal_notification``: помечаются
+        ``display_kind="hidden"`` ответы ассистента с текстом из
+        ``assistant_contents`` (NO_REPLY) и служебные повторы-напоминания из
+        ``user_contents``. Реплика человека останавливает обход — её и всё после
+        не трогаем. Модель строки по-прежнему видит (role/content не меняются).
+        """
+        if not session_id:
+            return 0
+        assistant_set = {self._encode_content(c) for c in assistant_contents if c}
+        user_set = {self._encode_content(c) for c in user_contents if c}
+        if not assistant_set:
+            return 0
+
+        def _do(conn):
+            anchor = conn.execute(
+                "SELECT id FROM messages WHERE session_id = ? AND role = 'user' "
+                "AND display_kind = 'internal_notification' AND active = 1 "
+                "ORDER BY id DESC LIMIT 1",
+                (session_id,),
+            ).fetchone()
+            if anchor is None:
+                return 0
+            rows = conn.execute(
+                "SELECT id, role, content, display_kind FROM messages "
+                "WHERE session_id = ? AND id > ? AND active = 1 ORDER BY id ASC",
+                (session_id, anchor[0]),
+            ).fetchall()
+            ids = []
+            for row_id, role, content, display_kind in rows:
+                if role == "user":
+                    if content in user_set:
+                        ids.append(row_id)
+                        continue
+                    if display_kind == "hidden":
+                        continue
+                    break
+                if role == "assistant" and content in assistant_set:
+                    ids.append(row_id)
+            for row_id in ids:
+                conn.execute(
+                    "UPDATE messages SET display_kind = 'hidden' WHERE id = ?", (row_id,),
+                )
+            return len(ids)
+
+        return int(self._execute_write(_do) or 0)
+
     #: Key under which message reactions live inside ``display_metadata``.
     #: Reactions share the existing per-message JSON column rather than a side
     #: table so they survive rewind/compaction row rewrites with the row itself.

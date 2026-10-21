@@ -1549,7 +1549,13 @@ class TelegramAdapter(BasePlatformAdapter):
                         )
                     )
                 except Exception:
-                    pass
+                    # Fail closed: a broken auth check must not admit anyone.
+                    logger.warning(
+                        "[Telegram] Auth check failed for user %s; denying",
+                        user_id,
+                        exc_info=True,
+                    )
+                    authorized = False
 
         if authorized is None:
             # Resolve through the runner's full auth chain (platform + group
@@ -1585,11 +1591,13 @@ class TelegramAdapter(BasePlatformAdapter):
                     try:
                         authorized = bool(auth_fn(source))
                     except Exception:
-                        logger.debug(
-                            "[Telegram] Falling back to env-only auth for user %s",
+                        # Fail closed: do not fall back to the env allowlist.
+                        logger.warning(
+                            "[Telegram] Auth chain failed for user %s; denying",
                             user_id,
                             exc_info=True,
                         )
+                        authorized = False
 
         if authorized is None:
             allowed_csv = _scoped_gate_env("TELEGRAM_ALLOWED_USERS").strip()

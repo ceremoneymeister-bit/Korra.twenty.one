@@ -649,6 +649,7 @@ class MemoryStore:
             working: List[str] = list(self._entries_for(target))
             limit = self._char_limit(target)
             replaced_entries: Dict[int, str] = {}
+            removed_entries: Dict[int, str] = {}
             net_added: List[str] = []
             net_removed: List[str] = []
 
@@ -700,7 +701,8 @@ class MemoryStore:
                             target,
                             f"{pos}: '{old_text}' matched multiple distinct entries -- be more specific.",
                         )
-                    self._note_change(net_added, net_removed, gone=working.pop(matches[0]))
+                    removed_entries[i] = working.pop(matches[0])
+                    self._note_change(net_added, net_removed, gone=removed_entries[i])
 
                 else:
                     return self._batch_error(
@@ -730,6 +732,8 @@ class MemoryStore:
         extra: Dict[str, Any] = {"changes": {"added": net_added, "removed": net_removed}}
         if replaced_entries:
             extra["replaced_entries"] = replaced_entries
+        if removed_entries:
+            extra["removed_entries"] = removed_entries
         return self._success_response(
             target, f"Applied {len(operations)} operation(s).", **extra
         )

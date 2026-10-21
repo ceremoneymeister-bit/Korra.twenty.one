@@ -27,6 +27,7 @@ import {
   resetLine,
   resetShort,
   planName,
+  quotaTone,
   spareText,
   windowName,
 } from "@/lib/codex-quota";
@@ -153,12 +154,13 @@ function QuotaLine({
   window: QuotaWindow;
 }) {
   const left = percentLeft(window);
+  const tone = quotaTone(window, blocked);
   const name = windowName(window.window_minutes);
   return (
     <div className={cn("kdw-limit", thin && "kdw-limit--thin")} data-window={window.key}>
       <div className="kdw-limit-top">
         <span className="kdw-limit-name">{name}</span>
-        <span className="kdw-limit-pct" data-level={window.level}>
+        <span className="kdw-limit-pct" data-tone={tone}>
           <strong>
             {left}
             <small> %</small>
@@ -168,7 +170,7 @@ function QuotaLine({
       </div>
       <div
         className="kdw-limit-bar"
-        data-level={window.level}
+        data-tone={tone}
         role="meter"
         aria-label={`${name}: осталось`}
         aria-valuemin={0}

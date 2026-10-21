@@ -2422,6 +2422,25 @@ it("скрытое уведомление сохраняет границу дв
   expect(messages.map(m => m.content)).toEqual(["Первый помощник готов", "Второй помощник готов", quote]);
 });
 
+it("молчаливый служебный ход не даёт второго сообщения, ход человека виден как раньше", async () => {
+  const { sessionMessagesToChat } = await import("./useChatStream");
+  const messages = sessionMessagesToChat("silent", [
+    { id: 1, role: "user", content: "Проверь отчёт" },
+    { id: 2, role: "assistant", content: "Отчёт проверен" },
+    { id: 3, role: "user", content: "служебный результат", display_kind: "internal_notification" },
+    { id: 4, role: "assistant", content: "", reasoning_content: "итог уже сообщён" },
+    { id: 5, role: "assistant", content: "NO_REPLY", display_kind: "hidden" },
+    { id: 6, role: "user", content: "Спасибо" },
+    { id: 7, role: "assistant", content: "", reasoning_content: "думаю над ответом" },
+  ]);
+  expect(messages.map(m => [m.role, m.content, m.reasoning ?? ""])).toEqual([
+    ["user", "Проверь отчёт", ""],
+    ["assistant", "Отчёт проверен", ""],
+    ["user", "Спасибо", ""],
+    ["assistant", "", "думаю над ответом"],
+  ]);
+});
+
 it("K21-376: commentary is visible before final and survives tool boundaries once", async () => {
   let stream!: ReadableStreamDefaultController<Uint8Array>;
   const encode = new TextEncoder();
@@ -2536,5 +2555,96 @@ describe('K21-385: Stop keeps the message recoverable', () => {
     const failed = current.messages.find(m => m.clientMessageId === record.messageId)!;
     expect(failed).toMatchObject({ delivery: 'failed', failureConfirmed: true });
     expect(current.isStreaming).toBe(false);
+  });
+});
+
+describe('UX 17.10: «Стоп» в первые секунды, пока хода ещё нет в списке', () => {
+  function openStream() {
+    let stream!: ReadableStreamDefaultController<Uint8Array>;
+    const cancelUrls: string[] = [];
+    let postSignal: AbortSignal | undefined;
+    vi.stubGlobal('fetch', vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      if (String(url).includes('/cancel')) { cancelUrls.push(String(url)); return Response.json({ stopped: true }); }
+      if (!String(url).includes('/chat/completions')) return Response.json({ sessions: [], messages: [] });
+      postSignal = init?.signal ?? undefined;
+      return new Response(new ReadableStream<Uint8Array>({ start(c) { stream = c; } }), {
+        headers: { 'content-type': 'text/event-stream' },
+      });
+    }));
+    return { cancelUrls, enqueue: (text: string) => stream.enqueue(new TextEncoder().encode(text)), signal: () => postSignal };
+  }
+
+  it('запоминает намерение, сразу отцепляет поток и отменяет ход, когда он появится', async () => {
+    const { getChatRuns } = await import('@/lib/chat-runs');
+    const runs = vi.mocked(getChatRuns);
+    const io = openStream();
+    await act(async () => { void current.send('Посчитай смету'); });
+    const record = loadChatOutbox()!;
+    runs.mockImplementation(async () => []);
+    await act(async () => { current.abort(); });
+    // Сразу: «Останавливаю…», лок отправки держится, локальный поток прерван.
+    expect(current.stopping).toBe(true);
+    expect(current.isStreaming).toBe(true);
+    expect(io.signal()?.aborted).toBe(true);
+    expect(io.cancelUrls).toHaveLength(0);
+    // Ход появился на сервере — отмена уходит именно ему.
+    runs.mockImplementation(async () => [{
+      message_id: record.messageId, session_id: current.sessionId!, profile: '',
+      status: 'running', updated_at: 1, history_count: 0,
+      user_message: { role: 'user', content: record.text },
+    }]);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 700)); });
+    expect(io.cancelUrls).toHaveLength(1);
+    expect(io.cancelUrls[0]).toContain(encodeURIComponent(record.messageId));
+    expect(current.isStreaming).toBe(false);
+    expect(current.stopping).toBe(false);
+    expect(loadChatOutbox()).toMatchObject({ text: record.text, status: 'failed', terminal: true });
+    runs.mockImplementation(async () => []);
+  });
+
+  it('фоновое перечитывание истории не отменяет намерение остановить', async () => {
+    const { getChatRuns } = await import('@/lib/chat-runs');
+    const runs = vi.mocked(getChatRuns);
+    const io = openStream();
+    await act(async () => { void current.send('Посчитай смету'); });
+    const record = loadChatOutbox()!;
+    const sessionId = current.sessionId!;
+    runs.mockImplementation(async () => []);
+    await act(async () => { current.abort(); });
+    // Возврат на вкладку: история перечитывается в фоне и забирает лок.
+    await act(async () => { await current.loadSession(sessionId, { background: true }); });
+    // Обновление истории не снимает блокировку до подтверждения остановки.
+    expect(current.isStreaming).toBe(true);
+    expect(current.stopping).toBe(true);
+    let newSend = true;
+    await act(async () => { newSend = await current.send('Следующее поручение'); });
+    expect(newSend).toBe(false);
+    expect(loadChatOutboxRecords()).toHaveLength(1);
+    runs.mockImplementation(async () => [{
+      message_id: record.messageId, session_id: sessionId, profile: '',
+      status: 'running', updated_at: 1, history_count: 0,
+      user_message: { role: 'user', content: record.text },
+    }]);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 700)); });
+    expect(io.cancelUrls).toHaveLength(1);
+    expect(loadChatOutbox()).toMatchObject({ status: 'failed', terminal: true });
+    runs.mockImplementation(async () => []);
+  });
+
+  it('не отменяет чужой прошлый ход, пока свой ещё не записан', async () => {
+    const { getChatRuns } = await import('@/lib/chat-runs');
+    const runs = vi.mocked(getChatRuns);
+    const io = openStream();
+    await act(async () => { void current.send('Новый вопрос'); });
+    runs.mockImplementation(async () => [{
+      message_id: 'previous-turn', session_id: current.sessionId!, profile: '',
+      status: 'completed', updated_at: 1, history_count: 0,
+      user_message: { role: 'user', content: 'старое' },
+    }]);
+    await act(async () => { current.abort(); });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 600)); });
+    expect(io.cancelUrls).toHaveLength(0);
+    expect(current.stopping).toBe(true);
+    runs.mockImplementation(async () => []);
   });
 });

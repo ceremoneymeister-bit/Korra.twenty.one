@@ -82,21 +82,22 @@ export function AgentFace({ label, status, large, active }: AgentFaceInnerProps 
 
 export interface ActivityRingProps extends Omit<ComponentProps<"button">, "children"> {
   count: number;
+  unavailable?: boolean;
 }
 
 /** «Идут работы» — кольцо с числом вместо текста «В работе: 3». */
 export const ActivityRing = forwardRef<HTMLButtonElement, ActivityRingProps>(function ActivityRing(
-  { count, className, ...props },
+  { count, unavailable = false, className, ...props },
   ref,
 ) {
-  const label = count > 0 ? `Идут работы: ${count}. Показать список` : "Сейчас агенты ничего не выполняют";
+  const label = unavailable ? "Работа агентов: часть профилей недоступна. Показать список" : count > 0 ? `Идут работы: ${count}. Показать список` : "Сейчас агенты ничего не выполняют";
   return (
     <button
       ref={ref}
       type="button"
       aria-label={label}
       title={label}
-      className={cn("k-act", count === 0 && "is-idle", className)}
+      className={cn("k-act", count === 0 && !unavailable && "is-idle", className)}
       {...props}
     >
       {count > 0 ? (
@@ -107,6 +108,8 @@ export const ActivityRing = forwardRef<HTMLButtonElement, ActivityRingProps>(fun
           </svg>
           <span className="k-act__n" aria-hidden>{count}</span>
         </>
+      ) : unavailable ? (
+        <span className="k-act__n" aria-hidden>?</span>
       ) : (
         <Activity size={18} aria-hidden className="k-icon" />
       )}

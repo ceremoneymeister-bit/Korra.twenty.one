@@ -222,20 +222,29 @@ export async function fetchJSON<T>(
     }
     throw new ApiError(
       res.status,
-      `${res.status}: ${safeApiErrorMessage(res.status, text)}`,
+      `${res.status}: ${safeApiErrorMessage(res.status, text, res.headers?.get("Content-Type") ?? "")}`,
       payload,
     );
   }
   return res.json();
 }
 
-function safeApiErrorMessage(status: number, raw: string): string {
-  const candidates: unknown[] = [raw];
+function safeApiErrorMessage(status: number, raw: string, contentType: string): string {
+  let candidates: unknown[];
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
-    candidates.unshift(parsed.detail, parsed.message, parsed.error);
+    candidates = [parsed.detail, parsed.message, parsed.error, raw];
   } catch {
-    // Plain-text response; it is checked below.
+    if (contentType.split(";")[0].trim().toLowerCase() === "text/html") {
+      // Proxy errors can be HTML. A template keeps scripts and resources inert;
+      // only its text is used, never inserted into the live document.
+      const template = document.createElement("template");
+      template.innerHTML = raw;
+      template.content.querySelectorAll("script, style, noscript, template, title").forEach(node => node.remove());
+      template.content.querySelectorAll("br, hr, p, div, h1, h2, h3, h4, h5, h6, li").forEach(node => node.after(" "));
+      raw = (template.content.textContent ?? "").replace(/\s+/g, " ").trim();
+    }
+    candidates = [raw];
   }
   for (const candidate of candidates) {
     const safe = russianInterfaceText(candidate);
@@ -1011,6 +1020,11 @@ export const api = {
     }),
   readOfficeFile: (path: string) =>
     fetchJSON<OfficePreview>(`/api/files/office?path=${encodeURIComponent(path)}`),
+  readPdfPage: (path: string, page: number, expectedSha256?: string | null, signal?: AbortSignal) => {
+    const params = new URLSearchParams({ path, pdf_page: String(page) });
+    if (expectedSha256) params.set("expected_sha256", expectedSha256);
+    return fetchJSON<PdfPagePreview>(`/api/files/read?${params}`, { signal });
+  },
   getLogs: (params: { file?: string; lines?: number; level?: string; component?: string }) => {
     const qs = new URLSearchParams();
     if (params.file) qs.set("file", params.file);
@@ -3111,6 +3125,12 @@ export interface OfficePreview {
     | { type: "paragraph"; text: string }
     | { type: "table"; rows: string[][] }
   >;
+}
+
+export interface PdfPagePreview {
+  page: number;
+  pages: number;
+  data_url: string;
 }
 
 export interface ManagedFilesResponse {

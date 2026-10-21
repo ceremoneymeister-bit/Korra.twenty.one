@@ -5847,6 +5847,7 @@ This compaction should PRIORITISE preserving all information related to the focu
         from agent.conversation_loop import (
             _CODEX_ACK_CONTINUATION_NUDGE,
             _CODEX_INCOMPLETE_NUDGE,
+            _CODEX_INCOMPLETE_NUDGE_SERVICE,
             _DROPPED_TOOLCALL_NUDGE_CONTENT,
             _EMPTY_TOOL_RESPONSE_NUDGE,
             _LENGTH_CONTINUATION_DROPPED_TOOLS_PREFIX,
@@ -5859,6 +5860,7 @@ This compaction should PRIORITISE preserving all information related to the focu
             _LEGACY_COMPRESSION_CONTINUATION_USER_CONTENT,
             MAX_ITERATIONS_SUMMARY_REQUEST,
             _CODEX_INCOMPLETE_NUDGE,
+            _CODEX_INCOMPLETE_NUDGE_SERVICE,
             _CODEX_ACK_CONTINUATION_NUDGE,
             _DROPPED_TOOLCALL_NUDGE_CONTENT,
             _EMPTY_TOOL_RESPONSE_NUDGE,

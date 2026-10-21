@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -36,9 +37,11 @@ logger = logging.getLogger(__name__)
 WAKE_TURN_TIMEOUT_SECONDS = 600.0
 
 # Backoff delays between retries on transient failures (429 concurrency cap,
-# connection errors). The API server has no per-session lock — concurrent
-# turns on one session are last-writer-wins — but it DOES enforce a global
-# max_concurrent_runs cap via HTTP 429, which is worth waiting out.
+# connection errors). The API server enforces a global max_concurrent_runs cap
+# via HTTP 429, which is worth waiting out. Per session, an internal wake turn
+# queues behind the session's running turns (APIServerAdapter._session_turn_slot),
+# so this wait may include the owner's in-flight turn; Idempotency-Key keeps a
+# retry after a client timeout attached to the same server-side turn.
 _RETRY_DELAYS_SECONDS = (2.0, 5.0, 10.0)
 
 
@@ -59,6 +62,8 @@ async def deliver_wake(
     text: str,
     session_id: str = "",
     source: Any = None,
+    silence_allowed: bool = False,
+    idempotency_key: str = "",
 ) -> None:
     """Deliver a wake turn to the session behind ``adapter``.
 
@@ -69,7 +74,22 @@ async def deliver_wake(
 
     Raises on failure (bad arguments, exhausted retries, HTTP error) so the
     caller can rewind/retry instead of treating the wake as delivered.
+
+    ``idempotency_key`` — устойчивый ключ уведомления (например, id
+    делегирования). Self-post несёт его в ``Idempotency-Key``: повтор доставки
+    того же уведомления присоединяется к уже идущему (или только что
+    завершённому) ходу, а не запускает второй. Без ключа он свой на каждый
+    вызов — повторы внутри одного вызова (таймаут клиента, 429) всё равно
+    остаются одним ходом.
     """
+    # Пробуждение — служебный ход о фоновой работе (канбан, процесс, дочерний
+    # агент). Если работа завершилась успешно (silence_allowed), модели сообщается,
+    # что можно ответить ровно NO_REPLY, и шлюз это глушит — в мессенджере и в
+    # веб-панели одинаково. О сбое модель обязана сообщить: подсказки нет.
+    if silence_allowed:
+        from gateway.response_filters import with_service_turn_silence_hint
+
+        text = with_service_turn_silence_hint(text)
     if adapter_supports_push(adapter):
         if source is None:
             raise ValueError(
@@ -91,11 +111,13 @@ async def deliver_wake(
             "deliver_wake: non-push adapter (supports_async_delivery=False) "
             "requires the raw session id to self-post the wake turn"
         )
-    await _self_post_chat_completion(adapter, text=text, session_id=session_id)
+    await _self_post_chat_completion(
+        adapter, text=text, session_id=session_id, idempotency_key=idempotency_key,
+    )
 
 
 async def _self_post_chat_completion(
-    adapter: Any, *, text: str, session_id: str
+    adapter: Any, *, text: str, session_id: str, idempotency_key: str = ""
 ) -> None:
     """POST the wake text to the in-pod API server as a normal session turn.
 
@@ -143,6 +165,12 @@ async def _self_post_chat_completion(
         "Authorization": f"Bearer {api_key}",
         "X-Hermes-Session-Id": session_id,
         "X-Hermes-Internal-Notification": "1",
+        # Таймаут клиента не останавливает ход на сервере: без ключа повтор
+        # ниже запускал второй ход на то же уведомление (два ответа владельцу).
+        # С ключом сервер отдаёт повтору результат уже идущего хода.
+        "Idempotency-Key": (
+            f"korra-wake:{session_id}:{idempotency_key or uuid.uuid4().hex}"
+        ),
     }
     payload = {
         "model": str(getattr(adapter, "_model_name", "") or "hermes-agent"),

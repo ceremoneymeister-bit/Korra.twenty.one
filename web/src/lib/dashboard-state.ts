@@ -16,7 +16,7 @@ import { atom, onMount } from "nanostores";
 
 import { fetchJSON } from "@/lib/api";
 import type { DashboardSales } from "@/lib/crm";
-import type { ChatRun } from "@/lib/chat-runs";
+import { chatRunHref, waitingDecisionRuns, type ChatRun } from "@/lib/chat-runs";
 import { getOwnerTimeZone } from "@/lib/dashboard-flags";
 
 export type SectionStatus = "ok" | "empty" | "error";
@@ -498,13 +498,9 @@ export function attentionView(
   chat: ChatAttentionInput,
 ): AttentionView {
   const rows: AttentionRow[] = [];
-  const seen = new Set<string>();
   if (chat.known) {
-    for (const run of chat.runs) {
-      if (run.status !== "waiting_decision") continue;
-      const key = `${run.profile}\0${run.session_id}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
+    for (const run of waitingDecisionRuns(chat.runs)) {
+      const key = `${run.profile}\0${run.decision_fallback ? run.message_id : run.session_id}`;
       const label = chat.labelFor(run.profile);
       const topic = (run.title || run.user_message?.content || "").replace(/\s+/g, " ").trim();
       rows.push({
@@ -513,12 +509,13 @@ export function attentionView(
         source: "chat",
         kind: "chat_decision",
         severity: "action",
-        title: `${label} ждёт вашего решения`,
-        detail: topic && topic !== "Ожидает вашего решения" ? topic : "Подтвердите или отклоните действие в чате.",
+        title: `${label} ждёт вашего решения${run.title ? ` · ${run.title}` : ""}`,
+        detail: run.decision_fallback ? run.decision_reason || "Исходный чат недоступен. Ответьте в центре решений."
+          : topic && topic !== "Ожидает вашего решения" ? topic : "Подтвердите или отклоните действие в чате.",
         agent: label,
         profile: run.profile,
-        href: chat.hrefFor(run.profile, run.session_id || null),
-        action: "Открыть чат",
+        href: run.decision_fallback ? chatRunHref(run) : chat.hrefFor(run.profile, run.session_id || null),
+        action: run.decision_fallback ? "Открыть решения" : "Открыть чат",
         at: run.updated_at || null,
       });
     }

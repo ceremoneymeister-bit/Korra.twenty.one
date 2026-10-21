@@ -7920,7 +7920,20 @@ def _run_one_job_body(
     _scope_token = None
     subscription_notice_locked = False
     notice_job = job
+    mcp_lease = None
     try:
+        # An MCP reload in progress is not a job failure: take the shared
+        # agent-work lease before any claim or side effect, and on refusal put
+        # the fire back on the schedule for the next tick (no failure_streak,
+        # no failure delivery). Held to the end so a reload cannot start
+        # mid-run (run_job's own lease nests inside it).
+        from gateway.mcp_reload import try_enter_agent_work
+
+        mcp_lease = try_enter_agent_work()
+        if mcp_lease is None:
+            _defer_fire_for_mcp_reload(job, execution_id)
+            return True
+
         # Pre-run dispatch claim (issue #38758): atomically commit a finite
         # one-shot's dispatch BEFORE its side effect runs, so a tick that dies
         # mid-execution (gateway kill, OOM, segfault, hard-timeout) cannot
@@ -8496,6 +8509,67 @@ def _run_one_job_body(
             _subscription_notice_lock.release()
         if _scope_token is not None:
             reset_secret_scope(_scope_token)
+        if mcp_lease is not None:
+            mcp_lease.release()
+
+
+def _defer_fire_for_mcp_reload(job: dict, execution_id: str) -> None:
+    """Return a fire refused by an in-progress MCP reload to the schedule.
+
+    The tick (or fire claim) already advanced a recurring job's
+    ``next_run_at``; set it back to the occurrence that just came due
+    (cron) or to now (interval) so the next tick fires it. One-shots keep
+    ``next_run_at`` and only drop their run claim. Our own fire claim is
+    released. Nothing here counts as a run: no ``mark_job_run``.
+    """
+    from cron.jobs import _ensure_croniter, _jobs_lock, load_jobs, save_jobs
+
+    now = _hermes_now()
+    claim = job.get("fire_claim")
+    owner = claim.get("by") if isinstance(claim, dict) else None
+    try:
+        with _jobs_lock():
+            jobs = load_jobs()
+            for stored in jobs:
+                if stored.get("id") != job["id"]:
+                    continue
+                stored_claim = stored.get("fire_claim")
+                stored_owner = stored_claim.get("by") if isinstance(stored_claim, dict) else None
+                if stored_owner != owner or stored.get("run_claim") != job.get("run_claim"):
+                    # A newer runner owns this occurrence. Do not rewind its
+                    # schedule or release its one-shot claim from a stale fire.
+                    break
+                schedule = stored.get("schedule") or {}
+                kind = schedule.get("kind")
+                if kind == "interval":
+                    stored["next_run_at"] = now.isoformat()
+                elif kind == "cron" and schedule.get("expr") and _ensure_croniter():
+                    from cron.jobs import croniter as _croniter
+
+                    base = now + timedelta(seconds=1)
+                    stored["next_run_at"] = (
+                        _croniter(str(schedule["expr"]), base).get_prev(datetime).isoformat()
+                    )
+                elif kind == "once":
+                    stored["run_claim"] = None
+                if owner and isinstance(stored_claim, dict) and stored_claim.get("by") == owner:
+                    stored["fire_claim"] = None
+                save_jobs(jobs)
+                break
+    except Exception:
+        logger.warning(
+            "Job '%s': could not return the deferred fire to the schedule",
+            job.get("name", job["id"]), exc_info=True,
+        )
+    logger.info(
+        "Job '%s': MCP reload in progress; run moved to the next tick",
+        job.get("name", job["id"]),
+    )
+    finish_execution(
+        execution_id,
+        success=False,
+        error="Deferred: MCP reload in progress; the run moves to the next tick.",
+    )
 
 
 def _notify_provider_jobs_changed() -> None:

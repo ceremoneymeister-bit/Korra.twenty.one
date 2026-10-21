@@ -76,6 +76,17 @@ def test_verbose_keeps_more_of_the_entry():
     assert len(verbose) > len(short) and LONG in verbose
 
 
+@pytest.mark.parametrize("mode", ["on", "verbose"])
+def test_legacy_many_to_one_notice_does_not_quote_unrelated_notes(mode):
+    old = ["Другой проект", "Служебный путь /opt/data/home/INDEX.md", "Старая задача"]
+    receipt = _receipt(memory=[_mem("memory", ["Оплату принимаем по пятницам"], old)])
+    text = format_notice(receipt, mode)
+    assert "Оплату принимаем по пятницам" in text
+    assert "сжал 3 старые заметки" in text
+    assert all(entry not in text for entry in old)
+    assert receipt["memory"][0]["removed"] == old
+
+
 @pytest.mark.parametrize(
     "skills,memory,expected",
     [

@@ -1422,6 +1422,54 @@ _CODEX_INCOMPLETE_NUDGE = (
     "you were planning).]"
 )
 
+# Итог хода, где модель так и не дала видимого ответа (одни рассуждения). Это не ответ:
+# шлюз распознаёт его по этим константам (gateway/run.py,
+# _is_gateway_hidden_reasoning_incomplete_turn) и человеку шлёт заметку, а служебный
+# ход молчит. Раньше шлюз искал только английский текст и отдавал русский как ответ.
+CODEX_INCOMPLETE_SENTINEL = "Ответ Codex остался незавершённым после 3 попыток продолжения"
+SCRATCHPAD_INCOMPLETE_SENTINEL = "Блок рассуждений REASONING_SCRATCHPAD остался незавершённым после 2 повторов"
+HIDDEN_REASONING_INCOMPLETE_SENTINELS = frozenset({
+    CODEX_INCOMPLETE_SENTINEL, SCRATCHPAD_INCOMPLETE_SENTINEL,
+})
+
+# Тот же повтор для служебного хода (уведомление о фоновой работе) в мессенджере и
+# веб-панели: там модели разрешено промолчать, и шлюз глушит NO_REPLY. Без этого варианта «скажи хоть
+# что-нибудь» превращало рассуждение «итог уже сообщён» во второе сообщение владельцу.
+_CODEX_INCOMPLETE_NUDGE_SERVICE = (
+    "[System: Your previous response contained only internal reasoning and "
+    "never produced a visible answer or tool call. This turn is a service "
+    "notification: if the user already has this outcome and there is nothing "
+    "new for them, answer exactly NO_REPLY. Otherwise produce your final "
+    "answer as plain text now (or make the tool call you were planning).]"
+)
+
+# Платформы, где NO_REPLY служебного хода никто не глушит: CLI, TUI, ACP — там остаётся
+# обычное напоминание. Мессенджеры глушат в gateway/run.py, веб-панель (api_server) — на
+# служебном self-post (X-Hermes-Internal-Notification, _hide_silent_service_turn).
+_SILENCE_CAPABLE_EXCLUDED_PLATFORMS = frozenset({"", "cli", "tui", "acp", "web"})
+
+
+def _incomplete_nudge_for(agent: Any, messages: list) -> str:
+    """Напоминание для хода из одних рассуждений: служебному ходу шлюза можно молчать."""
+    platform = str(getattr(agent, "platform", "") or "").strip().lower()
+    if platform in _SILENCE_CAPABLE_EXCLUDED_PLATFORMS:
+        return _CODEX_INCOMPLETE_NUDGE
+    for msg in reversed(messages or []):
+        if not isinstance(msg, dict) or msg.get("role") != "user":
+            continue
+        if msg.get("content") in (_CODEX_INCOMPLETE_NUDGE, _CODEX_INCOMPLETE_NUDGE_SERVICE):
+            continue
+        if msg.get("display_kind") == "internal_notification":
+            # Молчать можно только там, где шлюз сам разрешил (успешная фоновая
+            # работа, SERVICE_TURN_SILENCE_HINT в тексте). О сбое — обычный повтор.
+            from gateway.response_filters import SERVICE_TURN_SILENCE_HINT
+
+            content = msg.get("content")
+            if isinstance(content, str) and SERVICE_TURN_SILENCE_HINT in content:
+                return _CODEX_INCOMPLETE_NUDGE_SERVICE
+        return _CODEX_INCOMPLETE_NUDGE
+    return _CODEX_INCOMPLETE_NUDGE
+
 
 # Re-prompt sent after a Codex/Responses turn ends with an acknowledgment-only
 # reply (no tool calls, no final answer) — named so
@@ -7176,12 +7224,12 @@ def run_conversation(
                     agent._persist_session(messages, conversation_history)
                     
                     return {
-                        "final_response": "Блок рассуждений REASONING_SCRATCHPAD остался незавершённым после 2 повторов",
+                        "final_response": SCRATCHPAD_INCOMPLETE_SENTINEL,
                         "messages": rolled_back_messages,
                         "api_calls": api_call_count,
                         "completed": False,
                         "partial": True,
-                        "error": "Блок рассуждений REASONING_SCRATCHPAD остался незавершённым после 2 повторов"
+                        "error": SCRATCHPAD_INCOMPLETE_SENTINEL
                     }
             
             # Reset incomplete scratchpad counter on clean response
@@ -7301,10 +7349,13 @@ def run_conversation(
                     # turn, so every remaining attempt carries the nudge.
                     if not interim_replayable or agent._codex_incomplete_retries >= 2:
                         _last_msg = messages[-1] if messages else None
+                        _nudge = _incomplete_nudge_for(agent, messages)
                         _already_nudged = (
                             isinstance(_last_msg, dict)
                             and _last_msg.get("role") == "user"
-                            and _last_msg.get("content") == _CODEX_INCOMPLETE_NUDGE
+                            and _last_msg.get("content") in (
+                                _CODEX_INCOMPLETE_NUDGE, _CODEX_INCOMPLETE_NUDGE_SERVICE,
+                            )
                         )
                         # Alternation guard: the nudge is a user-role message,
                         # so it may only follow an assistant message. When the
@@ -7320,7 +7371,7 @@ def run_conversation(
                         if not _already_nudged and _last_is_assistant:
                             append_message(messages, {
                                 "role": "user",
-                                "content": _CODEX_INCOMPLETE_NUDGE,
+                                "content": _nudge,
                             })
                     if not agent.quiet_mode:
                         agent._vprint(f"{agent.log_prefix}↻ Codex response incomplete; continuing turn ({agent._codex_incomplete_retries}/3)")
@@ -7340,12 +7391,12 @@ def run_conversation(
                 agent._codex_incomplete_retries = 0
                 agent._persist_session(messages, conversation_history)
                 return {
-                    "final_response": "Ответ Codex остался незавершённым после 3 попыток продолжения",
+                    "final_response": CODEX_INCOMPLETE_SENTINEL,
                     "messages": messages,
                     "api_calls": api_call_count,
                     "completed": False,
                     "partial": True,
-                    "error": "Ответ Codex остался незавершённым после 3 попыток продолжения",
+                    "error": CODEX_INCOMPLETE_SENTINEL,
                 }
             elif hasattr(agent, "_codex_incomplete_retries"):
                 agent._codex_incomplete_retries = 0

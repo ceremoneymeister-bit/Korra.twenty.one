@@ -1075,6 +1075,8 @@ class GatewayKanbanWatchersMixin:
                                     adapter,
                                     text=_synth,
                                     session_id=_session_key,
+                                    # Молчать можно только о чисто завершённой задаче.
+                                    silence_allowed=_wake_kinds == {"completed"},
                                 )
                                 logger.info(
                                     "kanban notifier: woke agent for %s on %s/%s profile=%s events=%s",
@@ -1163,6 +1165,9 @@ class GatewayKanbanWatchersMixin:
                                 text=_synth,
                                 session_id=_session_key,
                                 source=_source,
+                                # Молчать можно только о чисто завершённой задаче;
+                                # сбой, блокировка, шаг владельца — сообщить обязательно.
+                                silence_allowed=_wake_kinds == {"completed"},
                             )
                             logger.info(
                                 "kanban notifier: woke agent for %s on %s/%s profile=%s events=%s",

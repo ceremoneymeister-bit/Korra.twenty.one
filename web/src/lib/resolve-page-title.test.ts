@@ -43,6 +43,9 @@ describe("resolvePageTitle", () => {
     expect(resolvePageTitle("/webhooks", t, [])).toBe("Вебхуки");
     expect(resolvePageTitle("/pairing", t, [])).toBe("Подключения");
     expect(resolvePageTitle("/files", t, [])).toBe("Файлы");
+    expect(resolvePageTitle("/marketplace", t, [])).toBe("Маркетплейс");
+    expect(resolvePageTitle("/marketplace/agents", t, [])).toBe("Маркетплейс");
+    expect(resolvePageTitle("/marketplace/agents/carousels/", t, [])).toBe("Маркетплейс");
   });
 
   it("называет дашборд одинаково в продукте и по прямой ссылке в панели", () => {

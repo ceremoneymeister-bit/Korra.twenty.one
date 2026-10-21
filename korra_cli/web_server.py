@@ -3585,7 +3585,7 @@ def _chat_profile_upstream(
     }
 
 
-def _chat_origin_chain(session_id: str, profile: Optional[str]) -> set[str]:
+def _chat_origin_chain(session_id: str, profile: Optional[str], *, include_routing_keys: bool = False) -> set[str]:
     """Existing owner chats in this profile, including their reset/compression chain."""
     from korra_cli import profiles
     from korra_cli.kanban_decisions import _chat_chain, _NON_OWNER_SOURCES
@@ -3606,12 +3606,23 @@ def _chat_origin_chain(session_id: str, profile: Optional[str]) -> set[str]:
             if (not row or (row.get("profile_name") or origin) != origin
                     or row.get("source") in _NON_OWNER_SOURCES):
                 return set()
-            return {
+            chain = {
                 sid for sid in _chat_chain(db, session_id)
                 if (member := db.get_session(sid))
                 and (member.get("profile_name") or origin) == origin
                 and member.get("source") not in _NON_OWNER_SOURCES
             }
+            if not include_routing_keys:
+                return chain
+            # SQL selection only, never authorization: legacy effects may
+            # store the routing key as their source ID. The resolver still
+            # verifies the selected record across every profile afterwards.
+            keys = {str(member["session_key"]) for sid in chain
+                    if (member := db.get_session(sid)) and member.get("session_key")}
+            for key, raw in db.load_gateway_routing_entries(scope=str((home / "sessions").resolve())).items():
+                if json.loads(raw).get("session_id") in chain:
+                    keys.add(key)
+            return chain | keys
     except Exception as exc:
         _log.warning("chat approval origin unavailable for %s: %s", origin, exc)
         raise HTTPException(status_code=503, detail="Не удалось проверить исходный чат") from exc
@@ -3621,58 +3632,37 @@ def _chat_effect_ledger_routes(
     session_id: str, profile: Optional[str], *, request_id: str = "",
     chain: Optional[set[str]] = None,
 ) -> list[tuple[str, str]]:
-    """Read only routing identities, never payloads or decision state transitions.
-
-    A direct cross-profile send has no Kanban card. Its physical sender ledger,
-    matching row.profile and verified origin chat together provide the link.
-    For an exact answer, inspect every existing ledger to reject ambiguity and
-    misplaced legacy rows before forwarding anything to the authenticated API.
-    """
-    import sqlite3
-    from korra_cli import profiles
+    """Find the physical ledger using the same origin identity as activity."""
+    from korra_cli.effect_decision_routes import effect_routes, authorize_route
+    from tools.effect_decisions import DecisionConflict, EffectDecisionStoreUnavailable
 
     origin = (profile or "").strip() or "default"
-    if chain is None:
-        chain = _chat_origin_chain(session_id, profile)
-    if not request_id and not chain:
-        return []
-    routes: list[tuple[str, str]] = []
-    for sender in profiles.list_profile_names():
-        path = profiles.get_profile_dir(sender) / "effect_decisions.sqlite3"
-        if not path.exists():
-            continue
-        try:
-            with contextlib.closing(sqlite3.connect(
-                path.resolve().as_uri() + "?mode=ro", uri=True, timeout=1,
-            )) as conn:
-                if request_id:
-                    rows = conn.execute(
-                        "SELECT id, source_session_id, profile FROM effect_decisions WHERE id = ?",
-                        (request_id,),
-                    ).fetchall()
-                else:
-                    marks = ",".join("?" for _ in chain)
-                    rows = conn.execute(
-                        "SELECT id, source_session_id, profile FROM effect_decisions "
-                        f"WHERE source_session_id IN ({marks})", tuple(chain),
-                    ).fetchall()
-        except (OSError, sqlite3.Error) as exc:
-            _log.warning("chat approval ledger unavailable for %s: %s", sender, exc)
-            raise HTTPException(status_code=503, detail="Не удалось проверить профиль запроса") from exc
-        for effect_id, source_session, stored_profile in rows:
-            belongs = source_session in chain or (sender == origin and source_session == session_id)
-            if stored_profile != sender or not belongs:
-                if request_id:
-                    raise HTTPException(status_code=409, detail="Запрос подтверждения не принадлежит этому чату или профилю")
-                continue
-            if str(effect_id).startswith("effect_"):
-                routes.append((sender, source_session))
-    if request_id and len(routes) > 1:
-        raise HTTPException(status_code=409, detail="Профиль запроса подтверждения неоднозначен")
-    return sorted(set(routes))
+    try:
+        routes = effect_routes(request_id=request_id) if request_id else _chat_session_effect_routes(session_id, profile)
+        if request_id:
+            if len(routes) > 1:
+                raise DecisionConflict("Профиль запроса подтверждения неоднозначен")
+            for route in routes:
+                authorize_route(route, session_id, origin)
+        else:
+            routes = [r for r in routes if not r["decision_fallback"]
+                      and r["profile"] == origin and session_id in r["chain"]]
+        return sorted({(r["ledger_profile"], r["source_session_id"]) for r in routes})
+    except DecisionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except EffectDecisionStoreUnavailable as exc:
+        raise HTTPException(status_code=503, detail="Не удалось проверить исходный чат или профиль запроса") from exc
 
 
-def _chat_executor_links(session_id: str, profile: Optional[str]) -> list[tuple[str, str]]:
+def _chat_session_effect_routes(session_id: str, profile: Optional[str]) -> list[dict]:
+    """Select this chat before resolving origins, including its settled receipts."""
+    from korra_cli.effect_decision_routes import effect_routes
+
+    sources = _chat_origin_chain(session_id, profile, include_routing_keys=True)
+    return effect_routes(source_sessions=sources | {session_id})
+
+
+def _chat_executor_links(session_id: str, profile: Optional[str], *, effect_routes=None) -> list[tuple[str, str]]:
     """Executor profiles holding cards handed over from this chat.
 
     Returns ``(executor profile, card origin session)`` pairs. The link is the
@@ -3684,11 +3674,13 @@ def _chat_executor_links(session_id: str, profile: Optional[str]) -> list[tuple[
         from korra_cli import profiles as profiles_mod
         origin = (profile or "").strip() or "default"
         chain = _chat_origin_chain(session_id, profile)
-        links = [
-            (sender, sid) for sender, sid in _chat_effect_ledger_routes(
-                session_id, profile, chain=chain,
-            ) if sender != origin
-        ]
+        direct = (
+            _chat_effect_ledger_routes(session_id, profile, chain=chain)
+            if effect_routes is None else
+            [(r["ledger_profile"], r["source_session_id"]) for r in effect_routes
+             if not r["decision_fallback"] and r["profile"] == origin and session_id in r["chain"]]
+        )
+        links = [(sender, sid) for sender, sid in direct if sender != origin]
         for executor, sessions in sorted(_kb.executors_for_sessions(chain).items()):
             if (
                 executor == origin
@@ -3733,21 +3725,50 @@ async def _chat_executor_effects(
 
 @app.get("/api/chat/decisions")
 async def chat_decisions_proxy(profile: Optional[str] = None) -> Response:
-    """Профильный центр долговечных решений по внешним эффектам."""
+    """Решения исходного профиля; потерянные чаты остаются в центре ledger."""
     import httpx as _httpx
+    from korra_cli.effect_decision_routes import effect_routes, decorate_decision
+    from tools.effect_decisions import EffectDecisionStoreUnavailable
 
     url, headers = _chat_profile_upstream(profile, "/api/effect-decisions")
+    origin = (profile or "").strip() or "default"
+    try:
+        unavailable_profiles: set[str] = set()
+        routes = await run_in_threadpool(
+            effect_routes, statuses=("pending", "needs_review"),
+            unavailable_profiles=unavailable_profiles,
+        )
+        if origin in unavailable_profiles:
+            raise EffectDecisionStoreUnavailable()
+    except EffectDecisionStoreUnavailable as exc:
+        raise HTTPException(status_code=503, detail="Не удалось проверить профиль запроса") from exc
+    selected = [r for r in routes if r["profile"] == origin]
+    ledgers = {origin, *(r["ledger_profile"] for r in selected)}
+    by_identity = {(r["ledger_profile"], r["id"]): r for r in routes}
+    data = []
     try:
         async with _httpx.AsyncClient(timeout=_httpx.Timeout(15.0)) as client:
-            response = await client.get(url, headers=headers)
+            for ledger in sorted(ledgers):
+                url, headers = _chat_profile_upstream(None if ledger == "default" else ledger, "/api/effect-decisions")
+                response = await client.get(url, headers=headers)
+                if response.status_code >= 400:
+                    return Response(content=response.content, status_code=response.status_code,
+                                    media_type="application/json")
+                for item in response.json()["data"]:
+                    route = by_identity.get((ledger, str(item.get("request_id") or "")))
+                    if route is None:
+                        # Settled history needs no chat navigation or response.
+                        # Keep the physical centre's bounded upstream history;
+                        # a chat's own receipts remain in /chat/approvals.
+                        if ledger == origin:
+                            data.append(item)
+                    elif route["profile"] == origin:
+                        data.append(decorate_decision(item, route))
     except Exception as exc:
         _log.error("chat_decisions_proxy upstream error: %s", exc)
-        raise HTTPException(status_code=502, detail=f"Upstream error: {exc}")
-    return Response(
-        content=response.content,
-        status_code=response.status_code,
-        media_type=response.headers.get("content-type", "application/json"),
-    )
+        raise HTTPException(status_code=502, detail=f"Upstream error: {exc}") from exc
+    return JSONResponse(content={"object": "list", "data": data,
+                                 "unavailable_profiles": sorted(unavailable_profiles)})
 
 
 @app.get("/api/chat/approvals")
@@ -3763,28 +3784,42 @@ async def chat_approvals_proxy(
     import httpx as _httpx
 
     url, headers = _chat_approval_upstream(session_id, profile, "/approvals")
-    links = await run_in_threadpool(_chat_executor_links, session_id, profile)
+    from korra_cli.effect_decision_routes import decorate_decision
+    from tools.effect_decisions import EffectDecisionStoreUnavailable
+    origin = (profile or "").strip() or "default"
+    try:
+        routes = await run_in_threadpool(_chat_session_effect_routes, session_id, profile)
+    except EffectDecisionStoreUnavailable as exc:
+        raise HTTPException(status_code=503, detail="Не удалось проверить исходный чат или профиль запроса") from exc
+    selected = [r for r in routes if not r["decision_fallback"]
+                and r["profile"] == origin and session_id in r["chain"]]
+    links = await run_in_threadpool(_chat_executor_links, session_id, profile, effect_routes=routes)
+    links = list(dict.fromkeys(links + [(r["ledger_profile"], r["source_session_id"])
+                                      for r in selected if (r["ledger_profile"], r["source_session_id"]) != (origin, session_id)]))
+    by_id = {r["id"]: r for r in routes}
+    wanted = {r["id"] for r in selected}
     try:
         async with _httpx.AsyncClient(timeout=_httpx.Timeout(15.0)) as client:
             response = await client.get(url, headers=headers)
-            if links and response.status_code < 400:
+            if response.status_code < 400:
                 payload = response.json()
-                data = payload["data"]
-                seen = {str(i.get("request_id") or "") for i in data if isinstance(i, dict)}
-                foreign, _down = await _chat_executor_effects(client, links)
-                for _executor, _sid, item in foreign:
-                    if str(item["request_id"]) not in seen:
-                        data.append(item)
-                        seen.add(str(item["request_id"]))
-                return JSONResponse(content=payload, status_code=response.status_code)
+                combined = list(payload["data"])
+                if links:
+                    foreign, _down = await _chat_executor_effects(client, links)
+                    combined.extend(item for _executor, _sid, item in foreign)
+                data, seen = [], set()
+                for item in combined:
+                    rid = str(item.get("request_id") or "")
+                    if rid in seen or (rid in by_id and rid not in wanted):
+                        continue
+                    data.append(decorate_decision(item, by_id[rid]) if rid in by_id else item)
+                    seen.add(rid)
+                return JSONResponse(content={**payload, "data": data}, status_code=response.status_code)
     except Exception as exc:
         _log.error("chat_approvals_proxy upstream error: %s", exc)
-        raise HTTPException(status_code=502, detail=f"Upstream error: {exc}")
-    return Response(
-        content=response.content,
-        status_code=response.status_code,
-        media_type=response.headers.get("content-type", "application/json"),
-    )
+        raise HTTPException(status_code=502, detail=f"Upstream error: {exc}") from exc
+    return Response(content=response.content, status_code=response.status_code,
+                    media_type=response.headers.get("content-type", "application/json"))
 
 
 @app.post("/api/chat/approval")
@@ -4950,7 +4985,23 @@ async def purge_managed_trash(payload: ManagedTrashAction, request: Request):
 
 
 @app.get("/api/files/read")
-async def read_managed_file(request: Request, path: str):
+async def read_managed_file(
+    request: Request, path: str, pdf_page: Optional[int] = None,
+    expected_sha256: Optional[str] = None,
+):
+    if pdf_page is not None:
+        from korra_cli.pdf_preview import read_pdf_page
+
+        def render():
+            # Same root, sensitive-file and revision checks as the original download.
+            original = _managed_file_response(
+                request, path, content_disposition_type="attachment", expected_sha256=expected_sha256,
+            )
+            return read_pdf_page(Path(original.path), pdf_page)
+
+        payload = await run_in_threadpool(render)
+        return JSONResponse(payload, headers={"Cache-Control": "private, no-store"})
+
     policy, target, display_path = _resolve_managed_path(path, request)
     if not target.exists():
         raise HTTPException(status_code=404, detail="File not found")

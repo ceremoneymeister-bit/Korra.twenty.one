@@ -139,7 +139,7 @@ def test_secondary_completion_returns_to_own_store_and_transport(fleet, monkeypa
     async def accept(event):
         delivered.append((get_hermes_home(), event.source.profile, event.text))
 
-    async def wake(adapter, *, text, session_id, source=None):
+    async def wake(adapter, *, text, session_id, source=None, idempotency_key=""):
         delivered.append((get_hermes_home(), session_id, text))
 
     primary = SimpleNamespace(handle_message=lambda _: pytest.fail("wrong bot"))
@@ -237,7 +237,7 @@ def test_same_raw_session_ids_in_different_profiles_do_not_coalesce(fleet, monke
     ids = [_dispatch(home, web=True, restarted=False) for home in (profile, other)]
     seen = []
 
-    async def wake(adapter, *, text, session_id, source=None):
+    async def wake(adapter, *, text, session_id, source=None, idempotency_key=""):
         seen.append((get_hermes_home(), session_id, text))
 
     monkeypatch.setattr("gateway.wake.deliver_wake", wake)

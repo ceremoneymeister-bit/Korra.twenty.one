@@ -1,29 +1,45 @@
+import type { Ref } from "react";
 import { useStore } from "@nanostores/react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router";
 import { X } from "lucide-react";
-import { $chatRuns, $chatRunsReachable, $dismissedRunToasts, $unreadChatRuns, dismissRunToasts, hasUnreadResponse, isRunBusy, type ChatRun } from "@/lib/chat-runs";
+import { $chatRuns, $chatRunsReachable, $chatRunsUnavailableProfiles, $dismissedRunToasts, $unreadChatRuns, dismissRunToasts, hasUnreadResponse, isRunBusy, chatRunHref, waitingDecisionRuns, type ChatRun } from "@/lib/chat-runs";
 import { agentChatHref, type AgentTabConfig } from "@/lib/agent-tabs";
 import { cn } from "@/lib/utils";
 
 /** Бейдж на вкладке агента: общий индикатор по всем его чатам. «В работе» и
  *  «Ответ готов» — разные состояния и показываются одновременно: готовый
  *  ответ одной сессии не прячется за работой другой. */
-export function AgentRunBadge({ profile }: { profile: string }) {
+export function AgentRunBadge({ profile, label = profile || "Корра", onNavigate, onShowWaiting }: { profile: string; label?: string; onNavigate?: () => void; onShowWaiting?: () => void }) {
   const runs = useStore($chatRuns);
   const unread = useStore($unreadChatRuns);
   const reachable = useStore($chatRunsReachable);
+  const unavailable = useStore($chatRunsUnavailableProfiles);
   const busy = runs.filter(run => run.profile === profile && isRunBusy(run));
-  const waiting = busy.some(run => run.status === "waiting_decision");
+  const waiting = waitingDecisionRuns(busy);
+  const waitingTitle = `${label} ждёт вас · ${waiting.map(run => run.title || (run.decision_fallback ? run.decision_reason || "Исходный чат недоступен" : "Чат без названия")).join("; ")}`;
   const ready = unread.some(run => run.profile === profile);
   const stale = runs.some(run => run.profile === profile && run.status === "stale");
-  const uncertain = (reachable === false && busy.length > 0) || stale;
+  const uncertain = unavailable.includes(profile) || (reachable === false && unavailable.length === 0 && busy.length > 0) || stale;
   return <>
-    {uncertain
-      ? <span className="text-xs" title={stale ? "Статус задачи требует проверки" : "Не удалось обновить статус работы"}>?<span className="sr-only"> Статус требует проверки</span></span>
-      : busy.length > 0 && <span className="inline-flex min-w-5 justify-center rounded-full bg-[var(--neo-accent)] px-1 text-xs text-[var(--neo-accent-foreground)]" title={waiting ? "Ждёт вас" : busy[0].status === "queued" ? "В очереди" : `В работе: ${busy.length}`}>
-      {waiting ? "Ждёт вас" : <><span aria-hidden>{busy.length}</span><span className="sr-only">{busy[0].status === "queued" ? "В очереди" : "В работе"}</span></>}
-    </span>}
+    {waiting.length > 1
+      ? <button type="button" data-waiting-link title={waitingTitle} aria-label={`${waitingTitle}. Открыть список ожидающих чатов`}
+          className="inline-flex min-h-9 items-center justify-center rounded-full bg-[var(--neo-accent)] px-2 text-xs text-[var(--neo-accent-foreground)]"
+          onClick={() => { onNavigate?.(); onShowWaiting?.(); }}>Ждёт вас · {waiting.length}</button>
+      : waiting.length === 1
+      ? <Link
+          data-waiting-link
+          to={chatRunHref(waiting[0])}
+          onClick={onNavigate}
+          title={waitingTitle}
+          aria-label={`${waitingTitle}. ${!waiting[0].decision_fallback ? "Открыть чат" : "Открыть решения"}`}
+          className="inline-flex min-h-9 items-center justify-center rounded-full bg-[var(--neo-accent)] px-2 text-xs text-[var(--neo-accent-foreground)]"
+        >Ждёт вас</Link>
+      : uncertain
+        ? <span className="text-xs" title={stale ? "Статус задачи требует проверки" : "Не удалось обновить статус работы"}>?<span className="sr-only"> Статус требует проверки</span></span>
+        : busy.length > 0 && <span className="inline-flex min-w-5 justify-center rounded-full bg-[var(--neo-accent)] px-1 text-xs text-[var(--neo-accent-foreground)]" title={busy[0].status === "queued" ? "В очереди" : `В работе: ${busy.length}`}>
+          <span aria-hidden>{busy.length}</span><span className="sr-only">{busy[0].status === "queued" ? "В очереди" : "В работе"}</span>
+        </span>}
     {ready && <span className="inline-flex" title="Есть непрочитанный ответ"><span aria-hidden className="size-2 rounded-full bg-[var(--neo-accent-line)]" /><span className="sr-only">Ответ готов</span></span>}
 
   </>;
@@ -39,30 +55,35 @@ export function ChatUnreadMark({ profile, sessionId, className = "" }: { profile
   </span>;
 }
 
-export function SessionRunActivity({ tabs }: { tabs: AgentTabConfig[] }) {
+export function SessionRunActivity({ tabs, panelRef }: { tabs: AgentTabConfig[]; panelRef?: Ref<HTMLDetailsElement> }) {
   const runs = useStore($chatRuns);
   const unread = useStore($unreadChatRuns);
   const dismissed = useStore($dismissedRunToasts);
   const reachable = useStore($chatRunsReachable);
+  const unavailable = useStore($chatRunsUnavailableProfiles);
   const name = (profile: string) => tabs.find(tab => tab.profile === profile)?.label || profile || "Корра";
-  const busy = runs.filter(isRunBusy);
+  const busy = runs.filter(run => isRunBusy(run) && run.status !== "waiting_decision");
+  const waiting = waitingDecisionRuns(runs);
   const stale = runs.filter(run => run.status === "stale");
-  const visible = [...busy, ...stale];
+  const visible = [...waiting, ...busy, ...stale];
   const toast = unread.filter(run => !dismissed.includes(run.message_id));
   return <>
-    {visible.length > 0 && <details className="relative shrink-0" onKeyDown={event => {
+    {(visible.length > 0 || unavailable.length > 0) && <details ref={panelRef} className="relative shrink-0" onKeyDown={event => {
       if (event.key === "Escape") { event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus(); }
     }} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false; }}>
-      <summary className="neo-tab cursor-pointer list-none rounded-full px-3 py-2 text-sm" aria-label={`Работа агентов: ${visible.length}`}>
-        В работе: {visible.length}
+      <summary className="neo-tab cursor-pointer list-none rounded-full px-3 py-2 text-sm" aria-label={unavailable.length ? "Работа агентов: часть профилей недоступна" : `Работа агентов: ${visible.length}`}>
+        {unavailable.length ? "Работа агентов · требует проверки" : `В работе: ${visible.length}`}
       </summary>
       <div className="absolute right-0 top-full z-40 mt-2 max-h-[50dvh] w-[min(340px,calc(100vw-32px))] overflow-y-auto rounded-2xl bg-[var(--neo-surface)] p-3 shadow-[var(--neo-depth-3)]" aria-label="Работающие чаты">
-        <p className="mb-2 text-sm">{reachable === false ? "Не удалось обновить статус. Ниже — последнее известное состояние." : "Работа агентов"}</p>
-        {visible.map(run => <Link key={run.message_id} to={agentChatHref(run.profile, run.session_id)} className="mb-2 block rounded-xl p-2 text-sm focus-visible:outline" onClick={event => { const panel = event.currentTarget.closest("details"); if (panel) panel.open = false; }}>
+        <p className="mb-2 text-sm">{unavailable.length ? "Доступная часть активности агентов" : reachable === false ? "Не удалось обновить статус. Ниже — последнее известное состояние." : "Работа агентов"}</p>
+        {unavailable.length > 0 && <p role="status" className="mb-2 text-sm">Недоступны профили: {unavailable.map(name).join(", ")}. Их активность и решения неизвестны.</p>}
+        {visible.map(run => <Link key={run.message_id} to={chatRunHref(run)} className="mb-2 block rounded-xl p-2 text-sm focus-visible:outline" onClick={event => { const panel = event.currentTarget.closest("details"); if (panel) panel.open = false; }}>
           <span className="block font-medium">{name(run.profile)}{run.title ? ` · ${run.title}` : ""}</span>
-          <span className="block break-words text-xs text-muted-foreground">Запрос: {run.user_message.content}</span>
+          <span className="block break-words text-xs text-muted-foreground">{run.decision_fallback
+            ? run.decision_reason || "Исходный чат недоступен. Ответьте в центре решений."
+            : `Запрос: ${run.user_message.content}`}</span>
           {(run.channel || run.started_at) && <span className="block text-xs text-muted-foreground">{[run.channel, run.started_at ? new Date(run.started_at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : null].filter(Boolean).join(" · ")}</span>}
-          <span className="block text-xs">{reachable === false || run.status === "stale" ? "Статус требует проверки" : run.status === "queued" ? "В очереди — начнёт автоматически" : run.status === "waiting_decision" ? "Ожидает вашего решения" : "Выполняется"} · Открыть чат</span>
+          <span className="block text-xs">{unavailable.includes(run.profile) || (reachable === false && unavailable.length === 0) || run.status === "stale" ? "Статус требует проверки" : run.status === "queued" ? "В очереди — начнёт автоматически" : run.status === "waiting_decision" ? "Ожидает вашего решения" : "Выполняется"} · {run.decision_fallback ? "Открыть решения" : "Открыть чат"}</span>
         </Link>)}
       </div>
     </details>}

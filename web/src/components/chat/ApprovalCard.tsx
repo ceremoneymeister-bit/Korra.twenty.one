@@ -71,6 +71,9 @@ export interface ApprovalCardProps {
   failed?: boolean;
   onSubmit: (choice: ApprovalChoice) => void;
   onSkip: () => void;
+  /** Выбор сразу уходит наверх, без «Продолжить»: в чате с панелью «Ваши ответы» он ничего не отправляет —
+   *  только кладёт черновик, который там же можно поменять, поэтому защита от промаха мышью не нужна. */
+  instant?: boolean;
 }
 
 export function ApprovalCard({
@@ -79,6 +82,7 @@ export function ApprovalCard({
   failed,
   onSubmit,
   onSkip,
+  instant,
 }: ApprovalCardProps) {
   const [choice, setChoice] = useState<ApprovalChoice | null>(null);
 
@@ -105,7 +109,7 @@ export function ApprovalCard({
               type="button"
               disabled={busy}
               aria-pressed={selected}
-              onClick={() => setChoice(option.value)}
+              onClick={() => (instant ? onSubmit(option.value) : setChoice(option.value))}
               className={cn(
                 "korra-approval__option",
                 "flex w-full items-center gap-2 rounded-[var(--neo-radius-control)] px-2 py-1.5",
@@ -118,9 +122,9 @@ export function ApprovalCard({
             >
               <span className="flex-none">{option.icon}</span>
               <span className="font-medium">{option.label}</span>
-              {option.hint && (
+              {(instant ? "в ваши ответы" : option.hint) && (
                 <span className="min-w-0 flex-1 truncate text-[10.5px] text-[var(--neo-text-secondary)]">
-                  {option.hint}
+                  {instant ? "в ваши ответы" : option.hint}
                 </span>
               )}
             </button>
@@ -144,7 +148,7 @@ export function ApprovalCard({
         >
           Пропустить
         </Button>
-        <Button
+        {!instant && <Button
           type="button"
           size="sm"
           disabled={busy || choice === null}
@@ -152,7 +156,7 @@ export function ApprovalCard({
           className="min-h-0 normal-case tracking-normal"
         >
           Продолжить
-        </Button>
+        </Button>}
       </div>
     </div>
   );

@@ -19,6 +19,7 @@ import {
 } from "@nous-research/ui/ui/components/dialog";
 
 import { Markdown } from "@/components/Markdown";
+import { PdfPreview } from "@/components/PdfPreview";
 import { api, type ManagedFileTextResponse, type OfficePreview } from "@/lib/api";
 import { artifactUrl } from "@/lib/chat-artifacts";
 import { ownerFacingError } from "@/lib/owner-facing-error";
@@ -364,7 +365,7 @@ export function FilePreviewDialog({
           ) : kind === "image" ? (
             <div className="grid h-full min-h-64 place-items-center p-3"><img src={href} alt={file?.name ?? "Изображение"} onLoad={markReviewed} className="max-h-full max-w-full rounded-lg object-contain" /></div>
           ) : kind === "pdf" ? (
-            <iframe src={href} title={file?.name ?? "PDF"} className="h-full min-h-[30rem] w-full bg-white" />
+            <PdfPreview key={fileKey} path={filePath} expectedSha256={expectedSha256} />
           ) : kind === "video" ? (
             <div className="grid h-full min-h-64 place-items-center bg-black p-3"><video controls preload="metadata" onLoadedMetadata={markReviewed} className="max-h-full max-w-full"><source src={href} />Ваш браузер не смог открыть видео.</video></div>
           ) : kind === "audio" ? (

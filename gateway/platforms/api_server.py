@@ -45,9 +45,10 @@ import concurrent.futures
 import errno
 import hashlib
 import hmac
+import inspect
 import itertools
 import json
-from contextlib import contextmanager, nullcontext, suppress
+from contextlib import asynccontextmanager, contextmanager, nullcontext, suppress
 from contextvars import ContextVar
 from functools import wraps
 import logging
@@ -716,6 +717,55 @@ _CURATOR_WEB_SUBCOMMANDS = frozenset(
 
 
 _CURATOR_WEB_TIMEOUT_SECONDS = 30
+
+
+def _hide_silent_service_turn(agent: Any, result: Any, display_kind: Optional[str]) -> bool:
+    """Служебный ход веб-панели, закончившийся молчанием, владельцу не показывается.
+
+    Пробуждение о фоновой работе приходит self-post с X-Hermes-Internal-Notification
+    (display_kind="internal_notification"), и модели разрешено ответить ровно NO_REPLY,
+    если нового для владельца нет. Мессенджер такой ответ просто не отправляет; здесь
+    ответ — строка истории, которую панель покажет, поэтому строка помечается
+    display_kind="hidden" (модель её по-прежнему видит), а final_response очищается.
+    Решение то же, что у мессенджера (should_swallow_silence): ход человека
+    (display_kind=None) не глушится никогда.
+    """
+    from gateway.response_filters import should_swallow_silence
+
+    if not isinstance(result, dict):
+        return False
+    response = result.get("final_response") or ""
+    if not should_swallow_silence(result, response, display_kind=display_kind):
+        return False
+    session_id = result.get("session_id") or getattr(agent, "session_id", None)
+    session_db = getattr(agent, "_session_db", None)
+    if session_db is not None and isinstance(session_id, str) and session_id:
+        from agent.conversation_loop import _CODEX_INCOMPLETE_NUDGE_SERVICE
+
+        try:
+            # Вместе с NO_REPLY скрывается и служебный повтор-напоминание этого хода.
+            session_db.hide_latest_service_turn_rows(
+                session_id,
+                assistant_contents=(response, response.strip()),
+                user_contents=(_CODEX_INCOMPLETE_NUDGE_SERVICE,),
+            )
+        except Exception:
+            logger.warning(
+                "Не удалось скрыть молчание служебного хода сессии %s", session_id,
+                exc_info=True,
+            )
+    for msg in reversed(result.get("messages") or []):
+        if (
+            isinstance(msg, dict)
+            and msg.get("role") == "assistant"
+            and isinstance(msg.get("content"), str)
+            and msg["content"].strip() == response.strip()
+        ):
+            msg["display_kind"] = "hidden"
+            break
+    result["final_response"] = ""
+    return True
+
 
 def _post_turn_learning_notice(agent: Any, result: Any) -> None:
     """Если агент сам записал память или навык в этом ходе — одно сообщение «Учёл»."""
@@ -1979,6 +2029,9 @@ class APIServerAdapter(BasePlatformAdapter):
         # agent with model="" that 400s every call until manual retry.
         self._last_resolved_model: Dict[str, str] = {}
         self._session_db_lock: Optional[asyncio.Lock] = None  # Single-flight for lazy init
+        # Очередь ходов по сессии: служебный ход не идёт рядом с ходом человека
+        # (см. _session_turn_slot).
+        self._session_turn_states: Dict[str, Dict[str, Any]] = {}
         # Concurrency cap shared across all agent-serving endpoints
         # (/v1/chat/completions, /v1/responses, /v1/runs). Read from
         # config.yaml gateway.api_server.max_concurrent_runs; 0 disables
@@ -5010,14 +5063,11 @@ class APIServerAdapter(BasePlatformAdapter):
                 approval_payload,
                 list_session_decisions,
             )
-            from korra_cli.profiles import get_active_profile_name
-
             seen = {str(item.get("request_id") or "") for item in data}
             data.extend(
                 _chat_approval_event(approval_payload(item), session_id=session_id)
                 for item in list_session_decisions(
                     session_id,
-                    profile=get_active_profile_name() or "default",
                     statuses=(
                         PENDING,
                         APPROVED,
@@ -5066,11 +5116,8 @@ class APIServerAdapter(BasePlatformAdapter):
             raw_limit = 100
         try:
             from tools.effect_decisions import approval_payload, list_profile_decisions
-            from korra_cli.profiles import get_active_profile_name
-
             decisions = await asyncio.to_thread(
                 list_profile_decisions,
-                profile=get_active_profile_name() or "default",
                 limit=max(1, min(raw_limit, 500)),
             )
             data = [
@@ -5193,10 +5240,10 @@ class APIServerAdapter(BasePlatformAdapter):
                 )
             try:
                 from korra_cli.profiles import get_active_profile_name
-                from tools.effect_decisions import resolve_effect_decision
+                from korra_cli.effect_decision_routes import resolve_ledger_decision
 
                 effect = await asyncio.to_thread(
-                    resolve_effect_decision,
+                    resolve_ledger_decision,
                     request_id,
                     choice,
                     source_session_id=session_id,
@@ -6063,6 +6110,50 @@ class APIServerAdapter(BasePlatformAdapter):
             else None
         )
 
+        def _run_agent_in_session_turn(**run_kwargs):
+            """Ход только в своей очереди сессии (см. ``_session_turn_slot``).
+
+            ``_run_agent`` вызывается сразу: сбой старта хода (неверные
+            аргументы) по-прежнему всплывает синхронно у вызывающего. Если в
+            очереди пришлось ждать чужой ход, история, прочитанная выше, его
+            ответа не содержит: ход пересоздаётся с перечитанной историей,
+            иначе служебный ход повторит уже сказанное.
+            """
+            first_run = self._run_agent(**run_kwargs)
+
+            async def _gated():
+                run = first_run
+                try:
+                    async with self._session_turn_slot(
+                        provided_session_id or None,
+                        internal=internal_display_kind is not None,
+                    ) as waited:
+                        if waited:
+                            try:
+                                db = await self._ensure_session_db_async()
+                                if db is not None:
+                                    fresh = await asyncio.to_thread(
+                                        db.get_messages_as_conversation, session_id,
+                                    )
+                                    if inspect.iscoroutine(run):
+                                        run.close()
+                                    run = self._run_agent(
+                                        **{**run_kwargs, "conversation_history": fresh},
+                                    )
+                            except Exception as e:
+                                logger.warning(
+                                    "Failed to reload session history for %s: %s",
+                                    session_id, e,
+                                )
+                        return await run
+                finally:
+                    # Отменённый в очереди ход не стартовал: не оставляем
+                    # незапущенную корутину (RuntimeWarning «never awaited»).
+                    if inspect.iscoroutine(run) and inspect.getcoroutinestate(run) == inspect.CORO_CREATED:
+                        run.close()
+
+            return _gated()
+
         completion_id = f"chatcmpl-{uuid.uuid4().hex[:29]}"
         model_name = body.get("model", self._model_name)
         created = int(time.time())
@@ -6258,7 +6349,7 @@ class APIServerAdapter(BasePlatformAdapter):
 
             agent_ref = [None]
             try:
-                agent_task = asyncio.ensure_future(self._run_agent(
+                agent_task = asyncio.ensure_future(_run_agent_in_session_turn(
                     user_message=user_message,
                     conversation_history=history,
                     ephemeral_system_prompt=system_prompt,
@@ -6292,7 +6383,7 @@ class APIServerAdapter(BasePlatformAdapter):
 
         # Non-streaming: run the agent (with optional Idempotency-Key)
         async def _compute_completion():
-            return await self._run_agent(
+            return await _run_agent_in_session_turn(
                 user_message=user_message,
                 conversation_history=history,
                 ephemeral_system_prompt=system_prompt,
@@ -6689,8 +6780,11 @@ class APIServerAdapter(BasePlatformAdapter):
                 }
                 await response.write(_sse_frame(error_chunk))
                 await response.write(b"data: [DONE]\n\n")
-            except Exception:
-                pass
+            except Exception as write_exc:
+                logger.warning(
+                    "Could not send error chunk to client for %s (%s)",
+                    completion_id, type(write_exc).__name__,
+                )
 
         return response
 
@@ -7306,8 +7400,11 @@ class APIServerAdapter(BasePlatformAdapter):
                     "type": "response.failed",
                     "response": failed_env,
                 })
-            except Exception:
-                pass
+            except Exception as write_exc:
+                logger.warning(
+                    "Could not send response.failed to client for %s (%s)",
+                    response_id, type(write_exc).__name__,
+                )
             logger.error("Agent crashed mid-stream for %s: %s", response_id, str(agent_error)[:300])
         finally:
             if _batch_timer and not _batch_timer.done():
@@ -8187,6 +8284,64 @@ class APIServerAdapter(BasePlatformAdapter):
     # Agent execution
     # ------------------------------------------------------------------
 
+    @asynccontextmanager
+    async def _session_turn_slot(self, session_id: Optional[str], *, internal: bool):
+        """Очередь ходов одной сессии веб-панели между служебным и человеческим.
+
+        Служебный ход (self-post пробуждения о фоновой работе) раньше шёл мимо
+        любой блокировки: пока ход человека ещё думал, уведомление запускало
+        второй ход в той же сессии, и оба писали финал — владелец получал два
+        ответа. Теперь служебный ход ждёт, пока в сессии не останется ни одного
+        хода, и сам занимает её целиком; ход человека ждёт только служебный
+        (очередь «человек за человеком» держит панель, её 409 не трогаем).
+        Отдаёт ``True``, если пришлось ждать: история, прочитанная до ожидания,
+        устарела, и её надо перечитать. Без ``session_id`` ничего не делает.
+        """
+        if not session_id:
+            yield False
+            return
+        states = self.__dict__.setdefault("_session_turn_states", {})
+        state = states.get(session_id)
+        if state is None:
+            state = states[session_id] = {
+                "cond": asyncio.Condition(), "active": 0, "internal": 0, "users": 0,
+            }
+        cond = state["cond"]
+        state["users"] += 1
+        acquired = False
+        try:
+            async with cond:
+                if internal:
+                    def ready() -> bool:
+                        return state["active"] == 0
+                else:
+                    def ready() -> bool:
+                        return state["internal"] == 0
+                waited = not ready()
+                if waited:
+                    logger.info(
+                        "Сессия %s: %s ход ждёт окончания %s хода",
+                        session_id,
+                        "служебный" if internal else "человеческий",
+                        "текущего" if internal else "служебного",
+                    )
+                await cond.wait_for(ready)
+                state["active"] += 1
+                if internal:
+                    state["internal"] += 1
+                acquired = True
+            yield waited
+        finally:
+            async with cond:
+                if acquired:
+                    state["active"] -= 1
+                    if internal:
+                        state["internal"] -= 1
+                    cond.notify_all()
+                state["users"] -= 1
+                if state["users"] == 0 and states.get(session_id) is state:
+                    states.pop(session_id, None)
+
     def _concurrency_limited_response(self) -> Optional["web.Response"]:
         """Return a 429 response if the concurrent-run cap is reached, else None.
 
@@ -8477,6 +8632,8 @@ class APIServerAdapter(BasePlatformAdapter):
                         )
                     if model_turn:
                         _post_turn_learning_notice(agent, result)
+                        if persist_user_display_kind:
+                            _hide_silent_service_turn(agent, result, persist_user_display_kind)
                     usage = {
                         "input_tokens": getattr(agent, "session_prompt_tokens", 0) or 0,
                         "output_tokens": getattr(agent, "session_completion_tokens", 0) or 0,

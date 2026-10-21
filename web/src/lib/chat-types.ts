@@ -141,6 +141,8 @@ export interface SSEApprovalRequestData {
   effect_status?: EffectDecisionStatus;
   /** Origin chat stays authoritative even when shown in the profile center. */
   source_session_id?: string;
+  decision_fallback?: boolean;
+  decision_reason?: string;
   task_url?: string;
   updated_at?: number;
   /** Команда как её покажут человеку (секреты вырезаны на сервере). */

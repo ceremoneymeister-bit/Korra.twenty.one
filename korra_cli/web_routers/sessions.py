@@ -206,6 +206,9 @@ def get_sessions(
             db.close()
     except HTTPException:
         raise
+    except (OSError, sqlite3.Error) as exc:
+        _log.warning("GET /api/sessions unavailable for %s: %s", profile_name or "default", exc)
+        raise HTTPException(status_code=503, detail="История чатов этого профиля временно недоступна. Проверьте доступ к данным профиля.") from exc
     except Exception:
         _log.exception("GET /api/sessions failed")
         raise HTTPException(status_code=500, detail="Internal server error")

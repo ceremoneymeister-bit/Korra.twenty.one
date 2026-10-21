@@ -123,6 +123,64 @@ def is_intentional_silence_agent_result(agent_result: dict | None, response: Any
 # Служебные ходы шлёт сам шлюз, а не человек: только им разрешено молчать.
 MACHINERY_DISPLAY_KINDS = frozenset({"internal_notification", "model_switch", "auto_continue"})
 
+# Дописывается к уведомлению о фоновой работе, которое шлюз вбрасывает служебным ходом
+# (мессенджер — MessageEvent(internal=True), веб-панель — self-post с
+# X-Hermes-Internal-Notification): модель должна знать, что молчание здесь разрешено (случай «Оператора терминала»
+# 19.10 — итог уже сообщён, модель отвечала одними рассуждениями, повтор-напоминание
+# выдавало владельцу второе сообщение «это уже учтено»). Шлюз глушит NO_REPLY только на
+# таком ходу (should_swallow_silence + MACHINERY_DISPLAY_KINDS).
+SERVICE_TURN_SILENCE_HINT = (
+    "[If you already told the user this outcome and have nothing new for them, "
+    "reply with exactly NO_REPLY — it is not shown to the user. Otherwise report "
+    "the result briefly.]"
+)
+
+
+def is_successful_background_completion(evt: Any) -> bool:
+    """Успешно ли завершилась фоновая работа, о которой служебный ход.
+
+    Подсказка о NO_REPLY даётся только успеху: упавший, убитый, потерянный или не
+    запустившийся процесс, неуспешный или обрезанный дочерний агент, совпадение watch —
+    всё это модель обязана сообщить владельцу, молчать здесь нельзя.
+    """
+    if not isinstance(evt, dict):
+        return False
+    evt_type = evt.get("type", "completion")
+    if evt_type == "completion":
+        reason = evt.get("completion_reason") or "exited"
+        return reason == "exited" and str(evt.get("exit_code")) == "0"
+    if evt_type != "async_delegation":
+        return False
+    if evt.get("error") or evt.get("truncated") or evt.get("exit_reason") == "max_iterations":
+        return False
+    ok = ("completed", "success")
+    results = evt.get("results")
+    if evt.get("is_batch") or isinstance(results, list):
+        return bool(results) and all(
+            isinstance(r, dict)
+            and r.get("status") in ok
+            and not r.get("error")
+            and not r.get("truncated")
+            and r.get("exit_reason") != "max_iterations"
+            for r in results
+        )
+    return (evt.get("status") or "completed") in ok
+
+
+def with_service_turn_silence_hint(text: Any) -> Any:
+    """Дописать SERVICE_TURN_SILENCE_HINT к тексту служебного хода о фоновой работе.
+
+    Одна точка для всех путей пробуждения (фоновый процесс, дочерний агент, канбан;
+    мессенджер и self-post веб-панели), чтобы поведение не расходилось. Вызывается только
+    для успешно завершённой работы (is_successful_background_completion). Повторный вызов
+    подсказку не удваивает; слэш-команды и пустой текст не трогаются.
+    """
+    if not isinstance(text, str) or not text.strip() or text.lstrip().startswith("/"):
+        return text
+    if SERVICE_TURN_SILENCE_HINT in text:
+        return text
+    return f"{text}\n{SERVICE_TURN_SILENCE_HINT}"
+
 # Показывается человеку, чьё сообщение модель оставила без ответа.
 UNEXPECTED_SILENCE_REPLY = (
     "⚠️ Не получилось ответить на ваше сообщение. Попробуйте ещё раз или задайте вопрос иначе."

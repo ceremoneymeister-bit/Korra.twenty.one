@@ -122,6 +122,60 @@ describe("fetchJSON", () => {
     );
   });
 
+  it.each([
+    ["text/html", "<h1>Панель агента не ответила</h1>", "Панель агента не ответила"],
+    ["Text/HTML; charset=utf-8", '<!doctype html><html><head><title>Ошибка</title><style>body { color: red }</style></head><body><h1>Панель &laquo;Агент&raquo; не ответила</h1><p>Повторите&nbsp;позже.</p><script>window.alert("ошибка")</script><!-- диагностика --></body></html>', "Панель «Агент» не ответила Повторите позже."],
+  ])("extracts readable text from an HTML HTTP error (%s)", async (contentType, body, message) => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(body, {
+      status: 502,
+      headers: { "Content-Type": contentType },
+    })));
+
+    const error = await fetchJSON("/api/status").catch(e => e) as ApiError;
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.message).toBe(`502: ${message}`);
+    expect(error.status).toBe(502);
+    expect(error.payload).toBeUndefined();
+  });
+
+  it.each([
+    "<html><head><title>502 Bad Gateway</title></head><body><h1>502 Bad Gateway</h1><hr><center>nginx</center></body></html>",
+    '<script>throw new Error("Сбой сервера")</script><style>/* Ошибка */</style>',
+    "",
+  ])("uses the Russian status fallback for HTML without a readable message", async body => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(body, {
+      status: 502,
+      headers: { "Content-Type": "text/html" },
+    })));
+
+    await expect(fetchJSON("/api/status")).rejects.toThrow(
+      "502: Сервис временно недоступен. Попробуйте позже. Если ошибка повторяется, обратитесь в поддержку.",
+    );
+  });
+
+  it.each(["application/json", "text/html"])("preserves JSON detail and payload even with %s", async contentType => {
+    const payload = { detail: "Укажите <имя файла> и повторите.", preference: { revision: 7 } };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(payload), {
+      status: 409,
+      headers: { "Content-Type": contentType },
+    })));
+
+    const error = await fetchJSON("/api/status").catch(e => e) as ApiError;
+
+    expect(error.message).toBe(`409: ${payload.detail}`);
+    expect(error.payload).toEqual(payload);
+  });
+
+  it("preserves plain-text errors without interpreting angle brackets", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("Укажите <имя файла> и повторите.", {
+      status: 400,
+      headers: { "Content-Type": "text/plain" },
+    })));
+
+    await expect(fetchJSON("/api/status")).rejects.toThrow("400: Укажите <имя файла> и повторите.");
+  });
+
   it("keeps the status and the response body on the thrown error", async () => {
     // Проигранный CAS (409 с победившей записью) и сбой связи требуют разных
     // действий от экрана, поэтому отказ несёт код и тело, а не только текст.

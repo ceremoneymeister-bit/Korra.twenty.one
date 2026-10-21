@@ -1,6 +1,7 @@
 import { loadChatOutboxRecords } from "@/lib/chat-outbox";
 import { atom, onMount } from "nanostores";
 import { withBasePath } from "@/lib/api";
+import { agentChatHref } from "@/lib/agent-tabs";
 
 export interface ChatRun {
   message_id: string;
@@ -23,6 +24,9 @@ export interface ChatRun {
   unread?: boolean;
   /** У строки `waiting_decision`: сколько решений ждёт в этом разговоре. */
   pending_decisions?: number;
+  /** Исходный чат не установлен однозначно: отвечать в центре решений. */
+  decision_fallback?: boolean;
+  decision_reason?: string;
   /** У строки `waiting_decision`: карточки доски, чьи вопросы ждут в этом чате. */
   kanban_task_urls?: string[];
   event_revision?: string;
@@ -37,8 +41,29 @@ export interface ChatRun {
   };
 }
 
+/** Одна строка на исходный чат; потерянные исходники различаем по решению. */
+export function waitingDecisionRuns(runs: readonly ChatRun[]): ChatRun[] {
+  const seen = new Set<string>();
+  return runs.filter(run => {
+    if (run.status !== "waiting_decision") return false;
+    const key = `${run.profile}\0${run.decision_fallback ? run.message_id : run.session_id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+export function chatRunHref(run: ChatRun): string {
+  return run.decision_fallback
+    ? `${agentChatHref(run.profile)}&decisions=1`
+    : agentChatHref(run.profile, run.session_id);
+}
+
 export const $chatRuns = atom<ChatRun[]>([]);
+/** Успешный полный опрос: false также означает частично недоступные профили. */
 export const $chatRunsReachable = atom<boolean | null>(null);
+/** Профили, чьи решения или активность не удалось проверить. */
+export const $chatRunsUnavailableProfiles = atom<string[]>([]);
 /** Когда список работ последний раз действительно пришёл (Date.now(), мс).
  *  Экран, который показывает активность агентов, обязан уметь сказать, что
  *  видимое — последнее известное, а не текущее: «не отвечает» без возраста
@@ -126,13 +151,18 @@ export function chatRunHeaders(): Record<string, string> {
 }
 
 export const CHAT_RUNS_TIMEOUT_MS = 10_000;
-const snapshots = new Map<string, { etag: string; runs: ChatRun[] }>();
+const snapshots = new Map<string, { etag: string; runs: ChatRun[]; unavailable: string[] }>();
 
 export async function getChatRuns(profile?: string, sessionId?: string, signal?: AbortSignal): Promise<ChatRun[]> {
   const url = chatRunUrl("", profile, sessionId);
   const headers = chatRunHeaders();
   const key = `${headers.Authorization}\0${url}`;
   const cached = snapshots.get(key);
+  const publishUnavailable = (names: string[]) => {
+    if (profile === undefined && sessionId === undefined) {
+      $chatRunsUnavailableProfiles.set(names.map(name => name === "default" ? "" : name));
+    }
+  };
   const controller = new AbortController();
   const cancel = () => controller.abort();
   signal?.addEventListener("abort", cancel, { once: true });
@@ -147,16 +177,19 @@ export async function getChatRuns(profile?: string, sessionId?: string, signal?:
   const read = async () => {
     let response = await fetch(url, { headers: { ...headers, ...(cached ? { "If-None-Match": cached.etag } : {}) }, cache: "no-store", signal: controller.signal });
     if (response.status === 304) {
-      if (cached) return cached.runs;
+      if (cached) { publishUnavailable(cached.unavailable); return cached.runs; }
       response = await fetch(url, { headers, cache: "no-store", signal: controller.signal });
     }
     if (!response.ok) throw new Error("Не удалось проверить работу агентов");
-    const runs = ((await response.json()) as { runs: ChatRun[] }).runs;
+    const snapshot = (await response.json()) as { runs: ChatRun[]; unavailable_profiles?: string[] };
+    const runs = snapshot.runs;
     if (controller.signal.aborted) throw new DOMException("Отменено", "AbortError");
+    const unavailable = snapshot.unavailable_profiles ?? [];
+    publishUnavailable(unavailable);
     const etag = response.headers?.get("ETag");
     if (etag) {
       snapshots.delete(key);
-      snapshots.set(key, { etag, runs });
+      snapshots.set(key, { etag, runs, unavailable });
       if (snapshots.size > 32) snapshots.delete(snapshots.keys().next().value!);
     } else snapshots.delete(key);
     return runs;
@@ -223,7 +256,7 @@ export function refreshChatRuns(): Promise<void> {
     }
     $chatRuns.set(runs);
     $chatRunsUpdatedAt.set(Date.now());
-    $chatRunsReachable.set(true);
+    $chatRunsReachable.set($chatRunsUnavailableProfiles.get().length === 0);
   }).catch(() => {
     if (refreshController === controller) $chatRunsReachable.set(false);
   }).finally(() => {

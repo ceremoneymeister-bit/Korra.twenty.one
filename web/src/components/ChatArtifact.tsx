@@ -6,7 +6,7 @@
  * время владельца, это прямой расход лимита на навигацию.
  */
 
-import { useState } from "react";
+import { useContext, useState } from "react";
 import { Download, ExternalLink } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -14,6 +14,7 @@ import { artifactUrl, shortName, type ChatArtifact } from "@/lib/chat-artifacts"
 import { AttachmentCard } from "@/components/ChatAttachments";
 import { ApprovalCard, ApprovalSettled } from "@/components/chat/ApprovalCard";
 import { FileAttachment } from "@/components/chat/FileAttachment";
+import { DecisionDraftsContext } from "@/lib/artifact-decisions";
 
 export type ArtifactDecision = "approve" | "change" | "defer";
 /** Возвращает false, если решение отправить не удалось — карточка тогда не
@@ -57,9 +58,24 @@ function DecisionRow({
   // Своё состояние живёт до перезагрузки, история — всегда. Показываем то, что
   // знает история, если она знает.
   const done = already ?? sent;
+  // В чате с панелью «Ваши ответы» выбор не уходит сразу, а копится там — несколько решений одним сообщением
+  const drafts = useContext(DecisionDraftsContext);
+  const draft = drafts?.drafts.get(item.path);
 
   if (done === "approve" || done === "defer") {
     return <ApprovalSettled decision={done} />;
+  }
+
+  if (draft && drafts) {
+    const label = { approve: "Согласовать", change: "Изменить", defer: "Отложить" }[draft.kind];
+    return (
+      <div className="mt-1.5 flex items-center gap-2 font-sans text-[11px] normal-case tracking-normal text-[var(--neo-text-secondary)]">
+        <span>В ответах: <b className="text-[var(--neo-text-primary)]">{label}</b> — отправится вместе с остальными</span>
+        <button type="button" onClick={() => drafts.remove(item.path)} className="cursor-pointer border-0 bg-transparent underline">
+          Убрать
+        </button>
+      </div>
+    );
   }
 
   if (skipped) {
@@ -83,10 +99,15 @@ function DecisionRow({
   return (
     <ApprovalCard
       question={`Что делаем с «${shortName(item.name, 44)}»?`}
-      busy={busy}
+      busy={drafts ? false : busy}
+      instant={Boolean(drafts)}
       failed={failed}
       onSkip={() => setSkipped(true)}
       onSubmit={async (choice) => {
+        if (drafts) {  // копим в панели; комментарий к «Изменить» пишется там же
+          drafts.choose({ kind: choice, name: item.name, path: item.path });
+          return;
+        }
         if (choice === "change") {
           // «Изменить» — не решение, а начало разговора: наверх уходит тот же
           // вызов, и хозяин чата подставляет черновик в поле.

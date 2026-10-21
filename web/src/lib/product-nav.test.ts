@@ -19,6 +19,7 @@ const ADMIN_NAV: NavEntry[] = [
   { path: "/chat", labelKey: "chat", label: "Chat" },
   { path: "/dashboard", label: "Дашборд" },
   { path: "/agents", label: "Agents" },
+  { path: "/marketplace", label: "Marketplace" },
   { path: "/sessions", labelKey: "sessions", label: "Sessions" },
   { path: "/files", label: "Files" },
   { path: "/models", labelKey: "models", label: "Models" },
@@ -47,12 +48,13 @@ const PLUGIN_NAV: NavEntry[] = [
 ];
 
 describe("selectProductNav", () => {
-  it("убирает отдельный чат и оставляет четыре рабочих экрана", () => {
+  it("убирает отдельный чат и оставляет пять рабочих экранов", () => {
     expect(selectProductNav(ADMIN_NAV, "fleet")).toEqual([
       { path: "/dashboard", label: "Дашборд", labelKey: undefined },
       { path: "/agents", label: "Агенты", labelKey: undefined },
       { path: "/files", label: "Файлы", labelKey: undefined },
       { path: "/cron", label: "Задачи", labelKey: undefined },
+      { path: "/marketplace", label: "Маркетплейс", labelKey: undefined },
     ]);
   });
 
@@ -138,6 +140,7 @@ describe("selectProductSidebar", () => {
       "/files",
       "/cron",
       "/kanban",
+      "/marketplace",
     ]);
   });
 

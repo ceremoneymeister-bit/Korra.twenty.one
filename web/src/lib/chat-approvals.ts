@@ -80,10 +80,10 @@ export function normalizeApprovalRequest(
     request_id: item.request_id,
     ...(decisionKind ? { decision_kind: decisionKind } : { decision_kind: undefined }),
     ...(effectStatus ? { effect_status: effectStatus } : { effect_status: undefined }),
-    // Пустой список означал бы карточку без единой кнопки. Такого сервер не
-    // присылает, но если пришлёт — показываем минимум, который он принимает
-    // всегда: разово разрешить или отклонить.
-    choices: choices.length > 0 ? choices : ["once", "deny"],
+    // Неоднозначное владение эффектом может запретить любой ответ. Явный
+    // пустой список fallback сохраняем; иначе совместимость со старым API.
+    choices: item.decision_fallback && Array.isArray(item.choices) && item.choices.length === 0
+      ? [] : choices.length > 0 ? choices : ["once", "deny"],
   };
 }
 
@@ -111,10 +111,12 @@ export async function fetchPendingApprovals(
 /** Durable external effects for the whole selected profile, across chats. */
 export async function fetchEffectDecisions(
   profile?: string,
+  onUnavailable?: (profiles: string[]) => void,
 ): Promise<SSEApprovalRequestData[]> {
   const response = await authedFetch(withProfile("/api/chat/decisions", profile));
   if (!response.ok) throw new Error(`${response.status}`);
-  const body = (await response.json()) as { data?: unknown };
+  const body = (await response.json()) as { data?: unknown; unavailable_profiles?: string[] };
+  onUnavailable?.(body.unavailable_profiles ?? []);
   if (!Array.isArray(body?.data)) return [];
   return body.data
     .map(normalizeApprovalRequest)

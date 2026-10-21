@@ -1,4 +1,5 @@
 import { agentChatHref } from "@/lib/agent-tabs";
+import { startVisibleInterval } from "@/lib/visible-interval";
 import { getManagementProfile } from "@/lib/api";
 import { KorraLoader } from "@/components/KorraLoader";
 import {
@@ -1199,10 +1200,11 @@ export default function SessionsPage() {
         .catch(() => {});
     };
     loadOverview();
-    const id = setInterval(loadOverview, 5000);
+    // Скрытая вкладка не опрашивает; возврат на неё обновляет сразу.
+    const stop = startVisibleInterval(loadOverview, 5000);
     return () => {
       cancelled = true;
-      clearInterval(id);
+      stop();
     };
   }, [loadSessions, sessionQueryOptions]);
 

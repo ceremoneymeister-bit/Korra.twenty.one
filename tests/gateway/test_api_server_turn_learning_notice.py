@@ -111,6 +111,36 @@ def _notices(db):
 
 
 @pytest.mark.asyncio
+async def test_web_compaction_notice_hides_old_notes_but_keeps_complete_undo(env):
+    from tools.memory_tool import load_on_disk_store, memory_tool
+
+    old = ["Архив Альфа: /opt/data/home/alpha/INDEX.md, согласование отложено.",
+           "Архив Бета: подробное описание старой задачи и ожидаемого результата."]
+    short = ["Архив Альфа: /opt/data/home/alpha/INDEX.md.", "Архив Бета: ждём."]
+    store = load_on_disk_store()
+    for entry in old:
+        assert store.add("memory", entry)["success"]
+    before = snapshot_memory()
+    args = {"target": "memory", "operations": [
+        {"action": "replace", "old_text": entry, "content": compact}
+        for entry, compact in zip(old, short)
+    ] + [{"action": "add", "content": RULE}]}
+
+    def work():
+        return _call("m1", "memory", args, memory_tool(store=store, **args))
+
+    await _turn(env, work)
+    notice, = _notices(env["db"])
+    assert RULE in notice["content"]
+    assert "сжал 2 старые заметки" in notice["content"]
+    assert "Архив" not in notice["content"] and "/opt/" not in notice["content"]
+    receipt = notice["display_metadata"][RECEIPT_KEY]
+    assert receipt["memory"][0]["removed"] == old
+    assert undo_receipt(receipt)["status"] == "undone"
+    assert snapshot_memory() == before
+
+
+@pytest.mark.asyncio
 async def test_memory_written_by_the_agent_gives_one_notice_with_working_undo(env):
     from tools.memory_tool import MemoryStore
 
