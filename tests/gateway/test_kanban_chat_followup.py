@@ -51,7 +51,7 @@ def _subs(tid):
 def _tick(monkeypatch):
     posts = []
 
-    async def fake_self_post(adapter, *, text, session_id):
+    async def fake_self_post(adapter, *, text, session_id, idempotency_key=None):
         posts.append(session_id)
 
     import gateway.wake as wake_mod
