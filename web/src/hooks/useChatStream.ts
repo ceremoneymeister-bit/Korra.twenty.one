@@ -674,26 +674,37 @@ function reducer(state: StreamState, action: StreamAction): StreamState {
       const known = new Set(
         state.approvals.map((entry) => entry.request.request_id),
       );
-      const kept = state.approvals.map((entry) => {
+      const kept = state.approvals.flatMap((entry) => {
         const serverEntry = restored.get(entry.request.request_id);
-        if (serverEntry?.status === "settled") return serverEntry;
-        if (entry.status === "settled") return entry;
+        if (serverEntry?.status === "settled") return [serverEntry];
+        if (entry.status === "settled") return [entry];
         // SSE owns command questions during the live turn. A polling response
         // may have started before that question reached the server's list.
-        if (action.preserveLiveCommands && !entry.request.decision_kind?.startsWith("kanban_")) return entry;
+        if (action.preserveLiveCommands && !entry.request.decision_kind?.startsWith("kanban_")) return [entry];
         const stillWaiting = alive.has(entry.request.request_id);
         if (stillWaiting && entry.status === "expired") {
-          return serverEntry ?? { ...entry, status: "pending" as const, error: undefined };
+          return [serverEntry ?? { ...entry, status: "pending" as const, error: undefined }];
+        }
+        // Kanban questions live outside the transcript and are restored by
+        // polling. Once the server no longer owns one, keeping an "expired"
+        // card in the chat makes a removed or archived task look stuck until
+        // the whole page is reloaded.
+        if (!stillWaiting && entry.request.decision_kind?.startsWith("kanban_")) {
+          return [];
         }
         if (!stillWaiting && entry.status !== "expired") {
-          return { ...entry, status: "expired" as const };
+          return [{ ...entry, status: "expired" as const }];
         }
-        return entry;
+        return [entry];
       });
       const added = action.requests
         .filter((item) => !known.has(item.request_id) && !isFinishedEffectDecision(item))
         .map((item) => restored.get(item.request_id)!);
-      if (added.length === 0 && kept.every((entry, i) => entry === state.approvals[i])) {
+      if (
+        added.length === 0 &&
+        kept.length === state.approvals.length &&
+        kept.every((entry, i) => entry === state.approvals[i])
+      ) {
         return state;
       }
       return { ...state, approvals: [...kept, ...added] };

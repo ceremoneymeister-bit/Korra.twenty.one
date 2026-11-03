@@ -47,6 +47,7 @@ import { $uploadJobs, dismissUploadJob } from "@/store/upload-jobs";
 import type { SessionInfo } from "@/lib/api";
 import type { UploadManifest } from "@/lib/upload-session";
 import type { ChatMessage } from "@/lib/chat-types";
+import type { ChatApprovalEntry } from "@/hooks/useChatStream";
 import { writeChatDraft } from "@/lib/chat-view-state";
 import { normalizeApprovalRequest } from "@/lib/chat-approvals";
 import { parseSSEBlock } from "@/lib/sse-parser";
@@ -1155,5 +1156,36 @@ describe("ожидание решения владельца (UX 17.10)", () => 
       />,
     );
     expect(container.textContent).toContain("Агент работает");
+  });
+});
+
+describe("BubbleChatTranscript — живые решения доски", () => {
+  it.each([
+    ["kanban_question", "Продолжить как предложено"],
+    ["kanban_approval", "Разрешить эти изменения"],
+    ["kanban_accept", "Принять результат"],
+  ] as const)("оставляет %s видимым и передаёт ответ из исходного чата", async (kind, label) => {
+    const onApprovalDecision = vi.fn();
+    const approvals: ChatApprovalEntry[] = [{
+      request: {
+        request_id: "kanban-current-version",
+        decision_kind: kind,
+        command: "Нужно решение по поручению",
+        choices: ["once"],
+        task_url: "/kanban?board=contracts&task=t_current",
+      },
+      status: "pending",
+    }];
+    await render(<BubbleChatTranscript messages={[]} sessionId="origin" approvals={approvals}
+      onApprovalDecision={onApprovalDecision} />);
+
+    expect(container.textContent).toContain("Нужно решение по поручению");
+    expect(container.querySelector("a")?.getAttribute("href"))
+      .toBe("/kanban?board=contracts&task=t_current");
+    const button = [...container.querySelectorAll("button")]
+      .find(item => item.textContent?.includes(label));
+    expect(button, "решение доступно прямо в исходном чате").toBeDefined();
+    await act(async () => { button!.click(); });
+    expect(onApprovalDecision).toHaveBeenCalledWith("kanban-current-version", "once", "");
   });
 });
