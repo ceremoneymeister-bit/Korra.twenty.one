@@ -779,6 +779,8 @@ def test_state_route_serves_every_section_without_writing(tmp_path, monkeypatch)
     conn.close()
     monkeypatch.setattr(korra_constants, "get_default_hermes_root", lambda: tmp_path)
     monkeypatch.setattr(ds, "list_agents", lambda: [main])
+    # The route's implicit clock must use the same month as its session fixture.
+    monkeypatch.setattr(ds.time, "time", lambda: NOW)
 
     def snapshot() -> dict[str, int]:
         return _data_snapshot(tmp_path)
