@@ -70,7 +70,7 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/opt/hermes/.playwright
 # hermes process, the dashboard, and per-profile gateways.
 RUN apt-get -o Acquire::Retries=3 update && \
     apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
-    ca-certificates curl iputils-ping python3 python-is-python3 ripgrep ffmpeg gcc g++ make cmake python3-dev python3-venv libffi-dev libatomic1 procps git openssh-client docker-cli sudo xz-utils \
+    ca-certificates curl iputils-ping python3 python-is-python3 ripgrep ffmpeg file gcc g++ make cmake python3-dev python3-venv libffi-dev libatomic1 procps git openssh-client docker-cli sudo xz-utils \
     libreoffice-calc libreoffice-writer libreoffice-impress \
     poppler-utils fonts-dejavu-core fonts-liberation2 && \
     rm -rf /var/lib/apt/lists/*
