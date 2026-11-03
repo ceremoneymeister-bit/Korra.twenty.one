@@ -141,6 +141,15 @@ class FakeDockerUpdater(u.Updater):
             if image in self.image_cores:
                 return run_packages_isolated(self.image_cores[image], root, *args[index + 2:index + 4])
             return run_packages_code(root, *args[index + 2:index + 4])
+        if args[0] == "run" and u.SQLITE_NORMALIZE_CODE in args:
+            root = next(a[:-len(":/opt/data")] for a in args if a.endswith(":/opt/data"))
+            # Docker boundary only: run the real normalization with a temp bind
+            # root, rather than returning a fabricated SQLite verdict.
+            code = u.SQLITE_NORMALIZE_CODE.replace("Path('/opt/data')", "Path(sys.argv[2])")
+            done = subprocess.run([sys.executable, "-I", "-B", "-c", code,
+                                   args[args.index(u.SQLITE_NORMALIZE_CODE) + 1], root],
+                                  capture_output=True, text=True, check=True, timeout=60)
+            return done.stdout
         if args[0] == "run":
             # Судья SQLite: одноразовый контейнер старого образа поверх снимка,
             # тем же приёмом, что и schema_rehearsal. Отсутствующий образ docker
@@ -254,6 +263,207 @@ def test_update_fetches_and_probes_before_quiescing(updater):
     assert updater.calls.index(("probe", NEW)) < updater.calls.index(("native", "drain"))
     assert (updater.job / "before/state.db").exists()
     assert json.loads((updater.job / "status.json").read_text())["target_image_id"] == NEW
+
+
+@pytest.fixture
+def external_updater(updater, tmp_path, monkeypatch):
+    binary = shutil.which("restic")
+    if not binary:
+        pytest.skip("real restic binary is required for cloud backup transaction tests")
+    password = tmp_path / "restic-password"
+    password.write_text("isolated-test-repository-password\n")
+    password.chmod(0o600)
+    repository = tmp_path / "external-repository"
+    environment = dict(os.environ, RESTIC_REPOSITORY=str(repository), RESTIC_PASSWORD_FILE=str(password))
+
+    def restic(*args):
+        return subprocess.run([binary, *map(str, args)], env=environment, capture_output=True,
+                              text=True, check=True, timeout=60).stdout
+
+    restic("init")
+    output = restic("backup", "--json", updater.data)
+    snapshot = next(json.loads(line)["snapshot_id"] for line in output.splitlines()
+                    if json.loads(line).get("message_type") == "summary")
+    restic("check", "--read-data")
+    probe = tmp_path / "operator-restore-probe"
+    restic("restore", snapshot + ":" + str(updater.data), "--target", probe, "--verify")
+    with sqlite3.connect(probe / "state.db") as db:
+        assert db.execute("PRAGMA quick_check").fetchall() == [("ok",)]
+        assert db.execute("SELECT * FROM messages").fetchall() == [("before",)]
+    proof = tmp_path / "accepted-backup.json"
+    proof.write_text(json.dumps({"status": "complete", "installation": updater.name,
+                                 "completed_at": u.utc(), "full_read_check": {"status": "passed"},
+                                 "restore_test": {"status": "passed"},
+                                 "snapshots": {"files-final": {"snapshot_id": snapshot}}}))
+    proof.chmod(0o600)
+    config = tmp_path / "external-backup.json"
+    config.write_text(json.dumps({"schema": 1, "name": updater.name, "data": str(updater.data),
+                                  "installation": updater.name, "binary": binary,
+                                  "binary_sha256": hashlib.sha256(Path(binary).read_bytes()).hexdigest(),
+                                  "password_file": str(password), "repository": str(repository),
+                                  "repository_id": json.loads(restic("cat", "config"))["id"],
+                                  "accepted_backup": str(proof)}))
+    config.chmod(0o600)
+    # Tests run unprivileged on CI. Full control-path ownership has separate
+    # host tests; the real files/repository/crypto/SQLite here are not mocked.
+    monkeypatch.setattr(u, "trusted_control", lambda path: None)
+    updater.receipt["external_backup"] = str(config)
+    updater.real_restic = restic
+    return updater
+
+
+def test_external_backup_updates_without_a_second_data_tree(external_updater):
+    updater = external_updater
+    blob = updater.data / "working-files.bin"
+    blob.write_bytes(os.urandom(1 << 20))
+    expected = hashlib.sha256(blob.read_bytes()).hexdigest()
+    updater.update("registry.example/korra:latest")
+    assert updater.receipt["status"] == "succeeded" and updater.image == NEW
+    assert not (updater.job / "before").exists()
+    assert updater.receipt["backup_path"].startswith("restic:")
+    assert updater.receipt["external_sqlite_readback"] == {"status": "passed", "databases": 1}
+    source_info, restored_info = updater.data.stat(), (updater.job / "external-sqlite").stat()
+    assert (restored_info.st_uid, restored_info.st_gid, restored_info.st_mode) == (
+        source_info.st_uid, source_info.st_gid, source_info.st_mode)
+    assert hashlib.sha256(blob.read_bytes()).hexdigest() == expected
+    before = updater.receipt["external_before"]
+    assert updater.external_backup().verify(before)["working-files.bin"]["sha256"] == expected
+
+
+def test_external_backup_is_selected_by_the_host_control_config(external_updater):
+    updater = external_updater
+    config = updater.home / "external-backup.json"
+    Path(updater.receipt["external_backup"]).rename(config)
+    another = u.Updater(updater.home)
+    assert another.receipt["external_backup"] == str(config)
+    another.initialize("automatic-cloud-mode", "registry.example/korra:latest")
+    assert another.receipt["external_backup"] == str(config)
+    assert another.external_backup().preflight()["repository_id"]
+
+
+def test_external_capture_recovers_an_id_lost_after_upload(external_updater):
+    updater = external_updater
+    backend = updater.external_backup()
+    first, manifest = backend.capture("before")
+    (updater.job / "before.external.json").unlink()
+    (updater.job / "before.manifest.json").unlink()
+    again, recovered = backend.capture("before")
+    assert again == first and recovered == manifest
+    snapshots = json.loads(updater.real_restic("snapshots", "--json"))
+    assert len([s for s in snapshots if "before" in s.get("tags", [])]) == 1
+
+
+def test_external_sqlite_readback_keeps_committed_wal_with_literal_glob_name(external_updater, tmp_path):
+    updater = external_updater
+    source = tmp_path / "wal-source.db"
+    db = sqlite3.connect(source)
+    try:
+        db.execute("PRAGMA journal_mode=WAL")
+        db.execute("CREATE TABLE durable(value)")
+        db.execute("INSERT INTO durable VALUES ('committed WAL row')")
+        db.commit()
+        for suffix in ("", "-wal", "-shm"):
+            original = Path(str(source) + suffix)
+            if original.exists():
+                shutil.copyfile(original, updater.data / ("[draft]*.session" + suffix))
+    finally:
+        db.close()
+    updater.fail_smoke = True
+    with pytest.raises(u.UpdateError):
+        updater.update("registry.example/korra:latest")
+    assert updater.receipt["status"] == "rolled_back"
+    with sqlite3.connect(updater.data / "[draft]*.session") as recovered:
+        assert recovered.execute("SELECT value FROM durable").fetchall() == [("committed WAL row",)]
+
+
+def test_external_backup_rollback_keeps_new_writes_and_rotated_credentials(external_updater):
+    updater = external_updater
+    updater.fail_smoke = True
+    with pytest.raises(u.UpdateError, match="Injected model smoke failure"):
+        updater.update("registry.example/korra:latest")
+    assert updater.receipt["status"] == "rolled_back" and updater.running and updater.image == OLD
+    assert updater.receipt["restore_mode"] == "external"
+    assert not (updater.job / "before").exists()
+    assert not list(updater.data.parent.glob("data.after-*"))
+    assert not (updater.data / "new-message.txt").exists()
+    assert not (updater.data / "revoked.token").exists()
+    assert json.loads((updater.data / "auth.json").read_text())["refresh_token"] == "rotated"
+    with sqlite3.connect(updater.data / "state.db") as db:
+        assert db.execute("SELECT text FROM messages").fetchall() == [("before",)]
+    exported = updater.receipt["post_update_cloud_export"]
+    payload = updater.external_backup().run("dump", exported["snapshot_id"], str(updater.data / "new-message.txt"))
+    assert payload == "write during new boot"
+    snapshots = json.loads(updater.real_restic("snapshots", "--json"))
+    assert len([s for s in snapshots if "after" in s.get("tags", [])]) == 1
+
+
+def test_external_restore_retry_reuses_export_and_credentials(external_updater, monkeypatch):
+    updater = external_updater
+    backend = updater.external_backup()
+    original = backend.restore
+    attempts = []
+
+    def interrupt(record, destination, includes=()):
+        if destination == updater.data and not attempts:
+            attempts.append(record["snapshot_id"])
+            (destination / "partial.txt").write_text("partial restore")
+            raise u.UpdateError("Injected cloud restore interruption")
+        return original(record, destination, includes)
+
+    monkeypatch.setattr(backend, "restore", interrupt)
+    updater.fail_smoke = True
+    with pytest.raises(u.UpdateError):
+        updater.update("registry.example/korra:latest")
+    assert updater.receipt["status"] == "rollback_failed"
+    checkpoint = json.loads((updater.job / "external-restore.json").read_text())
+    assert checkpoint["phase"] == "restoring"
+    updater.rollback()
+    assert updater.receipt["status"] == "rolled_back" and updater.image == OLD
+    assert updater.receipt["post_update_cloud_export"] == checkpoint["after"]
+    assert not (updater.data / "partial.txt").exists()
+    assert json.loads((updater.data / "auth.json").read_text())["refresh_token"] == "rotated"
+    assert not (updater.data / "revoked.token").exists()
+    snapshots = json.loads(updater.real_restic("snapshots", "--json"))
+    assert len([s for s in snapshots if "after" in s.get("tags", [])]) == 1
+
+
+@pytest.mark.parametrize("failure", ["unverified", "wrong_repository", "wrong_data", "public_config"])
+def test_external_backup_refuses_before_stopping_without_valid_recovery(external_updater, failure):
+    updater = external_updater
+    path = Path(updater.receipt["external_backup"])
+    config = json.loads(path.read_text())
+    if failure == "unverified":
+        proof = Path(config["accepted_backup"])
+        value = json.loads(proof.read_text()); value["restore_test"]["status"] = "pending"
+        proof.write_text(json.dumps(value))
+    elif failure == "wrong_repository":
+        config["repository_id"] = "0" * 64
+        path.write_text(json.dumps(config))
+    elif failure == "wrong_data":
+        config["data"] += "-other"
+        path.write_text(json.dumps(config))
+    else:
+        path.chmod(0o644)
+    updater.free_space = u.Updater.free_space.__get__(updater)
+    with pytest.raises(u.UpdateError):
+        updater.update("registry.example/korra:latest")
+    assert updater.running and updater.image == OLD
+    assert not any(call[0] == "stop" for call in updater.calls)
+
+
+def test_external_backup_space_budget_excludes_full_data(external_updater, monkeypatch):
+    updater = external_updater
+    (updater.data / "large-working-file.bin").write_bytes(os.urandom(8 << 20))
+    terms = u.copy_budget(updater.data)
+    free = 2 * 1024**3 + 2 * 1024**2
+    monkeypatch.setattr(u.shutil, "disk_usage", lambda path: types.SimpleNamespace(free=free))
+    u.Updater.free_space(updater)
+    assert updater.receipt["rollback_path"] == "external"
+    assert updater.receipt["rollback_budget"]["update_copies_bytes"] < terms["data_bytes"]
+    assert updater.receipt["rollback_required_bytes"] <= free
+    updater.receipt["external_backup"] = None
+    with pytest.raises(u.UpdateError, match="Insufficient space"):
+        u.Updater.free_space(updater)
 
 
 def test_wrong_mount_rejected_before_any_mutation(updater):
@@ -1661,6 +1871,8 @@ COPY_SITES = {
     ("link_tree", "copy2"): "config_bytes",
     ("overlay_credentials", "copy2"): "credential_bytes",
     ("Updater.rehearse_schema", "copy2"): "state_db_bytes",
+    ("SQLITE_NORMALIZE_CODE", "backup"): "sqlite_peak_bytes",
+    ("capture_rollback_credentials", "copy2"): "credential_bytes",
     # Runs in the container, sized by the old container's diff: unknown at the
     # first gate. Its bytes land in DATA, so the gate runs again after it.
     ("MIGRATE_PACKAGES_CODE", "copy2"): "data_bytes",

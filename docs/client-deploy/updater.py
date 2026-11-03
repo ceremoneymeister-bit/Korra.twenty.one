@@ -570,12 +570,216 @@ print(json.dumps({'bad': bad, 'checked': len(relatives), 'sqlite': sqlite3.sqlit
 '''
 
 
+SQLITE_NORMALIZE_CODE = r'''
+import json, os, sqlite3, sys, time
+from pathlib import Path
+root = Path('/opt/data')
+for relative in json.loads(sys.argv[1]):
+    source = root / relative
+    info = source.stat()
+    target = source.with_name(source.name + '.external-sqlite')
+    started = time.monotonic()
+    def progress(*_):
+        if time.monotonic() - started > 180:
+            raise TimeoutError('SQLite snapshot exceeded 180 seconds')
+    old = sqlite3.connect(source)
+    new = sqlite3.connect(target)
+    try:
+        old.backup(new, pages=2048, progress=progress, sleep=0.05)
+        new.execute('PRAGMA journal_mode=DELETE')
+        if new.execute('PRAGMA quick_check').fetchall() != [('ok',)]:
+            raise RuntimeError('SQLite snapshot integrity failed')
+    finally:
+        new.close()
+        old.close()
+    os.chmod(target, info.st_mode & 0o7777)
+    os.chown(target, info.st_uid, info.st_gid)
+    os.replace(target, source)
+    for suffix in ('-wal', '-shm', '-journal'):
+        Path(str(source) + suffix).unlink(missing_ok=True)
+print(json.dumps({'checked': len(json.loads(sys.argv[1])), 'sqlite': sqlite3.sqlite_version}))
+'''
+
+
 class UpdateError(RuntimeError):
     pass
 
 
 class DataMissing(UpdateError):
     pass
+
+
+class ExternalBackup:
+    """An operator's root-owned restic connection, never a space-gate override.
+
+    The operator first accepts a complete off-site backup. The updater then
+    captures its own stopped DATA in that repository, and can restore it in
+    place after exporting the failed release's writes to the same repository.
+    Google credentials stay with the operator; a scoped REST connection suffices.
+    """
+
+    def __init__(self, updater, config):
+        self.updater = updater
+        path = Path(config)
+        trusted_control(path)
+        if (not path.is_absolute() or not path.is_file() or path.is_relative_to(updater.data)
+                or path.stat().st_mode & 0o077):
+            raise UpdateError("External backup config must be a private control file outside DATA")
+        self.config = json.loads(path.read_text(encoding="utf-8"))
+        if (self.config.get("schema") != 1 or self.config.get("name") != updater.name
+                or self.config.get("data") != str(updater.data)):
+            raise UpdateError("External backup belongs to another deployment")
+        self.binary = Path(self.config["binary"])
+        trusted_control(self.binary)
+        with self.binary.open("rb") as stream:
+            if hashlib.file_digest(stream, "sha256").hexdigest() != self.config["binary_sha256"]:
+                raise UpdateError("External backup binary checksum mismatch")
+        self.env = {key: value for key, value in os.environ.items()
+                    if not key.startswith(("RESTIC_", "RCLONE_"))}
+        password = Path(self.config["password_file"])
+        trusted_control(password)
+        if not password.is_file() or password.stat().st_mode & 0o077:
+            raise UpdateError("External backup password file is not private")
+        repository = self.config["repository"]
+        if not isinstance(repository, str) or not repository or "@" in repository:
+            raise UpdateError("External backup repository must not embed credentials")
+        self.env.update(RESTIC_REPOSITORY=repository, RESTIC_PASSWORD_FILE=str(password))
+        if self.config.get("environment_file"):
+            environment = Path(self.config["environment_file"])
+            trusted_control(environment)
+            if not environment.is_file() or environment.stat().st_mode & 0o077:
+                raise UpdateError("External backup environment file is not private")
+            values = json.loads(environment.read_text(encoding="utf-8"))
+            if set(values) - {"RESTIC_REST_USERNAME", "RESTIC_REST_PASSWORD"}:
+                raise UpdateError("Unsupported external backup environment")
+            self.env.update(values)
+        self.env.update(RESTIC_CACHE_DIR=str(updater.home / "external-backup-cache"),
+                        GOMAXPROCS="2", GOMEMLIMIT="768MiB")
+
+    def run(self, *args, timeout=3600):
+        result = subprocess.run([str(self.binary), "--stuck-request-timeout", "60s", *map(str, args)],
+                                env=self.env, capture_output=True, text=True, timeout=timeout)
+        if result.returncode:
+            if self.updater.job:
+                with (self.updater.job / "external-backup.log").open("a") as stream:
+                    stream.write(result.stdout + result.stderr)
+            raise UpdateError(f"External backup {args[0]} failed (exit {result.returncode}); see private log")
+        return result.stdout
+
+    def preflight(self):
+        root_config = self.updater.data / "config.yaml"
+        if root_config.is_symlink() or not root_config.is_file():
+            raise UpdateError("External rollback requires a regular DATA/config.yaml")
+        proof = Path(self.config["accepted_backup"])
+        trusted_control(proof)
+        accepted = json.loads(proof.read_text(encoding="utf-8"))
+        if (accepted.get("status") != "complete"
+                or accepted.get("installation") != self.config["installation"]
+                or accepted.get("full_read_check", {}).get("status") != "passed"
+                or accepted.get("restore_test", {}).get("status") != "passed"):
+            raise UpdateError("A verified external backup with a restore test is required")
+        completed = datetime.fromisoformat(accepted["completed_at"])
+        age = (datetime.now(timezone.utc) - completed).total_seconds()
+        if not -300 <= age <= 24 * 3600:
+            raise UpdateError("External backup acceptance is stale; refresh it before updating")
+        configuration = json.loads(self.run("cat", "config", timeout=90))
+        if configuration.get("id") != self.config["repository_id"]:
+            raise UpdateError("External backup repository identity mismatch")
+        snapshot = accepted["snapshots"]["files-final"]["snapshot_id"]
+        metadata = json.loads(self.run("cat", "snapshot", snapshot, timeout=90))
+        if not any(self.updater.data == Path(p) or Path(p) in self.updater.data.parents
+                   for p in metadata.get("paths", [])):
+            raise UpdateError("Accepted external backup does not contain this DATA")
+        return {"repository_id": configuration["id"], "accepted_snapshot": snapshot,
+                "acceptance_completed_at": accepted["completed_at"]}
+
+    def capture(self, name):
+        updater = self.updater
+        owner = updater.data.stat()
+        root_metadata = {"uid": owner.st_uid, "gid": owner.st_gid, "mode": stat.S_IMODE(owner.st_mode)}
+        manifest = {key: value for key, value in tree_manifest(updater.data).items()
+                    if Path(key).name not in VOLATILE}
+        metadata = updater.job / (name + ".external-manifest.json")
+        receipt = updater.job / (name + ".external.json")
+        if receipt.exists():
+            existing = json.loads(receipt.read_text())
+            saved = json.loads(self.run("dump", existing["snapshot_id"], str(metadata), timeout=90))
+            if saved.get("manifest") == manifest and saved.get("root_metadata") == root_metadata:
+                self.verify(existing, manifest)
+                atomic_json(updater.job / (name + ".manifest.json"), manifest)
+                return existing, manifest
+        else:
+            # A process may have ended after upload but before recording its
+            # ID locally. Inspect the operation's own snapshots before retrying.
+            snapshots = json.loads(self.run("snapshots", "--json", "--tag",
+                                           "native-" + updater.receipt["job_id"] + "," + name, timeout=90))
+            for candidate in reversed(snapshots):
+                existing = {"snapshot_id": candidate["id"], "repository_id": self.config["repository_id"],
+                            "manifest_path": str(metadata), "data": str(updater.data)}
+                saved = json.loads(self.run("dump", candidate["id"], str(metadata), timeout=90))
+                existing["root_metadata"] = saved.get("root_metadata")
+                if saved.get("manifest") == manifest and saved.get("root_metadata") == root_metadata:
+                    self.verify(existing, manifest)
+                    atomic_json(receipt, existing)
+                    atomic_json(updater.job / (name + ".manifest.json"), manifest)
+                    return existing, manifest
+        atomic_json(metadata, dict(manifest=manifest, name=updater.name, data=str(updater.data),
+                                   job_id=updater.receipt["job_id"], old_image_id=updater.receipt["old_image_id"],
+                                   root_metadata=root_metadata))
+        args = ["backup", "--json", "--read-concurrency", "2", "--host", self.config["installation"],
+                "--tag", "native-" + updater.receipt["job_id"], "--tag", name]
+        for excluded in sorted(VOLATILE):
+            args.extend(["--exclude", "**/" + excluded])
+        output = self.run(*args, updater.data, metadata)
+        summaries = [row for line in output.splitlines() if isinstance(row := json.loads(line), dict)
+                     and row.get("message_type") == "summary"]
+        if len(summaries) != 1 or not re.fullmatch(r"[a-f0-9]{64}", summaries[0].get("snapshot_id", "")):
+            raise UpdateError("External backup did not return an exact snapshot ID")
+        record = {"snapshot_id": summaries[0]["snapshot_id"], "repository_id": self.config["repository_id"],
+                  "manifest_path": str(metadata), "data": str(updater.data), "root_metadata": root_metadata}
+        atomic_json(receipt, record)
+        self.verify(record, manifest)
+        atomic_json(updater.job / (name + ".manifest.json"), manifest)
+        return record, manifest
+
+    def verify(self, record, expected=None):
+        updater = self.updater
+        snapshot = record.get("snapshot_id", "")
+        if (not re.fullmatch(r"[a-f0-9]{64}", snapshot)
+                or record.get("repository_id") != self.config["repository_id"]
+                or record.get("data") != str(updater.data)):
+            raise UpdateError("External snapshot identity mismatch")
+        metadata = json.loads(self.run("cat", "snapshot", snapshot, timeout=90))
+        if (str(updater.data) not in metadata.get("paths", [])
+                or metadata.get("hostname") != self.config["installation"]
+                or "native-" + updater.receipt["job_id"] not in metadata.get("tags", [])):
+            raise UpdateError("External snapshot belongs to another operation")
+        recovered = json.loads(self.run("dump", snapshot, record["manifest_path"], timeout=90))
+        if (recovered.get("name") != updater.name or recovered.get("data") != str(updater.data)
+                or recovered.get("job_id") != updater.receipt["job_id"]
+                or recovered.get("root_metadata") != record.get("root_metadata")
+                or (expected is not None and recovered.get("manifest") != expected)):
+            raise UpdateError("External snapshot manifest readback mismatch")
+        return recovered["manifest"]
+
+    def restore(self, record, destination, includes=()):
+        self.verify(record)
+        # Restoring snapshot:subfolder does not carry that subfolder's own
+        # metadata. Without this, umask 077 makes a root-owned 0700 directory
+        # and the engine UID cannot read even correctly owned SQLite files.
+        destination.mkdir(parents=True, exist_ok=True)
+        owner = record["root_metadata"]
+        os.chown(destination, owner["uid"], owner["gid"])
+        os.chmod(destination, owner["mode"])
+        args = ["restore", record["snapshot_id"] + ":" + str(self.updater.data),
+                "--target", str(destination), "--verify"]
+        for relative in includes:
+            # Restic uses glob patterns, even for an exact include. Quote each
+            # metacharacter so a database named '[draft]*.db' stays one file.
+            literal = "".join({"[": "[[]", "*": "[*]", "?": "[?]", "\\": "\\\\"}.get(c, c)
+                              for c in relative)
+            args.extend(["--include", "/" + literal])
+        self.run(*args)
 
 
 def validate_capability(value):
@@ -1137,7 +1341,7 @@ def copy_budget(data):
     :func:`link_tree` copies. credential_bytes: what :func:`overlay_credentials`
     copies from the failed DATA. A new physical copy needs a term here.
     """
-    terms = dict.fromkeys(("data_bytes", "credential_bytes", "config_bytes",
+    terms = dict.fromkeys(("data_bytes", "credential_bytes", "config_bytes", "sqlite_bytes",
                            "state_db_bytes", "sqlite_peak_bytes"), 0)
     for root, _dirs, files in os.walk(data):
         for name in files:
@@ -1166,6 +1370,9 @@ def copy_budget(data):
             if is_db:
                 wal = path.with_name(name + "-wal")
                 size = info.st_size + (wal.lstat().st_size if wal.is_file() and not wal.is_symlink() else 0)
+                terms["sqlite_bytes"] += info.st_size + sum(
+                    extra.lstat().st_size for suffix in ("-wal", "-shm", "-journal")
+                    if (extra := path.with_name(name + suffix)).is_file() and not extra.is_symlink())
                 terms["sqlite_peak_bytes"] = max(terms["sqlite_peak_bytes"], size)
                 parts = relative.parts
                 if parts == ("state.db",) or (len(parts) == 3 and parts[0] == "profiles" and name == "state.db"):
@@ -1215,6 +1422,28 @@ def overlay_credentials(latest, restored):
     return changed
 
 
+def capture_rollback_credentials(source, destination):
+    """Small private credential/config hold while cloud rollback rewrites DATA."""
+    destination.mkdir(mode=0o750)
+    owner = source.stat()
+    os.chown(destination, owner.st_uid, owner.st_gid)
+    for relative in tree_manifest(source):
+        path = Path(relative)
+        config = path.parts == ("config.yaml",) or (
+            len(path.parts) == 3 and path.parts[0] == "profiles" and path.name == "config.yaml")
+        if not config and not credential_path(relative):
+            continue
+        original, target = source / relative, destination / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if original.is_symlink():
+            target.symlink_to(os.readlink(original))
+        else:
+            shutil.copy2(original, target)
+        info = original.lstat()
+        os.chown(target, info.st_uid, info.st_gid, follow_symlinks=False)
+    return tree_manifest(destination)
+
+
 class Updater:
     def __init__(self, home=HERE, *, data_missing_ok=False):
         self.home = Path(home)
@@ -1227,7 +1456,9 @@ class Updater:
             raise UpdateError("Invalid panel/API ports")
         self.jobs = self.home / "updates"
         self.job = None
-        self.receipt = {}
+        default_backup = self.home / "external-backup.json"
+        self.receipt = {"external_backup": str(default_backup)
+                        if default_backup.exists() or default_backup.is_symlink() else None}
 
     def log(self, message):
         line = f"{utc()} {self.receipt.get('job_id', '-')} {message}\n"
@@ -1397,7 +1628,8 @@ class Updater:
 
     def initialize(self, job_id, reference, dry_run=False, expected_current=None,
                    expected_target=None, expected_archive_sha256=None, accept_custom_current=None,
-                   skip_model_smoke=False):
+                   skip_model_smoke=False, external_backup=None):
+        external_backup = external_backup or self.receipt.get("external_backup")
         self.jobs.mkdir(mode=0o700, exist_ok=True)
         self.job = self.jobs / checked_identifier(job_id)
         self.job.mkdir(mode=0o700)
@@ -1408,7 +1640,8 @@ class Updater:
                             expected_current=expected_current, expected_target=expected_target,
                             expected_archive_sha256=expected_archive_sha256,
                             accept_custom_current=accept_custom_current,
-                            skip_model_smoke=bool(skip_model_smoke))
+                            skip_model_smoke=bool(skip_model_smoke),
+                            external_backup=str(external_backup) if external_backup else None)
         self.phase("pending")
 
     def image_integrity(self, info=None):
@@ -1502,6 +1735,15 @@ class Updater:
             linked.unlink(missing_ok=True)
             probe.unlink(missing_ok=True)
 
+    def external_backup(self):
+        config = self.receipt.get("external_backup")
+        if not config:
+            return None
+        cached = getattr(self, "_external_backup", None)
+        if cached is None:
+            cached = self._external_backup = ExternalBackup(self, config)
+        return cached
+
     def free_space(self, image_bytes=0):
         """Refuse before quiescing unless every file system holds all copies written on it.
 
@@ -1512,14 +1754,21 @@ class Updater:
         terms = copy_budget(self.data)
         # The same sum sizes the readiness budget of a large contour.
         self.receipt["data_bytes"] = terms["data_bytes"]
-        mode = self.rollback_path()
+        external = self.external_backup()
+        mode = "external" if external else self.rollback_path()
         # Update: `before` and its SQLite peak, plus the schema rehearsal's DB
         # copies, all under updates/. Rollback: the stage under DATA's parent is
         # hard links to `before`, so only what the restore rewrites is new —
         # config.yaml and every credential path, copied from the failed DATA;
         # across file systems the stage is a second full copy.
         update_bytes = terms["data_bytes"] + terms["state_db_bytes"] + terms["sqlite_peak_bytes"]
-        if mode == "link":
+        if external:
+            self.receipt["external_backup_acceptance"] = external.preflight()
+            # Cloud stores before/after. Only the SQLite readback/rehearsal and
+            # credential hold are local; restore streams into emptied DATA.
+            update_bytes = terms["sqlite_bytes"] + terms["sqlite_peak_bytes"] + terms["state_db_bytes"]
+            restore_bytes = 2 * (terms["config_bytes"] + terms["credential_bytes"]) + terms["sqlite_peak_bytes"]
+        elif mode == "link":
             restore_bytes = terms["config_bytes"] + terms["credential_bytes"]
         else:
             restore_bytes = terms["data_bytes"] + terms["sqlite_peak_bytes"] + terms["credential_bytes"]
@@ -2577,6 +2826,25 @@ class Updater:
         return result
 
     def verified_snapshot(self, name):
+        external = self.external_backup()
+        if external:
+            record, manifest = external.capture(name)
+            self.receipt["external_before"] = record
+            stage = self.job / "external-sqlite"
+            databases = sqlite_files(self.data)
+            includes = [relative + suffix for relative in databases for suffix in ("", "-wal", "-shm", "-journal")
+                        if relative + suffix in manifest]
+            if includes:
+                external.restore(record, stage, includes)
+                if tree_manifest(stage) != {key: manifest[key] for key in includes}:
+                    raise UpdateError("External SQLite readback differs from stopped DATA")
+                self.normalize_external_sqlite(stage)
+                self.judge_sqlite(self.judge_image(), stage)
+            else:
+                stage.mkdir(mode=0o700)
+            atomic_json(self.job / "external-sqlite.manifest.json", tree_manifest(stage))
+            self.receipt["external_sqlite_readback"] = {"status": "passed", "databases": len(databases)}
+            return "restic:" + record["snapshot_id"]
         destination = self.job / name
         manifest = snapshot(self.data, destination)
         self.judge_sqlite(self.judge_image(), destination)
@@ -2586,6 +2854,15 @@ class Updater:
         return destination
 
     def verify_backup(self):
+        external = self.external_backup()
+        if external:
+            external.verify(self.receipt["external_before"],
+                            json.loads((self.job / "before.manifest.json").read_text()))
+            stage = self.job / "external-sqlite"
+            manifest = json.loads((self.job / "external-sqlite.manifest.json").read_text())
+            if tree_manifest(stage) != manifest:
+                raise UpdateError("External SQLite rehearsal source changed")
+            return stage, manifest
         backup = self.job / "before"
         if backup.is_symlink() or str(backup) != self.receipt.get("backup_path"):
             raise UpdateError("Backup path is not the operation's own snapshot")
@@ -2593,6 +2870,17 @@ class Updater:
         if tree_manifest(backup) != manifest:
             raise UpdateError("Backup checksum mismatch; refusing restore")
         return backup, manifest
+
+    def normalize_external_sqlite(self, root):
+        databases = sqlite_files(root)
+        if not databases:
+            return
+        output = self.docker("run", "--rm", "--network", "none", "--read-only", "--cpus", "1", "--memory", "2g",
+                             "--user", "0:0", "--entrypoint", PYTHON, "-v", str(root) + ":/opt/data",
+                             self.judge_image(), "-c", SQLITE_NORMALIZE_CODE, json.dumps(databases), timeout=900)
+        result = json.loads(output.splitlines()[-1])
+        if result.get("checked") != len(databases):
+            raise UpdateError("External SQLite normalization did not check every database")
 
     def rehearse_schema(self, image):
         """Exercise native SessionDB migrations on disposable DB-only copies."""
@@ -2802,6 +3090,9 @@ print(json.dumps(changed))
         Before that point a retry rebuilds the stage from `before`; the
         previous partial stage is kept aside, never reused.
         """
+        if self.external_backup():
+            self.restore_external()
+            return
         stage_record = self.job / "restore-stage.json"
         stage = self.data.with_name(self.data.name + ".restore-" + self.receipt["job_id"])
         displaced = self.data.with_name(self.data.name + ".after-" + self.receipt["job_id"])
@@ -2877,6 +3168,64 @@ print(json.dumps(changed))
             raise
         atomic_json(stage_record, dict(done, phase="swapped"))
         self.finish_restore(dict(done, phase="swapped"))
+
+    def restore_external(self):
+        """Cloud export -> full read check -> in-place restore, with resumable checkpoints."""
+        if self.restore_record().get("phase") == "swapped":
+            return
+        external = self.external_backup()
+        before = self.receipt["external_before"]
+        manifest = external.verify(before, json.loads((self.job / "before.manifest.json").read_text()))
+        checkpoint = self.job / "external-restore.json"
+        record = json.loads(checkpoint.read_text()) if checkpoint.exists() else {}
+        credentials = self.job / "external-credentials"
+        if not record:
+            after, current = external.capture("after")
+            # No local data is removed until both remote snapshots are fully
+            # readable. An unavailable/corrupt repository keeps DATA intact.
+            self.phase("rollback_external_check")
+            external.run("check", "--read-data", timeout=21600)
+            if credentials.exists():
+                os.replace(credentials, credentials.with_name(credentials.name + ".attempt-" + uuid.uuid4().hex[:8]))
+            held = capture_rollback_credentials(self.data, credentials)
+            changes = sorted(key for key in set(manifest) | set(current) if manifest.get(key) != current.get(key))
+            atomic_json(self.job / "post-update-changes.json", changes)
+            record = {"phase": "exported", "after": after, "credentials_manifest": held,
+                      "post_update_changes": len(changes)}
+            atomic_json(checkpoint, record)
+        if tree_manifest(credentials) != record["credentials_manifest"]:
+            raise UpdateError("Saved rollback credentials changed; refusing cloud restore")
+        external.verify(record["after"])
+        root_config = self.data / "config.yaml"
+        if root_config.is_symlink() or not root_config.is_file():
+            raise UpdateError("DATA/config.yaml changed type; cloud exports kept, manual recovery required")
+        atomic_json(checkpoint, dict(record, phase="restoring"))
+        # The original config remains a regular file so interrupted restore is
+        # still recognized as this initialized deployment. A retry uses the
+        # same before/after IDs and held credentials, never exports partial DATA.
+        for entry in self.data.iterdir():
+            if entry.name == "config.yaml":
+                continue
+            if entry.is_dir() and not entry.is_symlink():
+                shutil.rmtree(entry)
+            else:
+                entry.unlink()
+        external.restore(before, self.data)
+        if tree_manifest(self.data) != manifest:
+            raise UpdateError("Cloud restore differs from the verified before snapshot")
+        self.normalize_external_sqlite(self.data)
+        self.judge_sqlite(self.judge_image(), self.data)
+        preserved = overlay_credentials(credentials, self.data)
+        config_preserved = self.preserve_config_credentials(credentials, self.data)
+        gateways = self.apply_gateway_intent(self.data)
+        self.receipt.update(post_update_cloud_export=record["after"],
+                            post_update_changes=record["post_update_changes"],
+                            preserved_credentials=len(preserved), restored_gateways=len(gateways),
+                            restore_mode="external")
+        atomic_json(self.job / "preserved-credentials.json", preserved)
+        atomic_json(self.job / "preserved-config-credentials.json", config_preserved)
+        atomic_json(self.job / "restore-stage.json", {"phase": "swapped", "mode": "external"})
+        atomic_json(checkpoint, dict(record, phase="complete"))
 
     def retried_changes(self, changes):
         """(paths, count) of a retry that finds an earlier export; count None = unknown.
@@ -3053,9 +3402,14 @@ print(json.dumps(changed))
         self.verify_launcher(rollback=True)
         # Validate before quiescing a healthy newer gateway. Once the restore
         # has swapped, `before` is spent and DATA itself is the restored tree.
-        backup = self.data if self.restore_record().get("phase") == "swapped" else self.verify_backup()[0]
-        self.verify_user_packages(self.receipt["old_image_id"], backup, strict=not automatic,
-                                  current=self.receipt.get("target_image_id"))
+        external = self.external_backup()
+        if external and self.restore_record().get("phase") != "swapped":
+            external.verify(self.receipt["external_before"],
+                            json.loads((self.job / "before.manifest.json").read_text()))
+        else:
+            backup = self.data if self.restore_record().get("phase") == "swapped" else self.verify_backup()[0]
+            self.verify_user_packages(self.receipt["old_image_id"], backup, strict=not automatic,
+                                      current=self.receipt.get("target_image_id"))
         allowed = {self.receipt.get("old_image_id"), self.receipt.get("target_image_id")}
         try:
             info = self.inspect_target(running=False)
@@ -3074,6 +3428,9 @@ print(json.dumps(changed))
             self.docker("stop", "--time", "60", self.name, timeout=90)
         self.phase("rollback_restore")
         self.restore()
+        if external:
+            self.verify_user_packages(self.receipt["old_image_id"], self.data, strict=not automatic,
+                                      current=self.receipt.get("target_image_id"))
         # Restore may bring back a different profile/config topology than the
         # failed candidate observed.  Recompute before booting the old image so
         # rollback smoke does not repeat a stale forward expectation.
@@ -3159,6 +3516,8 @@ def parse_args(argv=None):
                         help="Явно разрешить замену этого нестандартного текущего образа")
     parser.add_argument("--skip-model-smoke", action="store_true",
                         help="Не вызывать модель при приёмке обновления и отката (квитанция: model_smoke=skipped)")
+    parser.add_argument("--external-backup", metavar="PRIVATE_CONFIG",
+                        help="Проверенная внешняя копия вместо полной локальной DATA (root-owned restic config)")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--detach", action="store_true")
     parser.add_argument("--lock-fd", type=int, help=argparse.SUPPRESS)
@@ -3178,6 +3537,8 @@ def parse_args(argv=None):
         args.expected_archive_sha256 = args.expected_archive_sha256.lower()
     if args.skip_model_smoke and not (args.update or args.rollback):
         parser.error("--skip-model-smoke requires --update or --rollback")
+    if args.external_backup and (not args.update or not Path(args.external_backup).is_absolute()):
+        parser.error("--external-backup requires --update and an absolute config path")
     if args.dry_run and not args.update:
         parser.error("--dry-run requires --update")
     if args.detach and not (args.update or args.rollback):
@@ -3230,6 +3591,7 @@ def main(argv=None):
                           # K21-377: model acceptance may be skipped explicitly.
                           "model_smoke_skip": True,
                           "image_integrity": True, "custom_current_confirmation": True,
+                          "external_backup": True,
                           "files": ["update.sh", "updater.py", "up.sh", "backup.sh", "dependencies.lock.json"]}))
         return 0
     if os.geteuid() != 0:
@@ -3245,6 +3607,8 @@ def main(argv=None):
     except DataMissing:
         # Only the recovery of an interrupted restore swap may go on without DATA.
         updater = Updater(data_missing_ok=True)
+    if args.update and args.external_backup is None:
+        args.external_backup = updater.receipt.get("external_backup")
     if args.diagnose:
         updater.require_data()
         print(json.dumps(updater.image_integrity(), ensure_ascii=False))
@@ -3304,7 +3668,7 @@ def main(argv=None):
                         and bool(updater.receipt.get("dry_run")) == args.dry_run
                         and bool(updater.receipt.get("skip_model_smoke")) == args.skip_model_smoke
                         and all(updater.receipt.get(key) == getattr(args, key) for key in
-                                ("expected_current", "expected_target", "expected_archive_sha256", "accept_custom_current"))):
+                                ("expected_current", "expected_target", "expected_archive_sha256", "accept_custom_current", "external_backup"))):
                     print(json.dumps(updater.receipt))
                     return 0
             if args.rollback and (updater.jobs / checked_identifier(args.rollback) / "status.json").exists():
@@ -3338,14 +3702,15 @@ def main(argv=None):
                     raise UpdateError("Job ID belongs to a different expected-current image")
                 if (updater.receipt.get("expected_target") != args.expected_target
                         or updater.receipt.get("expected_archive_sha256") != args.expected_archive_sha256
-                        or updater.receipt.get("accept_custom_current") != args.accept_custom_current):
+                        or updater.receipt.get("accept_custom_current") != args.accept_custom_current
+                        or updater.receipt.get("external_backup") != args.external_backup):
                     raise UpdateError("Job ID belongs to different artifact expectations")
                 print(json.dumps(updater.receipt))
                 return 0
             updater.initialize(job_id, args.update, dry_run=args.dry_run, expected_current=args.expected_current,
                                expected_target=args.expected_target, expected_archive_sha256=args.expected_archive_sha256,
                                accept_custom_current=args.accept_custom_current,
-                               skip_model_smoke=args.skip_model_smoke)
+                               skip_model_smoke=args.skip_model_smoke, external_backup=args.external_backup)
         if args.detach:
             # start_new_session severs the SSH/browser controlling terminal;
             # the inherited flock survives until the actual operation exits.

@@ -679,6 +679,60 @@ NAME=korra-restore DATA=/opt/korra-restore/data PANEL_PORT=9129 API_PORT=8660 \
 здесь снимает drain, прежняя версия продолжает работать, причина — в receipt. Новая копия в `updater.py` без
 слагаемого ломает тест `test_every_physical_copy_of_the_update_and_rollback_path_has_a_budget_term`.
 
+**Проверенная внешняя копия вместо полного локального DATA.** Оператор может
+включить `external_backup`: root-owned файл `external-backup.json` рядом с
+`updater.py` выбирается автоматически, отдельный путь передаётся через
+`--external-backup /закрытый/путь.json`. Выбор сохраняется в операции и не меняется
+при detach/rollback. Без этой настройки старые установки используют локальный путь.
+
+Это отдельный поддержанный способ отката. Перед pull/drain updater проверяет
+личность репозитория, DATA/установку, SHA-256 бинарного файла restic и квитанцию
+полной внешней копии с чтением и восстановлением, не старше 24 часов. После
+остановки записи он сохраняет собственный свежий `before` потоком в restic,
+перечитывает manifest и восстанавливает все SQLite с журналами в малую проверочную
+папку. Нормализация и проверка баз выполняются SQLite прежнего образа без сети.
+Для `snapshot:subfolder` отдельно возвращаются UID/GID/права корня DATA.
+
+В режиме `rollback_path=external` на диске требуются только `sqlite_bytes`
+(все SQLite с sidecar), `state_db_bytes`, два пика `sqlite_peak_bytes`,
+два резерва `config_bytes + credential_bytes` и 2 ГиБ запаса; образ учитывается
+обычным способом. Полный `data_bytes` не резервируется и `updates/JOB/before`
+не создаётся. Слагаемые по-прежнему записаны в `rollback_budget` по файловым системам.
+
+При откате сначала сохраняются все записи неудачной версии в отдельный облачный
+`after`, затем выполняется полное чтение репозитория. До успеха этой проверки
+рабочие DATA не удаляются. После неё DATA восстанавливаются потоком на прежнем
+месте; свежие ключи, их удаления и намерения шлюзов переносятся штатными методами.
+`external-restore.json` хранит checkpoint и прежние snapshot ID: повтор после
+обрыва не экспортирует частично восстановленные DATA и не теряет новые записи.
+**Откату нужны доступное хранилище и ключ; он зависит от скорости сети.**
+
+Конфигурация 0600 находится вне DATA; все её пути root-owned без записи группы/прочих:
+
+```json
+{
+  "schema": 1,
+  "name": "korra21",
+  "data": "/opt/korra21/data",
+  "installation": "installation-id",
+  "binary": "/opt/korra21/tools/restic",
+  "binary_sha256": "SHA256_ПРОВЕРЕННОГО_БИНАРНОГО_ФАЙЛА",
+  "repository": "rest:http://127.0.0.1:27392/",
+  "repository_id": "ID_ИЗ_RESTIC_CAT_CONFIG",
+  "password_file": "/root/.secrets/korra21-backup/restic-password",
+  "environment_file": "/root/.secrets/korra21-backup/rest-environment.json",
+  "accepted_backup": "/opt/korra21/external-backup-accepted.json"
+}
+```
+
+`environment_file` допускает только `RESTIC_REST_USERNAME`/`RESTIC_REST_PASSWORD`.
+Оператор может обслуживать один клиентский репозиторий через авторизованный
+append-only `rclone serve restic` и loopback SSH-туннель. Общий Google OAuth
+остаётся у оператора. Этот канал должен жить до завершения native job, включая
+возможный откат; сбой выгрузки сообщения о прогрессе не должен обрывать его.
+Ключ репозитория сохраняется независимо от хоста. Недоступное/непроверенное
+хранилище останавливает обновление до остановки старой версии.
+
 Существующий настроенный клиентский `up.sh` нельзя заменять шаблоном вслепую.
 При установке host kit сохраните и перенесите фактические NAME/DATA, порты,
 TIMEZONE, ENGINE_UID/GID, AGENT_SUDO и дополнительные настройки доступа;
